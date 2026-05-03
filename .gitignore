@@ -1,2 +1,11 @@
+# 私密与状态数据 (你的核心隐私)
 memory-bank/
 .env
+.cline/
+
+# 依赖包 (第三方工具，绝对不要上传)
+node_modules/
+
+# 编译产物与日志 (可选防污染)
+dist/
+*.log
