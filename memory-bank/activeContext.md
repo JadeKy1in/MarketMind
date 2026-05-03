@@ -1,8 +1,11 @@
 # Active Context
 
-## 当前 Session（2026-05-03）Maker 修复阶段
+## 当前 Session（2026-05-03）Maker 修复阶段 → 文档升级阶段
 
-**【已完成】INQ-2026-05-03-002 四项缺陷修复已全部实施并通过自我验证。**
+**已完成的里程碑：**
+- ✅ INQ-2026-05-03-002 四项缺陷修复已全部实施并通过自我验证（之前 Session）
+- ✅ Memory Bank 场景文档全面升级（当前 Session）
+- ✅ 集成测试设计大纲已完成（当前 Session）
 
 ## 已完成 Workspace
 
@@ -28,15 +31,16 @@ src/
 ├── coverage-analyzer.ts  — 覆盖率分析引擎（含 SPA 检测 + 反爬 + robot 上下文验证）
 ├── adapter.ts            — BrowserAutomationAdapter（统一 navigate + 安全超时）
 ├── SCENARIO_CONTEXT_MANIFEST.md  — 宪法场景上下文清单
+├── TEST_DESIGN_OUTLINE.md        — 测试设计大纲（NEW）
 ├── package.json
-└── tsconfig.json
+├── tsconfig.json
 memory-bank/
-├── activeContext.md       — 本文（当前状态：MRP 审查准备就绪）
-├── progress.md            — 经验状态分类账（已更新修复记录）
-├── projectBrief.md        — 项目需求
-├── productContext.md      — 产品意图
+├── activeContext.md       — 本文（当前状态：文档升级完成）
+├── progress.md            — 经验状态分类账
+├── projectBrief.md        — 项目需求（已升级为完整版）
+├── productContext.md      — 产品意图（已升级为完整版）
 ├── systemPatterns.md      — 系统架构
-└── techContext.md          — 技术约束
+└── techContext.md          — 技术约束（已升级为完整版）
 AGENTS.md                  — 多智能体协作宪法
 .clinerules                — 自演化规则矩阵
 ```
@@ -50,6 +54,12 @@ AGENTS.md                  — 多智能体协作宪法
 
 ## 最近变更
 
+- **2026-05-03（本轮）**: Maker 完成 MRP 遗留任务 —— 文档升级 + 测试大纲
+  - `memory-bank/projectBrief.md` — 从模板升级为完整版，包含核心需求、成功指标、范围界定（In/Out of Scope）、约束条件
+  - `memory-bank/productContext.md` — 从模板升级为完整版，包含存在理由、四大问题场景、用户体验代码示例、角色目标矩阵
+  - `memory-bank/techContext.md` — 从模板升级为完整版，包含技术栈、MCP 集成架构、三轨制编排流程图、五维约束矩阵、目录结构与职责、技术债务清单
+  - `src/TEST_DESIGN_OUTLINE.md` — 全新文档，包含 7 章 70+ 测试用例的完整测试设计大纲
+  - `memory-bank/activeContext.md` — 本轮更新（本文）
 - **2026-05-03**: Maker 完成 INQ-2026-05-03-002 四项缺陷修复
   - `src/coverage-analyzer.ts` — C2-1 SPA Loading 检测 + C2-2 反爬库扩展 + robot 上下文验证
   - `src/adapter.ts` — C3-3 消除重复 navigate + C3-4 Promise.race 安全超时
@@ -77,6 +87,6 @@ AGENTS.md                  — 多智能体协作宪法
 
 ## 下一步计划
 
-- **场景文档填充**：projectBrief.md / productContext.md / techContext.md 从占位模板升级为实际内容
-- **集成测试落地**：构建 mock McpToolRunner 的单元测试套件，覆盖三轨制每条路径 + SPA/反爬边界
+- **✋ 集成测试代码落地**（优先级最高）：根据 `TEST_DESIGN_OUTLINE.md` 实现 `__tests__/helpers/mockToolRunner.ts`, `__tests__/coverage-analyzer.test.ts`, `__tests__/adapter.test.ts`
 - **VLM 后处理管道**：待 screenshot_visual 数据实际接入后，对接 VLM 视觉语言模型做结构化提取
+- **性能基准测试**：建立运行时性能基线，验证全链 ≤ 15s 的目标

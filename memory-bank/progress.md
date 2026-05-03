@@ -27,14 +27,29 @@
   - **C2-2**: 反爬特征库扩展 — 新增 Cloudflare Turnstile / reCAPTCHA v3 / DataDome / Kasada；`'robot'` 改用 `isRobotInAntiCrawlContext()` 上下文验证消除 3% 假阳性率
   - **C3-3**: 消除重复 navigate — `adapter.ts` `extractPage()` 重构为 Phase 0 统一导航，`executeJsInnerText` / `fallbackToScreenshot` 不再独立 navigate
   - **C3-4**: Promise.race 内存清理 — 改用 `new Promise<T>` + `clearTimeout` + 显式 resolve/reject，确保超时后原 Promise 不再残留
+- **✅ MRP 遗留任务完成 — 文档升级 + 测试大纲（当前 Session）**
+  - `memory-bank/projectBrief.md` — 从占位模板升级为完整版：核心需求、成功指标矩阵、In/Out of Scope 界定、5 项架构约束条件
+  - `memory-bank/productContext.md` — 从占位模板升级为完整版：MCP 双工具对比分析、四大问题场景（数据空洞/延迟浪费/反爬误导/场景一刀切）、用户体验代码示例、角色目标矩阵
+  - `memory-bank/techContext.md` — 从占位模板升级为完整版：技术栈/版本表、MCP 集成架构、三轨制编排流程图、六维约束矩阵（C-1 到 C-6）、目录结构与职责映射、已知技术债务清单
+  - `src/TEST_DESIGN_OUTLINE.md` — 全新文档：Mock McpToolRunner 工厂设计、7 章 70+ 测试用例覆盖 CoverageAnalyzer（CA/SPA/AC/HE/TC） + Adapter（AD/SC/INT） + 边界/极端情况 + 代码质量检查
 
 ## 待办与已知问题 (What's left & Known issues)
 
-- **【待 Inquisitor】审查点**：降级适配层的覆盖率阈值合理性及性能开销（INQ-2026-05-03-001 第 3 条后续审查点）
-  - 覆盖率阈值 60% 是否最优？需在真实页面数据集上验证
-  - 反爬检测启发式的假阳性/假阴性率评估
-  - MCP 调用抽象层的实际性能基准测试
-  - INQ-2026-05-03-002 四项修复需纳入审查范围
-- 项目基础文档（projectBrief.md、productContext.md、techContext.md）仍为占位模板，待实际填充后需要同步调整 AGENTS.md 中的架构约束引用
-- Memory Bank 初始化完成，systemPatterns.md 已从占位模板更新为实际架构文档
-- 项目总体处于早期阶段，核心架构已就绪但场景文档仍待充实
+- **【待 Inquisitor 审查】降级适配层覆盖率基准**：覆盖率阈值 60% 的合理性需在真实页面数据集上验证；反爬检测启发式的假阳性/假阴性率评估；MCP 调用抽象层性能基准测试
+- **【待 Inquisitor 审查】C2/C3 修复验证**：INQ-2026-05-03-002 四项修复需纳入审查范围，验证 robot 假阳性率从 ~3% 降至 ≤ 0.1%
+- **【待 Maker 实现】集成测试代码落地**（优先级最高）：根据 `src/TEST_DESIGN_OUTLINE.md` 实现 `__tests__/helpers/mockToolRunner.ts`, `__tests__/coverage-analyzer.test.ts`, `__tests__/adapter.test.ts`
+- **【待 Maker 实现】Jest 配置初始化**：`src/jest.config.js` 或 `src/package.json` 中 jest 配置段，确保 ts-jest 正确转换
+- **【待 Maker 实现】VLM 后处理管道**：screenshot_visual 数据接入后对接 VLM 视觉语言模型做结构化提取
+- **【待 Inquisitor 审查】性能基准测试**：建立运行时性能基线（全链 ≤ 15s，轻量链路 ≤ 2s）
+
+## Memory Bank 状态
+
+- ✅ projectBrief.md — 已升级为完整版
+- ✅ productContext.md — 已升级为完整版
+- ✅ techContext.md — 已升级为完整版
+- ✅ systemPatterns.md — 已从占位模板更新为实际架构文档
+- ✅ activeContext.md — 实时更新
+- ✅ SCENARIO_CONTEXT_MANIFEST.md — 已完成
+- ✅ TEST_DESIGN_OUTLINE.md — 已完成
+- ✅ AGENTS.md 1.0.0 — 已完成
+- ✅ .clinerules §3.7 — 四项浏览器自动化模式已永久编码
