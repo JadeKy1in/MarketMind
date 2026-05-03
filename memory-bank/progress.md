@@ -37,8 +37,12 @@
 
 - **【待 Inquisitor 审查】降级适配层覆盖率基准**：覆盖率阈值 60% 的合理性需在真实页面数据集上验证；反爬检测启发式的假阳性/假阴性率评估；MCP 调用抽象层性能基准测试
 - **【待 Inquisitor 审查】C2/C3 修复验证**：INQ-2026-05-03-002 四项修复需纳入审查范围，验证 robot 假阳性率从 ~3% 降至 ≤ 0.1%
-- **【待 Maker 实现】集成测试代码落地**（优先级最高）：根据 `src/TEST_DESIGN_OUTLINE.md` 实现 `__tests__/helpers/mockToolRunner.ts`, `__tests__/coverage-analyzer.test.ts`, `__tests__/adapter.test.ts`
-- **【待 Maker 实现】Jest 配置初始化**：`src/jest.config.js` 或 `src/package.json` 中 jest 配置段，确保 ts-jest 正确转换
+- **【已完成】集成测试 Phase 1 & 2 全部落地**
+  - `src/jest.config.js` — Jest 配置（ts-jest + 覆盖率阈值 75/85/80）
+  - `src/__tests__/helpers/mockToolRunner.ts` — Mock 工厂（8 个构造器 + 6 个预置快照 + 独立延迟 + 交互错误）
+  - `src/__tests__/coverage-analyzer.test.ts` — 43 个测试用例全部通过
+  - `src/__tests__/adapter.test.ts` — 40 个测试用例全部通过（包含 3 类 5 个逻辑缺陷修复）
+  - 全部 83 测试通过，覆盖率：Statements 94.75% / Branches 82.71% / Lines 95.29%
 - **【待 Maker 实现】VLM 后处理管道**：screenshot_visual 数据接入后对接 VLM 视觉语言模型做结构化提取
 - **【待 Inquisitor 审查】性能基准测试**：建立运行时性能基线（全链 ≤ 15s，轻量链路 ≤ 2s）
 

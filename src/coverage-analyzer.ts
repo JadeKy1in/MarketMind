@@ -207,7 +207,7 @@ function detectAnticrawl(html: string): boolean {
  * 递归统计无障碍树节点数
  */
 function countAxNodes(tree: any): number {
-  if (!tree) return 0;
+  if (!tree || typeof tree !== 'object') return 0;
   let count = 1; // 当前节点
   if (Array.isArray(tree.children)) {
     for (const child of tree.children) {

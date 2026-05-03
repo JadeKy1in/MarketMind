@@ -136,6 +136,14 @@ export class BrowserAutomationAdapter {
         'navigate',
       );
     } catch (err: any) {
+      // C3-6: 检查是否允许截图降级
+      if (allowScreenshotFallback === false) {
+        return this.buildResult('failed', {
+          error: `Prior error: ${err.message}`,
+          context,
+          durationMs: Date.now() - startTime,
+        });
+      }
       return this.fallbackToScreenshot(url, context, startTime, err);
     }
 
@@ -148,7 +156,14 @@ export class BrowserAutomationAdapter {
         'getSnapshot',
       );
     } catch (err: any) {
-      // 无障碍树获取失败——直接跳转到全量降级
+      // C3-6: 检查是否允许截图降级
+      if (allowScreenshotFallback === false) {
+        return this.buildResult('failed', {
+          error: `Prior error: ${err.message}`,
+          context,
+          durationMs: Date.now() - startTime,
+        });
+      }
       return this.fallbackToScreenshot(url, context, startTime, err);
     }
 
@@ -380,6 +395,17 @@ export class BrowserAutomationAdapter {
     startTime: number,
     priorError?: Error,
   ): Promise<ExtractionResult> {
+    // C3-6: Check allowScreenshotFallback before attempting screenshot
+    if (context.allowScreenshotFallback === false) {
+      return this.buildResult('failed', {
+        error: priorError
+          ? `Screenshot fallback disabled: ${priorError.message}`
+          : 'Screenshot fallback disabled',
+        context,
+        durationMs: Date.now() - startTime,
+      });
+    }
+
     try {
       const result = await this.withTimeout(
         this.toolRunner.screenshot({

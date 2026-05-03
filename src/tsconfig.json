@@ -1,9 +1,10 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "commonjs",
+    "module": "Node16",
+    "moduleResolution": "node16",
     "lib": ["ES2022"],
-    "types": ["node"],
+    "types": ["node", "jest"],
     "outDir": "./dist",
     "rootDir": ".",
     "strict": true,
@@ -13,7 +14,9 @@
     "resolveJsonModule": true,
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "isolatedModules": true,
+    "ignoreDeprecations": "6.0"
   },
   "include": ["./**/*.ts"],
   "exclude": ["node_modules", "dist"]

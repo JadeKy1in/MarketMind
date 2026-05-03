@@ -1,11 +1,15 @@
 # Active Context
 
-## 当前 Session（2026-05-03）Maker 修复阶段 → 文档升级阶段
+## 当前 Session（2026-05-03）文档升级阶段 → 集成测试落地阶段
 
 **已完成的里程碑：**
 - ✅ INQ-2026-05-03-002 四项缺陷修复已全部实施并通过自我验证（之前 Session）
 - ✅ Memory Bank 场景文档全面升级（当前 Session）
 - ✅ 集成测试设计大纲已完成（当前 Session）
+- ✅ Phase 1 集成测试落地完成（当前 Session）
+  - `src/jest.config.js` — ts-jest + 覆盖率阈值配置
+  - `src/__tests__/helpers/mockToolRunner.ts` — Mock 工厂（4 个构造器 + 6 个预置快照）
+  - `src/__tests__/coverage-analyzer.test.ts` — 43 个测试用例全通过
 
 ## 已完成 Workspace
 
@@ -31,11 +35,16 @@ src/
 ├── coverage-analyzer.ts  — 覆盖率分析引擎（含 SPA 检测 + 反爬 + robot 上下文验证）
 ├── adapter.ts            — BrowserAutomationAdapter（统一 navigate + 安全超时）
 ├── SCENARIO_CONTEXT_MANIFEST.md  — 宪法场景上下文清单
-├── TEST_DESIGN_OUTLINE.md        — 测试设计大纲（NEW）
+├── TEST_DESIGN_OUTLINE.md        — 测试设计大纲
+├── jest.config.js        — Jest 配置（ts-jest, 覆盖率阈值）
+├── __tests__/
+│   ├── helpers/
+│   │   └── mockToolRunner.ts  — Mock 工厂（4 构造器 + 6 预置快照）
+│   └── coverage-analyzer.test.ts  — 43 个测试用例 ✅
 ├── package.json
 ├── tsconfig.json
 memory-bank/
-├── activeContext.md       — 本文（当前状态：文档升级完成）
+├── activeContext.md       — 本文（当前状态：Phase 1 集成测试落地完成）
 ├── progress.md            — 经验状态分类账
 ├── projectBrief.md        — 项目需求（已升级为完整版）
 ├── productContext.md      — 产品意图（已升级为完整版）
@@ -87,6 +96,7 @@ AGENTS.md                  — 多智能体协作宪法
 
 ## 下一步计划
 
-- **✋ 集成测试代码落地**（优先级最高）：根据 `TEST_DESIGN_OUTLINE.md` 实现 `__tests__/helpers/mockToolRunner.ts`, `__tests__/coverage-analyzer.test.ts`, `__tests__/adapter.test.ts`
+- ✅ **Phase 1 集成测试落地完成**：Jest 配置 + Mock 工厂 + coverage-analyzer 43 个测试用例全通过
+- **📋 Phase 2: Adapter 测试**：根据 `TEST_DESIGN_OUTLINE.md` 实现 `__tests__/adapter.test.ts`（AD-01~AD-07, SC-01~SC-07, INT-01~INT-13 ~27 个测试用例）
 - **VLM 后处理管道**：待 screenshot_visual 数据实际接入后，对接 VLM 视觉语言模型做结构化提取
 - **性能基准测试**：建立运行时性能基线，验证全链 ≤ 15s 的目标
