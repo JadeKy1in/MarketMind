@@ -101,4 +101,64 @@ The 'Lessons Learned' Protocol: Abstract these friction points into actionable "
 
 Autonomous Self-Modification: Propose a specific, concise amendment to be added to this .clinerules file or the systemPatterns.md file. Upon receiving human authorization, you MUST use your file editing tools to physically rewrite the target instruction file, embedding the newly learned heuristic permanently.
 
+Matrix 5: Skill Foundry Standard (§4)
+
+The Skill Foundry Standard is the supreme constitutional process for developing, qualifying, and registering new infrastructure skills. Every AI agent MUST follow this exact pipeline when creating any new skill for this workspace.
+
+§4.1 The Five-Phase Qualification Pipeline
+
+All new skill development MUST pass through five sequential phases. No phase may be skipped or truncated.
+
+Phase 0 — Discovery & Gap Analysis
+   a) Search the existing infrastructure/ directory and SKILLS_MANIFEST.json for any pre-existing implementations that could be adapted.
+   b) If an existing skill covers >60% of the requirement, ADAPT it rather than building new.
+   c) If no suitable skill exists, proceed to Phase 1.
+
+Phase 1 — Interface Definition
+   a) Define the Input Schema: All required and optional parameters with types, defaults, and descriptions.
+   b) Define the Output Schema: All return fields with types and descriptions.
+   c) Define the Error Contract: All possible error modes and their corresponding return structures.
+   d) Write the Interface Definition FIRST, before any implementation code. The interface is the law.
+
+Phase 2 — Adapter Implementation
+   a) Implement the adapter as a standalone, self-contained module in infrastructure/skills/<skill-name>/src/.
+   b) Adhere to the Single-Navigation Architecture (SNA) principle for any multi-track degradations.
+   c) Implement safe timeout patterns using explicit Promise<T> with clearTimeout in BOTH resolve and reject handlers (see §3.7.d).
+   d) Each adapter MUST expose a clean entry point (index.ts or <adapter-name>.ts) that can be imported independently.
+   e) Total implementation tokens SHOULD NOT exceed 8000 tokens for the core adapter logic (excludes tests and configs).
+
+Phase 3 — Test Suite (Three-Tier Validation)
+   a) Unit Tests (Phase 3.1): Cover all pure logic paths, boundary conditions, and edge cases. Minimum 80% code coverage.
+   b) Integration Tests (Phase 3.2): Test the adapter against a mock execution environment (see MockToolRunner pattern in browser-automation tests). Verify all degradation tracks fire correctly.
+   c) End-to-End Tests (Phase 3.3): Full lifecycle test including telemetry verification and ROI energy efficiency measurement.
+   d) ALL tests MUST pass at 100% before proceeding. No exceptions.
+
+Phase 4 — Registration & SOP Lock
+   a) Register the new skill in infrastructure/SKILLS_MANIFEST.json with:
+      - Complete config_schema and input_spec/output_spec
+      - Token cost estimate per degradation track
+      - Trigger conditions
+      - Test coverage summary
+   b) Update infrastructure/README.md with the new skill's capabilities and usage examples.
+   c) The skill is now LOCKED. No further modifications without a new CRP cycle.
+
+§4.2 The Refactor-or-Delete Mandate
+
+If a skill's test suite drops below 100% pass rate after any modification:
+   a) The modifying agent MUST immediately halt all other work.
+   b) Either restore the tests to 100% pass rate, OR
+   c) Delete the broken skill entirely from SKILLS_MANIFEST.json and the filesystem.
+   d) A skill that cannot maintain 100% test pass rate is a liability, not an asset.
+
+§4.3 The One-Shot Entry Rule
+
+Every infrastructure/skills/<skill-name>/ MUST contain at minimum:
+   a) src/<adapter-name>.ts — The main adapter implementation
+   b) src/tsconfig.json — Standalone TypeScript configuration
+   c) src/jest.config.js — Standalone Jest configuration (rootDir = 'src')
+   d) src/__tests__/ — Test directory with *.test.ts files
+   e) A valid entry in infrastructure/SKILLS_MANIFEST.json
+
+This directory structure is non-negotiable. Any skill that does not conform to this standard is considered MALFORMED and must be corrected before it can be relied upon.
+
 Final Constraint: Never hallucinate compliance. Always root your actions in the persistent documentation, and always seek to augment that documentation iteratively.

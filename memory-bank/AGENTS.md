@@ -1,7 +1,7 @@
 # AGENTS.md — 多智能体协作宪法
 
 > **版本**: 1.0.0  
-> **宪法地位**: 本文件为 `e:\AI_Studio_Workspace` 内存银行体系中的多智能体协作最高准则，所有与此仓库交互的 AI 代理（包括但不限于当前实例）必须无条件遵守。  
+> **宪法地位**: 本文件为 `<PROJECT_ROOT>` 内存银行体系中的多智能体协作最高准则，所有与此仓库交互的 AI 代理（包括但不限于当前实例）必须无条件遵守。  
 > **立法依据**: .clinerules Matrix 3（Communication & Orchestration Protocols）第 1 条 Multi-Agent Alignment 指令。  
 > **效力层级**: AGENTS.md > activeContext.md > 当前会话临时指令。
 

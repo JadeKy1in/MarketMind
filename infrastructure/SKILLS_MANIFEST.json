@@ -1,0 +1,89 @@
+{
+  "manifest_version": "1.0.0",
+  "last_updated": "2026-05-03T15:00:00Z",
+  "description": "Foundation Skills Registry — Infrastructure Layer. Each skill is a self-contained, testable adapter that can be loaded into any AI agent's toolchain via MCP or direct import.",
+  "registry": [
+    {
+      "skill_id": "browser-automation",
+      "version": "3.0.0",
+      "name": "Browser Automation Adapter",
+      "description": "Three-track degradation adapter for browser content extraction. Automatically falls back through ax_tree → js_innertext → screenshot_visual based on coverage quality, anti-crawl detection, SPA hydration state, and hidden element ratio.",
+      "path": "skills/browser-automation/src",
+      "entry_point": "adapter.ts",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "timeout": {
+            "type": "number",
+            "description": "Global operation timeout in ms (default: 15000)",
+            "default": 15000
+          },
+          "scene": {
+            "type": "string",
+            "description": "Runtime scene identifier: 'realtime_request' | 'offline_batch_sync' | 'interactive_operation'",
+            "default": "realtime_request"
+          },
+          "enableFallbacks": {
+            "type": "object",
+            "description": "Toggle individual degradation tracks on/off",
+            "properties": {
+              "js_innertext": { "type": "boolean", "default": true },
+              "screenshot_visual": { "type": "boolean", "default": true }
+            }
+          },
+          "coverageThreshold": {
+            "type": "number",
+            "description": "Minimum acceptable coverage ratio (0.0–1.0) before fallback triggers",
+            "default": 0.6
+          }
+        },
+        "required": ["scene"]
+      },
+      "input_spec": {
+        "type": "BrowserExtractionRequest",
+        "fields": {
+          "url": { "type": "string", "description": "Target page URL", "required": true },
+          "timeout": { "type": "number", "description": "Per-operation timeout in ms", "default": 15000 },
+          "scene": { "type": "string", "description": "Contextual scene tag", "default": "realtime_request" },
+          "enableFallbacks": { "type": "object", "optional": true },
+          "causationId": { "type": "string", "description": "Trace ID for telemetry linkage", "optional": true }
+        }
+      },
+      "output_spec": {
+        "type": "BrowserExtractionResult",
+        "fields": {
+          "text": { "type": "string", "description": "Extracted text content" },
+          "html": { "type": "string", "description": "Raw page HTML" },
+          "snapshot": { "type": "object", "description": "Accessibility tree snapshot" },
+          "strategy": { "type": "string", "description": "Track used: 'ax_tree' | 'js_innertext' | 'screenshot_visual'" },
+          "metrics": { "type": "object", "description": "Performance telemetry (T_Init, T_Nav, T_Exec, T_Total)" },
+          "error": { "type": "string", "optional": true }
+        }
+      },
+      "token_cost_estimate": {
+        "ax_tree": { "input_tokens": 50, "output_tokens": 500, "total": 550 },
+        "js_innertext": { "input_tokens": 100, "output_tokens": 2000, "total": 2100 },
+        "screenshot_visual": { "input_tokens": 1000, "output_tokens": 0, "total": 1000 },
+        "notes": "Actual cost varies with page complexity. screenshot_visual output is base64 image sent to vision model."
+      },
+      "trigger_conditions": [
+        { "condition": "DOM extraction needed on any webpage", "priority": "high" },
+        { "condition": "Anti-crawl / CAPTCHA walls encountered", "priority": "critical" },
+        { "condition": "SPA pages that fail hydration detection", "priority": "high" },
+        { "condition": "Fallback required when ax_tree coverage < 60%", "priority": "medium" }
+      ],
+      "test_coverage": {
+        "unit_tests": 67,
+        "e2e_tests": 5,
+        "integration_tests": 16,
+        "total": 88,
+        "pass_rate": "100%",
+        "last_run": "2026-05-03T15:00:00Z"
+      },
+      "dependencies": {
+        "runtime": ["typescript", "node >= 18"],
+        "test": ["jest", "ts-jest"]
+      }
+    }
+  ]
+}
