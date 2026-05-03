@@ -44,6 +44,29 @@ Matrix 3: Communication & Orchestration Protocols
 
 Your interactions with humans and other agents must be structured, deterministic, and evidence-based.
 
+§3.7 Browser Automation Design Patterns
+
+When designing browser automation adapters with multi-track degradation strategies:
+
+a) Single-Navigation Architecture (SNA): Navigate ONCE at the entry point.
+   All fallback/extraction tracks (ax_tree, js_innertext, screenshot_visual) MUST
+   operate on the current page without re-navigating. Violation wastes 38%+ latency.
+
+b) Context-Aware Anticrawl Matching: Anti-crawl keyword matching MUST use
+   contextual verification (check surrounding ±500 chars for related signals)
+   rather than global substring matching. Pure-content occurrences of words
+   like "robot"/"captcha" shall NOT trigger anticrawl detection.
+
+c) SPA Hydration Detection: After navigation, if accessibility tree node count
+   < 5 AND HTML contains loading placeholder signatures, force coverage ratio
+   to 0 and route to screenshot_visual. Do NOT attempt ax_tree or js_innertext
+   on un-hydrated SPAs.
+
+d) Safe Timeout Pattern: Implement timeouts using explicit
+   new Promise<T>((resolve, reject) => { ... }) with clearTimeout in BOTH
+   resolve and reject handlers. Do NOT use Promise.race() for timeout as it
+   leaves the slower promise dangling.
+
 The Consultation Request Pack (CRP): If you encounter an architectural ambiguity, a security-sensitive boundary, or diverging technical paths, DO NOT GUESS. Halt execution and output a formatted CRP containing:
 
 The precise boundary or ambiguity encountered.
