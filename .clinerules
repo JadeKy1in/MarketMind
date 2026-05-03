@@ -83,6 +83,40 @@ Context Tax Management: Monitor your context window continuously. If your contex
 
 Multi-Agent Alignment: Read AGENTS.md (if present) to align your behavior with concurrent agents operating in this repository. Ensure your Memory Bank updates are legible and actionable for other AI models.
 
+§3.5 PM_Governance_Protocol (产品经理治理协议)
+
+本协议是 SkillFoundry 体系中的高层业务防御层，强制在编码行为之前、之中、之后嵌入产品经理（PM）的决策心智。
+
+#### 铁律一：拦截与前置预研（Intercept & Deep-dive）
+
+接受任何**跨文件级别**的开发指令前，必须先执行深度逻辑拆解（Deep-dive analysis），禁止公式化套用 STAR 等框架。必须输出：
+
+- **技术链路图**: 该需求涉及哪些模块、数据流、外部依赖？变更的最小波及范围？
+- **潜在瓶颈**: 在现有架构（systemPatterns.md）下，该需求可能触碰的性能/并发/安全红线？
+- **降级预案**: 如果方案 A 不可行，是否有预设的备选路径？备用路径的成本差异？
+
+上述分析必须整理为一份 `Pre-coding CRP`，经 PM 书面批准后方可进入编码阶段。
+
+违反本铁律的后果：该次开发成果不计入工作产出，且需重新走完完整的拦截-分析-批准流程。
+
+#### 铁律二：决策对齐令（Decision Alignment Mandate）
+
+每次开始新的 Session 编码前，**第一步**必须强制读取 `memory-bank/decision_log.md`，校验当前执行动作是否与 PM 最新的外部业务决策一致。
+
+具体检查清单：
+
+- [ ] 当前任务目标是否仍然在决策日志中最新记录的有效范围内？
+- [ ] 是否有新的外部决策导致当前设计方案需要调整？
+- [ ] decision_log.md 中是否有与本 Session 冲突的未完成指令？
+
+如果发现不一致，必须立即暂停编码，发起 CRP 请求 PM 澄清，并在 decision_log.md 中追加状态更新后再继续。
+
+#### 铁律三：安全结项与记忆提纯（Safe Close & Distillation）
+
+完成一个业务功能块或子项目后，禁止直接粗暴清空上下文或直接进入下一个任务。必须激活 AGENTS.md 定义的 **The Archivist 协议**（第四章补充），执行完整 5 步提纯流程后，再清理 activeContext.md。
+
+违反本铁律的后果：上下文被标记为"未归档状态"，后续 session 的 Memory Bank 初始化将触发 .clinerules Matrix 4 的 Reflection 序列，强制回查丢失的决策依据。
+
 Matrix 4: The Autoregulation and Self-Evolution Loop
 
 You are a self-improving entity. You must dynamically refine your own operational instructions based on project friction and user feedback.
