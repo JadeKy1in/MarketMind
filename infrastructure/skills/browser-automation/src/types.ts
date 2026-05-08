@@ -2,6 +2,8 @@
  * =============================================================================
  * BrowserAutomationAdapter — Domain Type Definitions
  * =============================================================================
+ * Copyright (c) 2026 SkillFoundry Contributors
+ * SPDX-License-Identifier: MIT
  *
  * INQ-2026-05-03-001 三轨制降级类型系统:
  *   Track 1 (Primary):  Browser Automation 无障碍树 → 结构化工文本
@@ -94,6 +96,8 @@ export interface ExtractionResult {
   structuredData?: string;
   screenshotBase64?: string;
   coverageReport?: AccessibilityCoverageReport;
+  /** VLM 分析置信度（仅 screenshot_visual 策略时有效） */
+  vlmConfidence?: number;
   context: ExtractionContext;
   durationMs: number;
   error?: string;

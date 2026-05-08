@@ -4,12 +4,12 @@
 
 | Track | T_Init (ms) | T_Nav (ms) | T_Exec (ms) | T_Total (ms) | Budget ≤ 15s | Strategy |
 |-------|------------|-----------|------------|-------------|-------------|----------|
-| Track 1 — ax_tree | 0.23 | 0.23 | 0.06 | 1.43 | ✅ PASS | `ax_tree` |
-| Track 2 — js_innertext | 0.01 | 0.02 | 0.01 | 0.78 | ✅ PASS | `js_innertext` |
-| Track 3 — screenshot_visual | 0.01 | 0.03 | 0.01 | 0.34 | ✅ PASS | `screenshot_visual` |
-| Track 3 — SPA Hydration | 0.02 | 0.01 | 0.01 | 0.24 | ✅ PASS | `screenshot_visual` |
+| Track 1 — ax_tree | 0.17 | 0.15 | 0.05 | 1.07 | ✅ PASS | `ax_tree` |
+| Track 2 — js_innertext | 0.01 | 0.02 | 0.01 | 0.58 | ✅ PASS | `js_innertext` |
+| Track 3 — screenshot_visual | 0.01 | 0.02 | 0.01 | 0.26 | ✅ PASS | `screenshot_visual` |
+| Track 3 — SPA Hydration | 0.02 | 0.07 | 0.01 | 0.32 | ✅ PASS | `screenshot_visual` |
 
-**Summary:** Avg=0.7ms Min=0.24ms Max=1.43ms
+**Summary:** Avg=0.56ms Min=0.26ms Max=1.07ms
 Budget Compliance: **✅ ALL PASS**
 All Succeeded: **✅ YES**
 
@@ -22,8 +22,8 @@ All Succeeded: **✅ YES**
 | Succeeded | 1 |
 | Failed | 3 |
 | Success Rate | 25.0% |
-| Avg Time on Success | 1.43ms |
-| Total Time Cost | 1.43ms |
+| Avg Time on Success | 1.07ms |
+| Total Time Cost | 1.07ms |
 
 ### 3-Track Degradation Adapter (actual)
 | Metric | Value |
@@ -32,14 +32,14 @@ All Succeeded: **✅ YES**
 | Succeeded | 4 |
 | Failed | 0 |
 | Success Rate | 100.0% |
-| Avg Time on Success | 0.7ms |
-| Total Time Cost | 2.79ms |
+| Avg Time on Success | 0.56ms |
+| Total Time Cost | 2.23ms |
 
 ### Delta Analysis
 | Metric | Delta |
 |--------|-------|
 | Success Rate Improvement | **+75.0%** |
-| Additional Latency Overhead | -0.73ms avg |
+| Additional Latency Overhead | -0.51ms avg |
 | Tokens Recovered via Degradation | 44000 tokens |
 
 ## Verdict

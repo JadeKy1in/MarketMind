@@ -1,0 +1,13 @@
+Collecting customtkinter
+  Downloading customtkinter-5.2.2-py3-none-any.whl.metadata (677 bytes)
+Collecting darkdetect (from customtkinter)
+  Downloading darkdetect-0.8.0-py3-none-any.whl.metadata (3.6 kB)
+Requirement already satisfied: packaging in c:\python314\lib\site-packages (from customtkinter) (26.2)
+Downloading customtkinter-5.2.2-py3-none-any.whl (296 kB)
+Downloading darkdetect-0.8.0-py3-none-any.whl (9.0 kB)
+Installing collected packages: darkdetect, customtkinter
+
+Successfully installed customtkinter-5.2.2 darkdetect-0.8.0
+
+[notice] A new release of pip is available: 25.3 -> 26.1
+[notice] To update, run: python.exe -m pip install --upgrade pip

@@ -1,6 +1,6 @@
 {
   "manifest_version": "1.0.0",
-  "last_updated": "2026-05-03T15:00:00Z",
+  "last_updated": "2026-05-04T11:15:00Z",
   "description": "Foundation Skills Registry — Infrastructure Layer. Each skill is a self-contained, testable adapter that can be loaded into any AI agent's toolchain via MCP or direct import.",
   "registry": [
     {
@@ -73,13 +73,146 @@
         { "condition": "Fallback required when ax_tree coverage < 60%", "priority": "medium" }
       ],
       "test_coverage": {
-        "unit_tests": 67,
+        "unit_tests": 131,
         "e2e_tests": 5,
-        "integration_tests": 16,
-        "total": 88,
+        "integration_tests": 46,
+        "total": 182,
         "pass_rate": "100%",
-        "last_run": "2026-05-03T15:00:00Z"
+        "last_run": "2026-05-04T11:15:00Z"
       },
+      "sub_modules": [
+        {
+          "module_id": "vlm-adapter",
+          "version": "1.0.0",
+          "name": "VLM Vision-Language Adapter",
+          "description": "Track 3 ultimate-fallback visual analysis pipeline. Three-stage compression (Level 0: input validation → Level 1: dimension downscale → Level 2: quality iteration) + four-layer response validation (Layer 1: syntax → Layer 2: schema → Layer 3: semantic → Layer 4: anti-hallucination) + retry orchestrator with degradation ladder (full schema → loose schema → extract text-only).",
+          "path": "skills/browser-automation/src",
+          "entry_point": "vlm-adapter.ts",
+          "config_schema": {
+            "type": "object",
+            "properties": {
+              "preprocessor": {
+                "type": "object",
+                "description": "ImagePreprocessor configuration",
+                "properties": {
+                  "maxWidth": { "type": "number", "description": "Max image width in px", "default": 1280 },
+                  "maxHeight": { "type": "number", "description": "Max image height in px", "default": 720 },
+                  "quality": { "type": "number", "description": "Initial JPEG quality 1–100", "default": 85 },
+                  "format": { "type": "string", "description": "Output format: 'jpeg' | 'png'", "default": "jpeg" },
+                  "targetMaxBytes": { "type": "number", "description": "Target max encoded size in bytes", "default": 120000 }
+                }
+              },
+              "backend": {
+                "type": "object",
+                "description": "VLM backend settings",
+                "properties": {
+                  "maxRetries": { "type": "number", "default": 2 },
+                  "retryDelayMs": { "type": "number", "default": 1000 }
+                }
+              }
+            }
+          },
+          "input_spec": {
+            "type": "VlmAnalysisRequest",
+            "fields": {
+              "base64Image": { "type": "string", "description": "Base64-encoded screenshot", "required": true },
+              "schema": { "type": "object", "description": "JSON Schema describing expected output structure", "required": true }
+            }
+          },
+          "output_spec": {
+            "type": "VlmAnalysisResult",
+            "fields": {
+              "textContent": { "type": "string", "description": "Extracted visible text from screenshot" },
+              "structuredData": { "type": "object", "description": "Structured JSON per the input schema", "optional": true },
+              "confidence": { "type": "number", "description": "VLM confidence score 0.0–1.0" },
+              "latencyMs": { "type": "number", "description": "Total VLM pipeline latency in ms" },
+              "attemptsUsed": { "type": "number", "description": "Retry attempts consumed" },
+              "errors": { "type": "array", "description": "Validation/retry errors encountered", "optional": true }
+            }
+          },
+          "token_cost_estimate": {
+            "compression_pipeline": { "input_tokens": 10, "output_tokens": 0, "total": 10 },
+            "mock_backend_default": { "input_tokens": 100, "output_tokens": 200, "total": 300 },
+            "mock_backend_low_quality": { "input_tokens": 100, "output_tokens": 150, "total": 250 },
+            "notes": "Real VLM API cost depends on provider. Default MockVlmBackend uses no external API."
+          },
+          "test_coverage": {
+            "unit_tests": 54,
+            "integration_tests": 8,
+            "total": 62,
+            "pass_rate": "100%",
+            "last_run": "2026-05-04T11:15:00Z"
+          },
+          "dependencies": {
+            "runtime": ["typescript", "node >= 18"],
+            "test": ["jest", "ts-jest"]
+          }
+        },
+        {
+          "module_id": "vlm-backend-rest",
+          "version": "1.0.0",
+          "name": "VLM REST Backend",
+          "description": "Zero-dependency REST backend for VLM provider calls using Node 18+ built-in fetch. Implements Safe Timeout Pattern (explicit Promise<T> with clearTimeout in both resolve and reject handlers), HTTP status code degradation ladder (429→VlmRateLimitError, 4xx→VlmRequestError, 5xx→VlmBackendError), Retry-After header parsing, and configurable custom headers.",
+          "path": "skills/browser-automation/src",
+          "entry_point": "vlm-backend-rest.ts",
+          "config_schema": {
+            "type": "object",
+            "properties": {
+              "endpoint": {
+                "type": "string",
+                "description": "Full URL for the VLM /v1/chat/completions endpoint"
+              },
+              "apiKey": {
+                "type": "string",
+                "description": "Bearer token for API authentication"
+              },
+              "timeoutMs": {
+                "type": "number",
+                "description": "Request timeout in ms (default: 60000)",
+                "default": 60000
+              },
+              "customHeaders": {
+                "type": "object",
+                "description": "Additional HTTP headers to include in every request",
+                "optional": true
+              }
+            },
+            "required": ["endpoint", "apiKey"]
+          },
+          "input_spec": {
+            "type": "VlmBackendConfig",
+            "fields": {
+              "endpoint": { "type": "string", "required": true },
+              "apiKey": { "type": "string", "required": true },
+              "timeoutMs": { "type": "number", "default": 60000 },
+              "customHeaders": { "type": "object", "optional": true }
+            }
+          },
+          "output_spec": {
+            "type": "VlmRawResponse",
+            "fields": {
+              "rawContent": { "type": "string", "description": "Raw content string from provider response" },
+              "tokenUsage": { "type": "object", "description": "Token usage stats (input, output)" },
+              "latencyMs": { "type": "number", "description": "Request round-trip latency in ms" }
+            }
+          },
+          "token_cost_estimate": {
+            "request_per_call": { "input_tokens": 200, "output_tokens": 500, "total": 700 },
+            "notes": "OpenAI-compatible /v1/chat/completions format. Image token cost depends on provider's vision model."
+          },
+          "test_coverage": {
+            "unit_tests": 36,
+            "integration_tests": 0,
+            "total": 36,
+            "pass_rate": "100%",
+            "last_run": "2026-05-04T11:15:00Z"
+          },
+          "dependencies": {
+            "runtime": ["typescript", "node >= 18"],
+            "test": ["jest", "ts-jest"]
+          }
+        }
+      ],
       "dependencies": {
         "runtime": ["typescript", "node >= 18"],
         "test": ["jest", "ts-jest"]

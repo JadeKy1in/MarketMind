@@ -1,0 +1,93 @@
+{
+  "phase": "8.3.2",
+  "belief": "SPY strong bullish trend",
+  "path": [
+    {
+      "phase": "1 - 信念建立",
+      "expectation": 0.7684,
+      "uncertainty": 0.0233,
+      "score": 0.751,
+      "obs_count": 5,
+      "status": "active"
+    },
+    {
+      "phase": "2 - 预测置信度调整",
+      "ticker": "SPY",
+      "assertion": "SPY will close above 530",
+      "raw_confidence": 85.0,
+      "belief_weight": 0.7509527971718644,
+      "adjusted_confidence": 63.83
+    },
+    {
+      "phase": "2 - 预测置信度调整",
+      "ticker": "SPY",
+      "assertion": "SPY will dip below 505",
+      "raw_confidence": 75.0,
+      "belief_weight": 0.7509527971718644,
+      "adjusted_confidence": 56.32
+    },
+    {
+      "phase": "3 - 信念衰减",
+      "step": 50,
+      "decay_number": 1,
+      "decayed_nodes": 1,
+      "active_after": 1
+    },
+    {
+      "phase": "3 - 信念衰减",
+      "step": 100,
+      "decay_number": 2,
+      "decayed_nodes": 1,
+      "active_after": 1
+    },
+    {
+      "phase": "3 - 信念衰减",
+      "step": 150,
+      "decay_number": 3,
+      "decayed_nodes": 1,
+      "active_after": 1
+    },
+    {
+      "phase": "3 - 信念衰减",
+      "step": 200,
+      "decay_number": 4,
+      "decayed_nodes": 1,
+      "active_after": 1
+    },
+    {
+      "phase": "3 - 衰减后信念状态",
+      "expectation": 0.7512,
+      "uncertainty": 0.0275,
+      "score": 0.7311,
+      "status": "active",
+      "total_decays": 4
+    },
+    {
+      "phase": "4 - 衰减后预测置信度",
+      "ticker": "SPY",
+      "assertion": "SPY will close above 530",
+      "raw_confidence": 85.0,
+      "belief_weight": 0.7310844592032951,
+      "adjusted_confidence": 62.14
+    },
+    {
+      "phase": "4 - 衰减后预测置信度",
+      "ticker": "SPY",
+      "assertion": "SPY will dip below 505",
+      "raw_confidence": 75.0,
+      "belief_weight": 0.7310844592032951,
+      "adjusted_confidence": 54.83
+    }
+  ],
+  "assertions": {
+    "alpha_before": 5.109999999999999,
+    "alpha_after": 4.347620687499997,
+    "score_before": 0.7509527971718644,
+    "score_after": 0.7310844592032951,
+    "uncertainty_before": 0.023261456013615057,
+    "uncertainty_after": 0.027534796162175506,
+    "decays_fired": 4,
+    "fresh_belief_weight": 0.7509527971718644,
+    "decayed_belief_weight": 0.7310844592032951
+  }
+}

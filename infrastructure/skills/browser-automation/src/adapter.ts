@@ -2,6 +2,8 @@
  * =============================================================================
  * BrowserAutomationAdapter — Scenario-Aware Degradation Orchestrator
  * =============================================================================
+ * Copyright (c) 2026 SkillFoundry Contributors
+ * SPDX-License-Identifier: MIT
  *
  * 核心编排器。负责：
  *   1. 统一管理 navigate → 浏览器页面由 adapter 统一导航
@@ -42,6 +44,9 @@ import type {
 } from './types';
 
 import { analyzeCoverage } from './coverage-analyzer';
+
+import type { VlmAdapter, JsonSchema, VlmAnalysisResult } from './vlm-types';
+import { PAGE_CONTENT_SCHEMA } from './vlm-adapter.config';
 
 /* ===========================================================================
  * MCP 工具调用抽象接口
@@ -92,9 +97,13 @@ export interface McpToolRunner {
 
 export class BrowserAutomationAdapter {
   private readonly toolRunner: McpToolRunner;
+  private readonly vlmAdapter?: VlmAdapter;
+  private readonly vlmSchema?: JsonSchema;
 
-  constructor(toolRunner: McpToolRunner) {
+  constructor(toolRunner: McpToolRunner, vlmAdapter?: VlmAdapter, vlmSchema?: JsonSchema) {
     this.toolRunner = toolRunner;
+    this.vlmAdapter = vlmAdapter;
+    this.vlmSchema = vlmSchema ?? PAGE_CONTENT_SCHEMA;
   }
 
   /* =======================================================================
@@ -388,6 +397,9 @@ export class BrowserAutomationAdapter {
    *
    * INQ-2026-05-03-002 C3-3 修复：已移除 navigate(url) 调用。
    * 当前页面已在 extractPage Phase 0 完成导航，此处仅执行 screenshot。
+   *
+   * VLM 集成：当 screenshot 成功后且有 VlmAdapter 实例时，自动调用
+   * analyze() 对截屏进行视觉分析，返回结构化文本和置信度。
    */
   private async fallbackToScreenshot(
     url: string,
@@ -407,7 +419,7 @@ export class BrowserAutomationAdapter {
     }
 
     try {
-      const result = await this.withTimeout(
+      const screenshotResult = await this.withTimeout(
         this.toolRunner.screenshot({
           name: `fallback-${context.causationId}`,
           url,
@@ -418,8 +430,36 @@ export class BrowserAutomationAdapter {
         'screenshot',
       );
 
+      const base64 = screenshotResult.base64;
+      if (!base64) {
+        return this.buildResult('failed', {
+          error: 'Screenshot returned no base64 data',
+          context,
+          durationMs: Date.now() - startTime,
+        });
+      }
+
+      // VLM 视觉分析（可选——仅当 vlmAdapter 已注入时执行）
+      let vlmResult: VlmAnalysisResult | undefined;
+      if (this.vlmAdapter) {
+        try {
+          vlmResult = await this.withTimeout(
+            this.vlmAdapter.analyze(base64, this.vlmSchema),
+            (context.timeoutMs ?? 15_000) + 5_000, // VLM 可额外多 5s
+            'vlm_analyze',
+          );
+        } catch {
+          // VLM 分析失败不阻断主流程，仅标记置信度为 0
+        }
+      }
+
       return this.buildResult('screenshot_visual', {
-        screenshotBase64: result.base64,
+        screenshotBase64: base64,
+        textContent: vlmResult?.textContent,
+        structuredData: vlmResult?.structuredData
+          ? JSON.stringify(vlmResult.structuredData)
+          : undefined,
+        vlmConfidence: vlmResult?.confidence ?? 0,
         context,
         durationMs: Date.now() - startTime,
         error: priorError ? `Prior error: ${priorError.message}` : undefined,
@@ -475,6 +515,7 @@ export class BrowserAutomationAdapter {
       structuredData: overrides.structuredData,
       screenshotBase64: overrides.screenshotBase64,
       coverageReport: overrides.coverageReport,
+      vlmConfidence: overrides.vlmConfidence,
       context: overrides.context!,
       durationMs: overrides.durationMs ?? 0,
       error: overrides.error,
