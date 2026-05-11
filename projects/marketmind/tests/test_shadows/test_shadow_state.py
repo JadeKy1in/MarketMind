@@ -105,7 +105,7 @@ def test_record_and_get_trades(temp_db):
     trade_id = temp_db.record_trade_open("test", trade)
     assert trade_id > 0
     temp_db.record_trade_close(trade_id, 160.0, "target", 0.0667)
-    history = temp_db.get_trade_history("test", days=90)
+    history = temp_db.get_trade_history("test", limit=90)
     assert len(history) == 1
     assert history[0].ticker == "AAPL"
     assert history[0].pnl_pct == pytest.approx(0.0667, rel=0.01)

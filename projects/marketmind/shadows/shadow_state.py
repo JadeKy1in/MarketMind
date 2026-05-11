@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
+
+logger = logging.getLogger("marketmind.shadows.shadow_state")
 
 
 # ── Data classes ────────────────────────────────────────────────────────────
@@ -29,6 +33,29 @@ class ShadowConfig:
     status: str = "active"           # "active" | "paused" | "watch" | "endangered" | "eliminated"
     eliminated_at: str | None = None
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    _VALID_TYPES = {"beta", "expert", "daredevil", "temp_event", "challenger", "missed_path", "catfish"}
+    _VALID_STATUSES = {"active", "paused", "watch", "endangered", "eliminated"}
+
+    def __post_init__(self):
+        if not self.shadow_id:
+            raise ValueError("shadow_id must not be empty")
+        if self.shadow_type not in self._VALID_TYPES:
+            raise ValueError(f"shadow_type must be one of {self._VALID_TYPES}, got '{self.shadow_type}'")
+        if self.status not in self._VALID_STATUSES:
+            raise ValueError(f"status must be one of {self._VALID_STATUSES}, got '{self.status}'")
+        if self.virtual_capital <= 0:
+            raise ValueError(f"virtual_capital must be positive, got {self.virtual_capital}")
+        if self.max_positions < 0:
+            raise ValueError(f"max_positions must be >= 0, got {self.max_positions}")
+        if not (0.0 <= self.temperature <= 2.0):
+            raise ValueError(f"temperature must be in [0.0, 2.0], got {self.temperature}")
+        if self.max_drawdown_limit < 0:
+            raise ValueError(f"max_drawdown_limit must be >= 0, got {self.max_drawdown_limit}")
+        if self.min_trades_for_ranking < 0:
+            raise ValueError(f"min_trades_for_ranking must be >= 0, got {self.min_trades_for_ranking}")
+        if self.generation < 0:
+            raise ValueError(f"generation must be >= 0, got {self.generation}")
 
 
 @dataclass
@@ -223,10 +250,12 @@ class ShadowStateDB:
 
     def __init__(self, db_path: str = "data/shadows/shadows.db"):
         self.db_path = db_path
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA busy_timeout=5000")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.row_factory = sqlite3.Row
@@ -336,13 +365,22 @@ class ShadowStateDB:
                 "UPDATE shadows SET status = 'eliminated', eliminated_at = ? WHERE id = ?",
                 (now, shadow_id)
             )
+            conn.execute(
+                """UPDATE virtual_trades SET exit_reason = 'shadow_eliminated',
+                   exit_date = ? WHERE shadow_id = ? AND exit_price IS NULL""",
+                (now[:10], shadow_id)
+            )
             conn.commit()
         finally:
             conn.close()
 
     @staticmethod
     def _row_to_config(row: sqlite3.Row) -> ShadowConfig:
-        config_json = json.loads(row["config_json"] or "{}")
+        try:
+            config_json = json.loads(row["config_json"] or "{}")
+        except json.JSONDecodeError:
+            logger.warning("Corrupted config_json for shadow %s, using defaults", row["id"])
+            config_json = {}
         return ShadowConfig(
             shadow_id=row["id"],
             shadow_type=row["shadow_type"],
@@ -405,7 +443,7 @@ class ShadowStateDB:
         finally:
             conn.close()
 
-    def get_trade_history(self, shadow_id: str, days: int = 90) -> list[VirtualTrade]:
+    def get_trade_history(self, shadow_id: str, limit: int = 90) -> list[VirtualTrade]:
         conn = self._connect()
         try:
             rows = conn.execute(
@@ -413,7 +451,7 @@ class ShadowStateDB:
                    WHERE shadow_id = ? AND exit_price IS NOT NULL
                    ORDER BY exit_date DESC
                    LIMIT ?""",
-                (shadow_id, days * 10)
+                (shadow_id, limit)
             ).fetchall()
             return [self._row_to_trade(r) for r in rows]
         finally:
@@ -433,9 +471,12 @@ class ShadowStateDB:
             exit_date=row["exit_date"],
             exit_reason=row["exit_reason"],
             pnl_pct=row["pnl_pct"],
-            virtual_slippage_applied=row["virtual_slippage_applied"] or 0.0,
-            confidence_discount_applied=row["confidence_discount_applied"] or 0.0,
-            paper_live_gap_ratio=row["paper_live_gap_ratio"] or 0.0,
+            virtual_slippage_applied=row["virtual_slippage_applied"]
+            if row["virtual_slippage_applied"] is not None else 0.0,
+            confidence_discount_applied=row["confidence_discount_applied"]
+            if row["confidence_discount_applied"] is not None else 0.0,
+            paper_live_gap_ratio=row["paper_live_gap_ratio"]
+            if row["paper_live_gap_ratio"] is not None else 0.0,
         )
 
     # ── Daily snapshots ───────────────────────────────────────────────────
@@ -510,10 +551,14 @@ class ShadowStateDB:
             deflated_score=row["deflated_score"],
             percentile_rank=row["percentile_rank"],
             achievement_tier=row["achievement_tier"],
-            flash_quota_used=row["flash_quota_used"] or 0,
-            pro_quota_used=row["pro_quota_used"] or 0,
-            emergency_quotas_used=row["emergency_quotas_used"] or 0,
-            insights_generated=row["insights_generated"] or 0,
+            flash_quota_used=row["flash_quota_used"]
+            if row["flash_quota_used"] is not None else 0,
+            pro_quota_used=row["pro_quota_used"]
+            if row["pro_quota_used"] is not None else 0,
+            emergency_quotas_used=row["emergency_quotas_used"]
+            if row["emergency_quotas_used"] is not None else 0,
+            insights_generated=row["insights_generated"]
+            if row["insights_generated"] is not None else 0,
         )
 
     # ── Rankings ──────────────────────────────────────────────────────────
@@ -543,28 +588,42 @@ class ShadowStateDB:
                    LIMIT ?""",
                 (shadow_id, days)
             ).fetchall()
-            return [{
-                "date": r["date"], "shadow_id": r["shadow_id"],
-                "rank": r["rank"], "composite_score": r["composite_score"],
-                "deflated_score": r["deflated_score"],
-                "component_scores": json.loads(r["component_scores"]),
-            } for r in rows]
+            results = []
+            for r in rows:
+                try:
+                    comp = json.loads(r["component_scores"])
+                except json.JSONDecodeError:
+                    logger.warning("Corrupted component_scores for shadow=%s on %s",
+                                   r["shadow_id"], r["date"])
+                    comp = {}
+                results.append({
+                    "date": r["date"], "shadow_id": r["shadow_id"],
+                    "rank": r["rank"], "composite_score": r["composite_score"],
+                    "deflated_score": r["deflated_score"],
+                    "component_scores": comp,
+                })
+            return results
         finally:
             conn.close()
 
     # ── Integrity ─────────────────────────────────────────────────────────
 
-    def record_integrity_event(self, shadow_id: str, event: IntegrityEvent) -> None:
+    def record_integrity_event(self, shadow_id: str, event: IntegrityEvent) -> bool:
         conn = self._connect()
         try:
-            conn.execute(
+            cur = conn.execute(
                 """INSERT OR IGNORE INTO integrity_events
                    (shadow_id, date, event_type, claim_detail, score_change, new_score)
                    VALUES (?, ?, ?, ?, ?, ?)""",
                 (shadow_id, event.date, event.event_type, event.claim_detail,
                  event.score_change, event.new_score)
             )
+            recorded = cur.rowcount > 0
+            if not recorded:
+                logger.debug("Duplicate integrity event ignored: shadow=%s date=%s type=%s",
+                             shadow_id, event.date, event.event_type)
             conn.commit()
+            return recorded
         finally:
             conn.close()
 
