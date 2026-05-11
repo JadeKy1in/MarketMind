@@ -20,9 +20,7 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
     # 1. News collection
     tracker.advance(1, "Scout: fetching news from all sources...")
     from projects.marketmind.pipeline.scout import fetch_all_sources
-    from projects.marketmind.pipeline.cache import DataCache
-    cache = DataCache(ttl_seconds=config.cache_ttl_seconds)
-    news_items = await fetch_all_sources(config, cache)
+    news_items = await fetch_all_sources(config)
     tracker.result(f"{len(news_items)} articles collected")
 
     # 2. Flash preprocessing
@@ -83,12 +81,15 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
 
     # 8. Archive
     tracker.advance(8, "Archive: saving session...")
+    from datetime import datetime as dt
     from projects.marketmind.storage.archivist import get_archivist
     archivist = get_archivist(config.data_dir)
     archivist.index_document(
-        "daily_session",
-        f"MarketMind daily: {l1_result.event_grade} | {l2_result.macro_quadrant} | "
-        f"resonance={resonance.verdict}",
+        date=dt.now().isoformat()[:10],
+        category="daily_session",
+        title="MarketMind Daily",
+        content=f"MarketMind daily: {l1_result.event_grade} | {l2_result.macro_quadrant} | "
+                f"resonance={resonance.verdict}",
     )
     tracker.result("Session archived")
 
