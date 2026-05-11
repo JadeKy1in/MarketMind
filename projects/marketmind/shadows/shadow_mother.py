@@ -283,7 +283,22 @@ class ShadowMother:
                                        market_data: dict,
                                        rejected_directions: list[str] | None = None
                                        ) -> ShadowOrchestrationResult:
-        """Full daily cycle for the shadow ecosystem."""
+        """Full daily cycle for the shadow ecosystem:
+        1. Scan events -> create/destroy temp shadows
+        2. Create missed_path shadows
+        3. Generate status cards
+        4. Run all shadow analyses (collect votes)
+        5. Compute rankings + backfill snapshots
+        6. Detect collusion
+        7. Check challenger conditions
+        8. Audit emergency quotas
+        """
+        from projects.marketmind.shadows.shadow_agent import ShadowAgent
+        from projects.marketmind.shadows.ranking_engine import RankingEngine, ShadowPerformance
+        from projects.marketmind.shadows.collusion_detector import CollusionDetector
+        from projects.marketmind.shadows.challenger_engine import ChallengerEngine
+        from projects.marketmind.shadows.emergency_quota import EmergencyQuotaAuditor
+
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         result = ShadowOrchestrationResult(date=today)
 
@@ -306,6 +321,99 @@ class ShadowMother:
         # 3. Count active shadows
         visible = self.state_db.get_visible_shadows()
         result.active_shadows = len(visible)
+
+        # 4. Run shadow analyses + collect votes
+        all_votes: list = []
+        for config in visible:
+            agent = ShadowAgent(config, self.state_db, self.config)
+            try:
+                output = await agent.run_daily_analysis(news_items, market_data)
+                result.shadow_analyses[config.shadow_id] = output
+                result.votes_collected += len(output.votes)
+                all_votes.extend(output.votes)
+                await agent.save_daily_snapshot()
+            except NotImplementedError:
+                # Base ShadowAgent has stub _analyze; concrete subclasses implement it
+                pass
+            except Exception as e:
+                logger.error("Shadow %s analysis failed: %s", config.shadow_id, e)
+
+        # 5. Compute rankings (if we have performance data)
+        try:
+            engine = RankingEngine(self.config)
+            performances = {}
+            for config in visible:
+                snapshots = self.state_db.get_snapshot_history(
+                    config.shadow_id, days=self.config.evaluation_window_days
+                )
+                if snapshots:
+                    returns = [s.daily_return_pct or 0.0 for s in snapshots
+                              if s.daily_return_pct is not None]
+                    cum = sum(returns)
+                    peak = 0.0; running = 0.0; mdd = 0.0
+                    for r in returns:
+                        running += r
+                        if running > peak: peak = running
+                        dd = running - peak
+                        if dd < mdd: mdd = dd
+                    perf = ShadowPerformance(
+                        shadow_id=config.shadow_id,
+                        daily_returns=returns,
+                        cumulative_return=cum,
+                        max_drawdown=abs(mdd) if mdd < 0 else 0.01,
+                        max_drawdown_duration_days=0,
+                        win_rate=sum(1 for r in returns if r > 0) / len(returns) if returns else 0.5,
+                        total_trades=len(returns),
+                        profitable_trades=sum(1 for r in returns if r > 0),
+                        losing_trades=sum(1 for r in returns if r <= 0),
+                        abstention_days=0,
+                        cagr=cum * 252 / len(returns) if len(returns) > 0 else 0.0,
+                    )
+                    performances[config.shadow_id] = perf
+
+            if performances:
+                rankings = engine.rank_shadows(performances, {}, today)
+                result.rankings = rankings
+                # Backfill ranking data into snapshots
+                for rr in rankings:
+                    agent_config = self.state_db.get_shadow(rr.shadow_id)
+                    if agent_config:
+                        agent = ShadowAgent(agent_config, self.state_db, self.config)
+                        agent.apply_ranking_to_snapshot(rr)
+        except Exception as e:
+            logger.error("Ranking computation failed: %s", e)
+
+        # 6. Detect collusion
+        try:
+            collusion = CollusionDetector(self.config)
+            collusion_flags = collusion.run_daily_check(today, all_votes, market_data)
+            result.collusion_flags = collusion_flags
+            for flag in collusion_flags:
+                self.state_db.record_collusion_flag(flag)
+        except Exception as e:
+            logger.error("Collusion detection failed: %s", e)
+
+        # 7. Check challenger conditions
+        try:
+            challenger = ChallengerEngine(self.state_db, self.config)
+            for config in visible:
+                stage = challenger.check_elimination_stage(config.shadow_id)
+                if stage.current_stage >= 2:
+                    result.challenger_actions.append(
+                        f"Shadow {config.shadow_id} at stage {stage.current_stage}"
+                    )
+        except Exception as e:
+            logger.error("Challenger check failed: %s", e)
+
+        # 8. Audit emergency quotas
+        try:
+            auditor = EmergencyQuotaAuditor(self.state_db, self.config)
+            pending = self.state_db.get_pending_emergency_audits()
+            if pending:
+                audits = auditor.audit_pending([q.id for q in pending if q.id])
+                result.emergency_audits = audits
+        except Exception as e:
+            logger.error("Emergency quota audit failed: %s", e)
 
         return result
 
