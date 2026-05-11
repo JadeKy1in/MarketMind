@@ -1,18 +1,16 @@
 """Fabrication Watchdog M1-M4: Law 7 enforcement — data integrity verification."""
 from __future__ import annotations
 import re
-import json
-import hashlib
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
 
-from projects.marketmind.gateway.async_client import chat_flash
+logger = logging.getLogger("marketmind.integrity.watchdog")
 
 
 @dataclass
 class NumericClaim:
-    value: str                  # the extracted number
+    value: str                  # the extracted number (commas stripped)
     claim_type: str             # price | ratio | percentage | date | amount
     context: str                # 100 chars surrounding the claim
     source_agent: str
@@ -45,11 +43,16 @@ You are bound by Law 7 (Data Integrity)."""
 
 M2_PATTERNS = {
     "price": r'\$\s*([\d,]+\.?\d{0,2})',
-    "ratio": r'(?:ratio|P/E|P/B|Sharpe)\s*(?:of\s+)?(\d+\.?\d*)',
+    "ratio": r'(?:ratio|P/E|P/B|Sharpe|EPS)\s*(?:of\s+)?(\d+\.?\d*)',
     "percentage": r'(\d+\.?\d*)\s*%',
     "date": r'(\d{4}-\d{2}-\d{2})',
-    "amount": r'(\d+\.?\d*)\s*(?:billion|million|trillion|B|M|T)',
+    "amount": r'([\d,]+\.?\d*)\s*(?:billion|million|trillion|B|M|T)',
 }
+
+
+def _normalize_value(value: str) -> str:
+    """Strip commas from numeric values and validate."""
+    return value.replace(",", "")
 
 
 def inject_m1_protocol(system_prompt: str, agent_id: str) -> str:
@@ -65,7 +68,7 @@ def extract_claims_m2(content: str, source_agent: str, session_id: str) -> list[
             end = min(len(content), match.end() + 50)
             context = content[start:end].replace("\n", " ")
             claims.append(NumericClaim(
-                value=match.group(1),
+                value=_normalize_value(match.group(1)),
                 claim_type=claim_type,
                 context=context,
                 source_agent=source_agent,
@@ -79,8 +82,12 @@ async def verify_claim_m3(claim: NumericClaim) -> NumericClaim:
     """M3: Verify a numeric claim via API cross-reference or mark unverifiable."""
     if claim.claim_type == "price":
         await _verify_price(claim)
+    elif claim.claim_type == "ratio":
+        await _verify_ratio(claim)
     elif claim.claim_type == "date":
         await _verify_date(claim)
+    elif claim.claim_type == "amount":
+        await _verify_amount(claim)
     else:
         claim.verified = None
         claim.verification_source = "UNVERIFIABLE_FORWARD"
@@ -98,7 +105,7 @@ async def _verify_price(claim: NumericClaim) -> None:
             if info:
                 current_price = info.get("currentPrice") or info.get("regularMarketPrice")
                 if current_price:
-                    claimed_val = float(claim.value.replace(",", ""))
+                    claimed_val = float(claim.value)
                     if abs(claimed_val - current_price) / current_price <= claim.tolerance:
                         claim.verified = True
                         claim.ground_truth = str(current_price)
@@ -108,8 +115,71 @@ async def _verify_price(claim: NumericClaim) -> None:
                         claim.ground_truth = str(current_price)
                         claim.verification_source = f"yfinance/{ticker}"
                     return
-    except Exception:
-        pass
+    except ImportError:
+        logger.warning("yfinance not installed; skipping M3 price verification")
+    except Exception as e:
+        logger.warning("M3 price verification failed for claim '%s': %s", claim.value, e)
+    claim.verified = None
+    claim.verification_source = "UNVERIFIABLE_FORWARD"
+
+
+async def _verify_ratio(claim: NumericClaim) -> None:
+    """M3 Track A for ratios: verify P/E, P/B, Sharpe via yfinance."""
+    try:
+        import yfinance as yf
+        ticker_match = re.search(r'\b([A-Z]{1,5})\b', claim.context)
+        if ticker_match:
+            ticker = ticker_match.group(1)
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            if info:
+                pe = info.get("trailingPE") or info.get("forwardPE")
+                pb = info.get("priceToBook")
+                claimed_val = float(claim.value)
+                for known in [pe, pb]:
+                    if known and abs(claimed_val - known) / known <= claim.tolerance:
+                        claim.verified = True
+                        claim.ground_truth = str(known)
+                        claim.verification_source = f"yfinance/{ticker}"
+                        return
+                claim.verified = None
+                claim.verification_source = "UNVERIFIABLE_FORWARD"
+                return
+    except ImportError:
+        logger.warning("yfinance not installed; skipping M3 ratio verification")
+    except Exception as e:
+        logger.warning("M3 ratio verification failed for claim '%s': %s", claim.value, e)
+    claim.verified = None
+    claim.verification_source = "UNVERIFIABLE_FORWARD"
+
+
+async def _verify_amount(claim: NumericClaim) -> None:
+    """M3 Track A for amounts: attempt to verify market cap / revenue via yfinance."""
+    try:
+        import yfinance as yf
+        ticker_match = re.search(r'\b([A-Z]{1,5})\b', claim.context)
+        if ticker_match:
+            ticker = ticker_match.group(1)
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            if info:
+                market_cap = info.get("marketCap")
+                revenue = info.get("totalRevenue")
+                claimed_val = float(claim.value)
+                # Check if amount matches market cap or revenue within tolerance
+                for known in [market_cap, revenue]:
+                    if known and abs(claimed_val - known) / known <= claim.tolerance:
+                        claim.verified = True
+                        claim.ground_truth = str(known)
+                        claim.verification_source = f"yfinance/{ticker}"
+                        return
+                claim.verified = None
+                claim.verification_source = "UNVERIFIABLE_FORWARD"
+                return
+    except ImportError:
+        logger.warning("yfinance not installed; skipping M3 amount verification")
+    except Exception as e:
+        logger.warning("M3 amount verification failed for claim '%s': %s", claim.value, e)
     claim.verified = None
     claim.verification_source = "UNVERIFIABLE_FORWARD"
 

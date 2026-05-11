@@ -1,10 +1,13 @@
-"""Fact checker: claim extraction → multi-source verification → synthesis report."""
+"""Fact checker: claim extraction -> multi-source verification -> synthesis report."""
 from __future__ import annotations
-import json
+import logging
 from dataclasses import dataclass, field
 
 from projects.marketmind.gateway.async_client import chat_pro
+from projects.marketmind.gateway.response_parser import extract_json
 from projects.marketmind.integrity.watchdog import NumericClaim, extract_claims_m2
+
+logger = logging.getLogger("marketmind.integrity.fact_checker")
 
 
 @dataclass
@@ -55,33 +58,26 @@ async def run_fact_check(content: str, source_agent: str, session_id: str) -> Fa
             max_tokens=4096,
         )
         return _parse_fact_check_response(result["content"], claims)
-    except Exception:
+    except Exception as e:
+        logger.warning("Fact check API call failed: %s", e)
         return FactCheckReport(total_claims=len(claims), verified=0, falsified=0,
                                unverifiable=len(claims), claims=claims,
                                summary="Fact check API call failed.")
 
 
 def _parse_fact_check_response(content: str, original_claims: list[NumericClaim]) -> FactCheckReport:
-    content = content.strip()
-    if content.startswith("```"):
-        lines = content.split("\n")
-        content = "\n".join(lines[1:])
-        if content.endswith("```"):
-            content = content[:-3]
     try:
-        data = json.loads(content)
-    except json.JSONDecodeError:
-        start = content.find("{")
-        end = content.rfind("}")
-        if start != -1 and end != -1:
-            data = json.loads(content[start:end + 1])
-        else:
-            return FactCheckReport(total_claims=len(original_claims), verified=0, falsified=0,
-                                   unverifiable=len(original_claims), summary="Failed to parse verification response")
+        data = extract_json(content)
+    except ValueError:
+        logger.warning("Failed to parse fact check response JSON")
+        return FactCheckReport(total_claims=len(original_claims), verified=0, falsified=0,
+                               unverifiable=len(original_claims), summary="Failed to parse verification response")
+    if isinstance(data, list):
+        data = {"claims": data, "summary": "", "critical_alerts": []}
     verified = 0
     falsified = 0
     uncertain = 0
-    alerts = data.get("critical_alerts", [])
+    alerts = list(data.get("critical_alerts", []))
     for i, c in enumerate(data.get("claims", [])):
         verdict = c.get("verdict", "UNCERTAIN")
         if verdict == "TRUE":

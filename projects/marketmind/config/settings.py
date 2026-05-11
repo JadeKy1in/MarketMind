@@ -19,6 +19,7 @@ class MarketMindConfig:
     daily_flash_limit: int = 100
     cache_ttl_seconds: int = 300
     session_checkpoint_dir: Path | None = None
+    position_protection_days: int = 60
 
     def __post_init__(self):
         self.data_dir = Path(self.data_dir)

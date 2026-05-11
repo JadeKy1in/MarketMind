@@ -21,7 +21,7 @@ def test_extract_claims_price():
     percentages = [c for c in claims if c.claim_type == "percentage"]
     assert len(prices) >= 1
     assert len(percentages) >= 1
-    assert any("520" in p.value for p in prices)
+    assert any("520.50" in p.value for p in prices)
     assert any("15.3" in p.value for p in percentages)
 
 
@@ -38,6 +38,16 @@ def test_extract_claims_ratio():
     assert len(ratios) >= 1
 
 
+def test_extract_claims_amount_comma():
+    """AF-2: Comma-separated thousands must be captured correctly."""
+    claims = extract_claims_m2("Market cap reached 1,234 billion USD with revenue of 345.7 million.", "builder", "sess-1")
+    amounts = [c for c in claims if c.claim_type == "amount"]
+    assert len(amounts) >= 2
+    values = [a.value for a in amounts]
+    assert "1234" in values, f"Expected '1234' in {values} — comma-separated thousands not stripped"
+    assert any("345" in v for v in values), f"Expected '345.7' or similar in {values}"
+
+
 def test_extract_claims_no_numbers():
     claims = extract_claims_m2("No numeric data here, just qualitative analysis.", "builder", "sess-1")
     assert claims == []
@@ -50,7 +60,7 @@ def test_update_score_verified_true():
                          verified=True, verification_source="yfinance/SPY",
                          ground_truth="520.50")
     score = update_score_m4(score, claim)
-    assert score.score == 100  # capped at 100
+    assert score.score == 100
     assert score.verified_true == 1
     assert score.total_claims == 1
 
@@ -86,11 +96,26 @@ def test_m2_patterns_coverage():
         assert isinstance(pattern, str)
 
 
+def test_normalize_value_strips_commas():
+    claims = extract_claims_m2("Price: $1,234,567.89", "test", "s1")
+    prices = [c for c in claims if c.claim_type == "price"]
+    assert len(prices) >= 1
+    assert prices[0].value == "1234567.89"
+
+
 @pytest.mark.asyncio
 async def test_verify_price_m3_sets_none_on_no_ticker():
     from projects.marketmind.integrity.watchdog import verify_claim_m3
     claim = NumericClaim(value="1234", claim_type="price", context="mystery asset at $1234",
                          source_agent="test", session_id="s1", timestamp="2026-01-01")
     result = await verify_claim_m3(claim)
-    # Without a valid ticker, price verification marks as unverifiable
+    assert result.verification_source == "UNVERIFIABLE_FORWARD"
+
+
+@pytest.mark.asyncio
+async def test_verify_ratio_m3_sets_unverifiable_on_no_ticker():
+    from projects.marketmind.integrity.watchdog import verify_claim_m3
+    claim = NumericClaim(value="25.0", claim_type="ratio", context="Unknown P/E ratio 25.0",
+                         source_agent="test", session_id="s1", timestamp="2026-01-01")
+    result = await verify_claim_m3(claim)
     assert result.verification_source == "UNVERIFIABLE_FORWARD"

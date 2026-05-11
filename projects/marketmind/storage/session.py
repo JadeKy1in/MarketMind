@@ -1,6 +1,7 @@
 """Session checkpoint persistence — auto-save after each gate, resume on restart."""
 from __future__ import annotations
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -61,7 +62,7 @@ class SessionManager:
 
     def list_sessions(self) -> list[dict]:
         sessions = []
-        for f in sorted(self.checkpoint_dir.glob("*.json"), reverse=True):
+        for f in sorted(self.checkpoint_dir.glob("*.json"), key=os.path.getmtime, reverse=True):
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
                 sessions.append({
