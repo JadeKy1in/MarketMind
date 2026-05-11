@@ -122,4 +122,13 @@ class MarketMindConfig:
                 errors.append("shadow.max_concurrent_shadows must be >= 1")
             if self.shadow.evaluation_window_days < 30:
                 errors.append("shadow.evaluation_window_days must be >= 30")
+            if not (0 < self.shadow.collusion_agreement_threshold <= 1):
+                errors.append("shadow.collusion_agreement_threshold must be in (0, 1]")
+            if self.shadow.confidence_discount_floor >= self.shadow.confidence_discount_default:
+                errors.append("shadow.confidence_discount_floor must be < confidence_discount_default")
+            if self.shadow.virtual_slippage_atr_pct < 0:
+                errors.append("shadow.virtual_slippage_atr_pct must be >= 0")
+            pcts = self.shadow.achievement_percentiles
+            if not (pcts["endangered"] < pcts["watch"] < pcts["excellent"] < pcts["elite"]):
+                errors.append("achievement_percentiles must be strictly ordered: endangered < watch < excellent < elite")
         return errors

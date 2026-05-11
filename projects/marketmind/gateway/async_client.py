@@ -96,6 +96,8 @@ async def chat_flash(
     max_tokens: int = 4096,
     reasoning_effort: str = "max",
 ) -> dict[str, Any]:
+    """Internal: raw Flash call without integrity protocol injection.
+    Shadow agents MUST use chat_with_integrity() instead."""
     gw = await get_gateway()
     return await gw._call(
         "deepseek-v4-flash", system_prompt, user_prompt, temperature, max_tokens, reasoning_effort
@@ -109,6 +111,8 @@ async def chat_pro(
     max_tokens: int = 8192,
     reasoning_effort: str = "max",
 ) -> dict[str, Any]:
+    """Internal: raw Pro call without integrity protocol injection.
+    Shadow agents MUST use chat_with_integrity() instead."""
     gw = await get_gateway()
     return await gw._call(
         "deepseek-v4-pro", system_prompt, user_prompt, temperature, max_tokens, reasoning_effort

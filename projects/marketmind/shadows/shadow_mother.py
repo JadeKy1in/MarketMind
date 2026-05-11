@@ -58,6 +58,17 @@ class ShadowMother:
     def __init__(self, config: ShadowSettings, state_db: ShadowStateDB):
         self.config = config
         self.state_db = state_db
+        self._cleanup_stale_temp_shadows()
+
+    def _cleanup_stale_temp_shadows(self) -> int:
+        """On init: destroy any temp_event shadows that have exceeded lifespan."""
+        cleaned = 0
+        for shadow in self.state_db.get_active_shadows("temp_event"):
+            if self.check_destruction_conditions(shadow.shadow_id):
+                logger.info("Startup cleanup: destroying stale temp shadow %s", shadow.shadow_id)
+                self.state_db.eliminate_shadow(shadow.shadow_id, "startup_cleanup_stale")
+                cleaned += 1
+        return cleaned
 
     # ── Event scanning ───────────────────────────────────────────────────
 

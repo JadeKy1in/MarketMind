@@ -288,6 +288,10 @@ class RankingEngine:
         Plateau weights: 0.5 stagnation + 0.3 wr_stability + 0.2 insight_drought
         """
         cfg = self.config
+
+        # Minimum-age guard: new shadows (< plateau_no_elite_days snapshots) skip detection
+        if len(tier_history) < cfg.plateau_no_elite_days:
+            return False, 0.0
         scores = []
 
         # Stagnation: no elite in plateau_no_elite_days
