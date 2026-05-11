@@ -192,17 +192,32 @@ class CashReframingTest:
                 elif t.pnl_pct < 0:
                     realized_losses += 1
 
-        # Categorize open trades as paper gains/losses
-        # Without current prices, we estimate: long positions above entry are gains,
-        # shorts below entry are gains. This is approximate.
+        # Estimate current price from recent closed trades for this shadow
+        exit_prices = [t.exit_price for t in trades
+                       if t.exit_price is not None and t.exit_price > 0]
+        estimated_price = statistics.mean(exit_prices) if exit_prices else 0.0
+
+        # Categorize open trades as paper gains/losses using estimated price
         paper_gains = 0
         paper_losses = 0
         for t in open_trades:
-            if t.direction == "long":
-                # Can't determine without current price; assume evenly split
-                paper_gains += 1  # conservative: treat all open as gains
-            elif t.direction == "short":
-                paper_losses += 1
+            if estimated_price > 0 and t.entry_price > 0:
+                if t.direction == "long":
+                    if t.entry_price < estimated_price:
+                        paper_gains += 1
+                    else:
+                        paper_losses += 1
+                elif t.direction == "short":
+                    if t.entry_price > estimated_price:
+                        paper_gains += 1
+                    else:
+                        paper_losses += 1
+            else:
+                # No price data; use direction-based heuristic
+                if t.direction == "long":
+                    paper_gains += 1
+                elif t.direction == "short":
+                    paper_losses += 1
 
         total_gains = realized_gains + paper_gains
         total_losses = realized_losses + paper_losses
