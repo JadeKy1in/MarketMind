@@ -1,10 +1,10 @@
-"""Tests for ShadowStateDB -- SQLite-backed shadow persistence."""
+﻿"""Tests for ShadowStateDB -- SQLite-backed shadow persistence."""
 import pytest
 import sqlite3
 import tempfile
 from pathlib import Path
 
-from projects.marketmind.shadows.shadow_state import (
+from marketmind.shadows.shadow_state import (
     ShadowStateDB, ShadowConfig, VirtualTradeOpen, DailySnapshot,
     IntegrityEvent, EmergencyQuotaRequest, CollusionFlag
 )
@@ -208,3 +208,35 @@ def test_wal_mode_enabled(temp_db):
     journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
     assert journal_mode.upper() == "WAL"
     conn.close()
+
+
+def test_emergency_quota_state_save_and_load(temp_db, sample_expert_config):
+    temp_db.create_shadow(sample_expert_config)
+    temp_db.save_emergency_quota_state(sample_expert_config.shadow_id, '{"test": 123}')
+    loaded = temp_db.load_emergency_quota_state(sample_expert_config.shadow_id)
+    assert loaded == '{"test": 123}'
+
+
+def test_emergency_quota_state_overwrite(temp_db, sample_expert_config):
+    temp_db.create_shadow(sample_expert_config)
+    temp_db.save_emergency_quota_state(sample_expert_config.shadow_id, '{"v": 1}')
+    temp_db.save_emergency_quota_state(sample_expert_config.shadow_id, '{"v": 2}')
+    loaded = temp_db.load_emergency_quota_state(sample_expert_config.shadow_id)
+    assert loaded == '{"v": 2}'
+
+
+def test_emergency_quota_state_missing_returns_none(temp_db):
+    result = temp_db.load_emergency_quota_state("nonexistent")
+    assert result is None
+
+
+def test_paper_live_gap_state_save_and_load(temp_db, sample_expert_config):
+    temp_db.create_shadow(sample_expert_config)
+    temp_db.save_paper_live_gap_state(sample_expert_config.shadow_id, '{"discount_rate": 0.12}')
+    loaded = temp_db.load_paper_live_gap_state(sample_expert_config.shadow_id)
+    assert loaded == '{"discount_rate": 0.12}'
+
+
+def test_paper_live_gap_state_missing_returns_none(temp_db):
+    result = temp_db.load_paper_live_gap_state("nonexistent")
+    assert result is None

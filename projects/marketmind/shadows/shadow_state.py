@@ -245,6 +245,20 @@ CREATE TABLE IF NOT EXISTS collusion_flags (
     verdict TEXT NOT NULL,
     user_action TEXT
 );
+
+CREATE TABLE IF NOT EXISTS emergency_quota_state (
+    shadow_id TEXT PRIMARY KEY,
+    state_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (shadow_id) REFERENCES shadows(id)
+);
+
+CREATE TABLE IF NOT EXISTS paper_live_gap_state (
+    shadow_id TEXT PRIMARY KEY,
+    state_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (shadow_id) REFERENCES shadows(id)
+);
 """
 
 
@@ -745,6 +759,64 @@ class ShadowStateDB:
                 verdict=r["verdict"],
                 user_action=r["user_action"],
             ) for r in rows]
+        finally:
+            conn.close()
+
+    # ── Emergency quota runtime state ──────────────────────────────────────
+
+    def save_emergency_quota_state(self, shadow_id: str, state_json: str) -> None:
+        """Save emergency quota state for a shadow (dedicated table, no read-merge-write)."""
+        conn = self._connect()
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            conn.execute(
+                """INSERT OR REPLACE INTO emergency_quota_state
+                   (shadow_id, state_json, updated_at)
+                   VALUES (?, ?, ?)""",
+                (shadow_id, state_json, now)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def load_emergency_quota_state(self, shadow_id: str) -> str | None:
+        """Load emergency quota state JSON for a shadow, or None if no state exists."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT state_json FROM emergency_quota_state WHERE shadow_id = ?",
+                (shadow_id,)
+            ).fetchone()
+            return row["state_json"] if row else None
+        finally:
+            conn.close()
+
+    # ── Paper/live gap runtime state ───────────────────────────────────────
+
+    def save_paper_live_gap_state(self, shadow_id: str, state_json: str) -> None:
+        """Save paper/live gap state for a shadow (dedicated table, no read-merge-write)."""
+        conn = self._connect()
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            conn.execute(
+                """INSERT OR REPLACE INTO paper_live_gap_state
+                   (shadow_id, state_json, updated_at)
+                   VALUES (?, ?, ?)""",
+                (shadow_id, state_json, now)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def load_paper_live_gap_state(self, shadow_id: str) -> str | None:
+        """Load paper/live gap state JSON for a shadow, or None if no state exists."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT state_json FROM paper_live_gap_state WHERE shadow_id = ?",
+                (shadow_id,)
+            ).fetchone()
+            return row["state_json"] if row else None
         finally:
             conn.close()
 

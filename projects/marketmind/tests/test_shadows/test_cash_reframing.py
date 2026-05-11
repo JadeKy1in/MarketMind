@@ -1,15 +1,15 @@
-"""Tests for cash reframing A/B test."""
+﻿"""Tests for cash reframing A/B test."""
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from projects.marketmind.shadows.cash_reframing import (
+from marketmind.shadows.cash_reframing import (
     CashReframingTest, CashReframingResult,
 )
-from projects.marketmind.shadows.shadow_state import (
+from marketmind.shadows.shadow_state import (
     ShadowStateDB, ShadowConfig, VirtualTradeOpen,
 )
-from projects.marketmind.config.settings import ShadowSettings
+from marketmind.config.settings import ShadowSettings
 
 
 @pytest.fixture
@@ -184,20 +184,33 @@ def test_non_inferiority_tost_on_returns(reframing_test, temp_shadow_db):
 
 # ── Test 6: cash reframing injection in gateway ────────────────────────────
 
+def _gateway_mock_response(content):
+    resp = MagicMock()
+    resp.json.return_value = {
+        "choices": [{"message": {"content": content}}],
+        "usage": {"total_tokens": 200}
+    }
+    resp.status_code = 200
+    resp.raise_for_status.return_value = None
+    return resp
+
+
+def _gateway_mock_client(mock_response):
+    client = MagicMock()
+    client.post = AsyncMock(return_value=mock_response)
+    return client
+
+
 @pytest.mark.asyncio
 async def test_cash_reframing_injection_in_gateway():
     """Verify that cash_reframing_ticker triggers M1 injection in gateway."""
-    from projects.marketmind.gateway.async_client import (
+    from marketmind.gateway.async_client import (
         chat_with_integrity, init_gateway,
     )
 
-    mock_response = {
-        "choices": [{"message": {"content": "I would not buy AAPL today."}}],
-        "usage": {"total_tokens": 200}
-    }
-    mock_http = AsyncMock()
-    mock_http.post.return_value.json = MagicMock(return_value=mock_response)
-    mock_http.post.return_value.status_code = 200
+    mock_http = _gateway_mock_client(
+        _gateway_mock_response("I would not buy AAPL today.")
+    )
 
     with patch("httpx.AsyncClient", return_value=mock_http):
         init_gateway("test-key")
@@ -220,17 +233,13 @@ async def test_cash_reframing_injection_in_gateway():
 @pytest.mark.asyncio
 async def test_cash_reframing_injection_not_applied_without_ticker():
     """Without cash_reframing_ticker, no injection should occur."""
-    from projects.marketmind.gateway.async_client import (
+    from marketmind.gateway.async_client import (
         chat_with_integrity, init_gateway,
     )
 
-    mock_response = {
-        "choices": [{"message": {"content": "Hold position."}}],
-        "usage": {"total_tokens": 100}
-    }
-    mock_http = AsyncMock()
-    mock_http.post.return_value.json = MagicMock(return_value=mock_response)
-    mock_http.post.return_value.status_code = 200
+    mock_http = _gateway_mock_client(
+        _gateway_mock_response("Hold position.")
+    )
 
     with patch("httpx.AsyncClient", return_value=mock_http):
         init_gateway("test-key")

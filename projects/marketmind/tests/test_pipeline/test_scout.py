@@ -1,11 +1,11 @@
-"""Tests for news scout."""
+﻿"""Tests for news scout."""
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
-from projects.marketmind.pipeline.scout import (
+from marketmind.pipeline.scout import (
     NewsItem, fetch_source, fetch_all_sources, deduplicate,
     _strip_html, _title_similarity,
 )
-from projects.marketmind.config.source_authority import Source, SourceTier, SourceStatus
+from marketmind.config.source_authority import Source, SourceTier, SourceStatus
 
 
 def test_strip_html_removes_tags():
@@ -74,6 +74,7 @@ def test_deduplicate_keeps_distinct_items():
 
 
 @pytest.mark.asyncio
+@pytest.mark.filterwarnings("ignore::DeprecationWarning:feedparser")
 async def test_fetch_source_rss_returns_items():
     rss_xml = """<?xml version="1.0"?>
     <rss version="2.0"><channel>

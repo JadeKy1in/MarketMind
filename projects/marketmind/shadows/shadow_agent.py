@@ -1,15 +1,17 @@
-"""Base ShadowAgent class — daily analysis cycle, virtual portfolio, integrity tracking."""
+﻿"""Base ShadowAgent class — daily analysis cycle, virtual portfolio, integrity tracking."""
 from __future__ import annotations
 
+import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from projects.marketmind.shadows.shadow_state import (
+from marketmind.shadows.shadow_state import (
     ShadowStateDB, ShadowConfig, VirtualTradeOpen, VirtualTrade,
     DailySnapshot, IntegrityEvent, EmergencyQuotaRequest
 )
-from projects.marketmind.config.settings import ShadowSettings
+from marketmind.config.settings import ShadowSettings
 
 logger = logging.getLogger("marketmind.shadows.shadow_agent")
 
@@ -37,6 +39,7 @@ class PositionCheck:
     days_held: int
     should_exit: bool
     exit_reason: str | None = None
+    confidence: float | None = None   # LLM-parsed confidence
 
 
 @dataclass
@@ -99,8 +102,121 @@ class ShadowAgent:
 
     async def _analyze(self, news_items: list,
                         market_data: dict) -> ShadowAnalysisOutput:
-        """Override in subclasses with methodology-specific analysis."""
-        raise NotImplementedError("Subclass must implement _analyze()")
+        """Execute analysis with LLM call using this shadow's methodology prompt.
+
+        Subclasses override _build_user_prompt() and _parse_output() to customize
+        domain filtering, prompt construction, and vote extraction. This base
+        implementation works for temp_event, challenger, and beta shadows that
+        use the config methodology_prompt directly.
+        """
+        from marketmind.gateway.async_client import chat_with_integrity
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        user_prompt = self._build_user_prompt(news_items, market_data)
+        caller_agent = f"shadow:{self.config.shadow_type}:{self.config.display_name}"
+
+        try:
+            result = await chat_with_integrity(
+                model=self.config.model,
+                system_prompt=self.config.methodology_prompt,
+                user_prompt=user_prompt,
+                caller_agent=caller_agent,
+                temperature=self.config.temperature,
+                reasoning_effort=self.config.reasoning_effort,
+            )
+            content = result.get("content", "")
+            latency_ms = result.get("latency_ms", 0)
+        except Exception as e:
+            logger.error("LLM call failed for %s: %s", self.shadow_id, e)
+            content = ""
+            latency_ms = 0
+
+        votes = self._parse_votes(content)
+        insights = self._extract_insights(content, news_items)
+
+        return ShadowAnalysisOutput(
+            shadow_id=self.shadow_id,
+            date=today,
+            votes=votes,
+            insights=insights,
+            methodology_notes=self.config.methodology_prompt[:200],
+            quota_used=1 if content else 0,
+            latency_ms=latency_ms,
+        )
+
+    # Patterns that could be misread as control sequences by vote parsers.
+    # Defanged by inserting a zero-width char to break the pattern without
+    # losing information value in the headline.
+    _DEFANG = [
+        ("VOTE_START", "VOTE​_START"),
+        ("VOTE_END", "VOTE​_END"),
+        ("EXIT_DECISION:", "EXIT​_DECISION:"),
+        ("INSIGHT:", "INSIGHT​:"),
+        ("OBSERVATION:", "OBSERVATION​:"),
+        ("DATA_INTEGRITY_PROTOCOL", "DATA​_INTEGRITY_PROTOCOL"),
+        ("CASH_REFRAMING_PROTOCOL", "CASH​_REFRAMING_PROTOCOL"),
+    ]
+
+    def _build_user_prompt(self, news_items: list, market_data: dict) -> str:
+        """Build the user prompt from news and market data. Override in subclasses."""
+        headlines = []
+        for item in news_items[:20]:
+            h = (getattr(item, "headline", None) or
+                 getattr(item, "title", None) or
+                 str(item.get("headline", "")) if hasattr(item, "get") else str(item))
+            if h and h not in headlines:
+                sanitized = str(h)[:200]
+                for pattern, replacement in self._DEFANG:
+                    sanitized = sanitized.replace(pattern, replacement)
+                headlines.append(sanitized)
+        news_context = "\n".join(f"- {h}" for h in headlines[:15]) if headlines else "No news available"
+        tickers_context = json.dumps(market_data) if market_data else "No market data"
+        return (
+            f"Today's market data:\n{tickers_context}\n\n"
+            f"Relevant news headlines:\n{news_context}\n\n"
+            f"Analyze these inputs from your perspective and output your vote(s) "
+            f"using VOTE_START/VOTE_END blocks. "
+            f"For each vote include: ticker, direction (long/short/abstain), "
+            f"confidence (0.0-1.0), thesis (1 sentence), risk_note (1 sentence)."
+        )
+
+    @staticmethod
+    def _parse_votes(text: str) -> list[ShadowVote]:
+        """Parse VOTE_START/VOTE_END blocks from LLM output."""
+        votes = []
+        pattern = re.compile(
+            r'VOTE_START\s*\n(.*?)\nVOTE_END', re.DOTALL
+        )
+        for match in pattern.finditer(text):
+            block = match.group(1)
+            ticker = _extract_field(block, "ticker")
+            direction = _extract_field(block, "direction")
+            confidence = float(_extract_field(block, "confidence") or 0.5)
+            thesis = _extract_field(block, "thesis") or ""
+            risk = _extract_field(block, "risk_note") or ""
+            if ticker and direction:
+                votes.append(ShadowVote(
+                    shadow_id="", shadow_type="unknown",
+                    date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                    ticker=ticker, direction=direction,
+                    confidence=min(max(confidence, 0.0), 1.0),
+                    thesis=thesis[:200], risk_note=risk[:200],
+                    emergency_flag=confidence >= 0.8,
+                ))
+        return votes
+
+    @staticmethod
+    def _extract_insights(text: str, news_items: list) -> list[str]:
+        """Extract non-vote insights from LLM output."""
+        insights = []
+        for line in text.split("\n"):
+            line = line.strip()
+            if line.startswith("INSIGHT:") or line.startswith("OBSERVATION:"):
+                insights.append(line[:300])
+        if not insights:
+            insights.append(f"Scanned {len(news_items)} news items, "
+                          f"produced {len(re.findall(r'VOTE_START', text))} votes")
+        return insights[:5]
 
     # ── Virtual portfolio ────────────────────────────────────────────────
 
@@ -124,6 +240,80 @@ class ShadowAgent:
                 days_held=days_held,
                 should_exit=False,
             ))
+        return results
+
+    async def analyze_position_exits(self) -> list[PositionCheck]:
+        """LLM-based exit analysis for open positions >= 5 days old."""
+        from marketmind.gateway.async_client import chat_with_integrity
+
+        open_trades = self.state_db.get_open_trades(self.shadow_id)
+        today = datetime.now(timezone.utc).date()
+        results = []
+
+        for trade in open_trades:
+            entry_date = datetime.strptime(trade.entry_date, "%Y-%m-%d").date()
+            days_held = (today - entry_date).days
+
+            if days_held < 5:
+                results.append(PositionCheck(
+                    trade_id=trade.trade_id, ticker=trade.ticker,
+                    direction=trade.direction, entry_price=trade.entry_price,
+                    current_pnl_pct=trade.pnl_pct or 0.0, days_held=days_held,
+                    should_exit=False,
+                ))
+                continue
+
+            # Build position context prompt
+            user_prompt = (
+                f"Position Review for {trade.ticker}:\n"
+                f"Direction: {trade.direction}\n"
+                f"Entry Price: ${trade.entry_price:.2f}\n"
+                f"Current P&L: {trade.pnl_pct or 0.0:+.2%}\n"
+                f"Days Held: {days_held}\n"
+                f"Position Size: {trade.position_size_pct:.1%} of portfolio\n\n"
+                f"Based on your methodology, decide whether to hold or exit this position.\n"
+                f"Output format:\n"
+                f"EXIT_DECISION: hold|exit\n"
+                f"EXIT_REASON: <1-2 sentence reason>\n"
+                f"CONFIDENCE: <0.0-1.0>"
+            )
+
+            caller = f"shadow:{self.config.shadow_type}:{self.config.display_name}"
+
+            try:
+                result = await chat_with_integrity(
+                    model=self.config.model,
+                    system_prompt=self.config.methodology_prompt,
+                    user_prompt=user_prompt,
+                    caller_agent=caller,
+                    cash_reframing_ticker=trade.ticker,
+                    cash_reframing_capital=self.config.virtual_capital,
+                    temperature=self.config.temperature,
+                    reasoning_effort=self.config.reasoning_effort,
+                )
+                content = result.get("content", "")
+                decision = _extract_field(content, "EXIT_DECISION")
+                reason = _extract_field(content, "EXIT_REASON") or ""
+                conf = float(_extract_field(content, "CONFIDENCE") or 0.5)
+
+                should_exit = (decision or "").lower().strip() == "exit"
+                results.append(PositionCheck(
+                    trade_id=trade.trade_id, ticker=trade.ticker,
+                    direction=trade.direction, entry_price=trade.entry_price,
+                    current_pnl_pct=trade.pnl_pct or 0.0, days_held=days_held,
+                    should_exit=should_exit, exit_reason=reason,
+                    confidence=min(max(conf, 0.0), 1.0),
+                ))
+            except Exception as e:
+                logger.warning("Position exit analysis failed for %s trade %d: %s",
+                              self.shadow_id, trade.trade_id, e)
+                results.append(PositionCheck(
+                    trade_id=trade.trade_id, ticker=trade.ticker,
+                    direction=trade.direction, entry_price=trade.entry_price,
+                    current_pnl_pct=trade.pnl_pct or 0.0, days_held=days_held,
+                    should_exit=False,
+                ))
+
         return results
 
     async def open_virtual_position(self, trade: VirtualTradeOpen) -> int:
@@ -176,7 +366,7 @@ class ShadowAgent:
         """Request emergency quota via the auditor state machine (not direct DB)."""
         if confidence < self.settings.emergency_confidence_threshold:
             return False
-        from projects.marketmind.shadows.emergency_quota import EmergencyQuotaAuditor
+        from marketmind.shadows.emergency_quota import EmergencyQuotaAuditor
         auditor = EmergencyQuotaAuditor(self.state_db, self.settings)
         return auditor.request_quota(self.shadow_id, opportunity, confidence)
 
@@ -214,3 +404,31 @@ class ShadowAgent:
             elif name == "win_rate":
                 snap.win_rate_pct = score
         self.state_db.save_snapshot(self.shadow_id, snap)
+
+
+def _extract_field(block: str, field: str) -> str | None:
+    match = re.search(rf'{re.escape(field)}:\s*(.+)', block, re.IGNORECASE)
+    return match.group(1).strip() if match else None
+
+
+def create_shadow_agent(config: ShadowConfig, state_db: ShadowStateDB,
+                        settings: ShadowSettings) -> ShadowAgent:
+    """Factory: instantiate the correct shadow subclass for a given config."""
+    from marketmind.shadows.expert_shadows import ExpertShadow
+    shadow_type = config.shadow_type
+
+    if shadow_type == "expert":
+        return ExpertShadow(config, state_db, settings)
+    elif shadow_type == "daredevil":
+        from marketmind.shadows.daredevil_shadows import DaredevilShadow
+        return DaredevilShadow(config, state_db, settings)
+    elif shadow_type == "catfish":
+        from marketmind.shadows.catfish_agent import CatfishAgent
+        return CatfishAgent(config, state_db, settings)
+    elif shadow_type == "missed_path":
+        from marketmind.shadows.missed_path import MissedPathAgent
+        return MissedPathAgent(config, state_db, settings)
+    elif shadow_type in ("temp_event", "challenger", "beta"):
+        return ShadowAgent(config, state_db, settings)
+    else:
+        return ShadowAgent(config, state_db, settings)

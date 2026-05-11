@@ -127,7 +127,10 @@ async def chat_batch_flash(
     semaphore = asyncio.Semaphore(max_concurrency)
     async def _one(system: str, user: str) -> dict[str, Any]:
         async with semaphore:
-            return await chat_flash(system, user, temperature=temperature)
+            try:
+                return await chat_flash(system, user, temperature=temperature)
+            except Exception as e:
+                return {"content": "", "error": str(e), "usage": {}}
     return await asyncio.gather(*[_one(s, u) for s, u in prompts])
 
 
@@ -158,9 +161,10 @@ async def chat_with_integrity(
     )
     full_system = integrity_header
     if cash_reframing_ticker:
-        cr_protocol = CASH_REFRAMING_PROTOCOL.format(
-            ticker=cash_reframing_ticker,
-            virtual_cash=cash_reframing_capital or "50000"
+        cr_protocol = CASH_REFRAMING_PROTOCOL.replace(
+            "{ticker}", cash_reframing_ticker
+        ).replace(
+            "{virtual_cash}", str(cash_reframing_capital or "50000")
         )
         full_system = cr_protocol + "\n" + full_system
     full_system += system_prompt

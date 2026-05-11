@@ -1,4 +1,4 @@
-"""Emergency Quota Auditor -- confidence-based extra LLM calls with reward/penalty state machine.
+﻿"""Emergency Quota Auditor -- confidence-based extra LLM calls with reward/penalty state machine.
 
 State machine:
     NORMAL -> PENDING -> AUDIT -> REWARDED/PENALIZED -> NORMAL
@@ -11,12 +11,13 @@ Loss (followed) -> 7-day penalty.
 """
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from projects.marketmind.shadows.shadow_state import ShadowStateDB, EmergencyQuotaRequest
-from projects.marketmind.config.settings import ShadowSettings
+from marketmind.shadows.shadow_state import ShadowStateDB, EmergencyQuotaRequest
+from marketmind.config.settings import ShadowSettings
 
 logger = logging.getLogger("marketmind.shadows.emergency_quota")
 
@@ -84,6 +85,7 @@ class EmergencyQuotaAuditor:
         current_state.state = "pending"
         self._shadow_states[shadow_id] = current_state
 
+        self._save_state(shadow_id)
         return True
 
     def audit_result(self, quota_id: int, was_profitable: bool,
@@ -158,6 +160,7 @@ class EmergencyQuotaAuditor:
         # Store updated state
         self._shadow_states[shadow_id] = state
 
+        self._save_state(shadow_id)
         return state
 
     def get_shadow_state(self, shadow_id: str) -> EmergencyQuotaState:
@@ -202,5 +205,42 @@ class EmergencyQuotaAuditor:
     def _get_or_create_state(self, shadow_id: str) -> EmergencyQuotaState:
         """Get existing state or create a default one for the shadow."""
         if shadow_id not in self._shadow_states:
+            # Try restoring from dedicated DB table
+            raw = self.state_db.load_emergency_quota_state(shadow_id)
+            if raw:
+                try:
+                    data = json.loads(raw)
+                    self._shadow_states[shadow_id] = EmergencyQuotaState(
+                        shadow_id=shadow_id,
+                        state=data.get("state", "normal"),
+                        consecutive_failures=data.get("consecutive_failures", 0),
+                        permanent_bonus=data.get("permanent_bonus", 0),
+                        permanent_penalty=data.get("permanent_penalty", 0),
+                        observation_days_remaining=data.get("observation_days_remaining", 0),
+                    )
+                    return self._shadow_states[shadow_id]
+                except (json.JSONDecodeError, KeyError, TypeError):
+                    logger.warning("Corrupted runtime state for %s, using defaults", shadow_id)
+            # No DB state or corrupted — create new default
             self._shadow_states[shadow_id] = EmergencyQuotaState(shadow_id=shadow_id)
         return self._shadow_states[shadow_id]
+
+    def _save_state(self, shadow_id: str) -> None:
+        """Persist emergency quota state to dedicated DB table (atomic write, no race)."""
+        if shadow_id not in self._shadow_states:
+            return
+        state = self._shadow_states[shadow_id]
+        data = json.dumps({
+            "state": state.state,
+            "consecutive_failures": state.consecutive_failures,
+            "permanent_bonus": state.permanent_bonus,
+            "permanent_penalty": state.permanent_penalty,
+            "observation_days_remaining": state.observation_days_remaining,
+        })
+        self.state_db.save_emergency_quota_state(shadow_id, data)
+
+    def save_all_states(self) -> None:
+        """Persist all tracked shadow emergency quota states."""
+        for shadow_id in list(self._shadow_states.keys()):
+            self._save_state(shadow_id)
+

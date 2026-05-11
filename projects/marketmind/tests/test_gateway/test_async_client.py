@@ -1,11 +1,26 @@
-"""Tests for async DeepSeek gateway."""
+﻿"""Tests for async DeepSeek gateway."""
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from projects.marketmind.gateway.async_client import (
+from marketmind.gateway.async_client import (
     chat_flash, chat_pro, chat_batch_flash, chat_with_integrity,
     DeepSeekGateway, init_gateway, get_gateway, RateLimitError,
 )
+
+
+def _mock_response(data):
+    """Build a plain MagicMock response to avoid AsyncMock chain coroutine warnings."""
+    resp = MagicMock()
+    resp.json.return_value = data
+    resp.status_code = 200
+    resp.raise_for_status.return_value = None
+    return resp
+
+
+def _mock_client(mock_response):
+    client = MagicMock()
+    client.post = AsyncMock(return_value=mock_response)
+    return client
 
 
 @pytest.mark.asyncio
@@ -14,9 +29,7 @@ async def test_chat_flash_returns_structured_response():
         "choices": [{"message": {"content": "Test analysis result"}}],
         "usage": {"total_tokens": 150, "prompt_tokens": 50, "completion_tokens": 100}
     }
-    mock_http = AsyncMock()
-    mock_http.post.return_value.json = MagicMock(return_value=mock_response)
-    mock_http.post.return_value.status_code = 200
+    mock_http = _mock_client(_mock_response(mock_response))
 
     with patch("httpx.AsyncClient", return_value=mock_http):
         init_gateway("test-key")
@@ -37,9 +50,7 @@ async def test_chat_pro_returns_structured_response():
         "choices": [{"message": {"content": "Deep Pro analysis"}}],
         "usage": {"total_tokens": 500, "prompt_tokens": 100, "completion_tokens": 400}
     }
-    mock_http = AsyncMock()
-    mock_http.post.return_value.json = MagicMock(return_value=mock_response)
-    mock_http.post.return_value.status_code = 200
+    mock_http = _mock_client(_mock_response(mock_response))
 
     with patch("httpx.AsyncClient", return_value=mock_http):
         init_gateway("test-key")
@@ -54,14 +65,11 @@ async def test_chat_pro_returns_structured_response():
 
 @pytest.mark.asyncio
 async def test_chat_batch_flash_runs_concurrently():
-    call_count = 0
     mock_response = {
         "choices": [{"message": {"content": "Batch item"}}],
         "usage": {"total_tokens": 100}
     }
-    mock_http = AsyncMock()
-    mock_http.post.return_value.json = MagicMock(return_value=mock_response)
-    mock_http.post.return_value.status_code = 200
+    mock_http = _mock_client(_mock_response(mock_response))
 
     with patch("httpx.AsyncClient", return_value=mock_http):
         init_gateway("test-key")
@@ -78,9 +86,7 @@ async def test_chat_with_integrity_injects_protocol():
         "choices": [{"message": {"content": "Verified analysis"}}],
         "usage": {"total_tokens": 200}
     }
-    mock_http = AsyncMock()
-    mock_http.post.return_value.json = MagicMock(return_value=mock_response)
-    mock_http.post.return_value.status_code = 200
+    mock_http = _mock_client(_mock_response(mock_response))
 
     with patch("httpx.AsyncClient", return_value=mock_http):
         init_gateway("test-key")
@@ -100,11 +106,10 @@ async def test_chat_with_integrity_injects_protocol():
 
 @pytest.mark.asyncio
 async def test_rate_limit_error_raised_on_429():
-    mock_http = AsyncMock()
-    mock_response = AsyncMock()
+    mock_response = MagicMock()
     mock_response.status_code = 429
     mock_response.headers = {"Retry-After": "10"}
-    mock_http.post.return_value = mock_response
+    mock_http = _mock_client(mock_response)
 
     with patch("httpx.AsyncClient", return_value=mock_http):
         init_gateway("test-key")
@@ -115,8 +120,8 @@ async def test_rate_limit_error_raised_on_429():
 
 @pytest.mark.asyncio
 async def test_gateway_not_initialized_raises():
-    from projects.marketmind.gateway.async_client import _gateway
-    with patch("projects.marketmind.gateway.async_client._gateway", None):
+    from marketmind.gateway.async_client import _gateway
+    with patch("marketmind.gateway.async_client._gateway", None):
         with pytest.raises(RuntimeError, match="Gateway not initialized"):
             await get_gateway()
 

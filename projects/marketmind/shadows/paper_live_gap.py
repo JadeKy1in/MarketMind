@@ -1,4 +1,4 @@
-"""Paper-to-Live Gap Manager -- virtual slippage, confidence discount,
+﻿"""Paper-to-Live Gap Manager -- virtual slippage, confidence discount,
 inter-shadow GapRatio, and live-ready certification.
 
 Manages the gap between virtual (paper) returns and real-world expected returns:
@@ -10,14 +10,15 @@ Manages the gap between virtual (paper) returns and real-world expected returns:
 """
 from __future__ import annotations
 
+import json
 import logging
 import math
 import statistics
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from projects.marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
-from projects.marketmind.config.settings import ShadowSettings
+from marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
+from marketmind.config.settings import ShadowSettings
 
 logger = logging.getLogger("marketmind.shadows.paper_live_gap")
 
@@ -88,8 +89,33 @@ class PaperLiveGapManager:
     def _get_discount_rate(self, shadow_id: str) -> float:
         """Get current discount rate for a shadow, initializing to default if needed."""
         if shadow_id not in self._discount_rates:
-            self._discount_rates[shadow_id] = self.settings.confidence_discount_default
+            # Try restoring from dedicated DB table
+            raw = self.state_db.load_paper_live_gap_state(shadow_id)
+            if raw:
+                try:
+                    data = json.loads(raw)
+                    if "discount_rate" in data:
+                        self._discount_rates[shadow_id] = float(data["discount_rate"])
+                    if "cumulative_slippage" in data:
+                        self._cumulative_slippage[shadow_id] = float(data["cumulative_slippage"])
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    pass
+            if shadow_id not in self._discount_rates:
+                self._discount_rates[shadow_id] = self.settings.confidence_discount_default
         return self._discount_rates[shadow_id]
+
+    def _save_state(self, shadow_id: str) -> None:
+        """Persist paper/live gap state to dedicated DB table (atomic write, no race)."""
+        data = json.dumps({
+            "discount_rate": self._discount_rates.get(shadow_id, self.settings.confidence_discount_default),
+            "cumulative_slippage": self._cumulative_slippage.get(shadow_id, 0.0),
+        })
+        self.state_db.save_paper_live_gap_state(shadow_id, data)
+
+    def save_all_states(self) -> None:
+        """Persist all tracked shadow paper-to-live states."""
+        for shadow_id in set(list(self._discount_rates.keys()) + list(self._cumulative_slippage.keys())):
+            self._save_state(shadow_id)
 
     def apply_confidence_discount(self, reported_return: float, shadow_id: str) -> float:
         """Apply confidence discount to a reported return.
@@ -189,6 +215,7 @@ class PaperLiveGapManager:
 
         logger.debug("Shadow %s discount: %.3f -> %.3f (gap=%.3f)",
                       shadow_id, current_rate, new_rate, gap)
+        self._save_state(shadow_id)
         return new_rate
 
     # ── Live-ready certification ─────────────────────────────────────────

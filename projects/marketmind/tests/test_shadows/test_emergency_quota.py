@@ -1,13 +1,14 @@
-"""Tests for EmergencyQuotaAuditor -- confidence-based extra LLM calls with reward/penalty state machine."""
+﻿"""Tests for EmergencyQuotaAuditor -- confidence-based extra LLM calls with reward/penalty state machine."""
+import json
 import pytest
 from datetime import datetime, timezone
 
-from projects.marketmind.shadows.shadow_state import (
+from marketmind.shadows.shadow_state import (
     ShadowStateDB, ShadowConfig, EmergencyQuotaRequest
 )
-from projects.marketmind.config.settings import ShadowSettings
+from marketmind.config.settings import ShadowSettings
 # Module under test (will be created)
-from projects.marketmind.shadows.emergency_quota import (
+from marketmind.shadows.emergency_quota import (
     EmergencyQuotaState, EmergencyQuotaAuditor
 )
 
@@ -204,3 +205,63 @@ def test_get_shadow_state_returns_defaults_for_new_shadow(auditor):
     assert state.permanent_bonus == 0
     assert state.permanent_penalty == 0
     assert state.observation_days_remaining == 0
+
+
+def test_state_survives_recreation(temp_shadow_db, sample_expert_config):
+    """Recreating Auditor restores state from DB."""
+    from marketmind.shadows.emergency_quota import EmergencyQuotaAuditor
+    settings = ShadowSettings()
+    temp_shadow_db.create_shadow(sample_expert_config)
+
+    auditor1 = EmergencyQuotaAuditor(temp_shadow_db, settings)
+    auditor1.request_quota(sample_expert_config.shadow_id, "test opportunity", 9)
+    state1 = auditor1.get_shadow_state(sample_expert_config.shadow_id)
+    assert state1.state == "pending"
+
+    # Create new instance — should restore from DB
+    auditor2 = EmergencyQuotaAuditor(temp_shadow_db, settings)
+    state2 = auditor2.get_shadow_state(sample_expert_config.shadow_id)
+    assert state2.state == "pending"
+
+
+def test_state_persisted_after_audit_result(temp_shadow_db, sample_expert_config):
+    """audit_result() persists state to DB."""
+    from marketmind.shadows.emergency_quota import EmergencyQuotaAuditor
+    from marketmind.shadows.shadow_state import EmergencyQuotaRequest
+    from datetime import datetime, timezone
+
+    settings = ShadowSettings()
+    temp_shadow_db.create_shadow(sample_expert_config)
+
+    auditor = EmergencyQuotaAuditor(temp_shadow_db, settings)
+    auditor.request_quota(sample_expert_config.shadow_id, "test", 9)
+
+    # Find pending quota via DB
+    pending = temp_shadow_db.get_pending_emergency_audits()
+    assert len(pending) > 0
+    quota_id = pending[0].id
+
+    state = auditor.audit_result(quota_id, was_profitable=True, was_followed=True)
+    assert state.state == "rewarded"
+
+    # Verify from DB
+    raw = temp_shadow_db.load_emergency_quota_state(sample_expert_config.shadow_id)
+    assert raw is not None
+    data = json.loads(raw)
+    assert data["state"] == "rewarded"
+
+
+def test_corrupted_runtime_state_graceful(temp_shadow_db, sample_expert_config):
+    """Corrupted DB state falls back to defaults gracefully."""
+    from marketmind.shadows.emergency_quota import EmergencyQuotaAuditor
+
+    settings = ShadowSettings()
+    temp_shadow_db.create_shadow(sample_expert_config)
+    # Write corrupted JSON
+    temp_shadow_db.save_emergency_quota_state(sample_expert_config.shadow_id, "not valid json{{{")
+
+    auditor = EmergencyQuotaAuditor(temp_shadow_db, settings)
+    state = auditor.get_shadow_state(sample_expert_config.shadow_id)
+    # Should fall back to defaults
+    assert state.state == "normal"
+    assert state.consecutive_failures == 0

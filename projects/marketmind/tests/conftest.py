@@ -4,6 +4,13 @@ import tempfile
 from pathlib import Path
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "filterwarnings",
+        "ignore::DeprecationWarning:feedparser.*"
+    )
+
+
 @pytest.fixture
 def temp_dir():
     with tempfile.TemporaryDirectory() as td:
