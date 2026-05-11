@@ -11,11 +11,25 @@ from projects.marketmind.config.settings import MarketMindConfig
 from projects.marketmind.gateway.async_client import init_gateway
 
 
-async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool = False) -> int:
+async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool = False,
+                     shadow_count: int | None = None) -> int:
     """Execute full daily analysis pipeline."""
     init_gateway(config.deepseek_api_key, config.deepseek_base_url)
 
     tracker = _StageTracker(verbose)
+
+    # 0. Shadow Mother event scan (pre-market)
+    shadow_db = None
+    mother = None
+    orchestration = None
+    if config.shadow.shadows_enabled and shadow_count != 0:
+        tracker.advance(0, "Shadow Mother: scanning events...")
+        from projects.marketmind.shadows.shadow_state import ShadowStateDB
+        from projects.marketmind.shadows.shadow_mother import ShadowMother
+        shadow_db = ShadowStateDB(config.shadow.shadows_db_path)
+        shadow_db.init_schema()
+        mother = ShadowMother(config.shadow, shadow_db)
+        tracker.result(f"Shadow ecosystem initialized")
 
     # 1. News collection
     tracker.advance(1, "Scout: fetching news from all sources...")
@@ -49,8 +63,18 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
     tracker.result(f"L2: {len(l2_result.ticker_candidates)} candidates, "
                    f"L3: {len(l3_result.results)} tickers ({len(l3_result.green_lights)} green)")
 
-    # 5. Red Team challenge
-    tracker.advance(5, "Red Team: adversarial challenge...")
+    # 5. Shadow ecosystem run
+    shadow_votes = None
+    if config.shadow.shadows_enabled and mother is not None:
+        tracker.advance(5, "Shadows: running analysis cycle...")
+        orchestration = await mother.orchestrate_daily_cycle(
+            news_items, {},
+        )
+        tracker.result(f"{orchestration.active_shadows} shadows, "
+                       f"{orchestration.temp_shadows_created} temp created")
+
+    # 6. Red Team challenge
+    tracker.advance(6, "Red Team: adversarial challenge...")
     from projects.marketmind.pipeline.red_team import run_red_team
     red_team_report = await run_red_team(
         l1_result.raw_analysis,
@@ -60,8 +84,8 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
     tracker.result(f"{len(red_team_report.challenges)} challenges, "
                    f"A-grade: {red_team_report.a_grade_count}")
 
-    # 6. Signal Resonance
-    tracker.advance(6, "Resonance: statistical validation...")
+    # 7. Signal Resonance
+    tracker.advance(7, "Resonance: statistical validation...")
     from projects.marketmind.pipeline.resonance import evaluate_resonance
     resonance = evaluate_resonance(
         signal_returns={},
@@ -69,18 +93,19 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
         observed_sharpe=0.5,
     )
 
-    # 7. Decision
-    tracker.advance(7, "Decision: synthesis...")
+    # 8. Decision with shadow consensus
+    tracker.advance(8, "Decision: synthesis...")
     from projects.marketmind.pipeline.decision import generate_decision
     decision = await generate_decision(
         l1=l1_result, l2=l2_result, l3=l3_result,
         red_team=red_team_report, resonance=resonance,
+        shadow_votes=shadow_votes,
     )
     tracker.result(f"cards={len(decision.decision_cards)}, "
                    f"no_trade={'present' if decision.no_trade_card else 'none'}")
 
-    # 8. Archive
-    tracker.advance(8, "Archive: saving session...")
+    # 9. Archive
+    tracker.advance(9, "Archive: saving session...")
     from datetime import datetime as dt
     from projects.marketmind.storage.archivist import get_archivist
     archivist = get_archivist(config.data_dir)
@@ -114,7 +139,7 @@ class _StageTracker:
 
     def advance(self, stage: int, msg: str) -> None:
         if self.verbose:
-            print(f"[{stage}/8] {msg}")
+            print(f"[{stage}/9] {msg}")
 
     def result(self, msg: str) -> None:
         if self.verbose:
@@ -129,6 +154,12 @@ def main():
                         help="Use mock LLM responses (no API calls)")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Verbose output")
+    parser.add_argument("--shadows", type=int, default=None, metavar="N",
+                        help="Number of shadows to activate (default: all)")
+    parser.add_argument("--no-shadows", action="store_true",
+                        help="Disable shadow ecosystem entirely")
+    parser.add_argument("--shadow-only", action="store_true",
+                        help="Run ONLY shadow ecosystem (no main pipeline)")
     args = parser.parse_args()
 
     config = MarketMindConfig.from_env()
@@ -141,7 +172,9 @@ def main():
     if args.mode == "gui":
         return run_gui(config)
     else:
-        return asyncio.run(run_daily(config, mock=args.mock, verbose=args.verbose))
+        shadow_n = 0 if args.no_shadows else args.shadows
+        return asyncio.run(run_daily(config, mock=args.mock, verbose=args.verbose,
+                                      shadow_count=shadow_n))
 
 
 if __name__ == "__main__":

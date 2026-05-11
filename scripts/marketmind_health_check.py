@@ -50,6 +50,23 @@ def check_imports() -> int:
         "projects.marketmind.ui.position_card",
         "projects.marketmind.ui.pause_screen",
         "projects.marketmind.ui.main_window",
+        # Phase B: Shadow Ecosystem
+        "projects.marketmind.shadows.shadow_state",
+        "projects.marketmind.shadows.shadow_agent",
+        "projects.marketmind.shadows.shadow_mother",
+        "projects.marketmind.shadows.ranking_engine",
+        "projects.marketmind.shadows.expert_shadows",
+        "projects.marketmind.shadows.daredevil_shadows",
+        "projects.marketmind.shadows.catfish_agent",
+        "projects.marketmind.shadows.challenger_engine",
+        "projects.marketmind.shadows.knowledge_filter",
+        "projects.marketmind.shadows.paper_live_gap",
+        "projects.marketmind.shadows.emergency_quota",
+        "projects.marketmind.shadows.collusion_detector",
+        "projects.marketmind.shadows.cash_reframing",
+        "projects.marketmind.shadows.missed_path",
+        "projects.marketmind.ui.shadow_panel",
+        "projects.marketmind.ui.shadow_status_card",
     ]
     for mod in modules:
         try:
