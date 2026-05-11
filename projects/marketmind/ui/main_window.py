@@ -10,6 +10,8 @@ from projects.marketmind.ui.decision_card import DecisionCard
 from projects.marketmind.ui.position_card import PositionCard
 from projects.marketmind.ui.pause_screen import PauseScreen
 from projects.marketmind.ui.progress import ProgressTracker
+from projects.marketmind.ui.shadow_panel import ShadowPanel
+from projects.marketmind.ui.shadow_status_card import ShadowStatusCard
 
 
 class MainWindow(ctk.CTk):
@@ -46,6 +48,7 @@ class MainWindow(ctk.CTk):
             ("Gate 3: Decision", self._show_gate3),
             ("Dashboard", self._show_dashboard),
             ("Positions", self._show_positions),
+            ("Shadows", self._show_shadows),
         ]
         self._nav_buttons: dict[str, ctk.CTkButton] = {}
         for label, cmd in nav_buttons:
@@ -106,6 +109,15 @@ class MainWindow(ctk.CTk):
         self.positions_frame = ctk.CTkScrollableFrame(self.content)
         self._panels["positions"] = self.positions_frame
 
+        # Shadow ranking panel
+        self.shadow_panel = ShadowPanel(self.content, self.bridge)
+        self.shadow_panel.set_on_click_callback(self._show_shadow_status)
+        self._panels["shadows"] = self.shadow_panel
+
+        # Shadow status card (shown on row click)
+        self.shadow_status_card = ShadowStatusCard(self.content)
+        self._panels["shadow_status"] = self.shadow_status_card
+
         # Decision cards display
         self.decision_frame = ctk.CTkFrame(self.content)
         self.decision_frame.grid_columnconfigure((0, 1), weight=1)
@@ -126,6 +138,45 @@ class MainWindow(ctk.CTk):
     def _show_gate3(self) -> None: self._show_panel("gate3")
     def _show_dashboard(self) -> None: self._show_panel("dashboard")
     def _show_positions(self) -> None: self._show_panel("positions")
+    def _show_shadows(self) -> None:
+        self._show_panel("shadows")
+        # Auto-refresh rankings when panel is shown
+        self.shadow_panel.refresh()
+
+    def _show_shadow_status(self, shadow_id: str) -> None:
+        """Show the status card for a shadow clicked in the ranking panel.
+        Displays card below or beside the ranking panel.
+        """
+        self._show_panel("shadow_status")
+        # Load shadow detail data via async bridge
+        async def _fetch():
+            # TODO: wire to shadow agent's receive_status_card()
+            # For now, show placeholder with the shadow_id
+            return {
+                "shadow_id": shadow_id,
+                "display_name": shadow_id,
+                "shadow_type": "unknown",
+                "tier": "normal",
+                "rank": "?",
+                "total_shadows": "?",
+                "percentile": 0,
+                "composite_score": 0,
+                "deflated_score": 0,
+                "mppm": 0,
+                "calmar": 0,
+                "omega": 0,
+                "win_rate": 0,
+                "virtual_capital": 0,
+                "capital_change_90d": 0,
+                "max_drawdown": 0,
+                "positions": [],
+                "integrity_score": 0,
+            }
+
+        def _on_done(result):
+            self.shadow_status_card.display_shadow(result)
+
+        self.bridge.submit(f"shadow_status_{shadow_id}", _fetch(), _on_done)
 
     # Pipeline stages
     def _run_gate1(self) -> None:
