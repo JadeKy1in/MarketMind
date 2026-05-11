@@ -126,14 +126,18 @@ class ShadowMother:
             news_items, "personnel", personnel_keywords, base_impact=0.4
         )
 
-    def _detect_by_keywords(self, news_items: list[dict], event_type: str,
+    def _detect_by_keywords(self, news_items: list, event_type: str,
                              keywords: list[str], base_impact: float) -> list[DetectedEvent]:
-        """Generic keyword-based event detection."""
+        """Generic keyword-based event detection. Handles both dict and object items."""
         events = []
         seen_headlines = set()
         for item in news_items:
-            headline = str(item.get("headline", ""))
-            if headline in seen_headlines:
+            headline = (
+                str(getattr(item, "headline", "")) or
+                str(getattr(item, "title", "")) or
+                str(item.get("headline", "")) if hasattr(item, "get") else ""
+            )
+            if not headline or headline in seen_headlines:
                 continue
             matched = sum(1 for kw in keywords if re.search(kw, headline, re.IGNORECASE))
             if matched >= 2:  # at least 2 keyword groups match

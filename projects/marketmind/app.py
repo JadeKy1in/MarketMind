@@ -28,8 +28,18 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
         from projects.marketmind.shadows.shadow_mother import ShadowMother
         shadow_db = ShadowStateDB(config.shadow.shadows_db_path)
         shadow_db.init_schema()
+
+        # Initialize permanent shadows (experts + daredevils + catfish)
+        from projects.marketmind.shadows.expert_shadows import create_expert_shadows
+        from projects.marketmind.shadows.daredevil_shadows import create_daredevil_shadows
+        from projects.marketmind.shadows.catfish_agent import create_catfish_agent
+        create_expert_shadows(shadow_db, config.shadow)
+        create_daredevil_shadows(shadow_db, config.shadow)
+        create_catfish_agent(shadow_db, config.shadow)
+
         mother = ShadowMother(config.shadow, shadow_db)
-        tracker.result(f"Shadow ecosystem initialized")
+        tracker.result(f"Shadow ecosystem initialized with "
+                       f"{len(shadow_db.get_visible_shadows())} shadows")
 
     # 1. News collection
     tracker.advance(1, "Scout: fetching news from all sources...")
@@ -46,7 +56,7 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
     # 3. Layer 1 Narrative analysis
     tracker.advance(3, "Layer 1: narrative analysis...")
     from projects.marketmind.pipeline.layer1_narrative import analyze_layer1
-    l1_result = await analyze_layer1(signals[:15])
+    l1_result = await analyze_layer1(signals[:15], news_items)
     tracker.result(f"grade={l1_result.event_grade}, quadrant={l1_result.matrix_quadrant}")
 
     # 4. Layer 2 + Layer 3 in parallel
@@ -109,6 +119,7 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
     from datetime import datetime as dt
     from projects.marketmind.storage.archivist import get_archivist
     archivist = get_archivist(config.data_dir)
+    archivist.init_fts()
     archivist.index_document(
         date=dt.now().isoformat()[:10],
         category="daily_session",
