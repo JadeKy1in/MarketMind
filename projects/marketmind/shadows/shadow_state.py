@@ -130,6 +130,7 @@ class EmergencyQuotaRequest:
     result: str = "pending"
     pnl_impact_pct: float | None = None
     quota_penalty_applied: str | None = None
+    id: int | None = None          # set when loaded from DB
 
 
 @dataclass
@@ -698,6 +699,7 @@ class ShadowStateDB:
                 "SELECT * FROM emergency_quotas WHERE result = 'pending'"
             ).fetchall()
             return [EmergencyQuotaRequest(
+                id=r["id"],
                 shadow_id=r["shadow_id"],
                 requested_at=r["requested_at"],
                 confidence_self_report=r["confidence_self_report"],
