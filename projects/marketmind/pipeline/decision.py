@@ -1,6 +1,9 @@
 """Decision generator: decision card + "no-trade" card synthesis."""
 from __future__ import annotations
 import json
+import logging
+
+logger = logging.getLogger("marketmind.pipeline.decision")
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -113,7 +116,8 @@ async def generate_decision(
             max_tokens=4096,
         )
         return _parse_decision_response(result["content"])
-    except Exception:
+    except Exception as e:
+        logger.warning("Decision generation failed: %s", e)
         return DecisionOutput(summary="Decision synthesis failed")
 
 

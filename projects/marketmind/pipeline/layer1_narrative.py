@@ -1,8 +1,11 @@
 """Layer 1: Narrative analysis — event grading, 2x2 matrix, price-in, cascade, sentiment."""
 from __future__ import annotations
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger("marketmind.pipeline.layer1")
 
 from projects.marketmind.gateway.async_client import chat_pro
 from projects.marketmind.pipeline.flash_preprocessor import FlashSignal
@@ -80,7 +83,8 @@ async def analyze_layer1(signals: list[FlashSignal], news_items: list[NewsItem])
         )
         content = result["content"]
         return _parse_layer1_response(content)
-    except Exception:
+    except Exception as e:
+        logger.warning("Layer 1 analysis failed: %s", e)
         return Layer1Result(
             event_grade="E", surprise_level="low", market_size="small",
             matrix_quadrant="observe_skip", price_in_score=0.5, cascade_rank=1,

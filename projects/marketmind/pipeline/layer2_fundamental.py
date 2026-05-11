@@ -1,6 +1,9 @@
 """Layer 2: Fundamental analysis — 5-tier progressive: macro → asset → sector → factor → ticker."""
 from __future__ import annotations
 import json
+import logging
+
+logger = logging.getLogger("marketmind.pipeline.layer2")
 from dataclasses import dataclass, field
 
 from projects.marketmind.gateway.async_client import chat_pro
@@ -59,7 +62,8 @@ async def analyze_layer2(l1: Layer1Result, market_context: dict | None = None) -
             max_tokens=4096,
         )
         return _parse_layer2_response(result["content"])
-    except Exception:
+    except Exception as e:
+        logger.warning("Layer 2 analysis failed: %s", e)
         return Layer2Result(
             macro_quadrant="contraction", macro_direction="risk_off",
             preferred_assets=[], sector_shortlist=[], factor_scores={},

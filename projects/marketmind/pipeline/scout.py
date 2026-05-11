@@ -1,6 +1,9 @@
 """Multi-source news collection with 3-tier degradation strategy."""
 from __future__ import annotations
 import hashlib
+import logging
+
+logger = logging.getLogger("marketmind.pipeline.scout")
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -74,13 +77,15 @@ async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsIte
                 for entry in feed.entries[:20]:
                     try:
                         items.append(NewsItem.from_entry(entry, source))
-                    except Exception:
+                    except Exception as e:
+                        logger.warning("Scout source fetch degraded: %s — %s", source.name, e)
                         continue
             source.status = SourceStatus.WORKING
             source.consecutive_failures = 0
         elif source.feed_type == "html":
             source.status = SourceStatus.DEGRADED  # HTML scraping not yet implemented
-    except Exception:
+    except Exception as e:
+        logger.warning("Scout source fetch failed for '%s': %s", source.name, e)
         source.consecutive_failures += 1
         if source.consecutive_failures >= 3:
             source.status = SourceStatus.DEAD

@@ -1,6 +1,9 @@
 """Flash preprocessor: batch signal extraction, classification, denoising."""
 from __future__ import annotations
 import json
+import logging
+
+logger = logging.getLogger("marketmind.pipeline.flash")
 from dataclasses import dataclass, field
 
 from projects.marketmind.gateway.async_client import chat_batch_flash, chat_flash
@@ -91,7 +94,8 @@ async def preprocess_batch(items: list[NewsItem], batch_size: int = 15) -> list[
                     signal.source_headline = batch[j].title
                     signal.source_url = batch[j].url
                 signals.append(signal)
-        except Exception:
+        except Exception as e:
+            logger.warning("Flash preprocessing failed for item: %s", e)
             continue
     return signals
 
@@ -114,8 +118,8 @@ async def preprocess_single(item: NewsItem) -> FlashSignal | None:
             signal.source_headline = item.title
             signal.source_url = item.url
             return signal
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Flash single preprocessing failed: %s", e)
     return None
 
 

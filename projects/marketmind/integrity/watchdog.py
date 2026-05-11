@@ -42,8 +42,8 @@ If data is unavailable, state 'DATA_UNAVAILABLE' — never fabricate.
 You are bound by Law 7 (Data Integrity)."""
 
 M2_PATTERNS = {
-    "price": r'\$\s*([\d,]+\.?\d{0,2})',
-    "ratio": r'(?:ratio|P/E|P/B|Sharpe|EPS)\s*(?:of\s+)?(\d+\.?\d*)',
+    "price": r'(?:\$\s*|price\s+of\s+|trading\s+at\s+|priced\s+at\s+|quoted\s+at\s+)([\d,]+\.?\d{0,2})',
+    "ratio": r'(?:(?:P/?E|P/?B|Sharpe|EPS|ratio)\s*(?:ratio\s*)?(?:of\s+|is\s+)?)(\d+\.?\d*)',
     "percentage": r'(\d+\.?\d*)\s*%',
     "date": r'(\d{4}-\d{2}-\d{2})',
     "amount": r'([\d,]+\.?\d*)\s*(?:billion|million|trillion|B|M|T)',

@@ -1,6 +1,9 @@
 """Layer 3: Technical review — 3-light review + entry/exit calculation (INDEPENDENT from L1-L2)."""
 from __future__ import annotations
+import logging
 from dataclasses import dataclass, field
+
+logger = logging.getLogger("marketmind.pipeline.layer3")
 import json
 from typing import Any
 
@@ -121,7 +124,8 @@ async def analyze_layer3(tickers: list[str], market_data: dict | None = None) ->
                     recommendation="avoid"
                 ))
         return Layer3BatchResult(results=parsed)
-    except Exception:
+    except Exception as e:
+        logger.warning("Layer 3 analysis failed: %s", e)
         return Layer3BatchResult()
 
 

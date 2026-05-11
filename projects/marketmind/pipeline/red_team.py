@@ -1,6 +1,9 @@
 """Red Team: Adversarial challenge engine — structurally independent from main analysis."""
 from __future__ import annotations
 import json
+import logging
+
+logger = logging.getLogger("marketmind.pipeline.red_team")
 from dataclasses import dataclass, field
 
 from projects.marketmind.gateway.async_client import chat_pro
@@ -77,7 +80,8 @@ Find every legitimate objection. At least 1 critical-level challenge is expected
             max_tokens=4096,
         )
         return _parse_red_team_response(result["content"])
-    except Exception:
+    except Exception as e:
+        logger.warning("Red Team analysis failed: %s", e)
         return RedTeamReport(overall_assessment="Red Team analysis failed")
 
 
