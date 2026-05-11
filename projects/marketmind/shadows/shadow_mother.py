@@ -66,7 +66,7 @@ class ShadowMother:
         events = []
         events.extend(self.detect_cb_shock(news_items))
         events.extend(self.detect_geopolitical(news_items))
-        events.extend(self.detect_vol_shock(news_items))
+        events.extend(self.detect_vol_shock(None))  # market_data passed separately
         events.extend(self.detect_personnel_change(news_items))
         events.sort(key=lambda e: e.impact_score, reverse=True)
         return events
