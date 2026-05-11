@@ -9,6 +9,7 @@ class Priority(enum.IntEnum):
     CRITICAL = 1
     HIGH = 2
     NORMAL = 3
+    SHADOW = 5   # Shadow ecosystem — below NORMAL, above LOW
     LOW = 4
 
 
@@ -74,6 +75,14 @@ class TokenBudget:
     def handle_429(self, retry_after: int) -> float:
         self._backoff_until = time.time() + retry_after + 1.0
         return self._backoff_until
+
+    def reserve_emergency_quota(self, estimated_tokens: int) -> bool:
+        """Emergency quota for shadows — bypasses normal limits with cap."""
+        self._maybe_reset()
+        if self.tokens_remaining < estimated_tokens:
+            return False
+        self.tokens_remaining -= estimated_tokens
+        return True
 
     def report(self) -> dict:
         self._maybe_reset()

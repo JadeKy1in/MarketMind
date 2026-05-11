@@ -13,6 +13,7 @@ from projects.marketmind.pipeline.layer2_fundamental import Layer2Result
 from projects.marketmind.pipeline.layer3_technical import Layer3BatchResult
 from projects.marketmind.pipeline.red_team import RedTeamReport
 from projects.marketmind.pipeline.resonance import ResonanceResult
+from projects.marketmind.shadows.shadow_agent import ShadowVote
 
 
 @dataclass
@@ -95,6 +96,7 @@ async def generate_decision(
     l3: Layer3BatchResult,
     red_team: RedTeamReport,
     resonance: ResonanceResult,
+    shadow_votes: dict[str, list[ShadowVote]] | None = None,
 ) -> DecisionOutput:
     """Generate final decision cards and no-trade card."""
     if not resonance.passed and not l3.green_lights:
@@ -107,7 +109,7 @@ async def generate_decision(
             ),
             summary="No actionable signal today. Cash is a valid position."
         )
-    user_prompt = _build_decision_prompt(l1, l2, l3, red_team, resonance)
+    user_prompt = _build_decision_prompt(l1, l2, l3, red_team, resonance, shadow_votes)
     try:
         result = await chat_pro(
             system_prompt=DECISION_SYSTEM_PROMPT,
@@ -124,10 +126,31 @@ async def generate_decision(
 def _build_decision_prompt(
     l1: Layer1Result, l2: Layer2Result, l3: Layer3BatchResult,
     red_team: RedTeamReport, resonance: ResonanceResult,
+    shadow_votes: dict | None = None,
 ) -> str:
     green = [r.ticker for r in l3.green_lights]
     challenges_str = "\n".join(f"- [{c.severity}] {c.challenge}" for c in red_team.challenges[:5])
-    return f"""## Signal Resonance
+
+    shadow_consensus_str = ""
+    if shadow_votes:
+        lines = ["## Shadow Ecosystem Consensus"]
+        for ticker, votes in shadow_votes.items():
+            if not votes:
+                continue
+            directions = {}
+            for v in votes:
+                if v.direction != "abstain":
+                    directions[v.direction] = directions.get(v.direction, 0) + 1
+            total = sum(directions.values())
+            if total > 0:
+                parts = [f"{d}: {c}/{total}" for d, c in
+                         sorted(directions.items(), key=lambda x: -x[1])]
+                lines.append(f"{ticker}: {', '.join(parts)}")
+        if len(lines) > 1:
+            lines.append("Note: Shadows are independent agents. Consensus is informational, not directive.")
+            shadow_consensus_str = "\n".join(lines) + "\n\n"
+
+    return f"""{shadow_consensus_str}## Signal Resonance
 Verdict: {resonance.verdict} | DSR: {resonance.dsr} | PBO: {resonance.pbo}
 
 ## Layer 1 Narrative

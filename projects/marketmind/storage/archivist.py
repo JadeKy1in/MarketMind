@@ -75,6 +75,54 @@ class MarketMindArchive:
         )
         db.commit()
 
+    # ── Shadow ecosystem FTS5 tables ────────────────────────────────────
+
+    def init_shadow_tables(self) -> None:
+        db = self._get_db()
+        db.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS shadow_analyses_fts USING fts5(
+                shadow_id, date, ticker, direction, thesis, risk_note,
+                tokenize='porter unicode61'
+            )
+        """)
+        db.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS shadow_rankings_fts USING fts5(
+                shadow_id, date, tier, rank_info,
+                tokenize='porter unicode61'
+            )
+        """)
+        db.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS shadow_trades_fts USING fts5(
+                shadow_id, ticker, direction, exit_reason,
+                tokenize='porter unicode61'
+            )
+        """)
+        db.commit()
+
+    def index_shadow_snapshot(self, shadow_id: str, date: str,
+                               votes: list[dict]) -> None:
+        db = self._get_db()
+        for v in votes:
+            db.execute(
+                """INSERT INTO shadow_analyses_fts
+                   (shadow_id, date, ticker, direction, thesis, risk_note)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (shadow_id, date,
+                 v.get("ticker", ""), v.get("direction", ""),
+                 v.get("thesis", ""), v.get("risk_note", ""))
+            )
+        db.commit()
+
+    def index_shadow_ranking(self, shadow_id: str, date: str,
+                              tier: str, rank: int) -> None:
+        db = self._get_db()
+        db.execute(
+            """INSERT INTO shadow_rankings_fts (shadow_id, date, tier, rank_info)
+               VALUES (?, ?, ?, ?)""",
+            (shadow_id, date, tier, f"rank={rank}")
+        )
+        db.commit()
+
     def search(self, query: str, limit: int = 20) -> list[dict]:
         db = self._get_db()
         results = db.execute(

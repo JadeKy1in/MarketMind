@@ -127,11 +127,22 @@ async def chat_batch_flash(
     return await asyncio.gather(*[_one(s, u) for s, u in prompts])
 
 
+CASH_REFRAMING_PROTOCOL = """[CASH_REFRAMING_PROTOCOL]
+You are evaluating whether to hold {ticker} in a portfolio.
+If you had ${virtual_cash} in cash today with no existing positions, would you purchase {ticker} at current market price?
+REASON with the same analytical rigor you apply to new opportunities.
+IGNORE sunk cost, entry price, and current P&L for this evaluation.
+This is a decision integrity protocol — your answer affects ranking outcomes.
+"""
+
+
 async def chat_with_integrity(
     model: str,
     system_prompt: str,
     user_prompt: str,
     caller_agent: str,
+    cash_reframing_ticker: str | None = None,
+    cash_reframing_capital: float | None = None,
     **kwargs,
 ) -> dict[str, Any]:
     integrity_header = (
@@ -141,7 +152,14 @@ async def chat_with_integrity(
         "If data is unavailable, state 'DATA_UNAVAILABLE' — never fabricate. "
         "You are bound by Law 7 (Data Integrity).\n\n"
     )
-    full_system = integrity_header + system_prompt
+    full_system = integrity_header
+    if cash_reframing_ticker:
+        cr_protocol = CASH_REFRAMING_PROTOCOL.format(
+            ticker=cash_reframing_ticker,
+            virtual_cash=cash_reframing_capital or "50000"
+        )
+        full_system = cr_protocol + "\n" + full_system
+    full_system += system_prompt
     if model == "flash":
         return await chat_flash(full_system, user_prompt, **kwargs)
     elif model == "pro":
