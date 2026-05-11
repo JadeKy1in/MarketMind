@@ -173,16 +173,12 @@ class ShadowAgent:
 
     async def request_emergency_quota(self, opportunity: str,
                                        confidence: int) -> bool:
+        """Request emergency quota via the auditor state machine (not direct DB)."""
         if confidence < self.settings.emergency_confidence_threshold:
             return False
-        quota = EmergencyQuotaRequest(
-            shadow_id=self.shadow_id,
-            requested_at=datetime.now(timezone.utc).isoformat(),
-            confidence_self_report=confidence,
-            opportunity_description=opportunity,
-        )
-        self.state_db.record_emergency_quota(self.shadow_id, quota)
-        return True
+        from projects.marketmind.shadows.emergency_quota import EmergencyQuotaAuditor
+        auditor = EmergencyQuotaAuditor(self.state_db, self.settings)
+        return auditor.request_quota(self.shadow_id, opportunity, confidence)
 
     # ── Persistence ──────────────────────────────────────────────────────
 
@@ -193,4 +189,28 @@ class ShadowAgent:
             date=today,
             virtual_capital=self.config.virtual_capital,
         )
+        self.state_db.save_snapshot(self.shadow_id, snap)
+
+    def apply_ranking_to_snapshot(self, ranking_result) -> None:
+        """Backfill ranking metrics into today's snapshot. Called by orchestrator
+        after ranking computation."""
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        snap = DailySnapshot(
+            shadow_id=self.shadow_id,
+            date=today,
+            virtual_capital=self.config.virtual_capital,
+            composite_score=ranking_result.composite_score,
+            deflated_score=ranking_result.deflated_score,
+            percentile_rank=ranking_result.percentile_rank,
+            achievement_tier=ranking_result.achievement_tier,
+        )
+        for name, score in ranking_result.component_scores.items():
+            if name == "mppm":
+                snap.mppm_score = score
+            elif name == "calmar":
+                snap.calmar_ratio = score
+            elif name == "omega":
+                snap.omega_ratio = score
+            elif name == "win_rate":
+                snap.win_rate_pct = score
         self.state_db.save_snapshot(self.shadow_id, snap)

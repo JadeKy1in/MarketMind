@@ -9,8 +9,8 @@ class Priority(enum.IntEnum):
     CRITICAL = 1
     HIGH = 2
     NORMAL = 3
-    SHADOW = 5   # Shadow ecosystem — below NORMAL, above LOW
-    LOW = 4
+    SHADOW = 4   # Shadow ecosystem — below NORMAL, above LOW
+    LOW = 5
 
 
 @dataclass

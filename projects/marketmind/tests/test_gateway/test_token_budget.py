@@ -57,9 +57,10 @@ def test_release_flash_restores():
 
 
 def test_priority_enum():
-    assert Priority.CRITICAL < Priority.HIGH < Priority.NORMAL < Priority.LOW
+    assert Priority.CRITICAL < Priority.HIGH < Priority.NORMAL < Priority.SHADOW < Priority.LOW
     assert int(Priority.CRITICAL) == 1
-    assert int(Priority.LOW) == 4
+    assert int(Priority.SHADOW) == 4
+    assert int(Priority.LOW) == 5
 
 
 def test_initial_values():
