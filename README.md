@@ -1,51 +1,43 @@
-# SignalFoundry
+# MarketMind
 
-Automated macro investment research platform. Multi-region news aggregation (57 sources, 8 regions) → DeepSeek Pro adversarial analysis → multi-horizon investment recommendations with shadow simulation.
+> AI-Powered Investment Analysis Workstation · AI 驱动的投资分析工作站
 
-自动化宏观投资研究平台。多区域新闻聚合（57个信源、8个区域）→ DeepSeek Pro 红蓝对抗深度分析 → 多期限投资建议 + 影子模拟。
+MarketMind is an AI-native investment analysis workstation that processes daily market signals through an adversarial pipeline. It ingests multi-source news, runs layered narrative/fundamental/technical analysis, cross-validates findings via an independent Red Team challenger, and surfaces high-conviction investment decisions — all orchestrated through an autonomous shadow agent ecosystem that hunts for bias, collusion, and missed counterfactuals.
 
-## Projects
+MarketMind 是一个 AI 原生的投资分析工作站，通过对抗性管道处理每日市场信号。系统采集多源新闻，运行分层分析，由独立 Red Team 对抗审查交叉验证，最终输出高置信度投资决策——整个过程由自主运行的影子代理生态编排，持续追猎偏见、合谋与错失的反事实路径。
 
-| Project | Purpose | Stack |
-|---------|---------|-------|
-| [SignalFoundry](projects/robinhood/) | Daily macro analysis pipeline | Python, DeepSeek V4, yfinance |
-| [Command Center](projects/command_center/) | Interactive investment UI | Python, CustomTkinter |
-| [Browser Automation](infrastructure/skills/browser-automation/) | Multi-track content extraction | TypeScript, VLM |
+---
 
 ## Quick Start
 
 ```bash
-# Command Center GUI
-python -m projects.command_center.app
+# GUI dashboard
+cd projects/marketmind
+python app.py
 
-# Daily analysis (CLI)
-cd projects/robinhood
-python src/main.py --mode daily --mock --verbose
+# CLI daily analysis (mock mode)
+python app.py --mode daily --mock --verbose
 
-# Health check
-python scripts/health_check.py
+# Run tests
+python -m pytest projects/marketmind/tests/ -v --tb=short
 ```
 
-## Architecture
+## Key Capabilities
 
-```
-Scout (57 sources, 8 regions)
-  → Four-Dimensional Analysis (Fundamental / Technical / Event / Sentiment)
-  → Blue/Red Adversarial Review
-  → Resonance Aggregation
-  → Multi-Profile Investment Recommendations
-  → Shadow Simulation (6 personalities × 4 horizons × 3 daily cycles)
-  → Cognitive Review & Methodology Evolution
-```
+- **Adversarial Pipeline** — Scout → Flash Preprocess → Narrative → Fundamental + Technical → Shadow Ecosystem → Red Team → Resonance → Decision → Archive
+- **Shadow Agent Ecosystem** — 21+ independent analyst shadows (expert, daredevil, catfish, temp event, missed path) with virtual capital, composite ranking, collusion detection, and emergency quota audits
+- **Red Team Auditor** — Structurally independent adversary hunting for confirmation bias, survivorship bias, and unsupported claims
+- **Counterfactual Tracking** — Missed-path shadows quantify what would have happened if rejected directions were chosen
+- **Resonance Validation** — Statistical cross-check of signal alignment across narrative, fundamental, technical, and sentiment dimensions
+- **Dual Interface** — CLI for batch runs + CustomTkinter GUI with live dashboard, decision cards, and shadow status panels
 
-## Model Routing
+## Tech Stack
 
-| Model | Role |
-|-------|------|
-| DeepSeek Flash | Data collection, sentiment classification |
-| DeepSeek Pro | Deep analysis, adversarial reasoning, report writing |
-| Claude (Cowork) | Development & architecture |
+Python · asyncio · httpx · yfinance · feedparser · CustomTkinter · SQLite · pytest
 
 ## Development
 
-Uses Cowork with `/tri` three-model collaboration (Opus architecture → Sonnet planning → Haiku execution). See [CLAUDE.md](CLAUDE.md) for full rules.
+For architecture details, model routing, testing commands, and full project structure:
+
+- **[CLAUDE.md](CLAUDE.md)** — Global workspace conventions and workflow
+- **[projects/marketmind/CLAUDE.md](projects/marketmind/CLAUDE.md)** — MarketMind-specific architecture and development guide
