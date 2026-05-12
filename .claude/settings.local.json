@@ -1,4 +1,78 @@
 {
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$(git rev-parse --show-toplevel)/.claude/hooks/plan_gate.py\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$(git rev-parse --show-toplevel)/.claude/hooks/session_activity_logger.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$(git rev-parse --show-toplevel)/.claude/hooks/conversation_archiver.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$(git rev-parse --show-toplevel)/.claude/hooks/unified_prompt_validator.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$(git rev-parse --show-toplevel)/.claude/hooks/unified_session_tracker.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$(git rev-parse --show-toplevel)/.claude/hooks/task_completed_handler.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
   "permissions": {
     "allow": [
       "Bash(bash *)",
@@ -59,7 +133,16 @@
       "Monitor",
       "EnterPlanMode",
       "ExitPlanMode",
-      "PushNotification"
+      "PushNotification",
+      "Bash(gh repo *)",
+      "PowerShell(gh repo view JadeKy1in/SignalFoundry --json name,isArchived,url 2>&1)",
+      "PowerShell($body = @{description = \"MarketMind — AI-powered investment analysis workstation | AI 驱动的投资分析工作站。Multi-layer pipeline \\(narrative → fundamental → technical\\) with shadow ecosystem for adversarial validation, resonance scoring, and daily macro research.\"} | ConvertTo-Json; Invoke-RestMethod -Uri \"https://api.github.com/repos/JadeKy1in/MarketMind\" -Method Patch -Headers @{Authorization = \"token $env:GITHUB_TOKEN\"} -Body $body -ContentType \"application/json\" 2>&1)",
+      "PowerShell(node --version)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(PYTHONPATH='E:/AI_Studio_Workspace/projects;E:/AI_Studio_Workspace' python -c ' *)",
+      "Bash(DEEPSEEK_API_KEY=\"mock_key\" python -m projects.marketmind.app --mode daily --mock --verbose)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.npmjs.com)"
     ]
   }
 }
