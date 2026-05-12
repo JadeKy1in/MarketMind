@@ -109,6 +109,7 @@ class DailySnapshot:
     pro_quota_used: int = 0
     emergency_quotas_used: int = 0
     insights_generated: int = 0
+    discount_rate: float | None = None
 
 
 @dataclass
@@ -196,6 +197,7 @@ CREATE TABLE IF NOT EXISTS daily_snapshots (
     pro_quota_used INTEGER DEFAULT 0,
     emergency_quotas_used INTEGER DEFAULT 0,
     insights_generated INTEGER DEFAULT 0,
+    discount_rate REAL DEFAULT 0.20,
     UNIQUE(shadow_id, date),
     FOREIGN KEY (shadow_id) REFERENCES shadows(id)
 );
@@ -259,6 +261,21 @@ CREATE TABLE IF NOT EXISTS paper_live_gap_state (
     updated_at TEXT NOT NULL,
     FOREIGN KEY (shadow_id) REFERENCES shadows(id)
 );
+
+CREATE TABLE IF NOT EXISTS shadow_votes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shadow_id TEXT NOT NULL,
+    date TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    direction TEXT NOT NULL CHECK(direction IN ('long','short','abstain')),
+    confidence REAL NOT NULL,
+    thesis TEXT,
+    risk_note TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (shadow_id) REFERENCES shadows(id)
+);
+CREATE INDEX IF NOT EXISTS idx_shadow_votes_date ON shadow_votes(date);
+CREATE INDEX IF NOT EXISTS idx_shadow_votes_shadow_date ON shadow_votes(shadow_id, date);
 """
 
 
@@ -282,9 +299,22 @@ class ShadowStateDB:
         conn = self._connect()
         try:
             conn.executescript(_SCHEMA_SQL)
+            # Phase D migration: add discount_rate column to existing databases
+            self._migrate_add_column(conn, "daily_snapshots",
+                                      "discount_rate", "REAL DEFAULT 0.20")
             conn.commit()
         finally:
             conn.close()
+
+    @staticmethod
+    def _migrate_add_column(conn: sqlite3.Connection, table: str,
+                            column: str, col_type: str) -> None:
+        """Safe ALTER TABLE ADD COLUMN — ignores if column already exists."""
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+            logger.info("Migration: added %s.%s %s", table, column, col_type)
+        except sqlite3.OperationalError:
+            pass  # Column already exists — safe to ignore
 
     def close(self) -> None:
         pass  # SQLite connections are closed per-operation
@@ -508,8 +538,8 @@ class ShadowStateDB:
                     sharpe_ratio, calmar_ratio, omega_ratio, mppm_score,
                     composite_score, deflated_score, percentile_rank,
                     achievement_tier, flash_quota_used, pro_quota_used,
-                    emergency_quotas_used, insights_generated)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    emergency_quotas_used, insights_generated, discount_rate)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (shadow_id, snapshot.date, snapshot.virtual_capital,
                  snapshot.daily_return_pct, snapshot.cumulative_return_pct,
                  snapshot.max_drawdown_pct, snapshot.win_rate_pct,
@@ -517,7 +547,8 @@ class ShadowStateDB:
                  snapshot.mppm_score, snapshot.composite_score, snapshot.deflated_score,
                  snapshot.percentile_rank, snapshot.achievement_tier,
                  snapshot.flash_quota_used, snapshot.pro_quota_used,
-                 snapshot.emergency_quotas_used, snapshot.insights_generated)
+                 snapshot.emergency_quotas_used, snapshot.insights_generated,
+                 snapshot.discount_rate)
             )
             conn.commit()
         finally:
@@ -576,6 +607,8 @@ class ShadowStateDB:
             if row["emergency_quotas_used"] is not None else 0,
             insights_generated=row["insights_generated"]
             if row["insights_generated"] is not None else 0,
+            discount_rate=row["discount_rate"]
+            if "discount_rate" in row.keys() and row["discount_rate"] is not None else None,
         )
 
     # ── Rankings ──────────────────────────────────────────────────────────
@@ -847,3 +880,87 @@ class ShadowStateDB:
                      "date": date, "ticker": ticker} for r in rows]
         finally:
             conn.close()
+
+    # ── Next-day return lookup ─────────────────────────────────────────────
+
+    def get_next_day_return_sign(self, ticker_or_shadow: str, date: str) -> int | None:
+        """Get return sign for a ticker/shadow on a given date. 1=positive, -1=negative, None=no data."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """SELECT pnl_pct FROM virtual_trades
+                   WHERE ticker = ? AND exit_date = ? AND pnl_pct IS NOT NULL
+                   LIMIT 1""",
+                (ticker_or_shadow, date)
+            ).fetchone()
+            if row and row["pnl_pct"] is not None:
+                return 1 if row["pnl_pct"] > 0 else -1
+            snap_row = conn.execute(
+                """SELECT daily_return_pct FROM daily_snapshots
+                   WHERE shadow_id = ? AND date = ? AND daily_return_pct IS NOT NULL
+                   LIMIT 1""",
+                (ticker_or_shadow, date)
+            ).fetchone()
+            if snap_row and snap_row["daily_return_pct"] is not None:
+                return 1 if snap_row["daily_return_pct"] > 0 else -1
+            return None
+        finally:
+            conn.close()
+
+    # ── Vote persistence ───────────────────────────────────────────────────
+
+    def save_votes(self, shadow_id: str, date: str, votes: list) -> None:
+        """Persist shadow votes for backtest/audit. Uses executemany for batch insert."""
+        if not votes:
+            return
+        conn = self._connect()
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            rows = [
+                (shadow_id, date, v.ticker, v.direction, v.confidence,
+                 getattr(v, 'thesis', '') or '', getattr(v, 'risk_note', '') or '', now)
+                for v in votes
+            ]
+            conn.executemany(
+                """INSERT INTO shadow_votes (shadow_id, date, ticker, direction,
+                   confidence, thesis, risk_note, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                rows
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_votes_by_date_range(self, start_date: str, end_date: str) -> list[dict]:
+        """Get all votes within a date range, ordered by date DESC."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT * FROM shadow_votes
+                   WHERE date >= ? AND date <= ?
+                   ORDER BY date DESC""",
+                (start_date, end_date)
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    # ── PnL by domain ──────────────────────────────────────────────────────
+
+    def get_pnl_by_domain(self, domain: str) -> list[float]:
+        """Get PnL values from virtual_trades for shadows in a given domain.
+        Domain is extracted from config_json JSON field."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT vt.pnl_pct FROM virtual_trades vt
+                   JOIN shadows s ON vt.shadow_id = s.id
+                   WHERE vt.pnl_pct IS NOT NULL
+                     AND s.status != 'eliminated'
+                     AND json_extract(s.config_json, '$.domain') = ?""",
+                (domain,)
+            ).fetchall()
+            return [r["pnl_pct"] for r in rows]
+        except Exception:
+            logger.warning("json_extract failed for domain=%s — SQLite JSON1 may be missing", domain)
+            return []

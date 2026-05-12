@@ -1,14 +1,15 @@
-"""MarketMind entry point — CLI and GUI launcher."""
+﻿"""MarketMind entry point — CLI and GUI launcher."""
 from __future__ import annotations
 import argparse
 import asyncio
+import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from projects.marketmind.config.settings import MarketMindConfig
-from projects.marketmind.gateway.async_client import init_gateway
+from marketmind.config.settings import MarketMindConfig
+from marketmind.gateway.async_client import init_gateway
 
 
 async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool = False,
@@ -24,15 +25,15 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
     orchestration = None
     if config.shadow.shadows_enabled and shadow_count != 0:
         tracker.advance(0, "Shadow Mother: scanning events...")
-        from projects.marketmind.shadows.shadow_state import ShadowStateDB
-        from projects.marketmind.shadows.shadow_mother import ShadowMother
+        from marketmind.shadows.shadow_state import ShadowStateDB
+        from marketmind.shadows.shadow_mother import ShadowMother
         shadow_db = ShadowStateDB(config.shadow.shadows_db_path)
         shadow_db.init_schema()
 
         # Initialize permanent shadows (experts + daredevils + catfish)
-        from projects.marketmind.shadows.expert_shadows import create_expert_shadows
-        from projects.marketmind.shadows.daredevil_shadows import create_daredevil_shadows
-        from projects.marketmind.shadows.catfish_agent import create_catfish_agent
+        from marketmind.shadows.expert_shadows import create_expert_shadows
+        from marketmind.shadows.daredevil_shadows import create_daredevil_shadows
+        from marketmind.shadows.catfish_agent import create_catfish_agent
         create_expert_shadows(shadow_db, config.shadow)
         create_daredevil_shadows(shadow_db, config.shadow)
         create_catfish_agent(shadow_db, config.shadow)
@@ -43,27 +44,27 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
 
     # 1. News collection
     tracker.advance(1, "Scout: fetching news from all sources...")
-    from projects.marketmind.pipeline.scout import fetch_all_sources
+    from marketmind.pipeline.scout import fetch_all_sources
     news_items = await fetch_all_sources(config)
     tracker.result(f"{len(news_items)} articles collected")
 
     # 2. Flash preprocessing
     tracker.advance(2, "Flash: preprocessing signals...")
-    from projects.marketmind.pipeline.flash_preprocessor import preprocess_batch
+    from marketmind.pipeline.flash_preprocessor import preprocess_batch
     signals = await preprocess_batch(news_items[:50])
     tracker.result(f"{len(signals)} signals extracted")
 
     # 3. Layer 1 Narrative analysis
     tracker.advance(3, "Layer 1: narrative analysis...")
-    from projects.marketmind.pipeline.layer1_narrative import analyze_layer1
+    from marketmind.pipeline.layer1_narrative import analyze_layer1
     l1_result = await analyze_layer1(signals[:15], news_items)
     tracker.result(f"grade={l1_result.event_grade}, quadrant={l1_result.matrix_quadrant}")
 
     # 4. Layer 2 + Layer 3 in parallel
     tracker.advance(4, "Layer 2+3: fundamental + technical analysis...")
-    from projects.marketmind.pipeline.layer2_fundamental import analyze_layer2
-    from projects.marketmind.pipeline.layer3_technical import analyze_layer3
-    from projects.marketmind.config.asset_universe import ASSET_UNIVERSE
+    from marketmind.pipeline.layer2_fundamental import analyze_layer2
+    from marketmind.pipeline.layer3_technical import analyze_layer3
+    from marketmind.config.asset_universe import ASSET_UNIVERSE
 
     tickers = [a.ticker for a in list(ASSET_UNIVERSE.values())[:10]]
     l2_task = analyze_layer2(l1_result)
@@ -85,7 +86,7 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
 
     # 6. Red Team challenge
     tracker.advance(6, "Red Team: adversarial challenge...")
-    from projects.marketmind.pipeline.red_team import run_red_team
+    from marketmind.pipeline.red_team import run_red_team
     red_team_report = await run_red_team(
         l1_result.raw_analysis,
         l2_result.raw_analysis,
@@ -96,7 +97,7 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
 
     # 7. Signal Resonance
     tracker.advance(7, "Resonance: statistical validation...")
-    from projects.marketmind.pipeline.resonance import evaluate_resonance
+    from marketmind.pipeline.resonance import evaluate_resonance
     resonance = evaluate_resonance(
         signal_returns={},
         dimensions=["narrative", "fundamental", "technical", "sentiment"],
@@ -105,7 +106,7 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
 
     # 8. Decision with shadow consensus
     tracker.advance(8, "Decision: synthesis...")
-    from projects.marketmind.pipeline.decision import generate_decision
+    from marketmind.pipeline.decision import generate_decision
     decision = await generate_decision(
         l1=l1_result, l2=l2_result, l3=l3_result,
         red_team=red_team_report, resonance=resonance,
@@ -117,7 +118,7 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
     # 9. Archive
     tracker.advance(9, "Archive: saving session...")
     from datetime import datetime as dt
-    from projects.marketmind.storage.archivist import get_archivist
+    from marketmind.storage.archivist import get_archivist
     archivist = get_archivist(config.data_dir)
     archivist.init_fts()
     archivist.index_document(
@@ -135,8 +136,8 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
 
 def run_gui(config: MarketMindConfig) -> int:
     """Launch CustomTkinter GUI."""
-    from projects.marketmind.ui.main_window import MainWindow
-    from projects.marketmind.gateway.async_client import init_gateway
+    from marketmind.ui.main_window import MainWindow
+    from marketmind.gateway.async_client import init_gateway
 
     init_gateway(config.deepseek_api_key, config.deepseek_base_url)
     app = MainWindow(config)
@@ -157,6 +158,38 @@ class _StageTracker:
             print(f"       {msg}")
 
 
+def _run_backtest(config: MarketMindConfig, args) -> int:
+    """Run multi-day backtest on shadow consensus signal quality."""
+    from datetime import datetime, timezone
+    from marketmind.shadows.shadow_state import ShadowStateDB
+    from marketmind.backtest_runner import BacktestRunner
+
+    import logging
+    logging.basicConfig(level=logging.INFO)
+
+    shadow_db = ShadowStateDB(config.shadow.shadows_db_path)
+    shadow_db.init_schema()
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    start = args.start or "2026-01-01"
+    end = args.end or today
+
+    try:
+        runner = BacktestRunner(shadow_db)
+        report = runner.run(start, end, args.output)
+    except (ValueError, FileNotFoundError) as e:
+        print(f"[ERROR] Backtest failed: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"[ERROR] Unexpected backtest error: {e}", file=sys.stderr)
+        return 1
+
+    print(json.dumps(report, indent=2) if not args.output else
+          f"Backtest report written to {args.output}")
+
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="MarketMind — AI Investment Analysis Workstation")
     parser.add_argument("--mode", choices=["daily", "gui"], default="gui",
@@ -171,6 +204,14 @@ def main():
                         help="Disable shadow ecosystem entirely")
     parser.add_argument("--shadow-only", action="store_true",
                         help="Run ONLY shadow ecosystem (no main pipeline)")
+    parser.add_argument("--backtest", action="store_true",
+                        help="Run multi-day backtest on shadow consensus signal quality")
+    parser.add_argument("--start", type=str, default=None, metavar="DATE",
+                        help="Backtest start date (YYYY-MM-DD)")
+    parser.add_argument("--end", type=str, default=None, metavar="DATE",
+                        help="Backtest end date (YYYY-MM-DD)")
+    parser.add_argument("--output", type=str, default=None, metavar="PATH",
+                        help="Backtest output path (JSON)")
     args = parser.parse_args()
 
     config = MarketMindConfig.from_env()
@@ -179,6 +220,9 @@ def main():
         for e in errors:
             print(f"[ERROR] {e}")
         return 1
+
+    if args.backtest:
+        return _run_backtest(config, args)
 
     if args.mode == "gui":
         return run_gui(config)

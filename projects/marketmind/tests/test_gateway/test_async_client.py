@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from marketmind.gateway.async_client import (
     chat_flash, chat_pro, chat_batch_flash, chat_with_integrity,
-    DeepSeekGateway, init_gateway, get_gateway, RateLimitError,
+    DeepSeekGateway, init_gateway, get_gateway, RateLimitError, KeyRotator,
 )
 
 
@@ -129,6 +129,6 @@ async def test_gateway_not_initialized_raises():
 def test_gateway_context_manager():
     mock_http = AsyncMock()
     with patch("httpx.AsyncClient", return_value=mock_http):
-        gw = DeepSeekGateway("test-key")
-        assert gw.api_key == "test-key"
+        gw = DeepSeekGateway(["test-key"])
+        assert gw.key_rotator.current() == "test-key"
         assert gw.base_url == "https://api.deepseek.com/v1"

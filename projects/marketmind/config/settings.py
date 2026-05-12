@@ -53,6 +53,7 @@ class ShadowSettings:
     confidence_discount_default: float = 0.20
     confidence_discount_floor: float = 0.05
     gap_closure_adjustment_factor: float = 0.75
+    absolute_return_benchmark: float = 0.04  # risk-free rate proxy for calibration
     live_ready_min_trades: int = 10
     live_ready_max_gap: float = 0.30
 
@@ -82,6 +83,9 @@ class ShadowSettings:
 @dataclass
 class MarketMindConfig:
     deepseek_api_key: str = field(default_factory=lambda: os.getenv("DEEPSEEK_API_KEY", ""))
+    deepseek_api_keys: list[str] = field(default_factory=lambda: [
+        k.strip() for k in os.getenv("DEEPSEEK_API_KEYS", "").split(",") if k.strip()
+    ])
     deepseek_base_url: str = field(default_factory=lambda: os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"))
     newsapi_key: str | None = field(default_factory=lambda: os.getenv("NEWSAPI_KEY"))
     gnews_key: str | None = field(default_factory=lambda: os.getenv("GNEWS_API_KEY"))

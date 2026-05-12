@@ -170,26 +170,41 @@ class PaperLiveGapManager:
 
     # ── Discount rate evolution ──────────────────────────────────────────
 
-    def update_discount_rate(self, shadow_id: str) -> float:
-        """Update the discount rate based on current inter-shadow gap.
+    def update_discount_rate(self, shadow_id: str,
+                                ticker: str | None = None) -> float:
+        """Update the discount rate based on PnL dispersion and inter-shadow gap.
 
-        As GapRatio decreases (shadow converges toward peer median), the discount
-        rate is reduced proportionally. The floor is 5%, ceiling is 20%.
+        Per-asset calibration (ticker provided):
+          - Computes coefficient of variation (CV) of shadow's PnL for this ticker
+            vs. domain peers
+          - CV > 1.0 → discount near ceiling (high dispersion = less reliable)
+          - CV < 0.3 → discount near floor (low dispersion = more reliable)
+          - Returns below absolute_return_benchmark → penalty factor applied
+
+        Aggregate (ticker=None):
+          - Falls back to the existing gap-based adjustment (backward compatible)
+
+        Cold start (< 10 trades): returns confidence_discount_default (0.20).
+        Floor is 5%, ceiling is 20%.
 
         Returns the new discount rate.
         """
         current_rate = self._get_discount_rate(shadow_id)
         default = self.settings.confidence_discount_default
         floor = self.settings.confidence_discount_floor
-        factor = self.settings.gap_closure_adjustment_factor  # 0.75
+        factor = self.settings.gap_closure_adjustment_factor
+        benchmark = getattr(self.settings, 'absolute_return_benchmark', 0.04)
 
-        # Compute current gap — use most recent date and common tickers
+        if ticker is not None:
+            # Per-asset calibration via PnL dispersion
+            return self._calibrate_per_asset(shadow_id, ticker, current_rate,
+                                             default, floor, factor, benchmark)
+
+        # Aggregate mode — use gap-based adjustment (backward compatible)
         trades = self.state_db.get_trade_history(shadow_id, limit=100)
         if not trades:
-            # No trade data — keep current rate
             return current_rate
 
-        # Find the most common ticker for this shadow
         from collections import Counter
         ticker_counts = Counter(t.ticker for t in trades)
         most_common_ticker = ticker_counts.most_common(1)
@@ -203,18 +218,58 @@ class PaperLiveGapManager:
         if gap == float("inf"):
             return current_rate
 
-        # Target discount: as gap approaches 0, discount approaches floor
-        # When gap >= 1.0, discount = default
-        # When gap < 1.0, discount = max(floor, gap * default)
         target_rate = max(floor, min(default, gap * default))
-
-        # Smooth adjustment: move current rate toward target by factor
         new_rate = current_rate + factor * (target_rate - current_rate)
         new_rate = max(floor, min(default, new_rate))
         self._discount_rates[shadow_id] = new_rate
 
         logger.debug("Shadow %s discount: %.3f -> %.3f (gap=%.3f)",
                       shadow_id, current_rate, new_rate, gap)
+        self._save_state(shadow_id)
+        return new_rate
+
+    def _calibrate_per_asset(self, shadow_id: str, ticker: str,
+                              current_rate: float, default: float, floor: float,
+                              factor: float, benchmark: float) -> float:
+        """Calibrate discount rate for a specific asset using PnL dispersion."""
+        trades = self.state_db.get_trade_history(shadow_id, limit=200)
+        own_pnls = [t.pnl_pct for t in trades
+                     if t.ticker == ticker and t.pnl_pct is not None]
+        if len(own_pnls) < 10:
+            # Cold start — insufficient data
+            return current_rate if current_rate != default else default
+
+        import statistics
+        own_mean = statistics.mean(own_pnls)
+        own_std = statistics.stdev(own_pnls) if len(own_pnls) > 1 else 0.0
+        cv = own_std / abs(own_mean) if abs(own_mean) > 0.001 else 2.0
+
+        # Get domain peer PnL for this ticker from config
+        config = self.state_db.get_shadow(shadow_id)
+        domain = config.domain if config else None
+        if domain:
+            peer_pnls = self.state_db.get_pnl_by_domain(domain)
+        else:
+            peer_pnls = []
+
+        # CV-based target: CV > 1.0 → near ceiling, CV < 0.3 → near floor
+        cv_clamped = max(0.0, min(cv, 2.0))
+        cv_target = floor + (cv_clamped / 2.0) * (default - floor)
+
+        # Benchmark penalty: if mean return < benchmark, add penalty
+        if own_mean < benchmark and peer_pnls:
+            peer_mean = statistics.mean(peer_pnls) if peer_pnls else benchmark
+            if own_mean < peer_mean:
+                penalty = min(0.05, (peer_mean - own_mean) * 0.5)
+                cv_target = min(default, cv_target + penalty)
+
+        # Smooth adjustment
+        new_rate = current_rate + factor * (cv_target - current_rate)
+        new_rate = max(floor, min(default, new_rate))
+        self._discount_rates[shadow_id] = new_rate
+
+        logger.debug("Shadow %s ticker=%s discount: %.3f -> %.3f (CV=%.3f, trades=%d)",
+                      shadow_id, ticker, current_rate, new_rate, cv, len(own_pnls))
         self._save_state(shadow_id)
         return new_rate
 

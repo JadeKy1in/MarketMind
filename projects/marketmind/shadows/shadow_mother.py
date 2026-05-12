@@ -1,15 +1,16 @@
-"""Shadow Mother — event detection, temp shadow lifecycle, daily orchestration."""
+﻿"""Shadow Mother — event detection, temp shadow lifecycle, daily orchestration."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from projects.marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
-from projects.marketmind.shadows.shadow_agent import ShadowAgent, ShadowAnalysisOutput, ShadowVote
-from projects.marketmind.config.settings import ShadowSettings
+from marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
+from marketmind.shadows.shadow_agent import ShadowAgent, ShadowAnalysisOutput, ShadowVote
+from marketmind.config.settings import ShadowSettings
 
 logger = logging.getLogger("marketmind.shadows.shadow_mother")
 
@@ -272,7 +273,7 @@ class ShadowMother:
         """Generate today's status card for every active shadow."""
         cards = {}
         for shadow in self.state_db.get_visible_shadows():
-            from projects.marketmind.shadows.shadow_agent import ShadowAgent
+            from marketmind.shadows.shadow_agent import ShadowAgent
             agent = ShadowAgent(shadow, self.state_db, self.config)
             cards[shadow.shadow_id] = await agent.receive_status_card()
         return cards
@@ -293,11 +294,11 @@ class ShadowMother:
         7. Check challenger conditions
         8. Audit emergency quotas
         """
-        from projects.marketmind.shadows.shadow_agent import ShadowAgent
-        from projects.marketmind.shadows.ranking_engine import RankingEngine, ShadowPerformance
-        from projects.marketmind.shadows.collusion_detector import CollusionDetector
-        from projects.marketmind.shadows.challenger_engine import ChallengerEngine
-        from projects.marketmind.shadows.emergency_quota import EmergencyQuotaAuditor
+        from marketmind.shadows.shadow_agent import ShadowAgent
+        from marketmind.shadows.ranking_engine import RankingEngine, ShadowPerformance
+        from marketmind.shadows.collusion_detector import CollusionDetector
+        from marketmind.shadows.challenger_engine import ChallengerEngine
+        from marketmind.shadows.emergency_quota import EmergencyQuotaAuditor
 
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         result = ShadowOrchestrationResult(date=today)
@@ -323,20 +324,32 @@ class ShadowMother:
         result.active_shadows = len(visible)
 
         # 4. Run shadow analyses + collect votes
+        from marketmind.shadows.shadow_agent import create_shadow_agent
         all_votes: list = []
-        for config in visible:
-            agent = ShadowAgent(config, self.state_db, self.config)
-            try:
-                output = await agent.run_daily_analysis(news_items, market_data)
-                result.shadow_analyses[config.shadow_id] = output
+        semaphore = asyncio.Semaphore(self.config.max_concurrent_shadows)
+        async def _run_one(config):
+            async with semaphore:
+                try:
+                    agent = create_shadow_agent(config, self.state_db, self.config)
+                    output = await agent.run_daily_analysis(news_items, market_data)
+                    # Persist votes for backtest/audit
+                    if output.votes:
+                        try:
+                            self.state_db.save_votes(config.shadow_id, today, output.votes)
+                        except Exception as e:
+                            logger.error("Failed to save votes for %s: %s", config.shadow_id, e)
+                    return config.shadow_id, output, None
+                except Exception as e:
+                    logger.error("Shadow %s analysis failed: %s", config.shadow_id, e)
+                    return config.shadow_id, None, e
+
+        tasks = [_run_one(c) for c in visible]
+        results_list = await asyncio.gather(*tasks)
+        for sid, output, err in results_list:
+            if output is not None:
+                result.shadow_analyses[sid] = output
                 result.votes_collected += len(output.votes)
                 all_votes.extend(output.votes)
-                await agent.save_daily_snapshot()
-            except NotImplementedError:
-                # Base ShadowAgent has stub _analyze; concrete subclasses implement it
-                pass
-            except Exception as e:
-                logger.error("Shadow %s analysis failed: %s", config.shadow_id, e)
 
         # 5. Compute rankings (if we have performance data)
         try:

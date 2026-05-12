@@ -1,57 +1,33 @@
-"""Daredevil shadows — direction-forced, event hound, contrarian, sector rotation."""
+﻿"""Daredevil shadows — direction-forced, event hound, contrarian, sector rotation."""
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
 
-from projects.marketmind.shadows.shadow_agent import (
+from marketmind.shadows.shadow_agent import (
     ShadowAgent, ShadowAnalysisOutput, ShadowVote
 )
-from projects.marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
-from projects.marketmind.config.settings import ShadowSettings
+from marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
+from marketmind.config.settings import ShadowSettings
+from marketmind.config import load_shadow_prompts
 
 logger = logging.getLogger("marketmind.shadows.daredevil_shadows")
 
-# ── Daredevil methodology prompts ──────────────────────────────────────────
 
-_SCALPER_PROMPT = (
-    "You are the Scalper, an intraday direction daredevil. You MUST pick a direction "
-    "for at least one asset every day — abstaining is not allowed. Hold for 1-3 days. "
-    "Your edge is speed and pattern recognition. Max position size: 15%. "
-    "Risk: higher turnover means higher slippage. Track your realized vs. paper PnL gap. "
-    "Output VOTE_START/VOTE_END blocks. Floor confidence: 0.35 (you must trade)."
-)
+def _load_daredevil_prompts() -> dict:
+    """Load daredevil prompts from JSON config."""
+    prompts = load_shadow_prompts()
+    return prompts.get("daredevil", {})
 
-_TREND_RIDER_PROMPT = (
-    "You are the Trend Rider, a weekly trend daredevil. Identify developing multi-week "
-    "trends in equities, commodities, or FX. Hold 5-15 days. Your edge is momentum "
-    "continuation. Use moving average crossovers, ADX > 25, and volume confirmation. "
-    "Max position: 20%. Stop: trend break confirmed by 2 consecutive closes below 20-day MA. "
-    "Output VOTE_START/VOTE_END blocks."
-)
 
-_NEWS_HOUND_PROMPT = (
-    "You are the News Hound, an event-driven daredevil. Trade news-driven moves within "
-    "1-5 days. Your edge is rapid information processing. Focus on earnings surprises, "
-    "M&A announcements, regulatory changes, and macro data beats. "
-    "Max position: 12%. Stop: if the news catalyst proves false or market reverses >50% "
-    "of initial move. Output VOTE_START/VOTE_END blocks."
-)
+_DD_PROMPTS = _load_daredevil_prompts()
 
-_FADE_MASTER_PROMPT = (
-    "You are the Fade Master, a contrarian daredevil. Systematically fade crowded consensus. "
-    "When >75% of expert shadows agree on a direction, take the opposite side. "
-    "Hold 3-10 days. Your edge is mean reversion. Use sentiment extremes, COT positioning, "
-    "put/call ratios, and AAII survey. Max position: 10%. Stop: if the crowd was right "
-    "(positioning confirms with price, not against it). Output VOTE_START/VOTE_END blocks."
-)
-
-_ROTATION_ENGINE_PROMPT = (
-    "You are the Rotation Engine, a sector rotation daredevil. Rotate between sector ETFs "
-    "based on business cycle phase analysis. Hold 5-20 days. Your edge is macro regime "
-    "detection. Use relative strength across 11 GICS sectors, yield curve shape, and "
-    "leading indicators. Max position: 20%. Output VOTE_START/VOTE_END blocks."
-)
+_SCALPER_PROMPT = _DD_PROMPTS.get("scalper", "You are the Scalper. Pick a direction daily.")
+_TREND_RIDER_PROMPT = _DD_PROMPTS.get("trend_rider", "You are the Trend Rider. Follow multi-week trends.")
+_NEWS_HOUND_PROMPT = _DD_PROMPTS.get("news_hound", "You are the News Hound. Trade event-driven moves.")
+_FADE_MASTER_PROMPT = _DD_PROMPTS.get("fade_master", "You are the Fade Master. Fade crowded consensus.")
+_ROTATION_ENGINE_PROMPT = _DD_PROMPTS.get("rotation_engine", "You are the Rotation Engine. Rotate between sectors.")
 
 
 class DaredevilShadow(ShadowAgent):
@@ -66,19 +42,36 @@ class DaredevilShadow(ShadowAgent):
 
     async def _analyze(self, news_items: list[dict],
                         market_data: dict) -> ShadowAnalysisOutput:
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        """Daredevil analysis — higher temperature, forced direction."""
+        return await super()._analyze(news_items, market_data)
 
-        # News hound: look for event-driven opportunities
-        headlines = [item.get("headline", "")[:150] for item in news_items[:15]]
-        news_context = "\n".join(f"- {h}" for h in headlines) if headlines else "No news"
+    def _build_user_prompt(self, news_items: list[dict], market_data: dict) -> str:
+        """Daredevil-specific prompt: risk-on framing, forced direction constraints."""
+        headlines = []
+        for item in news_items[:20]:
+            h = (getattr(item, "headline", None) or
+                 getattr(item, "title", None) or
+                 str(item.get("headline", "")) if hasattr(item, "get") else str(item))
+            if h and h not in headlines:
+                headlines.append(str(h)[:200])
+        news_context = "\n".join(f"- {h}" for h in headlines[:15]) if headlines else "No news"
 
-        return ShadowAnalysisOutput(
-            shadow_id=self.shadow_id,
-            date=today,
-            votes=[],
-            insights=[f"Daredevil scan: {len(news_items)} items, type={self.config.shadow_type}"],
-            methodology_notes=f"Daredevil {self.config.display_name}: {self.config.methodology_prompt[:200]}",
-            quota_used=1,
+        constraints = ""
+        if "scalper" in self.shadow_id:
+            constraints = "DANGER ZONE: You MUST pick a direction for at least one asset today. Abstaining is not allowed."
+        elif "fade" in self.shadow_id:
+            constraints = "CONTRARIAN MODE: Look for crowded consensus and take the opposite side."
+        elif "trend" in self.shadow_id:
+            constraints = "TREND MODE: Identify developing multi-week trends with momentum confirmation."
+        elif "news" in self.shadow_id:
+            constraints = "EVENT MODE: Trade news-driven moves within 1-5 days."
+
+        return (
+            f"{constraints}\n\n"
+            f"Market data: {json.dumps(market_data) if market_data else 'None'}\n\n"
+            f"News headlines:\n{news_context}\n\n"
+            f"Output your trades using VOTE_START/VOTE_END blocks. "
+            f"ticker, direction (long/short), confidence (0.35-1.0), thesis, risk_note."
         )
 
 
