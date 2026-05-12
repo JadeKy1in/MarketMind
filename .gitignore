@@ -25,13 +25,14 @@ data/velocity/
 data/methodology/
 data/event_store.jsonl
 projects/command_center/reports/
+data/
+output/
 
 # Cache & temp
 cache/
 *.log
 error_dump.log
 coverage/
-.pytest_cache/
 
 # Old Cline stuff (keep as reference but don't track changes)
 memory-bank/
