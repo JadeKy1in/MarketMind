@@ -45,7 +45,7 @@ Before any non-trivial code change:
 - **Execute (Haiku)**: Implement the plan yourself, following each step in order
 - Verify changes by reading files back and running syntax checks
 
-Invoke `/triumvirate` for automatic task classification or `/robinhood-plan-execute` for Robinhood-specific workflow.
+This cognitive loop is a design philosophy — apply it manually when scoping architecture changes.
 
 ### 2. Three System Laws
 
@@ -78,15 +78,12 @@ All LLM calls route through `deepseek_client.py` — no module should call httpx
 ## Development Workflow
 
 1. **Research first**: Search for existing solutions before building new
-2. **Skill evaluation (Security-First)**: All skills MUST follow this protocol before installation:
-   - **Sandbox**: Place skill files in isolated sandbox directory first
-   - **Scan**: Check for malicious code injection (eval, exec, subprocess with user input, obfuscated strings, network calls to unknown hosts)
-   - **Approve**: Only install after confirming no malicious patterns
-   - **Update**: Re-scan skills on every update — same protocol applies
-3. **Skill updates**: When updating existing skills, re-run the full sandbox-scan-approve cycle
+2. **Skill evaluation (Security-First)**: All third-party files (skills, plugins, GitHub repos, MCP servers) MUST pass through `.claude/sandbox/` before installation. See `.claude/sandbox/SANDBOX.md` for the full protocol: isolate → scan → approve → install. Updates follow the same process.
 3. **Plan before code**: Use Triumvirate pipeline (Opus→Sonnet→Haiku) for architecture decisions
 4. **Verify after code**: Syntax check + run tests before declaring done
-5. **Memory after milestone**: Save key decisions and state to Cowork Memory
+5. **Commit after each sub-phase**: `git add` + `git commit` after every sub-phase completes with passing tests. Never accumulate multiple sub-phases in the working directory without version control.
+6. **Red Team before completion**: Independent Red Team audit produces `.claude/audits/phase-X-red-team.md` BEFORE the phase is marked complete. Completion is never self-declared without external audit confirmation.
+7. **Memory after milestone**: Save key decisions and state to Cowork Memory
 
 ## Merge-Readiness Pack (MRP) Format
 
@@ -130,3 +127,17 @@ When encountering repeated errors or inefficient patterns caused by existing rul
 | `projects/command_center/app.py` | Command Center GUI entry |
 | `infrastructure/SKILLS_MANIFEST.json` | Registered skills registry |
 | `infrastructure/skills/browser-automation/` | Browser automation adapter (TypeScript) |
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues — use `gh issue` CLI for all operations. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-label vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Multi-context — `CONTEXT-MAP.md` at repo root points to per-context `CONTEXT.md` files. Currently active: `projects/marketmind/`. See `docs/agents/domain.md`.

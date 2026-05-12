@@ -291,6 +291,8 @@ class ShadowMother:
         4. Run all shadow analyses (collect votes)
         5. Compute rankings + backfill snapshots
         6. Detect collusion
+        6.5. Update shadow memory (ingest today's votes/analyses)
+        6.6. Run crystallization check (insight → hypothesis → validate)
         7. Check challenger conditions
         8. Audit emergency quotas
         """
@@ -396,6 +398,24 @@ class ShadowMother:
         except Exception as e:
             logger.error("Ranking computation failed: %s", e)
 
+        # 5b. Calibrate paper-to-live gap (per-asset discount rate adjustment)
+        try:
+            from marketmind.shadows.paper_live_gap import PaperLiveGapManager
+            gap_manager = PaperLiveGapManager(self.state_db, self.config)
+            for config in visible:
+                trades = self.state_db.get_trade_history(config.shadow_id, limit=100)
+                if not trades:
+                    continue
+                from collections import Counter
+                ticker_counts = Counter(t.ticker for t in trades)
+                most_common = ticker_counts.most_common(1)
+                if most_common:
+                    ticker = most_common[0][0]
+                    gap_manager.update_discount_rate(config.shadow_id, ticker)
+            gap_manager.save_all_states()
+        except Exception as e:
+            logger.error("Paper-to-live gap calibration failed: %s", e)
+
         # 6. Detect collusion
         try:
             collusion = CollusionDetector(self.config)
@@ -405,6 +425,24 @@ class ShadowMother:
                 self.state_db.record_collusion_flag(flag)
         except Exception as e:
             logger.error("Collusion detection failed: %s", e)
+
+        # 6.5 Memory update — ingest today's votes and analyses into shadow memory
+        if getattr(self.config, 'crystallization_enabled', False):
+            try:
+                await self._update_shadow_memory(result, today)
+            except Exception as e:
+                logger.error("Shadow memory update failed: %s", e)
+
+        # 6.6 Crystallization check — insight → hypothesis → validate → promote/retire
+        if getattr(self.config, 'crystallization_enabled', False):
+            try:
+                crystallization_results = await self._run_crystallization_check()
+                logger.info(
+                    "Crystallization complete: %d results",
+                    len(crystallization_results),
+                )
+            except Exception as e:
+                logger.error("Crystallization check failed: %s", e)
 
         # 7. Check challenger conditions
         try:
@@ -429,6 +467,98 @@ class ShadowMother:
             logger.error("Emergency quota audit failed: %s", e)
 
         return result
+
+    # ── Memory & Crystallization ──────────────────────────────────────────
+
+    async def _update_shadow_memory(
+        self, result: ShadowOrchestrationResult, today: str
+    ) -> None:
+        """Ingest today's votes and analyses into shadow memory.
+
+        Stores shadow analyses as episodic memory observations, preserving
+        the reasoning chain for knowledge crystallization.
+        """
+        from marketmind.shadows.shadow_memory import ShadowMemoryStore
+        from marketmind.shadows.shadow_agent import ExternalObservation
+
+        store = ShadowMemoryStore(self.state_db)
+
+        for shadow_id, analysis in result.shadow_analyses.items():
+            # Create observations from insights
+            for insight in analysis.insights:
+                obs = ExternalObservation(
+                    observation_id=f"insight:{shadow_id}:{today}:{hash(insight) & 0xFFFFFFFF:x}",
+                    source_type="text",
+                    source_path=f"shadow:{shadow_id}",
+                    extracted_text=insight[:500],
+                    metadata={"shadow_id": shadow_id, "date": today, "type": "insight"},
+                    confidence=0.7,
+                    source_attribution=f"shadow:{shadow_id}:daily_analysis",
+                    evaluated_at=today,
+                )
+                store.ingest_observation_sync(shadow_id, obs, tier="episodic")
+
+            # Create observations from votes
+            for vote in analysis.votes:
+                ticker = vote.ticker
+                obs = ExternalObservation(
+                    observation_id=f"vote:{shadow_id}:{today}:{ticker}:{hash(vote.thesis) & 0xFFFFFFFF:x}",
+                    source_type="text",
+                    source_path=f"shadow:{shadow_id}",
+                    extracted_text=(
+                        f"VOTE: {vote.direction} {ticker} "
+                        f"(confidence={vote.confidence:.2f}) "
+                        f"Thesis: {vote.thesis[:200]}"
+                    ),
+                    metadata={
+                        "shadow_id": shadow_id,
+                        "date": today,
+                        "type": "vote",
+                        "ticker": ticker,
+                        "direction": vote.direction,
+                        "confidence": vote.confidence,
+                    },
+                    confidence=vote.confidence,
+                    source_attribution=f"shadow:{shadow_id}:daily_analysis",
+                    evaluated_at=today,
+                )
+                store.ingest_observation_sync(shadow_id, obs, tier="episodic")
+
+        logger.info(
+            "Shadow memory updated: ingested analyses for %d shadows",
+            len(result.shadow_analyses),
+        )
+
+    async def _run_crystallization_check(self) -> list:
+        """Run knowledge crystallization for shadows with sufficient vote history.
+
+        Queries episodic memory for insights with high belief but low confidence,
+        backtest validates against shadow_votes, and promotes or retires insights.
+        """
+        from marketmind.shadows.shadow_memory import ShadowMemoryStore
+        from marketmind.shadows.methodology_evolver import MethodologyEvolver
+        from marketmind.shadows.crystallization import CrystallizationEngine
+
+        store = ShadowMemoryStore(self.state_db)
+        evolver = MethodologyEvolver()
+
+        significance = getattr(
+            self.config, 'crystallization_significance_threshold', 0.6
+        )
+        min_samples = getattr(
+            self.config, 'crystallization_min_samples', 10
+        )
+
+        engine = CrystallizationEngine(
+            memory_store=store,
+            state_db=self.state_db,
+            methodology_evolver=evolver,
+            significance_threshold=significance,
+            min_samples=min_samples,
+        )
+
+        results = await engine.run_crystallization_cycle()
+        return results
 
     # ── Queries ──────────────────────────────────────────────────────────
 

@@ -146,7 +146,13 @@ class CollusionFlag:
 
 # ── SQLite database ──────────────────────────────────────────────────────────
 
+CODE_VERSION = 2  # Increment on any schema change; add migration to _MIGRATIONS
+
 _SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS shadows (
     id TEXT PRIMARY KEY,
     shadow_type TEXT NOT NULL,
@@ -276,6 +282,53 @@ CREATE TABLE IF NOT EXISTS shadow_votes (
 );
 CREATE INDEX IF NOT EXISTS idx_shadow_votes_date ON shadow_votes(date);
 CREATE INDEX IF NOT EXISTS idx_shadow_votes_shadow_date ON shadow_votes(shadow_id, date);
+
+CREATE TABLE IF NOT EXISTS belief_nodes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id TEXT NOT NULL UNIQUE,
+    proposition TEXT NOT NULL,
+    alpha REAL NOT NULL DEFAULT 1.0,
+    beta REAL NOT NULL DEFAULT 1.0,
+    status TEXT NOT NULL DEFAULT 'active',
+    tier TEXT NOT NULL DEFAULT 'working',
+    source TEXT NOT NULL DEFAULT 'shadow',
+    tags TEXT DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    decayed_at TEXT DEFAULT NULL,
+    retired_at TEXT DEFAULT NULL,
+    retire_reason TEXT DEFAULT NULL
+);
+
+CREATE TABLE IF NOT EXISTS belief_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    observation_id TEXT NOT NULL UNIQUE,
+    node_id TEXT NOT NULL,
+    shadow_id TEXT NOT NULL,
+    value REAL NOT NULL,
+    confidence REAL NOT NULL,
+    source_type TEXT NOT NULL,
+    source_path TEXT DEFAULT '',
+    extracted_text TEXT DEFAULT '',
+    metadata_json TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (node_id) REFERENCES belief_nodes(node_id)
+);
+
+CREATE TABLE IF NOT EXISTS belief_retirements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id TEXT NOT NULL,
+    retired_confidence REAL NOT NULL,
+    threshold REAL NOT NULL,
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (node_id) REFERENCES belief_nodes(node_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_belief_nodes_status ON belief_nodes(status);
+CREATE INDEX IF NOT EXISTS idx_belief_nodes_tier ON belief_nodes(tier);
+CREATE INDEX IF NOT EXISTS idx_belief_observations_node ON belief_observations(node_id);
+CREATE INDEX IF NOT EXISTS idx_belief_observations_shadow ON belief_observations(shadow_id);
 """
 
 
@@ -299,9 +352,28 @@ class ShadowStateDB:
         conn = self._connect()
         try:
             conn.executescript(_SCHEMA_SQL)
-            # Phase D migration: add discount_rate column to existing databases
-            self._migrate_add_column(conn, "daily_snapshots",
-                                      "discount_rate", "REAL DEFAULT 0.20")
+            row = conn.execute(
+                "SELECT value FROM metadata WHERE key = 'schema_version'"
+            ).fetchone()
+            db_version = int(row["value"]) if row else 0
+
+            if db_version > CODE_VERSION:
+                logger.warning(
+                    "DB schema_version %d > code CODE_VERSION %d — "
+                    "database was opened with newer code. Skipping migrations.",
+                    db_version, CODE_VERSION
+                )
+            else:
+                for ver, func in _MIGRATIONS:
+                    if ver > db_version:
+                        func(conn)
+                        conn.execute(
+                            "INSERT OR REPLACE INTO metadata (key, value) "
+                            "VALUES ('schema_version', ?)",
+                            (str(ver),)
+                        )
+                        logger.info("Migration %d applied successfully.", ver)
+
             conn.commit()
         finally:
             conn.close()
@@ -964,3 +1036,67 @@ class ShadowStateDB:
         except Exception:
             logger.warning("json_extract failed for domain=%s — SQLite JSON1 may be missing", domain)
             return []
+
+
+# ── Migration registry (module-level, after class definition) ───────────────
+
+def _migration_1_add_discount_rate(conn: sqlite3.Connection) -> None:
+    """Phase D: add discount_rate column to daily_snapshots."""
+    ShadowStateDB._migrate_add_column(
+        conn, "daily_snapshots", "discount_rate", "REAL DEFAULT 0.20"
+    )
+
+
+def _migration_2_add_belief_tables(conn: sqlite3.Connection) -> None:
+    """Phase F-3: add 3-tier layered memory tables for ShadowMemoryStore."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS belief_nodes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            node_id TEXT NOT NULL UNIQUE,
+            proposition TEXT NOT NULL,
+            alpha REAL NOT NULL DEFAULT 1.0,
+            beta REAL NOT NULL DEFAULT 1.0,
+            status TEXT NOT NULL DEFAULT 'active',
+            tier TEXT NOT NULL DEFAULT 'working',
+            source TEXT NOT NULL DEFAULT 'shadow',
+            tags TEXT DEFAULT '[]',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            decayed_at TEXT DEFAULT NULL,
+            retired_at TEXT DEFAULT NULL,
+            retire_reason TEXT DEFAULT NULL
+        );
+        CREATE TABLE IF NOT EXISTS belief_observations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            observation_id TEXT NOT NULL UNIQUE,
+            node_id TEXT NOT NULL,
+            shadow_id TEXT NOT NULL,
+            value REAL NOT NULL,
+            confidence REAL NOT NULL,
+            source_type TEXT NOT NULL,
+            source_path TEXT DEFAULT '',
+            extracted_text TEXT DEFAULT '',
+            metadata_json TEXT DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (node_id) REFERENCES belief_nodes(node_id)
+        );
+        CREATE TABLE IF NOT EXISTS belief_retirements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            node_id TEXT NOT NULL,
+            retired_confidence REAL NOT NULL,
+            threshold REAL NOT NULL,
+            reason TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (node_id) REFERENCES belief_nodes(node_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_belief_nodes_status ON belief_nodes(status);
+        CREATE INDEX IF NOT EXISTS idx_belief_nodes_tier ON belief_nodes(tier);
+        CREATE INDEX IF NOT EXISTS idx_belief_observations_node ON belief_observations(node_id);
+        CREATE INDEX IF NOT EXISTS idx_belief_observations_shadow ON belief_observations(shadow_id);
+    """)
+
+
+_MIGRATIONS: list[tuple[int, callable]] = [
+    (1, _migration_1_add_discount_rate),
+    (2, _migration_2_add_belief_tables),
+]

@@ -54,6 +54,44 @@ class ShadowAnalysisOutput:
     latency_ms: int = 0
 
 
+@dataclass
+class ExternalObservation:
+    """Observation from external multi-modal input (screenshot, PDF, audio, text)."""
+    observation_id: str
+    source_type: str          # "image" | "pdf" | "screenshot" | "text" | "audio"
+    source_path: str          # original file path or URI
+    extracted_text: str       # text extracted by Gemini Flash / OCR
+    metadata: dict = field(default_factory=dict)
+    confidence: float = 1.0   # extraction confidence 0.0-1.0
+    source_attribution: str = ""  # who/what provided this observation
+    evaluated_at: str = ""    # ISO 8601 timestamp of ingestion
+
+
+@dataclass
+class MemoryQuery:
+    """Query parameters for searching layered shadow memory."""
+    tier: str = "working"     # "working" | "episodic" | "semantic" | "all"
+    ticker: str | None = None
+    domain: str | None = None
+    min_belief_strength: float = 0.0
+    limit: int = 20
+    tags: list[str] = field(default_factory=list)
+    date_from: str | None = None
+    date_to: str | None = None
+
+
+@dataclass
+class CrystallizationResult:
+    """Output from knowledge crystallization cycle."""
+    insight_id: str
+    hypothesis: str
+    validation_score: float   # backtest hit_rate or statistical significance
+    action: str               # "promote" | "retire" | "hold"
+    methodology_changes: list[str] = field(default_factory=list)
+    source_insight_ids: list[str] = field(default_factory=list)
+    evidence_summary: str = ""
+
+
 class ShadowAgent:
     """Base class for all shadow agents. Handles daily analysis cycle, virtual portfolio,
     integrity tracking, and state persistence."""

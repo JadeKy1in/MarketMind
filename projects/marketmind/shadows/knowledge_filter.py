@@ -15,7 +15,9 @@ ACE Risk score: 0-1 based on cascade depth and unverified ratio.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 logger = logging.getLogger("marketmind.shadows.knowledge_filter")
 
@@ -47,6 +49,14 @@ class KnowledgeItem:
             raise ValueError(f"verification_count must be >= 0, got {self.verification_count}")
         if self.false_positive_count < 0:
             raise ValueError(f"false_positive_count must be >= 0, got {self.false_positive_count}")
+
+@dataclass
+class KnowledgeVerdict:
+    """Evaluation result for external observation."""
+    verdict: str              # "PASS" | "DROP" | "ISOLATE"
+    reason: str
+    confidence: float         # 0.0-1.0 how confident the evaluation is
+    evaluated_at: str = ""    # ISO 8601
 
 
 # ── Filter ──────────────────────────────────────────────────────────────────
@@ -81,6 +91,23 @@ class KnowledgeFilter:
     ACE_UNVERIFIED_WEIGHT = 0.50      # Weight for unverified ratio
     ACE_FALSE_POSITIVE_WEIGHT = 0.30  # Weight for known false positive ratio
     ACE_CASCADE_INTERACTION = 0.20    # Cascade depth interaction with unverified/fp ratio
+
+    # External observation thresholds
+    EXTERNAL_MIN_CONFIDENCE = 0.3
+    EXTERNAL_MIN_TEXT_LENGTH = 20
+    EXTERNAL_VALID_SOURCE_TYPES = {"image", "pdf", "screenshot", "text", "audio"}
+
+    # Suspicious content patterns: ISOLATE observations matching any of these
+    # Red Team finding F-6-2: memory poisoning via crafted PDF/screenshot
+    SUSPICIOUS_CONTENT_PATTERNS = [
+        r'(?i)\binsider\s+(trading|information|tip|knowledge)\b',
+        r'(?i)\b(confidential|classified)\s+(document|report|information|memo|source)\b',
+        r'(?i)\bmaterial[-\s]?non[-\s]?public\s+information\b',
+        r'(?i)\bproprietary\s+(trading|algorithm|data|model)\b',
+        r'(?i)\b(leaked|stolen)\s+(document|report|information|data)\b',
+        r'(?i)\bnon[-\s]?public\s+(financial|earnings|revenue|profit)\s+(data|information|report)\b',
+        r'(?i)\bMNPI\b',
+    ]
 
     def __init__(self):
         self._isolated_items: list[KnowledgeItem] = []
@@ -165,6 +192,114 @@ class KnowledgeFilter:
         """Get the list of items isolated (false positives) from the last filter_inheritance call."""
         return list(self._isolated_items)
 
+    # ── External Observation Evaluation ───────────────────────────────────
+
+    def evaluate_external(self, observation: ExternalObservation,
+                          existing_knowledge: list[KnowledgeItem] | None = None) -> KnowledgeVerdict:
+        """Evaluate an external observation for ingestion into shadow memory.
+
+        Evaluation criteria:
+        1. Source credibility: check if source_type is known/trusted
+        2. Content freshness: extracted_text is not empty, has sufficient length (>20 chars)
+        3. Internal consistency: basic coherence check
+        4. Contradiction check: against existing knowledge items (if provided)
+        5. Extraction confidence: observation.confidence >= 0.3
+        """
+        from marketmind.shadows.shadow_agent import ExternalObservation
+
+        evaluated_at = datetime.now(timezone.utc).isoformat()
+
+        # Criterion 1: Source credibility
+        if observation.source_type not in self.EXTERNAL_VALID_SOURCE_TYPES:
+            return KnowledgeVerdict(
+                verdict="DROP",
+                reason=f"Unrecognized source_type '{observation.source_type}' — must be one of {self.EXTERNAL_VALID_SOURCE_TYPES}",
+                confidence=1.0,
+                evaluated_at=evaluated_at,
+            )
+
+        # Criterion 5: Extraction confidence < 0.3 → DROP
+        if observation.confidence < self.EXTERNAL_MIN_CONFIDENCE:
+            return KnowledgeVerdict(
+                verdict="DROP",
+                reason=f"Extraction confidence {observation.confidence:.2f} below minimum {self.EXTERNAL_MIN_CONFIDENCE}",
+                confidence=1.0,
+                evaluated_at=evaluated_at,
+            )
+
+        # Criterion 2: Content freshness
+        text = (observation.extracted_text or "").strip()
+        if not text:
+            return KnowledgeVerdict(
+                verdict="DROP",
+                reason="Empty or whitespace-only extracted_text",
+                confidence=1.0,
+                evaluated_at=evaluated_at,
+            )
+        if len(text) < self.EXTERNAL_MIN_TEXT_LENGTH:
+            return KnowledgeVerdict(
+                verdict="DROP",
+                reason=f"extracted_text too short ({len(text)} chars, minimum {self.EXTERNAL_MIN_TEXT_LENGTH})",
+                confidence=0.9,
+                evaluated_at=evaluated_at,
+            )
+
+        # Criterion 3: Internal consistency
+        alpha_ratio = sum(1 for c in text if c.isalpha()) / max(len(text), 1)
+        if alpha_ratio < 0.3:
+            return KnowledgeVerdict(
+                verdict="DROP",
+                reason=f"Low alphabetic content ({alpha_ratio:.1%}) — likely noise or gibberish",
+                confidence=0.85,
+                evaluated_at=evaluated_at,
+            )
+
+        # Criterion 4a: Suspicious content detection (Red Team F-6-2)
+        # ISOLATE observations containing suspicious patterns (e.g. insider info,
+        # confidential documents, leaked material) regardless of source confidence.
+        for pattern in self.SUSPICIOUS_CONTENT_PATTERNS:
+            if re.search(pattern, text):
+                return KnowledgeVerdict(
+                    verdict="ISOLATE",
+                    reason=f"Suspicious content pattern detected — quarantined for 30-day re-verification",
+                    confidence=0.65,
+                    evaluated_at=evaluated_at,
+                )
+
+        # Criterion 4: Contradiction check against existing knowledge
+        if existing_knowledge:
+            for item in existing_knowledge:
+                if self._text_contradicts(text, item.content):
+                    return KnowledgeVerdict(
+                        verdict="ISOLATE",
+                        reason=f"Observation contradicts existing knowledge item '{item.item_id}' — quarantined for 30-day re-verification",
+                        confidence=0.7,
+                        evaluated_at=evaluated_at,
+                    )
+
+        # All criteria passed
+        return KnowledgeVerdict(
+            verdict="PASS",
+            reason="All evaluation criteria met — observation cleared for shadow memory ingestion",
+            confidence=observation.confidence,
+            evaluated_at=evaluated_at,
+        )
+
+    @staticmethod
+    def _text_contradicts(text_a: str, text_b: str) -> bool:
+        """Simple contradiction check: direct negation overlap or opposite sentiment framing."""
+        negations = {"not", "never", "no", "false", "incorrect", "wrong", "mistaken", "contrary", "opposite"}
+        a_words = set(text_a.lower().split())
+        b_words = set(text_b.lower().split())
+        has_negation_a = bool(a_words & negations)
+        has_negation_b = bool(b_words & negations)
+        if not has_negation_a and not has_negation_b:
+            return False
+        a_substantive = a_words - negations
+        b_substantive = b_words - negations
+        overlap = a_substantive & b_substantive
+        return len(overlap) >= 3
+
     # ── ACE Risk ─────────────────────────────────────────────────────────
 
     def detect_ace_risk(self, items: list[KnowledgeItem]) -> float:
@@ -225,6 +360,11 @@ class KnowledgeFilter:
             "heuristic": f"PASS if verification_count >= {self.HEURISTIC_MIN_VERIFICATION}, DROP if 0",
             "rule": f"PASS if verification_count >= {self.RULE_MIN_VERIFICATION}, DROP if 0",
             "false_positive_override": "ISOLATE regardless of verification (30-day re-verification)",
+            "external_evaluation": {
+                "min_confidence": self.EXTERNAL_MIN_CONFIDENCE,
+                "min_text_length": self.EXTERNAL_MIN_TEXT_LENGTH,
+                "valid_source_types": sorted(self.EXTERNAL_VALID_SOURCE_TYPES),
+            },
             "ace_weights": {
                 "unverified_ratio": self.ACE_UNVERIFIED_WEIGHT,
                 "false_positive_ratio": self.ACE_FALSE_POSITIVE_WEIGHT,

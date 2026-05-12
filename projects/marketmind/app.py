@@ -42,6 +42,31 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
         tracker.result(f"Shadow ecosystem initialized with "
                        f"{len(shadow_db.get_visible_shadows())} shadows")
 
+        # Phase F: Initialize background scheduler (disabled by default)
+        if getattr(config.shadow, 'scheduler_enabled', False):
+            from marketmind.shadows.background_scheduler import (
+                BackgroundScheduler, SchedulerConfig,
+            )
+            from marketmind.shadows.shadow_memory import ShadowMemoryStore
+            memory_store = ShadowMemoryStore(shadow_db)
+            scheduler_config = SchedulerConfig(
+                reflection_interval_minutes=config.shadow.reflection_interval_minutes,
+                crystallization_interval_hours=config.shadow.crystallization_interval_hours,
+                max_concurrent_tasks=config.shadow.max_concurrent_tasks,
+                enabled=True,
+            )
+            scheduler = BackgroundScheduler(
+                memory_store, shadow_db, mother, scheduler_config,
+            )
+            scheduler.start()
+            tracker.result("Background scheduler started")
+
+        # Phase F: Initialize Gemini Flash multimodal adapter (disabled by default)
+        if getattr(config.shadow, 'gemini_flash_enabled', False):
+            from marketmind.gateway.multimodal_adapter import MultimodalAdapter
+            multimodal = MultimodalAdapter()
+            tracker.result("Gemini Flash multimodal adapter initialized")
+
     # 1. News collection
     tracker.advance(1, "Scout: fetching news from all sources...")
     from marketmind.pipeline.scout import fetch_all_sources
@@ -83,6 +108,12 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
         )
         tracker.result(f"{orchestration.active_shadows} shadows, "
                        f"{orchestration.temp_shadows_created} temp created")
+
+        # Phase F integration: memory update + crystallization (if enabled)
+        # These are already wired in shadow_mother.orchestrate_daily_cycle()
+        # as step 6.5 (memory update) and step 6.6 (crystallization check)
+        if getattr(config.shadow, 'crystallization_enabled', False):
+            tracker.result("Memory updated, crystallization check complete")
 
     # 6. Red Team challenge
     tracker.advance(6, "Red Team: adversarial challenge...")

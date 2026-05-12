@@ -75,9 +75,24 @@ class ShadowSettings:
     plateau_no_insight_days: int = 63
     max_resets_per_month: int = 2
 
+    # Scheduler settings
+    scheduler_enabled: bool = False
+    reflection_interval_minutes: int = 60
+    crystallization_interval_hours: int = 6
+    max_concurrent_tasks: int = 3
+
+    # Gemini Flash settings
+    gemini_api_key: str = ""
+    gemini_flash_enabled: bool = False
+
     # Missed paths
     missed_path_max_per_gate: int = 2
     missed_path_report_days: int = 30
+
+    # Crystallization (knowledge crystallization engine)
+    crystallization_enabled: bool = False
+    crystallization_significance_threshold: float = 0.6
+    crystallization_min_samples: int = 10
 
 
 @dataclass
