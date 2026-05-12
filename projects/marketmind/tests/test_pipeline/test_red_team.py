@@ -1,8 +1,8 @@
-"""Tests for Red Team adversarial engine."""
+﻿"""Tests for Red Team adversarial engine."""
 import json
 from unittest.mock import AsyncMock, patch
 import pytest
-from projects.marketmind.pipeline.red_team import (
+from marketmind.pipeline.red_team import (
     RedTeamChallenge, RedTeamReport, run_red_team, _parse_red_team_response,
 )
 
@@ -62,7 +62,7 @@ async def test_run_red_team_returns_report():
         "overall_assessment": "One critical finding.",
         "no_valid_objection": False
     })
-    with patch("projects.marketmind.pipeline.red_team.chat_pro", AsyncMock(return_value={"content": mock_content})):
+    with patch("marketmind.pipeline.red_team.chat_pro", AsyncMock(return_value={"content": mock_content})):
         report = await run_red_team("L1 raw text", "L2 raw text", ["AAPL"])
         assert isinstance(report, RedTeamReport)
         assert report.critical_count >= 1

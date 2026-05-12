@@ -33,7 +33,9 @@
       "TaskStop",
       "SendMessage",
       "EnterPlanMode",
-      "ExitPlanMode"
+      "ExitPlanMode",
+      "Bash(git add *)",
+      "Bash(git rm *)"
     ]
   }
 }

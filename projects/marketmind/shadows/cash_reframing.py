@@ -1,4 +1,4 @@
-"""Cash Reframing A/B Test -- treatment/control cohorts, Mann-Whitney DE test,
+﻿"""Cash Reframing A/B Test -- treatment/control cohorts, Mann-Whitney DE test,
 non-inferiority TOST, and gateway M1 injection.
 
 Tests whether cash-reframing exit discipline improves returns:
@@ -17,8 +17,8 @@ import statistics
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from projects.marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
-from projects.marketmind.config.settings import ShadowSettings
+from marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
+from marketmind.config.settings import ShadowSettings
 
 logger = logging.getLogger("marketmind.shadows.cash_reframing")
 

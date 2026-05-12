@@ -1,7 +1,7 @@
-"""Tests for DSR/CSCV resonance framework — pure math, full coverage."""
+﻿"""Tests for DSR/CSCV resonance framework — pure math, full coverage."""
 import math
 import pytest
-from projects.marketmind.pipeline.resonance import (
+from marketmind.pipeline.resonance import (
     compute_returns, sharpe_ratio, deflated_sharpe_ratio,
     cscv_pbo, evaluate_resonance, ResonanceResult, _rank, _spearman_rho,
 )

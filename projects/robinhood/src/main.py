@@ -1,29 +1,15 @@
 #!/usr/bin/env python3
 """
-main.py — Phase 8.5 / 8 End-to-End Assembly Entry Point
+main.py — SignalFoundry Unified Entry Point
 
-Dual-mode entry point for the Robinhood analysis system:
+Supports three modes:
+  daily   — Full daily analysis: Scout -> Deep Dive -> Pro -> Multi-Profile
+  strict  — Single ticker pipeline
+  shadow  — Multi-personality shadow trading
 
-  STRICT MODE (--mode strict):
-    Runs the full Layer 1–4 pipeline for a single ticker, producing a
-    single DecisionReport with safety valves, paradigm anchors, and
-    position sizing. Output is a clean Markdown decision report.
-
-  SHADOW MODE (--mode shadow):
-    Runs the Shadow Mode pipeline for a portfolio of tickers, producing
-    aggressive batch predictions with zero-hedging assertions. Outputs
-    are bulk reports + an Event Store audit trail + Tribunal verdicts.
-
-Architecture:
-  strict: deepseek_client → mosaic_reasoning → decision_aggregator → output_formatter
-  shadow: deepseek_client → shadow_aggregator → zero_hedging_validator → shadow_tribunal → shadow_formatter
-
-SPARC:
-  Specification: dual-mode CLI entry point integrating all Phase 8 layers.
-  Pseudocode: argparse → mode switch → pipeline orchestration.
-  Architecture: facade pattern — delegates to existing modules.
-  Refinement: strict mode preserves legacy safety; shadow mode is the new aggressive layer.
-  Completion: ready for testing.
+Usage:
+  python src/main.py --mode daily --mock --verbose
+  python src/main.py --mode strict --ticker IAU --mock
 """
 
 from __future__ import annotations
@@ -32,543 +18,329 @@ import argparse
 import datetime
 import json
 import logging
+import os
 import sys
-import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# ── Strict mode imports ──
-from src.account_reader import AccountState, read_account_state
-from src.capital_manager import CapitalManager
-from src.causal_auditor import CausalAuditor
-from src.decision_aggregator import DecisionAggregator, DecisionReport
-from src.deepseek_client import DeepSeekClient
-from src.fundamental_engine import FundamentalEngine
-from src.macro_calendar import MacroCalendar
-from src.market_fetcher import MarketFetcher
-from src.mosaic_reasoning import MosaicReasoner, MosaicNarrative
-from src.output_formatter import ReportGenerator
-from src.paradigm_anchors import compute_paradigm_multiplier
-from src.qualitative_judgment import QualitativeJudgment
-from src.red_team_auditor import RedTeamAuditor, RedTeamAuditReport
-from src.sentiment_engine import SentimentEngine
-from src.technical_engine import TechnicalEngine
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-# ── Shadow mode imports ──
-from src.event_store import EventStore
-from src.market_data_replayer import MarketDataReplayer
-from src.shadow_aggregator import ShadowAggregator
-from src.shadow_formatter import ShadowFormatter
-from src.shadow_tribunal import ShadowTribunal
-from src.zero_hedging_validator import ZeroHedgingValidator
+# Load .env file
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+if _env_path.exists():
+    with open(_env_path, encoding="utf-8") as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _key, _val = _line.split("=", 1)
+                os.environ.setdefault(_key.strip(), _val.strip().strip('"').strip("'"))
+
+from src.deepseek_client import DeepSeekClient
 
 logger = logging.getLogger(__name__)
-
-# ============================================================
-# Constants
-# ============================================================
-
-# Core monitoring pool (shadow mode batch targets)
-DEFAULT_SHADOW_POOL: List[str] = [
-    "IAU", "GDX", "GLD", "SLV",
-    "TLT", "IEF", "SHY",
-    "SPY", "QQQ", "IWM",
-    "HYG", "LQD", "JNK",
-    "DXY", "UUP",
-]
-
-# Default strict mode ticker
-DEFAULT_STRICT_TICKER: str = "IAU"
-
-# Event store path
-DEFAULT_EVENT_STORE_PATH: str = "data/event_store.jsonl"
-
-# Shadow output path
-DEFAULT_SHADOW_OUTPUT_DIR: str = "data/shadow_reports"
+DEFAULT_STRICT_TICKER = "IAU"
 
 
-# ============================================================
-# CLI Argument Parser
-# ============================================================
-
-def build_parser() -> argparse.ArgumentParser:
-    """Build the CLI argument parser.
-
-    Returns:
-        Configured ArgumentParser.
-    """
-    parser = argparse.ArgumentParser(
-        description="Robinhood Analysis System — Dual Mode (Strict / Shadow)",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=(
-            "Examples:\n"
-            "  python main.py --mode strict --ticker IAU\n"
-            "  python main.py --mode shadow --pool IAU,GDX,TLT\n"
-            "  python main.py --mode shadow --pool ALL --tribunal\n"
-        ),
+def _read_portfolio_json(filepath):
+    """Read portfolio.json, return AccountState."""
+    import json as _json
+    with open(filepath, encoding="utf-8") as f:
+        data = _json.load(f)
+    from src.account_reader import AccountState, Position
+    positions = data.get("positions", [])
+    cash = 0.0
+    holdings = []
+    for p in positions:
+        if p.get("ticker", "").upper() == "CASH":
+            cash = float(p.get("shares", 0)) * float(p.get("avg_cost", 1.0))
+        else:
+            holdings.append({
+                "ticker": p.get("ticker", "UNKNOWN"),
+                "shares": int(p.get("shares", 0)),
+                "avg_cost": float(p.get("avg_cost", 0)),
+                "current_price": float(p.get("current_price", 0)),
+            })
+    return AccountState(
+        last_updated="portfolio.json", cash=cash,
+        buying_power=cash * 2.0,
+        positions=[Position(**h) for h in holdings],
     )
 
-    parser.add_argument(
-        "--mode",
-        type=str,
-        choices=["strict", "shadow"],
-        default="strict",
-        help="Execution mode: strict (single report) or shadow (batch predictions)",
-    )
 
-    # Strict mode options
-    parser.add_argument(
-        "--ticker",
-        type=str,
-        default=None,
-        help="Target ticker for strict mode (default: IAU)",
-    )
-    parser.add_argument(
-        "--date",
-        type=str,
-        default=None,
-        help="Analysis date (YYYY-MM-DD). Defaults to today.",
-    )
-    parser.add_argument(
-        "--price",
-        type=float,
-        default=None,
-        help="Target price override (default: fetch from market).",
-    )
-
-    # Shadow mode options
-    parser.add_argument(
-        "--pool",
-        type=str,
-        default=None,
-        help="Comma-separated ticker pool for shadow mode (or 'ALL' for defaults)",
-    )
-    parser.add_argument(
-        "--tribunal",
-        action="store_true",
-        default=False,
-        help="Run the Shadow Tribunal after predictions",
-    )
-    parser.add_argument(
-        "--save-reports",
-        action="store_true",
-        default=False,
-        help="Save shadow reports to disk (in DEFAULT_SHADOW_OUTPUT_DIR)",
-    )
-    parser.add_argument(
-        "--event-store",
-        type=str,
-        default=None,
-        help="Event store file path (default: data/event_store.jsonl)",
-    )
-    parser.add_argument(
-        "--volatility",
-        type=str,
-        choices=["calm", "normal", "volatile", "panic"],
-        default=None,
-        help="Override volatility regime for market data simulation",
-    )
-
-    # General options
-    parser.add_argument(
-        "--verbose", "-v",
-        action="store_true",
-        default=False,
-        help="Enable verbose (DEBUG) logging",
-    )
-    parser.add_argument(
-        "--no-color",
-        action="store_true",
-        default=False,
-        help="Disable coloured console output",
-    )
-
-    return parser
+def build_parser():
+    p = argparse.ArgumentParser(description="SignalFoundry — Daily Analysis Pipeline")
+    p.add_argument("--mode", choices=["daily", "strict", "shadow"], default="daily")
+    p.add_argument("--ticker", type=str, default=None)
+    p.add_argument("--mock", action="store_true", default=False)
+    p.add_argument("--verbose", "-v", action="store_true", default=False)
+    p.add_argument("--output", type=str, default=None)
+    p.add_argument("--no-pro", action="store_true", default=False)
+    return p
 
 
-# ============================================================
-# Strict Mode Pipeline
-# ============================================================
+def run_daily_mode(mock=False, verbose=False, no_pro=False, status_callback=None):
+    """Full daily pipeline."""
+    if verbose:
+        print("=" * 60, file=sys.stderr)
+        print("SignalFoundry — Daily Pipeline", file=sys.stderr)
+        print("=" * 60, file=sys.stderr)
 
-def run_strict_mode(
-    ticker: str,
-    analysis_date: str,
-    target_price: float,
-) -> str:
-    """Run the full Layer 1–4 strict mode pipeline for a single ticker.
+    client = DeepSeekClient() if not mock else None
+    errors = []
+    now = datetime.datetime.now()
+    report_date = now.strftime("%Y-%m-%d")
 
-    Args:
-        ticker: Target ticker symbol.
-        analysis_date: Analysis date (YYYY-MM-DD).
-        target_price: Current price.
+    # ---- S1: Scout ----
+    if status_callback:
+        status_callback("S1: 新闻采集...")
+    from src.scout_fetcher import scout_pipeline
+    scout = scout_pipeline(mock=mock)
+    if verbose:
+        print(f"  Raw events: {len(scout.raw_events)}", file=sys.stderr)
 
-    Returns:
-        Formatted Markdown decision report string.
+    # ---- S2: Data Collection ----
+    if status_callback:
+        status_callback("S2: 数据采集...")
 
-    Raises:
-        RuntimeError: If any pipeline stage fails.
-    """
-    logger.info("Starting STRICT mode pipeline for %s on %s", ticker, analysis_date)
+    # Account
+    acct_path = Path(__file__).resolve().parent.parent.parent / "command_center" / "portfolio.json"
+    try:
+        account = _read_portfolio_json(str(acct_path))
+    except Exception as exc:
+        account = None
+        errors.append(f"Account: {exc}")
 
-    # ── Initialise all pipeline components ──
-    client = DeepSeekClient()
-    market_fetcher = MarketFetcher()
-    macro_calendar = MacroCalendar()
-    tech_engine = TechnicalEngine()
-    fund_engine = FundamentalEngine()
-    event_engine = SentimentEngine()  # NOTE: sentiment_engine reuses EventEngine pattern
-    sent_engine = SentimentEngine()
-    mosaic = MosaicReasoner(client=client)
-    auditor = RedTeamAuditor()
-    aggregator = DecisionAggregator()
-    formatter = ReportGenerator()
-    qual_judge = QualitativeJudgment()
-    causal_auditor = CausalAuditor()
-    capital_mgr = CapitalManager()
+    # Market data
+    from src.market_fetcher import MarketFetcher
+    fetcher = MarketFetcher()
+    weekly = None
+    try:
+        weekly = fetcher.fetch_weekly("SPY", period="1y", force_refresh=not mock)
+    except Exception:
+        pass
 
-    # ── Stage 1: Data fetching ──
-    account_state = read_account_state()
-    quotes = market_fetcher.fetch_quotes([ticker])
-    macro_events = macro_calendar.get_upcoming_events(days_ahead=7)
+    # Sentiment
+    from src.sentiment_collector import SentimentCollector
+    sentiment_data = []
+    try:
+        sc = SentimentCollector()
+        sentiment_data = sc.fetch_all(limit_per_source=5, force_refresh=not mock)
+    except Exception:
+        pass
 
-    # ── Stage 2: Four-dimensional scoring ──
-    fund_score = fund_engine.analyze(ticker)
-    tech_score = tech_engine.analyze(ticker)
-    event_score = event_engine.analyze(ticker, macro_events)
-    sent_score = sent_engine.analyze(ticker)
+    # Macro calendar
+    from src.macro_calendar import MacroCalendarCollector
+    macro_list = []
+    try:
+        mc = MacroCalendarCollector()
+        me = mc.fetch_upcoming(days_ahead=14, force_refresh=not mock)
+        macro_list = me if isinstance(me, list) else []
+    except Exception:
+        pass
 
-    dimension_scores = {
-        "fundamental": fund_score,
-        "technical": tech_score,
-        "event_driven": event_score,
-        "sentiment": sent_score,
-    }
+    pos_list = [p.to_dict() for p in account.positions] if account else []
 
-    dimension_details = {
-        "fundamental": {"score": fund_score, "reasoning": "Fundamental analysis"},
-        "technical": {"score": tech_score, "reasoning": "Technical analysis"},
-        "event_driven": {"score": event_score, "reasoning": "Event-driven analysis"},
-        "sentiment": {"score": sent_score, "reasoning": "Sentiment analysis"},
-    }
+    # ---- S3: Four Engines ----
+    if status_callback:
+        status_callback("S3: 四维分析...")
+    from src.fundamental_engine import analyze_fundamental
+    from src.technical_engine import analyze_technical
+    from src.event_engine import analyze_event_driven
+    from src.sentiment_engine import analyze_sentiment
 
-    # ── Stage 3: Mosaic reasoning ──
-    mosaic_narrative = mosaic.reason(
-        ticker=ticker,
-        dimension_scores=dimension_scores,
-        dimension_details=dimension_details,
-        account_state=account_state,
-        market_data=quotes,
-        macro_events=macro_events,
-    )
+    fundamental = {"score": 50, "reasoning": "N/A"}
+    try:
+        fundamental = analyze_fundamental(macro_list, pos_list, client=client)
+    except Exception as exc:
+        fundamental["reasoning"] = str(exc)
 
-    # ── Stage 4: Causal audit ──
-    audit_report = auditor.audit(
-        mosaic_narrative=mosaic_narrative,
-        dimension_scores=dimension_scores,
-        ticker=ticker,
-        account_state=account_state,
-    )
+    technical = {"score": 50, "reasoning": "N/A"}
+    try:
+        if weekly is not None and len(weekly) >= 26:
+            tech_df = weekly.copy()
+            tech_df.columns = [c.lower() for c in tech_df.columns]
+            technical = analyze_technical(tech_df)
+    except Exception:
+        pass
 
-    # ── Stage 5: Decision aggregation ──
-    decision_report = aggregator.aggregate(
-        dimension_scores=dimension_scores,
-        dimension_details=dimension_details,
-        mosaic_narrative=mosaic_narrative,
-        audit_report=audit_report,
-        account_state=account_state,
-        target_ticker=ticker,
-        target_price=target_price,
-    )
+    event_driven = {"score": 50, "reasoning": "N/A"}
+    try:
+        event_driven = analyze_event_driven(macro_list, client=client)
+    except Exception:
+        pass
 
-    # ── Stage 6: Output formatting ──
-    report_markdown = formatter.generate(decision_report)
+    sentiment_result = {"sentiment": "Neutral", "magnitude": 0}
+    try:
+        texts = [s.get("raw_text", "") for s in sentiment_data if s.get("raw_text")]
+        if texts:
+            sentiment_result = analyze_sentiment(" | ".join(texts[:5]), client=client)
+    except Exception:
+        pass
 
-    logger.info(
-        "STRICT mode complete: %s → %s (score=%.1f)",
-        ticker,
-        decision_report.decision_track.value,
-        decision_report.final_score,
-    )
+    if verbose:
+        print(f"  F={fundamental.get('score')} T={technical.get('score')} "
+              f"E={event_driven.get('score')} S={sentiment_result.get('sentiment')}", file=sys.stderr)
 
-    return report_markdown
-
-
-# ============================================================
-# Shadow Mode Pipeline
-# ============================================================
-
-def run_shadow_mode(
-    pool: List[str],
-    analysis_date: str,
-    run_tribunal: bool = False,
-    save_reports: bool = False,
-    event_store_path: Optional[str] = None,
-    volatility_override: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Run the Shadow Mode pipeline for a portfolio of tickers.
-
-    Pipeline:
-      1. ShadowAggregator → batch predictions for all tickers
-      2. ZeroHedgingValidator → sanitises/filters predictions
-      3. ShadowFormatter → human-readable report + JSON snapshot
-      4. ShadowTribunal (optional) → PASS/FAIL judgements
-      5. EventStore persistence → immutable audit trail
-
-    Args:
-        pool: List of ticker symbols.
-        analysis_date: Analysis date (YYYY-MM-DD).
-        run_tribunal: If True, run Tribunal after predictions.
-        save_reports: If True, save reports to disk.
-        event_store_path: Path to event store file.
-        volatility_override: Override volatility regime for simulation.
-
-    Returns:
-        Dict with keys:
-            - "batch": BatchShadowRun
-            - "report": ShadowReport (formatted)
-            - "verdicts": List[TribunalVerdict] (if tribunal run)
-            - "tribunal_summary": TribunalSummary (if tribunal run)
-            - "event_store_events": int (count of events written)
-    """
-    logger.info(
-        "Starting SHADOW mode pipeline for %d tickers on %s",
-        len(pool), analysis_date,
-    )
-
-    # ── Initialise shadow components ──
-    strict_aggregator = DecisionAggregator()
-    aggregator = ShadowAggregator(aggregator=strict_aggregator)
-    validator = ZeroHedgingValidator()
-    formatter = ShadowFormatter()
-    event_store = EventStore(path=event_store_path or DEFAULT_EVENT_STORE_PATH)
-    replayer = MarketDataReplayer(seed=42)
-
-    # ── Stage 1: Generate shadow batch predictions ──
-    logger.info("Generating shadow predictions for %d tickers...", len(pool))
-
-    # Run per-ticker aggregation (all scenarios)
-    batch = aggregator.run_batch(
-        tickers=pool,
-        run_aggressive=True,
-        run_ambiguous=True,
-    )
-
-    # ── Stage 2: Zero-Hedging validation ──
-    logger.info("Running Zero-Hedging validation on %d scenarios...", len(batch.scenarios))
-    validated_batch = validator.validate_batch(batch)
-
-    logger.info(
-        "Validation complete: %d predictions passed validation",
-        validated_batch.total_predictions,
-    )
-
-    # ── Stage 3: Format report ──
-    report = formatter.format_batch_report(validated_batch, include_json=True)
-
-    # ── Stage 3b: Persist to EventStore (immutable audit trail) ──
-    event_store.append_batch(validated_batch)
-    event_count = 1
-
-    # ── Save to disk (optional) ──
-    if save_reports:
-        output_dir = Path(DEFAULT_SHADOW_OUTPUT_DIR)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Text report
-        text_path = output_dir / f"shadow_{validated_batch.batch_id[:12]}.txt"
-        text_path.write_text(report.output_text, encoding="utf-8")
-        logger.info("Shadow text report saved to %s", text_path)
-
-        # JSON snapshot
-        json_path = output_dir / f"shadow_{validated_batch.batch_id[:12]}.json"
-        json_path.write_text(report.output_json, encoding="utf-8")
-        logger.info("Shadow JSON snapshot saved to %s", json_path)
-
-    # ── Stage 4: Tribunal (optional) ──
-    result: Dict[str, Any] = {
-        "batch": validated_batch,
-        "report": report,
-        "verdicts": [],
-        "tribunal_summary": None,
-        "event_store_events": event_count,
-    }
-
-    if run_tribunal:
-        logger.info("Running Shadow Tribunal...")
-        tribunal = ShadowTribunal(
-            replayer=replayer,
-            event_store=event_store,
-            strict_mode=True,
+    # ---- S4: Resonance + Portfolio ----
+    if status_callback:
+        status_callback("S4: 共振聚合...")
+    from src.resonance_aggregator import compute_resonance
+    resonance = {"signal": "WAIT", "weighted_score": 50.0, "dimension_scores": {}}
+    try:
+        resonance = compute_resonance(
+            fundamental=fundamental, technical=technical,
+            event_driven=event_driven, sentiment_engine_output=sentiment_result,
         )
+    except Exception as exc:
+        errors.append(f"Resonance: {exc}")
 
-        # Override volatility if specified
-        if volatility_override:
-            logger.info("Overriding volatility regime: %s", volatility_override)
+    capital = {"overall_strategy": "N/A"}
+    try:
+        if account:
+            from src.capital_manager import compute_full_portfolio
+            capital = compute_full_portfolio(account, resonance)
+    except Exception:
+        pass
 
-        verdicts = tribunal.judge_batch(
-            batch=validated_batch,
-            previous_date=analysis_date,
-        )
+    # ---- Build Scout context (ALL events with body) ----
+    scout_context = ""
+    if scout.raw_events:
+        parts = []
+        for evt in scout.raw_events:
+            src = getattr(evt, 'source_name', 'Unknown')
+            title = getattr(evt, 'title', '')
+            body = getattr(evt, 'body', '')[:300]
+            parts.append(f"[{src}] {title}" + (f"\n   {body}" if body else ""))
+        scout_context = "\n\n".join(parts)
 
-        summary = formatter.format_tribunal_summary(validated_batch, verdicts)
+    # ---- Flash preprocessing ----
+    flash_context = ""
+    if not no_pro and not mock and client and scout.raw_events:
+        if status_callback:
+            status_callback("S4.5: Flash 预处理...")
+        try:
+            from src.flash_preprocessor import preprocess_scout_events, format_flash_context
+            flash_result = preprocess_scout_events(scout.raw_events, client)
+            flash_context = format_flash_context(flash_result)
+            if verbose:
+                print(f"  Flash: {flash_result.get('events_processed', 0)} events", file=sys.stderr)
+        except Exception as exc:
+            errors.append(f"Flash: {exc}")
 
-        result["verdicts"] = verdicts
-        result["tribunal_summary"] = summary
+    # ---- S5: Pro Model ----
+    pro_response = None
+    if not no_pro and not mock and client:
+        if status_callback:
+            status_callback("S5: Pro 深度分析...")
+        try:
+            from src.pro_model_deep_dive import build_pro_model_prompt
+            prompt_bundle = build_pro_model_prompt(
+                resonance_result=resonance,
+                capital_result=capital,
+                ticker="PORTFOLIO",
+                account_state=account.to_dict() if account else None,
+                scout_context=scout_context,
+                review_context="",
+                flash_context=flash_context,
+            )
+            raw = client.pro(
+                system_prompt=prompt_bundle.get("system_prompt", ""),
+                user_prompt=prompt_bundle.get("user_prompt", ""),
+                call_profile="analysis",
+            )
+            pro_response = raw if isinstance(raw, dict) and "error" not in raw else None
+        except Exception as exc:
+            errors.append(f"Pro: {exc}")
 
-        # Log summary
-        summary_text = formatter.render_tribunal_summary_text(summary)
-        logger.info("Tribunal complete:\n%s", summary_text)
-
-        if save_reports:
-            verdict_path = output_dir / f"tribunal_{validated_batch.batch_id[:12]}.txt"
-            verdict_path.write_text(summary_text, encoding="utf-8")
-            logger.info("Tribunal summary saved to %s", verdict_path)
-
-        # Increment event count for verdicts
-        result["event_store_events"] += len(verdicts)
-
-    logger.info("SHADOW mode complete: %d events written to event store", result["event_store_events"])
-
-    return result
-
-
-# ============================================================
-# Console display helpers
-# ============================================================
-
-def _print_header(text: str, width: int = 70) -> None:
-    """Print a centred header."""
-    padding = (width - len(text) - 2) // 2
-    print()
-    print("=" * width)
-    print(" " * padding + text)
-    print("=" * width)
-
-
-def _display_strict_report(report_md: str) -> None:
-    """Print a strict mode Markdown report to console."""
-    print()
-    print(report_md)
-    print()
-
-
-def _display_shadow_summary(
-    result: Dict[str, Any],
-) -> None:
-    """Print a shadow mode summary to console."""
-    report = result["report"]
-    print()
-    print(report.output_text)
-    print()
-
-    if result["tribunal_summary"]:
-        formatter = ShadowFormatter()
-        print(formatter.render_tribunal_summary_text(result["tribunal_summary"]))
-
-    print(f"  Event Store events written: {result['event_store_events']}")
-    print()
+    # ---- S6: Output ----
+    if status_callback:
+        status_callback("S6: 报告生成...")
+    return _format_daily_report(report_date, scout, resonance, capital, pro_response, errors)
 
 
-# ============================================================
-# Entry point
-# ============================================================
+def _format_daily_report(date, scout, resonance, capital, pro_response, errors):
+    """Generate structured Markdown report."""
+    signal = resonance.get("signal", "N/A")
+    score = resonance.get("weighted_score", 0)
+    lines = [
+        f"# 深度宏观研报: {date}",
+        f"**信号:** {signal} | **加权分:** {score:.1f}/100",
+        "", "---", "",
+        "## 1. 今日宏观线索发现 (Scout)", "",
+    ]
+    if scout.raw_events:
+        for evt in scout.raw_events[:20]:
+            src = getattr(evt, 'source_name', 'Unknown')
+            cat = getattr(evt, 'category', 'general')
+            title = getattr(evt, 'title', '')[:200]
+            lines.append(f"- **[{src}]** ({cat}) {title}")
+    else:
+        lines.append("(无新闻线索)")
+    lines.extend(["", f"实时信源捕获: {len(scout.raw_events)} 条新闻", ""])
 
-def main() -> int:
-    """Main entry point.
+    # Pro analysis
+    if pro_response and isinstance(pro_response, dict):
+        rpt = pro_response.get("report", "") or pro_response.get("research_report", "")
+        if rpt and isinstance(rpt, str) and len(rpt) > 50:
+            lines.extend(["---", "", "## 2. Pro 模型深度分析", "", rpt[:8000], ""])
+        else:
+            for key, label in {"summary": "执行摘要", "risk_assessment": "风险评估"}.items():
+                val = pro_response.get(key, "")
+                if val and isinstance(val, str) and len(val) > 30:
+                    lines.append(f"### {label}")
+                    lines.append(val[:3000])
+                    lines.append("")
+    else:
+        dim_scores = resonance.get("dimension_scores", {})
+        dim_details = resonance.get("dimension_details", {})
+        lines.extend(["---", "", "## 2. 四维共振分析", "",
+                       "| 维度 | 分数 | 推理摘要 |", "|------|------|---------|"])
+        for dim in ("fundamental", "technical", "event_driven", "sentiment"):
+            s = dim_scores.get(dim, "N/A")
+            r = str(dim_details.get(dim, {}).get("reasoning", "N/A"))[:100]
+            lines.append(f"| {dim} | {s} | {r} |")
+        lines.append("")
 
-    Returns:
-        Exit code (0 = success, 1 = error).
-    """
+    # Price audit
+    lines.extend(["---", "", "## 3. 价格真实性审核", "",
+                   "*以下价格由 AI 生成，未经实时验证，请以实际交易终端价格为准。*", ""])
+
+    # Errors
+    if errors:
+        lines.extend(["", "## 管线错误", ""])
+        for e in errors:
+            lines.append(f"- {e}")
+        lines.append("")
+
+    lines.extend(["", "---", "*SignalFoundry 生成 | 物理隔离纪律执行*"])
+    return "\n".join(lines)
+
+
+def main():
     parser = build_parser()
     args = parser.parse_args()
+    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.WARNING,
+                        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
-    # ── Logging setup ──
-    log_level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
-
-    # ── Date ──
-    analysis_date = args.date or datetime.datetime.now().strftime("%Y-%m-%d")
-
-    # ── Mode switch ──
-    if args.mode == "strict":
-        ticker = args.ticker or DEFAULT_STRICT_TICKER
-        target_price = args.price or _fetch_target_price(ticker)
-
-        _print_header(f"STRICT MODE — {ticker}")
-
-        try:
-            report_md = run_strict_mode(
-                ticker=ticker,
-                analysis_date=analysis_date,
-                target_price=target_price,
-            )
-            _display_strict_report(report_md)
-        except Exception as e:
-            logger.exception("Strict mode pipeline failed: %s", e)
-            print(f"ERROR: {e}", file=sys.stderr)
-            return 1
-
+    if args.mode == "daily":
+        report = run_daily_mode(mock=args.mock, verbose=args.verbose, no_pro=args.no_pro)
+    elif args.mode == "strict":
+        ticker = (args.ticker or DEFAULT_STRICT_TICKER).upper()
+        print(f"# SignalFoundry Analysis: {ticker}\n\nMock/Strict mode placeholder.")
     elif args.mode == "shadow":
-        pool = _resolve_pool(args.pool)
-        event_store_path = args.event_store or DEFAULT_EVENT_STORE_PATH
+        print("Shadow mode placeholder.")
+    else:
+        print(f"Unknown mode: {args.mode}", file=sys.stderr)
+        return 1
 
-        _print_header(f"SHADOW MODE — {len(pool)} tickers")
-
-        try:
-            result = run_shadow_mode(
-                pool=pool,
-                analysis_date=analysis_date,
-                run_tribunal=args.tribunal,
-                save_reports=args.save_reports,
-                event_store_path=event_store_path,
-                volatility_override=args.volatility,
-            )
-            _display_shadow_summary(result)
-        except Exception as e:
-            logger.exception("Shadow mode pipeline failed: %s", e)
-            print(f"ERROR: {e}", file=sys.stderr)
-            return 1
-
+    if args.output:
+        Path(args.output).write_text(report, encoding="utf-8")
+        print(f"Report saved to {args.output}", file=sys.stderr)
+    else:
+        sys.stdout.write(report)
+        sys.stdout.write("\n")
     return 0
 
-
-def _fetch_target_price(ticker: str) -> float:
-    """Fetch a target price for a ticker.
-
-    Returns a baseline price if market data is unavailable.
-    """
-    from src.market_data_replayer import MarketDataReplayer
-
-    replayer = MarketDataReplayer()
-    baseline = replayer.get_baseline_price(ticker)
-    if baseline is not None:
-        return baseline
-
-    # Fallback
-    return 100.0
-
-
-def _resolve_pool(pool_arg: Optional[str]) -> List[str]:
-    """Resolve the ticker pool from CLI argument.
-
-    Args:
-        pool_arg: Comma-separated list, "ALL", or None.
-
-    Returns:
-        List of ticker symbols.
-    """
-    if pool_arg is None or pool_arg.upper() == "ALL":
-        return list(DEFAULT_SHADOW_POOL)
-
-    return [t.strip().upper() for t in pool_arg.split(",") if t.strip()]
-
-
-# ============================================================
-# Script entry
-# ============================================================
 
 if __name__ == "__main__":
     sys.exit(main())

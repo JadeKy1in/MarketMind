@@ -1,12 +1,12 @@
-"""Tests for KnowledgeFilter — Learngenes selective inheritance, ACE risk detection."""
+﻿"""Tests for KnowledgeFilter — Learngenes selective inheritance, ACE risk detection."""
 import pytest
 
-from projects.marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
+from marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
 
 
 @pytest.fixture
 def knowledge_filter():
-    from projects.marketmind.shadows.knowledge_filter import KnowledgeFilter
+    from marketmind.shadows.knowledge_filter import KnowledgeFilter
     return KnowledgeFilter()
 
 
@@ -14,7 +14,7 @@ def knowledge_filter():
 
 def _make_item(item_id, source, category, content, verification_count=0,
                false_positive_count=0):
-    from projects.marketmind.shadows.knowledge_filter import KnowledgeItem
+    from marketmind.shadows.knowledge_filter import KnowledgeItem
     return KnowledgeItem(
         item_id=item_id,
         source_shadow_id=source,

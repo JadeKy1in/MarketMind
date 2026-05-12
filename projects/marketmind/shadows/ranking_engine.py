@@ -1,4 +1,4 @@
-"""Ranking Engine -- pure Python composite score, Bayesian haircut, achievement ladder.
+﻿"""Ranking Engine -- pure Python composite score, Bayesian haircut, achievement ladder.
 
 Zero LLM calls. All computation is deterministic mathematical formulas.
 """
@@ -8,7 +8,7 @@ import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from projects.marketmind.config.settings import ShadowSettings
+from marketmind.config.settings import ShadowSettings
 
 
 @dataclass

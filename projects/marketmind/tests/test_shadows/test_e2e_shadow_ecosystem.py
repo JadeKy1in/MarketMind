@@ -1,12 +1,12 @@
-"""End-to-end tests for the full Shadow Ecosystem."""
+﻿"""End-to-end tests for the full Shadow Ecosystem."""
 import pytest
 import tempfile
 from pathlib import Path
 
-from projects.marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
-from projects.marketmind.shadows.shadow_mother import ShadowMother
-from projects.marketmind.shadows.ranking_engine import RankingEngine
-from projects.marketmind.config.settings import ShadowSettings
+from marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
+from marketmind.shadows.shadow_mother import ShadowMother
+from marketmind.shadows.ranking_engine import RankingEngine
+from marketmind.config.settings import ShadowSettings
 
 
 @pytest.fixture
@@ -27,9 +27,9 @@ def e2e_db():
 @pytest.fixture
 def mother_with_shadows(e2e_db, settings):
     """Create 15 expert + 5 daredevil + 1 catfish shadows."""
-    from projects.marketmind.shadows.expert_shadows import create_expert_shadows
-    from projects.marketmind.shadows.daredevil_shadows import create_daredevil_shadows
-    from projects.marketmind.shadows.catfish_agent import create_catfish_agent
+    from marketmind.shadows.expert_shadows import create_expert_shadows
+    from marketmind.shadows.daredevil_shadows import create_daredevil_shadows
+    from marketmind.shadows.catfish_agent import create_catfish_agent
 
     create_expert_shadows(e2e_db, settings)
     create_daredevil_shadows(e2e_db, settings)

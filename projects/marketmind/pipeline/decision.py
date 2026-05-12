@@ -1,4 +1,4 @@
-"""Decision generator: decision card + "no-trade" card synthesis."""
+﻿"""Decision generator: decision card + "no-trade" card synthesis."""
 from __future__ import annotations
 import json
 import logging
@@ -7,13 +7,13 @@ logger = logging.getLogger("marketmind.pipeline.decision")
 from dataclasses import dataclass, field
 from typing import Any
 
-from projects.marketmind.gateway.async_client import chat_pro
-from projects.marketmind.pipeline.layer1_narrative import Layer1Result
-from projects.marketmind.pipeline.layer2_fundamental import Layer2Result
-from projects.marketmind.pipeline.layer3_technical import Layer3BatchResult
-from projects.marketmind.pipeline.red_team import RedTeamReport
-from projects.marketmind.pipeline.resonance import ResonanceResult
-from projects.marketmind.shadows.shadow_agent import ShadowVote
+from marketmind.gateway.async_client import chat_pro
+from marketmind.pipeline.layer1_narrative import Layer1Result
+from marketmind.pipeline.layer2_fundamental import Layer2Result
+from marketmind.pipeline.layer3_technical import Layer3BatchResult
+from marketmind.pipeline.red_team import RedTeamReport
+from marketmind.pipeline.resonance import ResonanceResult
+from marketmind.shadows.shadow_agent import ShadowVote
 
 
 @dataclass

@@ -1,11 +1,11 @@
-"""Fact checker: claim extraction -> multi-source verification -> synthesis report."""
+﻿"""Fact checker: claim extraction -> multi-source verification -> synthesis report."""
 from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
-from projects.marketmind.gateway.async_client import chat_pro
-from projects.marketmind.gateway.response_parser import extract_json
-from projects.marketmind.integrity.watchdog import NumericClaim, extract_claims_m2
+from marketmind.gateway.async_client import chat_pro
+from marketmind.gateway.response_parser import extract_json
+from marketmind.integrity.watchdog import NumericClaim, extract_claims_m2
 
 logger = logging.getLogger("marketmind.integrity.fact_checker")
 

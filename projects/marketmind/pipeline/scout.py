@@ -1,4 +1,4 @@
-"""Multi-source news collection with 3-tier degradation strategy."""
+﻿"""Multi-source news collection with 3-tier degradation strategy."""
 from __future__ import annotations
 import hashlib
 import logging
@@ -12,8 +12,8 @@ from typing import Any
 import feedparser
 import httpx
 
-from projects.marketmind.config.settings import MarketMindConfig
-from projects.marketmind.config.source_authority import Source, SourceTier, SourceStatus, get_working_sources
+from marketmind.config.settings import MarketMindConfig
+from marketmind.config.source_authority import Source, SourceTier, SourceStatus, get_working_sources
 
 
 @dataclass
@@ -99,7 +99,7 @@ async def fetch_all_sources(config: MarketMindConfig) -> list[NewsItem]:
     """Fetch from all working sources, deduplicate, return sorted by tier."""
     sources = get_working_sources()
     if not sources:
-        sources = [s for s in __import__("projects.marketmind.config.source_authority", fromlist=["SOURCES"]).SOURCES
+        sources = [s for s in __import__("marketmind.config.source_authority", fromlist=["SOURCES"]).SOURCES
                    if s.status == SourceStatus.UNTESTED]
     all_items: list[NewsItem] = []
     for source in sources:

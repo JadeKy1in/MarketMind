@@ -1,5 +1,5 @@
 """
-app.py —— Cline OS Command Center V2.0 入口点
+app.py —— SignalFoundry Terminal 入口点
 
 启动流程:
   1. 尝试加载 .env（python-dotenv，失败静默）
@@ -29,7 +29,7 @@ def setup_logging(level: int = logging.INFO) -> None:
 def main() -> None:
     setup_logging()
     logger = logging.getLogger(__name__)
-    logger.info("Starting Cline OS Command Center V2.0")
+    logger.info("Starting SignalFoundry Terminal")
 
     # Step 0: 尝试加载 .env（可选依赖，失败静默降级）
     try:
@@ -37,9 +37,13 @@ def main() -> None:
         env_path = Path(__file__).resolve().parent / ".env"
         if env_path.exists():
             load_dotenv(env_path)
-            logger.info(".env loaded from %s", env_path)
+            import os
+            ak = os.environ.get("DEEPSEEK_API_KEY", "")
+            logger.info(".env loaded from %s (DEEPSEEK_API_KEY length=%d)", env_path, len(ak))
+        else:
+            logger.warning(".env not found at %s; using environment variables only", env_path)
     except ImportError:
-        pass  # python-dotenv 未安装，跳过
+        logger.warning("python-dotenv not installed; .env file will be ignored. Install with: pip install python-dotenv")
 
     # Step 1: 初始化 SettingsManager（config.json 优先，.env 后备）
     from projects.command_center.config.settings_manager import SettingsManager
@@ -59,9 +63,12 @@ def main() -> None:
     flash_config = FlashAdapterConfig.from_settings(settings)
     router = LLMRouter.create_default()
 
+    pro_adapter = ProAdapter(config=pro_config)
+    flash_adapter = FlashAdapter(config=flash_config)
+
     task_queue = TaskQueue(
-        pro_adapter=ProAdapter(config=pro_config),
-        flash_adapter=FlashAdapter(config=flash_config),
+        pro_adapter=pro_adapter,
+        flash_adapter=flash_adapter,
         router=router,
     )
     task_queue.start()
@@ -74,11 +81,26 @@ def main() -> None:
         "MOCK" if not flash_config.api_key else "REAL",
     )
 
-    # Step 3: 启动 UI
+    # Step 3: 设置 UI 外观
+    try:
+        import customtkinter as ctk
+        ctk.set_appearance_mode("dark")
+        ctk.set_default_color_theme("dark-blue")
+    except ImportError:
+        pass
+
+    # Step 4: 启动 UI (注入 adapter 状态查询)
     try:
         from projects.command_center.ui.main_window import MainWindow
         app = MainWindow(task_queue=task_queue, settings=settings)
         logger.info("MainWindow displayed")
+
+        # 注入 adapter 状态到 ChatPanel 欢迎消息
+        pro_label = pro_adapter.status_label
+        flash_label = flash_adapter.status_label
+        app.chat_panel.update_adapter_status(pro_label, flash_label)
+        logger.info("Adapter status injected: Pro=%s, Flash=%s", pro_label, flash_label)
+
         app.mainloop()
     except KeyboardInterrupt:
         logger.info("Interrupted")

@@ -1,15 +1,15 @@
-"""Tests for paper-to-live gap manager."""
+﻿"""Tests for paper-to-live gap manager."""
 import pytest
 import math
 from datetime import datetime, timezone
 
-from projects.marketmind.shadows.paper_live_gap import (
+from marketmind.shadows.paper_live_gap import (
     PaperLiveGapManager, GapMetrics,
 )
-from projects.marketmind.shadows.shadow_state import (
+from marketmind.shadows.shadow_state import (
     ShadowStateDB, ShadowConfig, VirtualTradeOpen, DailySnapshot,
 )
-from projects.marketmind.config.settings import ShadowSettings
+from marketmind.config.settings import ShadowSettings
 
 
 @pytest.fixture
@@ -283,3 +283,91 @@ def test_not_live_ready_high_mdd(gap_manager, temp_shadow_db):
     is_ready, reason = gap_manager.check_live_ready(shadow_id)
     assert not is_ready
     assert "mdd" in reason.lower() or "drawdown" in reason.lower()
+
+
+def test_discount_rate_survives_recreation(temp_shadow_db, sample_expert_config):
+    """Recreating Manager restores discount rate from DB."""
+    from marketmind.shadows.paper_live_gap import PaperLiveGapManager
+
+    settings = ShadowSettings()
+    temp_shadow_db.create_shadow(sample_expert_config)
+
+    manager1 = PaperLiveGapManager(temp_shadow_db, settings)
+    # Manually set and persist discount rate
+    manager1._discount_rates[sample_expert_config.shadow_id] = 0.12
+    manager1._save_state(sample_expert_config.shadow_id)
+
+    # New instance restores
+    manager2 = PaperLiveGapManager(temp_shadow_db, settings)
+    rate = manager2._get_discount_rate(sample_expert_config.shadow_id)
+    assert rate == 0.12
+
+
+def test_discount_rate_default_when_no_state(temp_shadow_db, sample_expert_config):
+    """No persisted state — use default discount rate."""
+    from marketmind.shadows.paper_live_gap import PaperLiveGapManager
+
+    settings = ShadowSettings()
+    temp_shadow_db.create_shadow(sample_expert_config)
+
+    manager = PaperLiveGapManager(temp_shadow_db, settings)
+    rate = manager._get_discount_rate(sample_expert_config.shadow_id)
+    assert rate == 0.20  # confidence_discount_default
+
+
+def test_compute_inter_shadow_gap_with_peers(temp_shadow_db, sample_expert_config):
+    """有peer数据时计算GapRatio"""
+    from marketmind.shadows.paper_live_gap import PaperLiveGapManager
+    from marketmind.shadows.shadow_state import VirtualTradeOpen, ShadowConfig
+
+    settings = ShadowSettings()
+    temp_shadow_db.create_shadow(sample_expert_config)
+
+    # 创建另一个shadow作为peer
+    peer_config = ShadowConfig(
+        shadow_id="expert:gold:peer_test", shadow_type="expert",
+        display_name="Peer Gold", methodology_prompt="Peer.",
+        virtual_capital=40000.0, domain="gold",
+    )
+    temp_shadow_db.create_shadow(peer_config)
+
+    # 两个shadow都在GLD上有交易
+    for sid in [sample_expert_config.shadow_id, peer_config.shadow_id]:
+        trade = VirtualTradeOpen(
+            shadow_id=sid, ticker="GLD", direction="long",
+            entry_price=180.0, position_size_pct=0.10, entry_date="2026-05-11"
+        )
+        trade_id = temp_shadow_db.record_trade_open(sid, trade)
+        temp_shadow_db.record_trade_close(trade_id, 185.0, "target", 0.0278)
+
+    manager = PaperLiveGapManager(temp_shadow_db, settings)
+    gap = manager.compute_inter_shadow_gap(
+        sample_expert_config.shadow_id, "GLD", "2026-05-11"
+    )
+    # 两个shadow的PnL相同 -> gap应该接近0
+    assert gap < 0.5
+
+
+def test_compute_inter_shadow_gap_no_peers(temp_shadow_db, sample_expert_config):
+    """无peer数据时GapRatio为0（shadow有自身交易但无peer）"""
+    from marketmind.shadows.paper_live_gap import PaperLiveGapManager
+    from marketmind.shadows.shadow_state import VirtualTradeOpen
+
+    settings = ShadowSettings()
+    temp_shadow_db.create_shadow(sample_expert_config)
+
+    # 先为shadow添加一个交易，确保own_pnls不为空
+    trade = VirtualTradeOpen(
+        shadow_id=sample_expert_config.shadow_id, ticker="UNIQUE_TICKER",
+        direction="long", entry_price=100.0, position_size_pct=0.10,
+        entry_date="2026-05-11"
+    )
+    trade_id = temp_shadow_db.record_trade_open(sample_expert_config.shadow_id, trade)
+    temp_shadow_db.record_trade_close(trade_id, 105.0, "test", 0.05)
+
+    manager = PaperLiveGapManager(temp_shadow_db, settings)
+    gap = manager.compute_inter_shadow_gap(
+        sample_expert_config.shadow_id, "UNIQUE_TICKER", "2026-05-11"
+    )
+    # 无peer交易 -> gap为0.0
+    assert gap == 0.0

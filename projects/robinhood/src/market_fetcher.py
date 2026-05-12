@@ -7,14 +7,27 @@ files keyed by ticker, timeframe, and date to minimize network requests.
 
 Dependencies: yfinance, pandas (whitelisted in techContext.md)
 """
+from __future__ import annotations
+
 import json
 import logging
 from datetime import date
 from pathlib import Path
 from typing import Callable, Optional, Union
 
-import pandas as pd
-import yfinance as yf
+try:
+    import pandas as pd
+    _PANDAS_AVAILABLE = True
+except ImportError:
+    pd = None  # type: ignore
+    _PANDAS_AVAILABLE = False
+
+try:
+    import yfinance as yf
+    _YFINANCE_AVAILABLE = True
+except ImportError:
+    yf = None  # type: ignore
+    _YFINANCE_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -177,9 +190,14 @@ class MarketFetcher:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _fetch_yfinance(ticker: str, period: str, interval: str) -> pd.DataFrame:
+    def _fetch_yfinance(ticker: str, period: str, interval: str):
         """Raw yfinance download call. Returns a clean DataFrame."""
-        raw: pd.DataFrame = yf.download(
+        if not _YFINANCE_AVAILABLE or not _PANDAS_AVAILABLE:
+            raise RuntimeError(
+                "yfinance and/or pandas are not installed. "
+                "Market data fetching is unavailable."
+            )
+        raw = yf.download(
             tickers=ticker,
             period=period,
             interval=interval,

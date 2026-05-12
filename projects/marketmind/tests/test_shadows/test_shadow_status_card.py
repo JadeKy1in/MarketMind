@@ -1,4 +1,4 @@
-"""Tests for ShadowStatusCard — individual shadow detail widget."""
+﻿"""Tests for ShadowStatusCard — individual shadow detail widget."""
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -57,7 +57,7 @@ def sample_shadow_data():
 
 def test_status_card_displays_data(mock_ctk, sample_shadow_data):
     """Status card should accept and store shadow data without errors."""
-    from projects.marketmind.ui.shadow_status_card import ShadowStatusCard
+    from marketmind.ui.shadow_status_card import ShadowStatusCard
 
     card = ShadowStatusCard(MagicMock())
     card.display_shadow(sample_shadow_data)
@@ -70,7 +70,7 @@ def test_status_card_displays_data(mock_ctk, sample_shadow_data):
 
 def test_status_card_clear_clears_all_fields(mock_ctk, sample_shadow_data):
     """Clear should reset shadow data to None."""
-    from projects.marketmind.ui.shadow_status_card import ShadowStatusCard
+    from marketmind.ui.shadow_status_card import ShadowStatusCard
 
     card = ShadowStatusCard(MagicMock())
     card.display_shadow(sample_shadow_data)
@@ -82,7 +82,7 @@ def test_status_card_clear_clears_all_fields(mock_ctk, sample_shadow_data):
 
 def test_status_card_tier_color_mapping(mock_ctk):
     """Tier to color mapping should return correct hex codes."""
-    from projects.marketmind.ui.shadow_status_card import ShadowStatusCard
+    from marketmind.ui.shadow_status_card import ShadowStatusCard
 
     card = ShadowStatusCard(MagicMock())
 
@@ -96,7 +96,7 @@ def test_status_card_tier_color_mapping(mock_ctk):
 
 def test_status_card_handles_missing_keys(mock_ctk):
     """Card should not crash when optional keys are missing from shadow_data."""
-    from projects.marketmind.ui.shadow_status_card import ShadowStatusCard
+    from marketmind.ui.shadow_status_card import ShadowStatusCard
 
     card = ShadowStatusCard(MagicMock())
     minimal_data = {

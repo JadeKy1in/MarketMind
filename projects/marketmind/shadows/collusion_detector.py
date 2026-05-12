@@ -1,4 +1,4 @@
-"""Collusion Detector -- detects when shadows move in lockstep.
+﻿"""Collusion Detector -- detects when shadows move in lockstep.
 
 Detects:
 - >=80% agreement for 3 consecutive days -> FLAG (binomial test P~4.4e-5)
@@ -12,9 +12,9 @@ import logging
 import math
 from statistics import mean
 
-from projects.marketmind.shadows.shadow_state import CollusionFlag
-from projects.marketmind.config.settings import ShadowSettings
-from projects.marketmind.shadows.shadow_agent import ShadowVote
+from marketmind.shadows.shadow_state import CollusionFlag
+from marketmind.config.settings import ShadowSettings
+from marketmind.shadows.shadow_agent import ShadowVote
 
 logger = logging.getLogger("marketmind.shadows.collusion_detector")
 

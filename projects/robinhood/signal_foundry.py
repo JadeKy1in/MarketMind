@@ -1,22 +1,34 @@
 #!/usr/bin/env python3
 """
-signal_foundry.py - Layer 4 CLI Main Entrypoint (Task 3.5)
+signal_foundry.py — DEPRECATED (Phase A, 2026-05-09)
 
-Command center of the SkillFoundry pipeline. Orchestrates sequential execution
-across all four layers:
+This entry point has been superseded by src/main.py.  Please use:
 
-  Layer 1 (Data):  account_reader, market_fetcher, sentiment_collector, macro_calendar
-  Layer 2 (Analysis): fundamental_engine, technical_engine, event_engine, sentiment_engine
-  Layer 3 (Resonance): resonance_aggregator, capital_manager, pro_model_deep_dive
-  Layer 4 (Output): output_formatter, deepseek_client
+    python src/main.py --mode strict --ticker AAPL
+    python src/main.py --mode strict --ticker AAPL --mock --verbose
 
-Usage:
-    python signal_foundry.py --ticker AAPL
-    python signal_foundry.py --ticker AAPL --mock
-    python signal_foundry.py --ticker AAPL --mock --dry-run
-    python signal_foundry.py --ticker AAPL --output report.md
-    python signal_foundry.py --ticker AAPL --resonance-only   # skip pro model
+All new development targets src/main.py exclusively.
 """
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+# Redirect to the new entry point
+_PROJECT_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(_PROJECT_ROOT))
+
+if __name__ == "__main__":
+    print(
+        "signal_foundry.py is DEPRECATED. Use src/main.py instead:\n"
+        "  python src/main.py --mode strict --ticker AAPL\n"
+        "  python src/main.py --mode strict --ticker AAPL --mock --verbose",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+# === LEGACY CODE BELOW — kept for reference only, NOT maintained ===
 
 from __future__ import annotations
 

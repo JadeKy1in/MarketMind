@@ -21,8 +21,12 @@ class RateLimitError(Exception):
         super().__init__(f"Rate limited. Retry after {retry_after}s")
 
 
+KEY_ROTATE_THRESHOLD = 5  # Preemptively rotate when remaining below this
+SHARED_POOL_WARNED = False
+
+
 class KeyRotator:
-    """Thread-safe API key rotation with asyncio.Lock."""
+    """API key rotation with asyncio.Lock and per-key quota tracking."""
 
     def __init__(self, keys: list[str]):
         if not keys:
@@ -30,14 +34,42 @@ class KeyRotator:
         self._keys = keys
         self._idx = 0
         self._lock = asyncio.Lock()
+        self._remaining: dict[int, int | None] = {i: None for i in range(len(keys))}
 
     def current(self) -> str:
         return self._keys[self._idx]
+
+    def update_remaining(self, remaining: int | None) -> None:
+        """Update quota remaining for the current key from response headers."""
+        self._remaining[self._idx] = remaining
+
+    def current_remaining(self) -> int | None:
+        return self._remaining[self._idx]
+
+    def key_status(self) -> dict:
+        """Return per-key quota status for monitoring."""
+        status = {}
+        for i, key in enumerate(self._keys):
+            suffix = key[-6:] if len(key) > 6 else "***"
+            status[f"key_{i}_{suffix}"] = {
+                "in_use": i == self._idx,
+                "remaining": self._remaining.get(i),
+            }
+        # Detect shared quota pool
+        non_none = [v for v in self._remaining.values() if v is not None]
+        if len(non_none) >= 2 and len(set(non_none)) == 1:
+            status["_shared_pool_warning"] = True
+        return status
 
     async def rotate(self) -> str:
         async with self._lock:
             self._idx = (self._idx + 1) % len(self._keys)
             return self._keys[self._idx]
+
+    def needs_rotation(self) -> bool:
+        """Check if current key should be preemptively rotated."""
+        rem = self._remaining.get(self._idx)
+        return rem is not None and rem < KEY_ROTATE_THRESHOLD
 
     def __len__(self) -> int:
         return len(self._keys)
@@ -93,6 +125,15 @@ class DeepSeekGateway:
             retry_after = int(resp.headers.get("Retry-After", 5))
             raise RateLimitError(retry_after)
         resp.raise_for_status()
+
+        # Track per-key quota from response headers (preserve previous if missing)
+        remaining_str = resp.headers.get("x-ratelimit-remaining")
+        if remaining_str is not None:
+            try:
+                self.key_rotator.update_remaining(int(remaining_str))
+            except (ValueError, TypeError):
+                pass
+
         data = resp.json()
         return {
             "content": data["choices"][0]["message"]["content"],
@@ -128,10 +169,21 @@ async def get_budget() -> TokenBudget:
 
 
 def get_budget_report() -> dict:
-    """Return current token budget status for monitoring. Safe to call any time."""
+    """Return current token budget and key status for monitoring."""
     if _budget is None:
         return {"status": "not_initialized"}
-    return _budget.report()
+    report = _budget.report()
+    if _gateway is not None:
+        report["key_status"] = _gateway.key_rotator.key_status()
+        # Log shared-pool warning once per session
+        global SHARED_POOL_WARNED
+        if report["key_status"].get("_shared_pool_warning") and not SHARED_POOL_WARNED:
+            SHARED_POOL_WARNED = True
+            logger.warning(
+                "All API keys appear to share one quota pool — "
+                "rotation provides resilience against key expiration but not quota expansion."
+            )
+    return report
 
 
 async def get_gateway() -> DeepSeekGateway:
@@ -195,8 +247,14 @@ async def _call_with_retry(
     max_tokens: int,
     reasoning_effort: str,
 ) -> dict[str, Any]:
-    """Call LLM with one retry on 429 (key rotation)."""
+    """Call LLM with one retry on 429 and preemptive key rotation."""
     budget = await get_budget()
+
+    # Preemptive rotation if current key is near quota limit
+    if gw.key_rotator.needs_rotation() and len(gw.key_rotator) > 1:
+        await gw.key_rotator.rotate()
+        logger.debug("Preemptive key rotation (remaining quota low)")
+
     try:
         return await gw._call(
             model, system_prompt, user_prompt, temperature, max_tokens, reasoning_effort

@@ -1,10 +1,10 @@
-"""Shared fixtures for shadow ecosystem tests."""
+﻿"""Shared fixtures for shadow ecosystem tests."""
 import pytest
 import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock
 
-from projects.marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
+from marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
 
 
 @pytest.fixture

@@ -49,7 +49,7 @@ class ReportData:
         total_portfolio_value: 总市值
         n_simulations: Monte Carlo 模拟路径数
     """
-    title: str = "Cline OS Command Center — 投资决策报告"
+    title: str = "SignalFoundry Terminal — 投资决策报告"
     generated_at: str = field(default_factory=lambda: (
         datetime.datetime.now(datetime.timezone.utc).strftime(
             "%Y-%m-%dT%H:%M:%S.%f"
@@ -540,10 +540,10 @@ class Reporter:
     def _build_disclaimer() -> str:
         return (
             "## 免责声明\n\n"
-            "*本报告由 Cline OS Command Center V2.0 自动生成，仅供决策参考，"
+            "*本报告由 SignalFoundry Terminal 自动生成，仅供决策参考，"
             "不构成投资建议。投资有风险，入市需谨慎。*\n\n"
             "---\n\n"
-            "*© Cline OS Command Center V2.0 — 报告引擎 v1.0*"
+            "*© SignalFoundry Terminal — 报告引擎 v1.0*"
         )
 
     # ============================================================

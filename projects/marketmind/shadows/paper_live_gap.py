@@ -236,7 +236,25 @@ class PaperLiveGapManager:
         own_pnls = [t.pnl_pct for t in trades
                      if t.ticker == ticker and t.pnl_pct is not None]
         if len(own_pnls) < 10:
-            # Cold start — insufficient data
+            # Cold start: use domain peer CV as Bayesian prior if available
+            config = self.state_db.get_shadow(shadow_id)
+            domain = config.domain if config else None
+            if domain:
+                peer_pnls = self.state_db.get_pnl_by_domain(domain)
+                if peer_pnls and len(peer_pnls) >= 3:
+                    import statistics
+                    peer_mean = statistics.mean(peer_pnls)
+                    peer_std = statistics.stdev(peer_pnls) if len(peer_pnls) > 1 else 0.0
+                    peer_cv = peer_std / abs(peer_mean) if abs(peer_mean) > 0.001 else 2.0
+                    peer_cv_clamped = max(0.0, min(peer_cv, 2.0))
+                    peer_target = floor + (peer_cv_clamped / 2.0) * (default - floor)
+                    new_rate = current_rate + factor * (peer_target - current_rate)
+                    new_rate = max(floor, min(default, new_rate))
+                    self._discount_rates[shadow_id] = new_rate
+                    logger.debug("Shadow %s ticker=%s cold-start discount: %.3f -> %.3f (peer CV=%.3f, peers=%d)",
+                                  shadow_id, ticker, current_rate, new_rate, peer_cv, len(peer_pnls))
+                    self._save_state(shadow_id)
+                    return new_rate
             return current_rate if current_rate != default else default
 
         import statistics

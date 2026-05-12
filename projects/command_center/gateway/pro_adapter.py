@@ -7,11 +7,11 @@ pro_adapter.py — Sprint 1: Pro 模型适配器 (DeepSeek V4 Pro)
 接口抽象化，使得适配器可被 Mock 替换（测试和离线模式支持）。
 
 SPARC:
-  Specification: V2.0 蓝图 §三-3 Pro/Flash Adapter Interface
-  Pseudocode: chat() → httpx.AsyncClient POST → parse response
+  Specification: V2.0 蓝图 S3-3 Pro/Flash Adapter Interface
+  Pseudocode: chat() -> httpx.AsyncClient POST -> parse response
   Architecture: ABC 基类 + Concrete ProAdapter。ABC 与 FlashAdapter 共享
-  Refinement: 使用 Safe Timeout Pattern（explicit Promise<T> 模式）
-  Completion: test 覆盖率 ≥ 90%
+  Refinement: 使用 Safe Timeout Pattern (explicit Promise<T> 模式)
+  Completion: test 覆盖率 >= 90%
 """
 
 from __future__ import annotations
@@ -206,7 +206,7 @@ class ProAdapter(LLMAdapter):
 
         if self._mock_mode:
             logger.warning(
-                "ProAdapter in MOCK mode — no DEEPSEEK_API_KEY set. "
+                "ProAdapter in MOCK mode - no DEEPSEEK_API_KEY set. "
                 "Set the environment variable for real API calls."
             )
         else:
@@ -215,6 +215,22 @@ class ProAdapter(LLMAdapter):
                 self._config.model,
                 self._config.endpoint,
             )
+
+    # ============================================================
+    # 公开状态查询
+    # ============================================================
+
+    @property
+    def is_mock(self) -> bool:
+        """适配器是否运行在 Mock 模式。"""
+        return self._mock_mode
+
+    @property
+    def status_label(self) -> str:
+        """适配器状态标签（用于 UI 展示）。"""
+        if self._mock_mode:
+            return "Mock (离线模拟)"
+        return f"Real ({self._config.model})"
 
     async def _ensure_client(self) -> httpx.AsyncClient:
         """懒初始化 httpx 客户端。"""
@@ -334,7 +350,7 @@ class ProAdapter(LLMAdapter):
             logger.error("ProAdapter stream: HTTP %s", e.response.status_code)
 
     def estimate_tokens(self, text: str) -> int:
-        """粗略预估 token 数量（每 4 字符 ≈ 1 token）。"""
+        """粗略预估 token 数量（每 4 字符 approx 1 token）。"""
         return len(text) // 4
 
     # ============================================================
@@ -370,10 +386,11 @@ class ProAdapter(LLMAdapter):
         """Mock 模式下的回复生成。"""
         last_msg = messages[-1]["content"] if messages else ""
         return (
-            f"🤖 [Pro Mock] 收到您的信息：\"{last_msg[:80]}...\"\n\n"
+            "[Pro Mock] 收到您的信息: "
+            f'"{last_msg[:80]}..."\n\n'
             "这是一条来自 Mock Pro 模型的自动回复。\n"
             "设置 DEEPSEEK_API_KEY 环境变量后可切换到真实模型。\n\n"
-            "从您的输入中，我注意到几个值得深入讨论的方向：\n"
+            "从您的输入中，我注意到几个值得深入讨论的方向:\n"
             "1. 市场环境与当前仓位的匹配度\n"
             "2. 潜在风险和下行保护策略\n"
             "3. 下一步的战术调整建议\n\n"

@@ -1,4 +1,4 @@
-"""Challenger Engine — 3-stage elimination buffer, secret challenger creation, paired t-test comparison.
+﻿"""Challenger Engine — 3-stage elimination buffer, secret challenger creation, paired t-test comparison.
 
 Stage 1 (WARNING): 2 consecutive evaluation periods in bottom 20%
 Stage 2 (CHALLENGER): 3 periods → secret challenger shadow created (invisible to rankings)
@@ -13,10 +13,10 @@ from datetime import datetime, timezone
 
 from scipy import stats
 
-from projects.marketmind.shadows.shadow_state import (
+from marketmind.shadows.shadow_state import (
     ShadowStateDB, ShadowConfig, DailySnapshot
 )
-from projects.marketmind.config.settings import ShadowSettings
+from marketmind.config.settings import ShadowSettings
 
 logger = logging.getLogger("marketmind.shadows.challenger_engine")
 

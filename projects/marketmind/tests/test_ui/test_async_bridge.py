@@ -1,4 +1,4 @@
-"""Tests for async_bridge — daemon-thread asyncio + tkinter bridge."""
+﻿"""Tests for async_bridge — daemon-thread asyncio + tkinter bridge."""
 import time
 import asyncio
 import pytest
@@ -22,7 +22,7 @@ def fake_root():
 
 @pytest.fixture
 def bridge(fake_root):
-    from projects.marketmind.ui.async_bridge import AsyncBridge
+    from marketmind.ui.async_bridge import AsyncBridge
     b = AsyncBridge(fake_root)
     b.start()
     yield b

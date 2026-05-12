@@ -1,362 +1,247 @@
 """
-pro_model_deep_dive.py - Layer 3 Pro Model Deep Dive / Final Brain (Task 3.3)
+pro_model_deep_dive.py - Layer 3 Pro Model Deep Dive / Final Brain
 
 Orchestrates the final LLM call to DeepSeek, packing all four engine outputs
-plus the resonance result into a structured "action directive" that forces a
-thousand-word-level deep research report.
-
-Key design:
-  1. Merges resonance_aggregator output + capital_manager output + raw engine details.
-  2. Builds a system prompt that forces strict JSON output with an exhaustive
-     "deep_research" section (no 200-400 word limit; target 1000+ words).
-  3. NEVER calls the actual DeepSeek API in this module; only constructs the
-     prompt payload. The caller decides whether to dispatch.
-  4. Implements Output Format Enforcement: the expected JSON schema is defined
-     as a Pydantic-style dict spec, validated by the caller if needed.
+plus the resonance result into a structured action directive.
 """
 
 from __future__ import annotations
-
 import json
 from typing import Any
 
 from src.account_reader import AccountState, read_account_state
 from src.capital_manager import compute_full_portfolio, compute_position_sizing
 from src.resonance_aggregator import compute_resonance
+from src.lateral_proxy import PROXY_REFERENCE_PROMPT
 
-# ---------------------------------------------------------------------------
-# Output JSON Schema Specification
-# ---------------------------------------------------------------------------
+
+def _lateral_proxy_section() -> str:
+    return PROXY_REFERENCE_PROMPT
+
 
 OUTPUT_SCHEMA_SPEC: dict[str, Any] = {
     "type": "object",
-    "required": [
-        "executive_summary",
-        "trading_decision",
-        "position_management",
-        "deep_research",
-        "risk_assessment",
-        "action_plan",
-    ],
+    "required": ["executive_summary", "trading_decision", "position_management",
+                 "deep_research", "risk_assessment", "action_plan"],
     "properties": {
         "executive_summary": {
             "type": "object",
             "required": ["signal", "weighted_score", "conviction_level",
                          "override_available", "one_liner"],
-            "properties": {
-                "signal": {"type": "string", "enum": ["STRONG_BUY", "BUY",
-                                                       "SELL", "HOLD", "WAIT"]},
-                "weighted_score": {"type": "number"},
-                "conviction_level": {"type": "string",
-                                     "enum": ["HIGH", "MEDIUM", "LOW"]},
-                "override_available": {"type": "boolean"},
-                "one_liner": {"type": "string"},
-            },
         },
         "trading_decision": {
             "type": "object",
             "required": ["action", "max_shares", "max_notional",
                          "cash_reserve_kept", "ticker", "price_target_suggestion"],
-            "properties": {
-                "action": {"type": "string", "enum": ["BUY", "SELL", "HOLD",
-                                                       "AVOID"]},
-                "max_shares": {"type": "integer"},
-                "max_notional": {"type": "number"},
-                "cash_reserve_kept": {"type": "number"},
-                "ticker": {"type": "string"},
-                "price_target_suggestion": {"type": "string"},
-            },
         },
         "position_management": {
             "type": "object",
-            "required": ["position_adjustment", "exit_suggestion",
-                         "portfolio_impact"],
-            "properties": {
-                "position_adjustment": {"type": "object"},
-                "exit_suggestion": {"type": "object"},
-                "portfolio_impact": {"type": "string"},
-            },
+            "required": ["position_adjustment", "exit_suggestion", "portfolio_impact"],
         },
-        "deep_research": {
-            "type": "object",
-            "required": ["macro_analysis", "fundamental_deep_dive",
-                         "technical_context", "sentiment_landscape",
-                         "event_risk_calendar", "scenario_analysis",
-                         "final_reasoning"],
-            "properties": {
-                "macro_analysis": {"type": "string",
-                                   "description": "500+ words macro context"},
-                "fundamental_deep_dive": {"type": "string",
-                    "description": "300+ words on fundamentals"},
-                "technical_context": {"type": "string",
-                    "description": "300+ words technical analysis"},
-                "sentiment_landscape": {"type": "string",
-                    "description": "200+ words sentiment context"},
-                "event_risk_calendar": {"type": "string",
-                    "description": "200+ words on upcoming events"},
-                "scenario_analysis": {"type": "string",
-                    "description": ("Bull/bear/base scenarios, each "
-                                    "150+ words")},
-                "final_reasoning": {"type": "string",
-                    "description": "500+ words final synthesis"},
-            },
-        },
-        "risk_assessment": {
-            "type": "object",
-            "required": ["max_loss_scenario", "stop_loss_level",
-                         "correlation_risk", "liquidity_concern",
-                         "overall_risk_rating"],
-            "properties": {
-                "max_loss_scenario": {"type": "string"},
-                "stop_loss_level": {"type": "string"},
-                "correlation_risk": {"type": "string"},
-                "liquidity_concern": {"type": "string"},
-                "overall_risk_rating": {"type": "string",
-                    "enum": ["LOW", "MEDIUM", "HIGH", "EXTREME"]},
-            },
-        },
-        "action_plan": {
-            "type": "object",
-            "required": ["immediate_steps", "contingency_triggers",
-                         "review_timeline"],
-            "properties": {
-                "immediate_steps": {"type": "array", "items": {"type": "string"}},
-                "contingency_triggers": {"type": "array",
-                    "items": {"type": "string"}},
-                "review_timeline": {"type": "string"},
-            },
-        },
+        "deep_research": {"type": "object", "required": ["macro_analysis", "final_reasoning"]},
+        "risk_assessment": {"type": "object", "required": ["overall_risk_rating", "stop_loss_level"]},
+        "action_plan": {"type": "object", "required": ["immediate_steps", "contingency_triggers"]},
     },
 }
 
 
-# ---------------------------------------------------------------------------
-# System Prompt Construction
-# ---------------------------------------------------------------------------
-
-def _build_dimension_summary(
-    resonance_result: dict[str, Any],
-) -> str:
-    """Build a compact text summary of the four dimensions for the prompt.
-
-    Args:
-        resonance_result: Output from compute_resonance().
-
-    Returns:
-        Formatted string.
-    """
+def _build_dimension_summary(resonance_result: dict[str, Any]) -> str:
     ds = resonance_result.get("dimension_scores", {})
     dd = resonance_result.get("dimension_details", {})
-
     lines: list[str] = [
         "=== Four-Dimensional Resonance Analysis ===",
         f"Weighted Score: {resonance_result.get('weighted_score', 'N/A')}/100",
         f"Resonance Signal: {resonance_result.get('signal', 'N/A')}",
-        f"Soft Veto Triggered: {resonance_result.get('soft_veto_triggered', False)}",
-        f"Override Available: {resonance_result.get('override_available', False)}",
-        f"Resonance Condition Met: {resonance_result.get('resonance_condition_met', False)}",
-        "",
+        f"Soft Veto: {resonance_result.get('soft_veto_triggered', False)}",
         "[Dimension Scores]",
     ]
     for dim in ("fundamental", "technical", "event_driven", "sentiment"):
         score = ds.get(dim, "N/A")
-        reasoning = dd.get(dim, {}).get("reasoning", "No reasoning provided.")
-        lines.append(f"  {dim}: {score}/100")
-        lines.append(f"    Reasoning: {reasoning}")
+        reasoning = dd.get(dim, {}).get("reasoning", "No reasoning.")[:150]
+        lines.append(f"  {dim}: {score}/100 — {reasoning}")
     return "\n".join(lines)
 
 
-def _build_capital_summary(
-    capital_result: dict[str, Any] | None,
-) -> str:
-    """Build a text summary of capital management for the prompt.
-
-    Args:
-        capital_result: Output from compute_full_portfolio() or None.
-
-    Returns:
-        Formatted string.
-    """
+def _build_capital_summary(capital_result: dict[str, Any] | None) -> str:
     if capital_result is None:
         return "[Capital Management: Not computed]"
-
     lines: list[str] = [
-        "=== Capital Management Analysis ===",
-        f"Overall Strategy: {capital_result.get('overall_strategy', 'N/A')}",
-        "",
-        "[Cash Summary]",
+        "=== Capital Management ===",
+        f"Strategy: {capital_result.get('overall_strategy', 'N/A')}",
     ]
-    cash = capital_result.get("cash_summary", {})
-    lines.append(f"  Total Cash: ${cash.get('total_cash', 0):.2f}")
-    lines.append(f"  Reserved Cash: ${cash.get('reserved_cash', 0):.2f}")
-    lines.append(f"  Deployable Cash: ${cash.get('deployable_cash', 0):.2f}")
-
-    pos_actions = capital_result.get("position_actions", [])
-    if pos_actions:
-        lines.append("")
-        lines.append("[Position Actions]")
-        for pa in pos_actions:
-            lines.append(
-                f"  {pa.get('ticker', '?')}: {pa.get('action', '?')} "
-                f"| Max Shares: {pa.get('max_shares', 0)} "
-                f"| Notional: ${pa.get('max_notional', 0):.2f}"
-            )
-            if pa.get("exit_suggestion"):
-                es = pa["exit_suggestion"]
-                lines.append(
-                    f"    Exit: {es.get('type', '?')} - "
-                    f"{es.get('shares_to_sell', 0)} shares "
-                    f"(${es.get('estimated_notional', 0):.2f})"
-                )
-            if pa.get("position_adjustment"):
-                adj = pa["position_adjustment"]
-                lines.append(f"    Adjustment: {adj.get('type', '?')}")
-
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
+def _build_price_reference(account_state, ticker):
+    """Build a current price reference table to prevent price hallucinations."""
+    lines = ["=== CURRENT MARKET PRICES (DO NOT INVENT PRICES) ==="]
+    lines.append("You MUST use these prices. If a ticker is not listed below,")
+    lines.append("state 'price unknown' rather than inventing a price.")
+    lines.append("")
+    if account_state:
+        lines.append("| Ticker | Current Price |")
+        lines.append("|--------|---------------|")
+        for pos in account_state.get("positions", []):
+            ticker = pos.get("ticker", "?")
+            price = pos.get("current_price", "N/A")
+            lines.append(f"| {ticker} | ${price} |")
+        lines.append("")
+    # Add key reference tickers
+    # Try to fetch live prices for key reference tickers
+    try:
+        from src.market_fetcher import MarketFetcher
+        fetcher = MarketFetcher()
+        ref_tickers = ["IAU", "SLV", "SPY", "GLD", "USO", "WEAT", "MOS", "NVDA"]
+        live_prices = {}
+        for t in ref_tickers:
+            try:
+                df = fetcher.fetch_daily(t, period="5d", force_refresh=False)
+                if df is not None and len(df) > 0:
+                    price = float(df.iloc[-1]["Close"] if "Close" in df.columns else df.iloc[-1]["close"])
+                    live_prices[t] = round(price, 2)
+            except Exception:
+                pass
+        if live_prices:
+            lines.append("| Ticker | Live Price |")
+            lines.append("|--------|-----------|")
+            for t, p in sorted(live_prices.items()):
+                lines.append(f"| {t} | ${p} |")
+            lines.append("")
+    except Exception:
+        pass
+    lines.append("Key reference assets (as of today's data):")
+    lines.append("- IAU (iShares Gold Trust): check yfinance for latest")
+    lines.append("- SLV (iShares Silver Trust): check yfinance for latest")
+    lines.append("- SPY (S&P 500 ETF): check yfinance for latest")
+    lines.append("- GLD (SPDR Gold Trust): check yfinance for latest")
+    lines.append("- USO (US Oil Fund): check yfinance for latest")
+    lines.append("- WEAT (Wheat ETF): check yfinance for latest")
+    lines.append("")
+    lines.append("CRITICAL: Never fabricate a price. If you don't know the exact current")
+    lines.append("price, express triggers as percentages from current (e.g., 'buy if 5% above current').")
+    return "\n".join(lines)
+
 
 def build_pro_model_prompt(
     resonance_result: dict[str, Any],
     capital_result: dict[str, Any] | None = None,
     ticker: str = "AAPL",
     account_state: dict[str, Any] | None = None,
+    scout_context: str = "",
+    review_context: str = "",
+    flash_context: str = "",
 ) -> dict[str, str]:
-    """Build the complete prompt bundle for the Pro Model (DeepSeek).
-
-    This function NEVER dispatches to an external API. It only constructs
-    the prompt payload. The caller decides whether to actually send it.
-
-    Args:
-        resonance_result: Output from compute_resonance().
-        capital_result: Output from compute_full_portfolio(), or None.
-        ticker: The target ticker symbol.
-        account_state: Raw account state dict (from account_state.json)
-            for additional context.
-
-    Returns:
-        Dict with 'system_prompt' and 'user_prompt' keys.
-    """
-    # Build the dimension summary
     dim_summary = _build_dimension_summary(resonance_result)
     cap_summary = _build_capital_summary(capital_result)
+    override_flag = resonance_result.get("override_available", False)
 
-    # Account state summary
+    lateral_instructions = ""
+    try:
+        lateral_instructions = _lateral_proxy_section()
+    except Exception:
+        pass
+
     acct_lines: list[str] = ["=== Account State ==="]
     if account_state:
         acct_lines.append(f"  Cash: ${account_state.get('cash', 0):.2f}")
-        acct_lines.append(
-            f"  Buying Power: ${account_state.get('buying_power', 0):.2f}"
-        )
         for pos in account_state.get("positions", []):
-            acct_lines.append(
-                f"  {pos.get('ticker', '?')}: {pos.get('shares', 0)} shares "
-                f"@ ${pos.get('avg_cost', 0):.2f} avg "
-                f"(current: ${pos.get('current_price', 0):.2f})"
-            )
-    else:
-        acct_lines.append("  Not provided.")
+            acct_lines.append(f"  {pos.get('ticker', '?')}: {pos.get('shares', 0)} shares")
     acct_summary = "\n".join(acct_lines)
 
-    override_flag = resonance_result.get("override_available", False)
+    system_prompt = (
+        "You are a Senior Global Macro Strategist producing institutional-grade "
+        "investment research.\n\n"
+        "## CRITICAL: Multi-Asset Mandatory Coverage\n"
+        "You MUST analyze ALL of the following asset classes. Do NOT skip any:\n"
+        "- **Gold & Precious Metals**: Central bank buying, real rates, safe-haven flows, ETF flows\n"
+        "- **Crude Oil & Energy**: OPEC+ decisions, supply disruptions, shipping routes (Hormuz, Suez)\n"
+        "- **Agricultural Commodities**: Fertilizer costs, weather patterns, planting data, crop prices\n"
+        "- **AI/Tech Supply Chain**: Semiconductor equipment, foundry capacity, HBM memory, cloud capex\n"
+        "- **Crypto & Digital Assets**: ETF flows, regulatory shifts, institutional adoption signals\n"
+        "- **Fixed Income & Credit**: Yield curve shape, corporate spreads, default risk, duration positioning\n"
+        "For EACH class, explain WHY macro signals point in a specific direction. "
+        "Show the full causal chain from macro event → asset impact. "
+        "Do NOT cherry-pick one stock. Justify EVERY stock choice with macro logic.\n\n"
+        "## Investment Philosophy\n"
+        "1. **Low Risk, High Reward Priority**: Focus on asymmetric opportunities "
+        "where downside is limited and upside is substantial. Cash is a valid position.\n"
+        "2. **Multi-Horizon Flexibility**: intraday/swing (0.5-5 days), tactical (1-2 weeks), strategic (1 month+).\n"
+        "3. **Cash Preservation**: Always maintain adequate cash reserve (10-30%). "
+        "The purpose of cash is to be ready when truly asymmetric opportunities appear. "
+        "Do NOT get trapped in positions when great opportunities require capital.\n"
+        "4. **Every Trade Must Have A Timeline**: Specify exactly WHEN to enter "
+        "(buy signal/price trigger), WHEN to exit (target price or date), and "
+        "WHAT would invalidate the thesis. Example: 'Sell IAU between May 12-15 "
+        "before Wolsh's first speech as Fed Chair.'\n"
+        "5. **Don't Fight The Market**: As a non-professional tool relying on "
+        "public information, we will always lag institutional investors. "
+        "Accept this constraint. Do not try to outsmart the market on timing — "
+        "focus on direction and magnitude.\n"
+        "6. **Concrete Triggers Only**: Every recommendation must include specific "
+        "observable conditions: 'Buy NVDA if it closes above $950 on above-average volume.' "
+        "NOT 'Buy on weakness.'\n\n"
+        "## Core Directive\n"
+        "You are an institutional-grade trading decision engine producing deep "
+        "research reports.\n\n"
+        "## Required Analysis Depth\n"
+        "### 1. Asset Chain Penetration\n"
+        "Trace the FULL vertical chain.\n"
+        "### 2. Historical Context\n"
+        "Reference specific historical episodes with dates.\n"
+        "### 3. Mosaic Theory Reasoning\n"
+        "Piece together fragmented public signals.\n"
+        "### 4. Lateral Data Proxy\n"
+        f"{lateral_instructions}\n"
+        "## Output Format\n"
+        "Respond with a single JSON object.\n"
+        "NO markdown wrapping. Output PURE JSON.\n\n"
+        "## Writing Style\n"
+        "- Narrative essay, not bullet points.\n"
+        "- Concrete data, specific dates, named sources.\n"
+        "- Show reasoning chains.\n"
+        "- Output in Chinese. Professional financial terminology.\n\n"
+        "## Critical Constraints\n"
+        "1. Every recommendation: specific price level + timeline.\n"
+        "2. Every ticker: Robinhood-tradable.\n"
+        "3. No generic language.\n"
+        "4. Cash reserve: never below 10%.\n"
+        "5. Override Protocol: "
+        + ("Override IS available." if override_flag
+           else "Override NOT available.")
+    )
 
-    # ===================================================================
-    # SYSTEM PROMPT
-    # ===================================================================
-    system_prompt = f"""You are a Senior Portfolio Strategist operating within the SkillFoundry Four-Dimensional Resonance Framework. Your role is to synthesize the outputs of four independent analysis engines into a single, decisive action directive. You MUST produce a response that is rigorous, data-driven, and actionable.
+    # Build current price reference table to prevent hallucinations
+    price_table = _build_price_reference(account_state, ticker)
+    
+    user_prompt = (
+        f"## Analysis Context for {ticker}\n\n"
+        f"{price_table}\n\n"
+        f"### Engine Outputs\n{dim_summary}\n\n"
+        f"### Capital Management\n{cap_summary}\n\n"
+        f"### Account State\n{acct_summary}\n\n"
+        f"### Scout Discovery\n{scout_context or 'No scout data.'}\n\n"
+        f"### Cognitive Review\n{review_context or 'No prior review.'}\n\n"
+        f"### Flash Preprocessing\n{flash_context or 'No Flash preprocessing.'}\n\n"
+        "### Instructions\n"
+        "Synthesize everything above into a deep research report. "
+        "Follow depth requirements: asset chain penetration, historical context, "
+        "mosaic theory, lateral proxies, specific price levels. "
+        "Chinese output, narrative essay style. PURE JSON output.\n"
+        "Begin now. Output ONLY valid JSON."
+    )
 
-## Core Directive
-You are NOT a chatbot. You are an institutional-grade trading decision engine. Every word in your output must serve the single purpose of making or justifying a capital allocation decision for {ticker}.
-
-## Input Data Integrity
-You will receive:
-  1. Four-Dimensional Resonance Scores (fundamental, technical, event_driven, sentiment)
-  2. Capital Management Sizing (cash allocation, position limits, exit suggestions)
-  3. Account State (cash balance, buying power, current holdings)
-
-## Output Format Enforcement
-You MUST respond with a single JSON object. NO markdown wrapping, NO code fences, NO explanatory text outside the JSON.
-
-The JSON schema is:
-{json.dumps(OUTPUT_SCHEMA_SPEC, indent=2)}
-
-## Critical Constraints
-
-1. **Override Protocol**: {"Override IS available (soft veto was triggered). You MAY override the soft veto if your deep analysis provides strong justification. If overriding, explain explicitly in deep_research.final_reasoning." if override_flag else "Override is NOT available. The resonance condition was met cleanly. Proceed with the signal as computed."}
-
-2. **Deep Research Mandate**: The `deep_research` field must contain a MINIMUM of 1500 words across its subfields. This is NOT optional. Each subfield (macro_analysis, fundamental_deep_dive, technical_context, sentiment_landscape, event_risk_calendar, scenario_analysis, final_reasoning) must be substantive. Target: 300-500 words per subfield except scenario_analysis (min 450 words across three scenarios) and final_reasoning (min 500 words synthesis).
-
-3. **Specificity Requirement**: Price targets must be specific numbers, not ranges like "somewhere between X and Y". If you are uncertain, state the single best estimate and explain the confidence interval separately.
-
-4. **No Generic Language**: Avoid phrases like "may potentially" or "could possibly." State your conviction. Use "will," "is expected to," "the data indicates," or be explicit: "uncertainty is high because..."
-
-5. **Position Management Precision**: If an exit suggestion is present, specify EXACTLY how many shares to sell at what price trigger. If a position adjustment is present, specify whether to average up, down, or maintain.
-
-6. **Risk Quantification**: The risk_assessment section must include a specific stop-loss price level (not a percentage alone). The max_loss_scenario must quantify worst-case dollar loss.
-"""
-
-    # ===================================================================
-    # USER PROMPT
-    # ===================================================================
-    user_prompt = f"""## Analysis Context for {ticker}
-
-### Engine Outputs
-{dim_summary}
-
-### Capital Management
-{cap_summary}
-
-### Account State
-{acct_summary}
-
-### Instructions
-Produce the JSON decision directive as specified in the system prompt. Your response will be parsed automatically and fed into downstream execution systems. Any deviation from the JSON schema will cause a parse failure.
-
-Remember:
-- {override_flag} = Override flag status (True means soft veto was triggered and you may override if justified)
-- Deep research section must be 1500+ words total
-- Price targets must be specific
-- Risk assessment must include quantified stop-loss price level
-- Action plan must contain at least 3 immediate steps and 2 contingency triggers
-
-Begin your response now. Output ONLY valid JSON.
-"""
-
-    return {
-        "system_prompt": system_prompt,
-        "user_prompt": user_prompt,
-    }
+    return {"system_prompt": system_prompt, "user_prompt": user_prompt}
 
 
 def format_pro_model_response(raw_response: str) -> dict[str, Any]:
-    """Parse and validate the raw response from a Pro Model call.
-
-    Strips any markdown code fences, then attempts JSON parse.
-
-    Args:
-        raw_response: The raw text returned by the LLM.
-
-    Returns:
-        Parsed dict if valid JSON, or error dict on parse failure.
-    """
     cleaned = raw_response.strip()
-
-    # Strip code fences if present
     if cleaned.startswith("```"):
-        # Remove opening fence
-        first_newline = cleaned.find("\n")
-        if first_newline != -1:
-            cleaned = cleaned[first_newline + 1 :]
-        # Remove closing fence
+        first_nl = cleaned.find("\n")
+        if first_nl != -1:
+            cleaned = cleaned[first_nl + 1:]
         if cleaned.endswith("```"):
             cleaned = cleaned[:-3].strip()
-
     try:
-        parsed = json.loads(cleaned)
+        return json.loads(cleaned)
     except json.JSONDecodeError as e:
         return {"error": f"JSON parse failed: {e}", "raw": raw_response}
-
-    return parsed

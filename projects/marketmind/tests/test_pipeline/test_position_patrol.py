@@ -1,12 +1,12 @@
-"""Tests for position patrol."""
+﻿"""Tests for position patrol."""
 import json
 from unittest.mock import AsyncMock, patch
 import pytest
-from projects.marketmind.pipeline.position_patrol import (
+from marketmind.pipeline.position_patrol import (
     PositionStatus, patrol_positions, _parse_patrol_response,
     _apply_protection_veto,
 )
-from projects.marketmind.config.settings import MarketMindConfig
+from marketmind.config.settings import MarketMindConfig
 
 
 @pytest.fixture
@@ -119,7 +119,7 @@ async def test_patrol_positions_returns_results_with_input_join():
     positions = [
         {"ticker": "SPY", "entry_price": 500, "current_price": 510, "entry_date": "2026-04-01"},
     ]
-    with patch("projects.marketmind.pipeline.position_patrol.chat_pro", AsyncMock(return_value={"content": mock_content})):
+    with patch("marketmind.pipeline.position_patrol.chat_pro", AsyncMock(return_value={"content": mock_content})):
         results, error = await patrol_positions(positions)
         assert error is None
         assert len(results) == 1
@@ -132,7 +132,7 @@ async def test_patrol_positions_returns_results_with_input_join():
 
 @pytest.mark.asyncio
 async def test_patrol_positions_returns_error_on_failure():
-    with patch("projects.marketmind.pipeline.position_patrol.chat_pro", side_effect=RuntimeError("API down")):
+    with patch("marketmind.pipeline.position_patrol.chat_pro", side_effect=RuntimeError("API down")):
         results, error = await patrol_positions([{"ticker": "SPY", "entry_price": 500}])
         assert results == []
         assert error is not None

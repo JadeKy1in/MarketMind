@@ -77,13 +77,35 @@ class ChatPanel(ctk.CTkFrame):
             self._tq.shutdown()
         logger.info("ChatPanel shutdown")
 
-    def _welcome(self):
-        self._disp.configure(state="normal")
-        self._disp.insert("end",
-            "Cline OS Command Center V2.0\n四象限人机协同界面\n\n"
+    def _welcome(self, adapter_status: str = "检测中..."):
+        self._welcome_text = (
+            "SignalFoundry Terminal\n宏观投资决策终端\n\n"
             "欢迎使用！在下方输入框发送消息即可开始对话。\n"
             "支持附件: 图片(Flash Vision)、PDF、MD、TXT\n"
-            "当前模式: Mock (本地模拟)\n\n", _TAG_S)
+            f"当前模式: {adapter_status}\n\n"
+        )
+        self._disp.configure(state="normal")
+        self._disp.insert("end", self._welcome_text, _TAG_S)
+        self._disp.see("end")
+        self._disp.configure(state="disabled")
+
+    def set_mode_status(self, status: str) -> None:
+        """Update the mode display. Called after adapter detection."""
+        self._welcome_text = self._welcome_text.replace(
+            "当前模式: 检测中...", f"当前模式: {status}"
+        )
+        self._disp.configure(state="normal")
+        self._disp.delete("1.0", "end")
+        self._disp.insert("end", self._welcome_text, _TAG_S)
+        self._disp.configure(state="disabled")
+
+    def update_adapter_status(self, pro_label: str, flash_label: str) -> None:
+        """更新适配器状态显示（由 MainWindow 在启动后调用）。"""
+        status = f"Pro: {pro_label} / Flash: {flash_label}"
+        self._disp.configure(state="normal")
+        ts = time.strftime("%H:%M:%S")
+        self._disp.insert("end", f"\n[{ts}] 适配器状态\n", _TAG_T)
+        self._disp.insert("end", f"{status}\n\n", _TAG_S)
         self._disp.see("end")
         self._disp.configure(state="disabled")
 

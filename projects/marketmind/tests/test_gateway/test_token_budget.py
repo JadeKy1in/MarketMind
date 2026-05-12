@@ -1,5 +1,5 @@
-"""Tests for TokenBudget manager."""
-from projects.marketmind.gateway.token_budget import TokenBudget, Priority
+﻿"""Tests for TokenBudget manager."""
+from marketmind.gateway.token_budget import TokenBudget, Priority
 
 
 def test_reserve_pro_deducts_correctly():

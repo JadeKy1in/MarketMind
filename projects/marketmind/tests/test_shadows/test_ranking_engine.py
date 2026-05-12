@@ -1,11 +1,11 @@
-"""Tests for RankingEngine -- pure Python ranking computation."""
+﻿"""Tests for RankingEngine -- pure Python ranking computation."""
 import math
 import pytest
 import random
-from projects.marketmind.shadows.ranking_engine import (
+from marketmind.shadows.ranking_engine import (
     RankingEngine, ShadowPerformance, RankingResult
 )
-from projects.marketmind.config.settings import ShadowSettings
+from marketmind.config.settings import ShadowSettings
 
 
 @pytest.fixture

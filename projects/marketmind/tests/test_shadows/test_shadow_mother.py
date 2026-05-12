@@ -1,13 +1,13 @@
-"""Tests for Shadow Mother — event detection and temp shadow lifecycle."""
+﻿"""Tests for Shadow Mother — event detection and temp shadow lifecycle."""
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from projects.marketmind.shadows.shadow_mother import (
+from marketmind.shadows.shadow_mother import (
     ShadowMother, DetectedEvent, TempShadowSpec, ShadowOrchestrationResult
 )
-from projects.marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
-from projects.marketmind.shadows.shadow_agent import ShadowAgent
-from projects.marketmind.config.settings import ShadowSettings
+from marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
+from marketmind.shadows.shadow_agent import ShadowAgent
+from marketmind.config.settings import ShadowSettings
 
 
 @pytest.fixture
@@ -146,3 +146,99 @@ def test_check_destruction_non_temp_never_destroyed(mother, populated_db):
 def test_get_event_status(mother):
     status = mother.get_event_status("nonexistent")
     assert status == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_detect_cb_shock_from_news(temp_shadow_db):
+    """从新闻中检测央行冲击事件"""
+    from marketmind.shadows.shadow_mother import ShadowMother
+    settings = ShadowSettings()
+    mother = ShadowMother(settings, temp_shadow_db)
+
+    news = [
+        {"headline": "Fed surprise rate hike of 50bp shocks markets"},
+        {"headline": "ECB unexpected rate cut decision announced"},
+    ]
+    events = mother.detect_cb_shock(news)
+    assert len(events) > 0
+    # 所有事件应有event_id和event_type
+    for e in events:
+        assert e.event_id
+        assert e.event_type == "cb_shock"
+
+
+@pytest.mark.asyncio
+async def test_detect_geopolitical_from_news(temp_shadow_db):
+    """从新闻中检测地缘政治事件"""
+    from marketmind.shadows.shadow_mother import ShadowMother
+    settings = ShadowSettings()
+    mother = ShadowMother(settings, temp_shadow_db)
+
+    news = [
+        {"headline": "Military conflict and geopolitical crisis as tensions rise in region"},
+    ]
+    events = mother.detect_geopolitical(news)
+    assert len(events) > 0
+    assert events[0].event_type == "geopolitical"
+
+
+def test_detect_vol_shock_from_market_data(temp_shadow_db):
+    """从市场数据中检测波动率冲击（zscore >= 5）"""
+    from marketmind.shadows.shadow_mother import ShadowMother
+    settings = ShadowSettings()
+    mother = ShadowMother(settings, temp_shadow_db)
+
+    # zscore >= 5 应触发检测
+    events = mother.detect_vol_shock({"AAPL": 6.5, "SPY": 2.0, "TSLA": 7.2})
+    assert len(events) == 2  # AAPL + TSLA
+    tickers = [e.affected_assets[0] for e in events]
+    assert "AAPL" in tickers
+    assert "TSLA" in tickers
+    assert "SPY" not in tickers  # 2.0 < 5
+
+
+def test_detect_vol_shock_empty_data(temp_shadow_db):
+    """空 market_data 不产生事件"""
+    from marketmind.shadows.shadow_mother import ShadowMother
+    settings = ShadowSettings()
+    mother = ShadowMother(settings, temp_shadow_db)
+
+    events = mother.detect_vol_shock(None)
+    assert len(events) == 0
+
+    events = mother.detect_vol_shock({})
+    assert len(events) == 0
+
+
+@pytest.mark.asyncio
+async def test_scan_events_deduplicates(temp_shadow_db):
+    """scan_events 去除重复标题"""
+    from marketmind.shadows.shadow_mother import ShadowMother
+    settings = ShadowSettings()
+    mother = ShadowMother(settings, temp_shadow_db)
+
+    news = [
+        {"headline": "Fed surprise rate hike of 50bp shocks markets"},
+        {"headline": "Fed surprise rate hike of 50bp shocks markets"},  # 重复
+    ]
+    events = await mother.scan_events(news)
+    # 每种类型只应有一个事件
+    assert len(events) <= 2  # 最多 cb_shock ×1
+
+
+def test_prioritize_events_limits_count(temp_shadow_db):
+    """prioritize_events 限制返回数量"""
+    from marketmind.shadows.shadow_mother import ShadowMother, DetectedEvent
+    settings = ShadowSettings()
+    mother = ShadowMother(settings, temp_shadow_db)
+
+    events = [
+        DetectedEvent(event_id=f"evt_{i}", event_type="cb_shock",
+                      description=f"Event {i}", affected_assets=["SPY"],
+                      impact_score=0.1 * i, detected_at="2026-05-11T00:00:00Z")
+        for i in range(10)
+    ]
+    limited = mother.prioritize_events(events, max_shadows=3)
+    assert len(limited) == 3
+    # 应该是 impact_score 最高的3个
+    assert limited[0].impact_score == 0.9

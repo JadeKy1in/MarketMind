@@ -1,6 +1,6 @@
-"""Tests for progress tracker and indeterminate spinner."""
+﻿"""Tests for progress tracker and indeterminate spinner."""
 import time
-from projects.marketmind.ui.progress import ProgressTracker, IndeterminateSpinner
+from marketmind.ui.progress import ProgressTracker, IndeterminateSpinner
 
 
 def test_progress_tracker_initial_state():

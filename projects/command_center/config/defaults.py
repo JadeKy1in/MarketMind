@@ -22,8 +22,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     # ── API ──
     "api": {
         "deepseek_api_key_encoded": "",         # XOR + base64 混淆
-        "deepseek_pro_model": "deepseek-chat",
-        "deepseek_flash_model": "deepseek-chat",
+        "deepseek_pro_model": "deepseek-v4-pro",
+        "deepseek_flash_model": "deepseek-v4-flash",
     },
 
     # ── 调仓优化器 ──

@@ -1,4 +1,4 @@
-"""Position patrol: daily health check, buy archive comparison, cash reframing."""
+﻿"""Position patrol: daily health check, buy archive comparison, cash reframing."""
 from __future__ import annotations
 import json
 import logging
@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
-from projects.marketmind.gateway.async_client import chat_pro
-from projects.marketmind.config.settings import MarketMindConfig
+from marketmind.gateway.async_client import chat_pro
+from marketmind.config.settings import MarketMindConfig
 
 logger = logging.getLogger("marketmind.pipeline.position_patrol")
 
@@ -96,7 +96,7 @@ async def patrol_positions(positions: list[dict], config: MarketMindConfig | Non
 
 def _parse_patrol_response(content: str, positions: list[dict], config: MarketMindConfig) -> list[PositionStatus]:
     """Parse LLM response and join with input positions for ground-truth fields."""
-    from projects.marketmind.gateway.response_parser import extract_json
+    from marketmind.gateway.response_parser import extract_json
 
     # Build lookup from input positions
     pos_lookup: dict[str, dict] = {}

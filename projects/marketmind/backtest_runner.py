@@ -35,11 +35,21 @@ class BacktestRunner:
         consensus_returns: list[float] = []
 
         current = start
+        days_with_votes = 0
+        total_days = 0
+        empty_dates: list[str] = []
+
         while current <= end:
             date_str = current.strftime("%Y-%m-%d")
             next_str = (current + timedelta(days=1)).strftime("%Y-%m-%d")
+            total_days += 1
 
             day_result = self._evaluate_day(date_str, next_str)
+            if day_result["total"] > 0:
+                days_with_votes += 1
+            else:
+                empty_dates.append(date_str)
+
             hits += day_result["hits"]
             total += day_result["total"]
             for tkr, counts in day_result["by_ticker"].items():
@@ -56,6 +66,7 @@ class BacktestRunner:
 
         hit_rate = hits / total if total > 0 else 0.0
         sharpe = self._compute_sharpe(consensus_returns)
+        coverage_pct = round(days_with_votes / total_days * 100, 1) if total_days > 0 else 0.0
 
         # Per-ticker hit rates
         ticker_rates = {}
@@ -79,6 +90,7 @@ class BacktestRunner:
             "total_predictions": total,
             "hit_rate": round(hit_rate, 4),
             "sharpe_of_consensus": round(sharpe, 4),
+            "coverage_pct": coverage_pct,
             "by_ticker": ticker_rates,
             "confusion_matrix": {
                 "long_precision": round(long_precision, 4),
@@ -87,6 +99,15 @@ class BacktestRunner:
                 "short_predictions": short_total,
             },
         }
+
+        if coverage_pct < 100.0:
+            report["warning"] = (
+                f"{days_with_votes} of {total_days} dates have vote data "
+                f"({coverage_pct}% coverage). Results may be incomplete. "
+                "Vote persistence was added in Phase D (2026-05-12)."
+            )
+            if empty_dates:
+                report["empty_dates_sample"] = empty_dates[:10]
 
         if output_path:
             with open(output_path, "w", encoding="utf-8") as f:

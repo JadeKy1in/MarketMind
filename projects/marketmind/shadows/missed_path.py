@@ -1,13 +1,13 @@
-"""Missed path tracking — counterfactual path shadows, survivorship bias warning."""
+﻿"""Missed path tracking — counterfactual path shadows, survivorship bias warning."""
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from projects.marketmind.shadows.shadow_state import ShadowStateDB
-from projects.marketmind.shadows.shadow_agent import ShadowAgent, ShadowAnalysisOutput
-from projects.marketmind.config.settings import ShadowSettings
+from marketmind.shadows.shadow_state import ShadowStateDB
+from marketmind.shadows.shadow_agent import ShadowAgent, ShadowAnalysisOutput
+from marketmind.config.settings import ShadowSettings
 
 logger = logging.getLogger("marketmind.shadows.missed_path")
 

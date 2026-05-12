@@ -1,4 +1,4 @@
-"""Flash preprocessor: batch signal extraction, classification, denoising."""
+﻿"""Flash preprocessor: batch signal extraction, classification, denoising."""
 from __future__ import annotations
 import json
 import logging
@@ -6,8 +6,8 @@ import logging
 logger = logging.getLogger("marketmind.pipeline.flash")
 from dataclasses import dataclass, field
 
-from projects.marketmind.gateway.async_client import chat_batch_flash, chat_flash
-from projects.marketmind.pipeline.scout import NewsItem
+from marketmind.gateway.async_client import chat_batch_flash, chat_flash
+from marketmind.pipeline.scout import NewsItem
 
 
 @dataclass

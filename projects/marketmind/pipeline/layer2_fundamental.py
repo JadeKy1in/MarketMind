@@ -1,4 +1,4 @@
-"""Layer 2: Fundamental analysis — 5-tier progressive: macro → asset → sector → factor → ticker."""
+﻿"""Layer 2: Fundamental analysis — 5-tier progressive: macro → asset → sector → factor → ticker."""
 from __future__ import annotations
 import json
 import logging
@@ -6,8 +6,8 @@ import logging
 logger = logging.getLogger("marketmind.pipeline.layer2")
 from dataclasses import dataclass, field
 
-from projects.marketmind.gateway.async_client import chat_pro
-from projects.marketmind.pipeline.layer1_narrative import Layer1Result
+from marketmind.gateway.async_client import chat_pro
+from marketmind.pipeline.layer1_narrative import Layer1Result
 
 
 @dataclass

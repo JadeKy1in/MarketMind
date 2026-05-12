@@ -1,11 +1,11 @@
-"""Tests for fact checker — claim extraction + Pro verification + report synthesis."""
+﻿"""Tests for fact checker — claim extraction + Pro verification + report synthesis."""
 import json
 from unittest.mock import AsyncMock, patch
 import pytest
-from projects.marketmind.integrity.fact_checker import (
+from marketmind.integrity.fact_checker import (
     FactCheckReport, run_fact_check, _parse_fact_check_response,
 )
-from projects.marketmind.integrity.watchdog import NumericClaim
+from marketmind.integrity.watchdog import NumericClaim
 
 
 def test_parse_fact_check_response_extracts_claims():
@@ -74,7 +74,7 @@ async def test_run_fact_check_with_claims():
         "summary": "All claims verified",
         "critical_alerts": [],
     }
-    with patch("projects.marketmind.integrity.fact_checker.chat_pro",
+    with patch("marketmind.integrity.fact_checker.chat_pro",
                AsyncMock(return_value={"content": json.dumps(mock_response)})):
         report = await run_fact_check(content, "builder", "s1")
         assert report.total_claims == 3
@@ -84,7 +84,7 @@ async def test_run_fact_check_with_claims():
 @pytest.mark.asyncio
 async def test_run_fact_check_handles_api_failure():
     content = "SPY is at $520.50."
-    with patch("projects.marketmind.integrity.fact_checker.chat_pro",
+    with patch("marketmind.integrity.fact_checker.chat_pro",
                side_effect=RuntimeError("API error")):
         report = await run_fact_check(content, "builder", "s2")
         assert report.total_claims == 1

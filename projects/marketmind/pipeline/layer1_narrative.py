@@ -1,4 +1,4 @@
-"""Layer 1: Narrative analysis — event grading, 2x2 matrix, price-in, cascade, sentiment."""
+﻿"""Layer 1: Narrative analysis — event grading, 2x2 matrix, price-in, cascade, sentiment."""
 from __future__ import annotations
 import json
 import logging
@@ -7,9 +7,9 @@ from typing import Any
 
 logger = logging.getLogger("marketmind.pipeline.layer1")
 
-from projects.marketmind.gateway.async_client import chat_pro
-from projects.marketmind.pipeline.flash_preprocessor import FlashSignal
-from projects.marketmind.pipeline.scout import NewsItem
+from marketmind.gateway.async_client import chat_pro
+from marketmind.pipeline.flash_preprocessor import FlashSignal
+from marketmind.pipeline.scout import NewsItem
 
 
 @dataclass

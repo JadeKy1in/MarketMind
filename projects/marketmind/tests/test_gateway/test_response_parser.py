@@ -1,7 +1,7 @@
-"""Tests for shared response_parser — JSON extraction from LLM output."""
+﻿"""Tests for shared response_parser — JSON extraction from LLM output."""
 import json
 import pytest
-from projects.marketmind.gateway.response_parser import extract_json, _strip_fences
+from marketmind.gateway.response_parser import extract_json, _strip_fences
 
 
 def test_extract_json_clean_object():

@@ -1,4 +1,4 @@
-"""Layer 3: Technical review — 3-light review + entry/exit calculation (INDEPENDENT from L1-L2)."""
+﻿"""Layer 3: Technical review — 3-light review + entry/exit calculation (INDEPENDENT from L1-L2)."""
 from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
@@ -7,7 +7,7 @@ logger = logging.getLogger("marketmind.pipeline.layer3")
 import json
 from typing import Any
 
-from projects.marketmind.gateway.async_client import chat_pro
+from marketmind.gateway.async_client import chat_pro
 
 
 @dataclass

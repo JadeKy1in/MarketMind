@@ -1,6 +1,6 @@
-"""Tests for Fabrication Watchdog M1-M4."""
+﻿"""Tests for Fabrication Watchdog M1-M4."""
 import pytest
-from projects.marketmind.integrity.watchdog import (
+from marketmind.integrity.watchdog import (
     NumericClaim, AgentIntegrityScore, inject_m1_protocol,
     extract_claims_m2, update_score_m4, evaluate_strikes,
     STRIKE_CONSEQUENCES, M2_PATTERNS,
@@ -105,7 +105,7 @@ def test_normalize_value_strips_commas():
 
 @pytest.mark.asyncio
 async def test_verify_price_m3_sets_none_on_no_ticker():
-    from projects.marketmind.integrity.watchdog import verify_claim_m3
+    from marketmind.integrity.watchdog import verify_claim_m3
     claim = NumericClaim(value="1234", claim_type="price", context="mystery asset at $1234",
                          source_agent="test", session_id="s1", timestamp="2026-01-01")
     result = await verify_claim_m3(claim)
@@ -114,7 +114,7 @@ async def test_verify_price_m3_sets_none_on_no_ticker():
 
 @pytest.mark.asyncio
 async def test_verify_ratio_m3_sets_unverifiable_on_no_ticker():
-    from projects.marketmind.integrity.watchdog import verify_claim_m3
+    from marketmind.integrity.watchdog import verify_claim_m3
     claim = NumericClaim(value="25.0", claim_type="ratio", context="Unknown P/E ratio 25.0",
                          source_agent="test", session_id="s1", timestamp="2026-01-01")
     result = await verify_claim_m3(claim)

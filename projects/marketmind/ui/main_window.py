@@ -1,17 +1,17 @@
-"""Main MarketMind GUI — multi-panel layout with sidebar navigation and 3-gate flow."""
+﻿"""Main MarketMind GUI — multi-panel layout with sidebar navigation and 3-gate flow."""
 from __future__ import annotations
 from typing import Any
 import customtkinter as ctk
 
-from projects.marketmind.ui.async_bridge import AsyncBridge
-from projects.marketmind.ui.gate_panel import GatePanel, DirectionBriefCard
-from projects.marketmind.ui.dashboard_panel import DashboardPanel
-from projects.marketmind.ui.decision_card import DecisionCard
-from projects.marketmind.ui.position_card import PositionCard
-from projects.marketmind.ui.pause_screen import PauseScreen
-from projects.marketmind.ui.progress import ProgressTracker
-from projects.marketmind.ui.shadow_panel import ShadowPanel
-from projects.marketmind.ui.shadow_status_card import ShadowStatusCard
+from marketmind.ui.async_bridge import AsyncBridge
+from marketmind.ui.gate_panel import GatePanel, DirectionBriefCard
+from marketmind.ui.dashboard_panel import DashboardPanel
+from marketmind.ui.decision_card import DecisionCard
+from marketmind.ui.position_card import PositionCard
+from marketmind.ui.pause_screen import PauseScreen
+from marketmind.ui.progress import ProgressTracker
+from marketmind.ui.shadow_panel import ShadowPanel
+from marketmind.ui.shadow_status_card import ShadowStatusCard
 
 
 class MainWindow(ctk.CTk):
@@ -184,7 +184,7 @@ class MainWindow(ctk.CTk):
         self._set_progress(0.15, "Gate 1: Direction analysis")
 
         async def _pipeline():
-            from projects.marketmind.gateway.async_client import init_gateway, chat_pro
+            from marketmind.gateway.async_client import init_gateway, chat_pro
             init_gateway(self.config.deepseek_api_key, self.config.deepseek_base_url)
 
             # TODO: wire full pipeline — Scout → Flash → Layer1 → Gate 1 briefs

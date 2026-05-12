@@ -1,8 +1,8 @@
-"""Tests for Layer 3 technical review."""
+﻿"""Tests for Layer 3 technical review."""
 import json
 from unittest.mock import AsyncMock, patch
 import pytest
-from projects.marketmind.pipeline.layer3_technical import (
+from marketmind.pipeline.layer3_technical import (
     Layer3Result, Layer3BatchResult, analyze_layer3,
     _parse_layer3_response, _format_market_data,
 )
@@ -96,7 +96,7 @@ async def test_analyze_layer3_returns_results():
         "recommendation": "enter"
     }])
     mock_result = {"content": mock_content, "usage": {}}
-    with patch("projects.marketmind.pipeline.layer3_technical.chat_pro", AsyncMock(return_value=mock_result)):
+    with patch("marketmind.pipeline.layer3_technical.chat_pro", AsyncMock(return_value=mock_result)):
         result = await analyze_layer3(["SPY", "AAPL"], {"VIX": 18})
         assert isinstance(result, Layer3BatchResult)
         assert len(result.results) >= 1

@@ -8,3 +8,6 @@ pytest-asyncio>=0.24.0
 
 # --- UI (Sprint 2) ---
 customtkinter>=5.2.0
+
+# --- Environment (Sprint 5) ---
+python-dotenv>=1.0.0

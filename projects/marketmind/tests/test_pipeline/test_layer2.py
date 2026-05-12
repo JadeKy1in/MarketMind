@@ -1,11 +1,11 @@
-"""Tests for Layer 2 fundamental analysis engine."""
+﻿"""Tests for Layer 2 fundamental analysis engine."""
 import json
 from unittest.mock import AsyncMock, patch
 import pytest
-from projects.marketmind.pipeline.layer2_fundamental import (
+from marketmind.pipeline.layer2_fundamental import (
     Layer2Result, analyze_layer2, _parse_layer2_response, _build_context,
 )
-from projects.marketmind.pipeline.layer1_narrative import Layer1Result
+from marketmind.pipeline.layer1_narrative import Layer1Result
 
 
 def _sample_l1():
@@ -79,7 +79,7 @@ async def test_analyze_layer2_returns_result():
         "sector_momentum": {}, "factor_scores": {}, "ticker_candidates": ["AAPL"],
         "ticker_weights": {"AAPL": 0.5}, "tier_challenges": [],
     })
-    with patch("projects.marketmind.pipeline.layer2_fundamental.chat_pro",
+    with patch("marketmind.pipeline.layer2_fundamental.chat_pro",
                AsyncMock(return_value={"content": mock_content})):
         result = await analyze_layer2(l1)
         assert result.macro_quadrant == "expansion"
@@ -89,7 +89,7 @@ async def test_analyze_layer2_returns_result():
 @pytest.mark.asyncio
 async def test_analyze_layer2_returns_defaults_on_failure():
     l1 = _sample_l1()
-    with patch("projects.marketmind.pipeline.layer2_fundamental.chat_pro",
+    with patch("marketmind.pipeline.layer2_fundamental.chat_pro",
                side_effect=RuntimeError("API error")):
         result = await analyze_layer2(l1)
         assert result.macro_quadrant == "contraction"

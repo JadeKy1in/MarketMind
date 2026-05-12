@@ -12,11 +12,11 @@ Flash 适用任务：
   - 文本格式化/关键词提取
 
 SPARC:
-  Specification: V2.0 蓝图 §三-3 Pro/Flash Adapter Interface
+  Specification: V2.0 蓝图 S3-3 Pro/Flash Adapter Interface
   Pseudocode: 复用 ProAdapter 结构，仅配置不同
   Architecture: FlashAdapter 继承 LLMAdapter（共享 ABC）
   Refinement: Flash 的 mock 回复更短，模拟高吞吐特性
-  Completion: 测试覆盖率 ≥ 90%
+  Completion: 测试覆盖率 >= 90%
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ class FlashAdapter(LLMAdapter):
 
         if self._mock_mode:
             logger.warning(
-                "FlashAdapter in MOCK mode — no DEEPSEEK_API_KEY set."
+                "FlashAdapter in MOCK mode - no DEEPSEEK_API_KEY set."
             )
         else:
             logger.info(
@@ -64,6 +64,22 @@ class FlashAdapter(LLMAdapter):
                 self._config.model,
                 self._config.endpoint,
             )
+
+    # ============================================================
+    # 公开状态查询
+    # ============================================================
+
+    @property
+    def is_mock(self) -> bool:
+        """适配器是否运行在 Mock 模式。"""
+        return self._mock_mode
+
+    @property
+    def status_label(self) -> str:
+        """适配器状态标签（用于 UI 展示）。"""
+        if self._mock_mode:
+            return "Mock (离线模拟)"
+        return f"Real ({self._config.model})"
 
     async def _ensure_client(self) -> httpx.AsyncClient:
         """懒初始化 httpx 客户端（与 ProAdapter 共享模式）。"""
@@ -200,12 +216,12 @@ class FlashAdapter(LLMAdapter):
         """Mock 模式的回复。Flash 回复更短、结构更机械。"""
         last_msg = messages[-1]["content"] if messages else ""
         return (
-            f"⚡ [Flash Mock] 任务收到。\n"
+            "[Flash Mock] 任务收到。\n"
             f"输入摘要: {last_msg[:60]}...\n\n"
-            f"提取结果(JSON):\n"
+            "提取结果(JSON):\n"
             f'{{"status": "mock", "input_length": {len(last_msg)}, '
             f'"type": "auto_detected", "confidence": 0.85}}\n\n'
-            f"设置 DEEPSEEK_API_KEY 可切换真实 Flash 模型。"
+            "设置 DEEPSEEK_API_KEY 可切换真实 Flash 模型。"
         )
 
     async def close(self) -> None:

@@ -1,4 +1,4 @@
-"""Tests for ShadowPanel — ranking dashboard UI widget."""
+﻿"""Tests for ShadowPanel — ranking dashboard UI widget."""
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -81,7 +81,7 @@ def test_shadow_panel_renders_rankings(mock_bridge, sample_rankings):
     """Panel should create row widgets for all 15 shadows without error."""
     mocks = _start_ctk_mocks()
     try:
-        from projects.marketmind.ui.shadow_panel import ShadowPanel
+        from marketmind.ui.shadow_panel import ShadowPanel
         panel = ShadowPanel(MagicMock(), mock_bridge)
         panel.load_rankings(sample_rankings)
 
@@ -95,7 +95,7 @@ def test_shadow_panel_sort_order(mock_bridge, sample_rankings):
     """Rank 1 (highest composite) should appear first in the list."""
     mocks = _start_ctk_mocks()
     try:
-        from projects.marketmind.ui.shadow_panel import ShadowPanel
+        from marketmind.ui.shadow_panel import ShadowPanel
         panel = ShadowPanel(MagicMock(), mock_bridge)
         panel.load_rankings(sample_rankings)
 
@@ -110,7 +110,7 @@ def test_shadow_panel_click_callback(mock_bridge, sample_rankings):
     """Clicking a shadow row should fire the registered callback with shadow_id."""
     mocks = _start_ctk_mocks()
     try:
-        from projects.marketmind.ui.shadow_panel import ShadowPanel
+        from marketmind.ui.shadow_panel import ShadowPanel
 
         callback_calls = []
 
@@ -137,7 +137,7 @@ def test_shadow_panel_clear_removes_rankings(mock_bridge, sample_rankings):
     """Clearing the panel should remove all stored rankings."""
     mocks = _start_ctk_mocks()
     try:
-        from projects.marketmind.ui.shadow_panel import ShadowPanel
+        from marketmind.ui.shadow_panel import ShadowPanel
         panel = ShadowPanel(MagicMock(), mock_bridge)
         panel.load_rankings(sample_rankings)
         assert len(panel._rankings) == 15

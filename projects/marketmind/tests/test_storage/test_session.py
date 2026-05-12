@@ -1,7 +1,7 @@
-"""Tests for session checkpoint persistence."""
+﻿"""Tests for session checkpoint persistence."""
 import tempfile
 from pathlib import Path
-from projects.marketmind.storage.session import (
+from marketmind.storage.session import (
     SessionState, SessionManager, GateCheckpoint,
 )
 

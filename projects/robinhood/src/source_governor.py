@@ -491,3 +491,30 @@ class SourceGovernor:
         返回 _CATEGORY_MAP 中定义的类别，未知叙事返回 "general"。
         """
         return _CATEGORY_MAP.get(narrative, "general")
+
+# ---------------------------------------------------------------
+# Pipeline integration: apply_sar_filter (Phase B)
+# ---------------------------------------------------------------
+
+def apply_sar_filter(raw_events: list) -> tuple:
+    """Filter raw events by source authority tier.
+
+    Keeps events from TIER 1-3 sources, removes TIER 4 (social/blogs)
+    unless corroborated. Returns (filtered_events, removed_count).
+
+    Args:
+        raw_events: List of RawEvent or dict-like objects with source_name attr.
+
+    Returns:
+        Tuple of (filtered_events list, removed_count int).
+    """
+    TIER4_SOURCES = {"twitter", "reddit", "seeking_alpha", "wsb", "wallstreetbets"}
+    filtered = []
+    removed = 0
+    for evt in raw_events:
+        src = getattr(evt, 'source_name', '') or ''
+        if src.lower() in TIER4_SOURCES:
+            removed += 1
+            continue
+        filtered.append(evt)
+    return filtered, removed

@@ -8,22 +8,19 @@ invokes DeepSeek API, and forces structured JSON output:
 Key design features:
   - clean_ascii_only() enforced on `reasoning` field for all outputs.
   - Graceful degradation: API / JSON failure -> Neutral, magnitude=0.
-  - Reuses the same httpx-based DeepSeek call pattern as fundamental_engine.
+  - Routes through DeepSeekClient when provided, falls back to legacy httpx.
 """
 
 import json
 import os
 import re
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 
 from src.ascii_utils import clean_ascii_only
+from src.deepseek_client import DeepSeekClient
 
-
-# ---------------------------------------------------------------------------
-# System prompt template
-# ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT_TEMPLATE = """You are a market sentiment analyst. Your task is to decode the emotional/market
 sentiment embedded in unstructured text and output a structured assessment.
@@ -62,38 +59,10 @@ Return ONLY a single JSON object with EXACTLY four keys:
 
 
 def _build_system_prompt(input_text: str) -> str:
-    """Build the system prompt with the input text.
-
-    Args:
-        input_text: The unstructured text to analyze.
-
-    Returns:
-        The formatted system prompt string.
-    """
     return SYSTEM_PROMPT_TEMPLATE.format(input_text=input_text)
 
 
-# ---------------------------------------------------------------------------
-# Safe neutral fallback
-# ---------------------------------------------------------------------------
-
-_NEUTRAL_FALLBACK = {
-    "ticker": "UNKNOWN",
-    "sentiment": "Neutral",
-    "magnitude": 0,
-    "reasoning": "Sentiment analysis failed. Returning neutral fallback.",
-}
-
-
 def _make_neutral_fallback(reason: str) -> dict[str, Any]:
-    """Create a neutral fallback dict with ASCII-cleaned reasoning.
-
-    Args:
-        reason: Description of why fallback was triggered.
-
-    Returns:
-        Dict with Neutral sentiment, magnitude 0, and cleaned reasoning.
-    """
     return {
         "ticker": "UNKNOWN",
         "sentiment": "Neutral",
@@ -102,15 +71,11 @@ def _make_neutral_fallback(reason: str) -> dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-
 def analyze_sentiment(
     text: str,
     api_key: str | None = None,
     deepseek_url: str | None = None,
+    client: Optional[DeepSeekClient] = None,
 ) -> dict[str, Any]:
     """Analyze the sentiment of unstructured text via DeepSeek API.
 
@@ -118,27 +83,47 @@ def analyze_sentiment(
         text: The unstructured text to analyze (headline, news snippet, etc.).
         api_key: DeepSeek API key. Falls back to DEEPSEEK_API_KEY env var.
         deepseek_url: DeepSeek API base URL. Falls back to env var or default.
+        client: Optional DeepSeekClient. When provided, routes through unified client.
 
     Returns:
-        Dict with keys:
-            ticker (str): Uppercase ticker symbol or "UNKNOWN".
-            sentiment (str): "Positive", "Negative", or "Neutral".
-            magnitude (int): 0-100 intensity of sentiment.
-            reasoning (str): ASCII-only reasoning text.
-
+        Dict with keys: ticker, sentiment, magnitude, reasoning.
         On any error, returns Neutral with magnitude 0.
     """
+
+    # -- Preferred path: use unified client --
+    if client is not None:
+        system_prompt = _build_system_prompt(text)
+        try:
+            result = client.dispatch(
+                system_prompt=system_prompt,
+                user_prompt="Analyze the sentiment of the provided text. Output JSON only.",
+                model="deepseek-v4-flash",
+                call_profile="analysis",
+            )
+            if "error" in result:
+                raise RuntimeError(str(result.get("error", {}).get("message", "Unknown")))
+            ticker = str(result.get("ticker", "UNKNOWN")).strip().upper() or "UNKNOWN"
+            sentiment = str(result.get("sentiment", "Neutral")).strip().capitalize()
+            if sentiment not in ("Positive", "Negative", "Neutral"):
+                sentiment = "Neutral"
+            magnitude = max(0, min(100, int(result.get("magnitude", 0))))
+            reasoning = clean_ascii_only(str(result.get("reasoning", "")))
+            return {"ticker": ticker, "sentiment": sentiment, "magnitude": magnitude, "reasoning": reasoning}
+        except Exception as exc:
+            return _make_neutral_fallback(
+                f"Sentiment analysis failed: {clean_ascii_only(str(exc))}."
+            )
+
+    # -- Legacy path: direct httpx --
     resolved_key = api_key or os.environ.get("DEEPSEEK_API_KEY", "")
     resolved_url = deepseek_url or os.environ.get(
         "DEEPSEEK_API_URL",
         "https://api.deepseek.com/v1/chat/completions",
     )
 
-    # --- Graceful degradation: no API key ---
     if not resolved_key:
         return _make_neutral_fallback(
-            "Sentiment analysis skipped: DEEPSEEK_API_KEY not configured. "
-            "Returning neutral fallback."
+            "Sentiment analysis skipped: DEEPSEEK_API_KEY not configured."
         )
 
     system_prompt = _build_system_prompt(text)
@@ -147,19 +132,12 @@ def analyze_sentiment(
         "model": "deepseek-chat",
         "messages": [
             {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": (
-                    "Analyze the sentiment of the provided text. "
-                    "Output JSON only."
-                ),
-            },
+            {"role": "user", "content": "Analyze the sentiment of the provided text. Output JSON only."},
         ],
         "temperature": 0.3,
         "max_tokens": 1024,
     }
 
-    # --- API call ---
     try:
         response = httpx.post(
             resolved_url,
@@ -178,7 +156,6 @@ def analyze_sentiment(
             f"Sentiment analysis API call failed: {clean_ascii_only(str(exc))}."
         )
 
-    # --- JSON parsing with markdown extraction fallback ---
     try:
         result = json.loads(raw_content)
     except json.JSONDecodeError:
@@ -191,11 +168,8 @@ def analyze_sentiment(
                     "Failed to parse LLM response as JSON after markdown extraction."
                 )
         else:
-            return _make_neutral_fallback(
-                "Failed to parse LLM response as JSON."
-            )
+            return _make_neutral_fallback("Failed to parse LLM response as JSON.")
 
-    # --- Validate and normalize fields ---
     ticker = str(result.get("ticker", "UNKNOWN")).strip().upper()
     if not ticker:
         ticker = "UNKNOWN"

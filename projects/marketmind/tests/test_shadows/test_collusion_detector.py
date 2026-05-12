@@ -1,12 +1,12 @@
-"""Tests for CollusionDetector -- agreement statistics, convergence vs herding discrimination, escalation pipeline."""
+﻿"""Tests for CollusionDetector -- agreement statistics, convergence vs herding discrimination, escalation pipeline."""
 import pytest
 from unittest.mock import MagicMock
 
-from projects.marketmind.shadows.shadow_state import CollusionFlag
-from projects.marketmind.config.settings import ShadowSettings
-from projects.marketmind.shadows.shadow_agent import ShadowVote
+from marketmind.shadows.shadow_state import CollusionFlag
+from marketmind.config.settings import ShadowSettings
+from marketmind.shadows.shadow_agent import ShadowVote
 # Module under test (will be created)
-from projects.marketmind.shadows.collusion_detector import CollusionDetector
+from marketmind.shadows.collusion_detector import CollusionDetector
 
 
 @pytest.fixture

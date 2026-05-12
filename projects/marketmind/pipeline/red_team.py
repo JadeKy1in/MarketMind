@@ -1,4 +1,4 @@
-"""Red Team: Adversarial challenge engine — structurally independent from main analysis."""
+﻿"""Red Team: Adversarial challenge engine — structurally independent from main analysis."""
 from __future__ import annotations
 import json
 import logging
@@ -6,7 +6,7 @@ import logging
 logger = logging.getLogger("marketmind.pipeline.red_team")
 from dataclasses import dataclass, field
 
-from projects.marketmind.gateway.async_client import chat_pro
+from marketmind.gateway.async_client import chat_pro
 
 
 @dataclass

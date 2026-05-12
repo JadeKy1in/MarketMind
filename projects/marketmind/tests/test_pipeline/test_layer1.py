@@ -1,12 +1,12 @@
-"""Tests for Layer 1 narrative analysis."""
+﻿"""Tests for Layer 1 narrative analysis."""
 import json
 from unittest.mock import AsyncMock, patch
 import pytest
-from projects.marketmind.pipeline.layer1_narrative import (
+from marketmind.pipeline.layer1_narrative import (
     Layer1Result, analyze_layer1, _parse_layer1_response, _format_signals,
 )
-from projects.marketmind.pipeline.flash_preprocessor import FlashSignal
-from projects.marketmind.pipeline.scout import NewsItem
+from marketmind.pipeline.flash_preprocessor import FlashSignal
+from marketmind.pipeline.scout import NewsItem
 
 
 def make_signal() -> FlashSignal:
@@ -72,7 +72,7 @@ async def test_analyze_layer1_returns_result():
         "narrative_summary": "Earnings beat driving rally."
     })
     mock_result = {"content": mock_content, "usage": {}}
-    with patch("projects.marketmind.pipeline.layer1_narrative.chat_pro", AsyncMock(return_value=mock_result)):
+    with patch("marketmind.pipeline.layer1_narrative.chat_pro", AsyncMock(return_value=mock_result)):
         result = await analyze_layer1([make_signal()], [make_item()])
         assert isinstance(result, Layer1Result)
         assert result.event_grade == "B"

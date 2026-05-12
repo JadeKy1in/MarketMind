@@ -19,7 +19,16 @@ import re
 import time
 from typing import Any, Dict, List, Literal, Optional, Union
 
-import httpx
+try:
+    import httpx
+    _HTTPX_AVAILABLE = True
+except ImportError:
+    try:
+        from src import httpx_stub as httpx
+        _HTTPX_AVAILABLE = True
+    except ImportError:
+        httpx = None  # type: ignore
+        _HTTPX_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -550,6 +559,14 @@ def dispatch_prompt(
         payload["frequency_penalty"] = frequency_penalty
 
     # ---- execute HTTP call ----
+    if not _HTTPX_AVAILABLE:
+        return _error_response(
+            "HTTPX_UNAVAILABLE",
+            "httpx library is not installed. Live API calls are disabled. Use mock=True for testing.",
+            retryable=False,
+            _start_time=start_time,
+        )
+
     try:
         logger.info(
             "Dispatching to %s | model=%s | temperature=%.2f | max_tokens=%d",
@@ -705,16 +722,134 @@ def _error_response(
 
 
 # ---------------------------------------------------------------------------
-# Convenience subclass for streaming (Phase 8+)
+# DeepSeekClient — class-based wrapper for pipeline integration
+# ---------------------------------------------------------------------------
+
+
+
+# ---------------------------------------------------------------------------
+# DeepSeekClient -- class-based wrapper for pipeline integration
+# ---------------------------------------------------------------------------
+
+
+class DeepSeekClient:
+    """Unified DeepSeek client for the strict-mode pipeline.
+
+    Thin class-based wrapper around dispatch_prompt(). Supports flash()
+    and pro() convenience methods for model-specific dispatch.
+    """
+
+    def __init__(self, api_key=None, deepseek_url=None):
+        self._api_key = api_key
+        self._deepseek_url = deepseek_url
+
+    def dispatch(self, system_prompt, user_prompt, *,
+                 model="deepseek-v4-flash", mock=False, ticker="UNKNOWN",
+                 call_profile=None, temperature=None, top_p=None,
+                 reasoning_effort=None, max_tokens=None,
+                 timeout_seconds=DEFAULT_TIMEOUT, disable_cot=False,
+                 response_schema=None):
+        return dispatch_prompt(
+            system_prompt=system_prompt, user_prompt=user_prompt,
+            mock=mock, ticker=ticker,
+            api_key=self._api_key, deepseek_url=self._deepseek_url,
+            model_name=model, call_profile=call_profile,
+            temperature=temperature, top_p=top_p,
+            reasoning_effort=reasoning_effort, max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds, disable_cot=disable_cot,
+            response_schema=response_schema,
+        )
+
+    chat_completion = dispatch
+
+    def flash(self, system_prompt, user_prompt, **kwargs):
+        kwargs.setdefault("model", "deepseek-v4-flash")
+        return self.dispatch(system_prompt=system_prompt, user_prompt=user_prompt, **kwargs)
+
+    def pro(self, system_prompt, user_prompt, **kwargs):
+        kwargs.setdefault("model", "deepseek-v4-pro")
+        kwargs.setdefault("reasoning_effort", "high")
+        return self.dispatch(system_prompt=system_prompt, user_prompt=user_prompt, **kwargs)
+
+
+# ---------------------------------------------------------------------------
+# AsyncDeepSeekClient -- streaming stub (Phase 8+)
 # ---------------------------------------------------------------------------
 
 class AsyncDeepSeekClient:
-    """Async wrapper for streaming / chunked responses (stub — Phase 8+)."""
+    """Async wrapper for streaming responses (stub -- Phase 8+)."""
 
-    async def dispatch_stream(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        **kwargs: Any,
-    ) -> Any:
+    async def async_dispatch(self, system_prompt, user_prompt, **kwargs):
         raise NotImplementedError("Streaming support is planned for Phase 8+")
+
+
+# ---------------------------------------------------------------------------
+# Smart Model Router (Phase Optimization)
+# ---------------------------------------------------------------------------
+
+ROUTING_RULES = {
+    # Data collection: always Flash
+    "scout_fetch": {"model": "deepseek-v4-flash", "profile": "analysis"},
+    "sentiment_classify": {"model": "deepseek-v4-flash", "profile": "analysis"},
+    "keyword_extract": {"model": "deepseek-v4-flash", "profile": "creative"},
+    "rss_parse": {"model": "deepseek-v4-flash", "profile": "analysis"},
+    "news_summarize": {"model": "deepseek-v4-flash", "profile": "creative"},
+    # Analysis: Pro when quality matters, Flash for fast scans
+    "fundamental_deep": {"model": "deepseek-v4-pro", "profile": "analysis"},
+    "event_adversarial": {"model": "deepseek-v4-pro", "profile": "reasoning"},
+    "red_team_challenge": {"model": "deepseek-v4-pro", "profile": "reasoning"},
+    "blue_team_defense": {"model": "deepseek-v4-pro", "profile": "analysis"},
+    "mosaic_reasoning": {"model": "deepseek-v4-pro", "profile": "reasoning"},
+    "reflexivity_analysis": {"model": "deepseek-v4-pro", "profile": "analysis"},
+    # Output: Pro for final report, Flash for formatting
+    "final_report": {"model": "deepseek-v4-pro", "profile": "analysis"},
+    "report_format": {"model": "deepseek-v4-flash", "profile": "creative"},
+    # Quick checks: always Flash
+    "spell_check": {"model": "deepseek-v4-flash", "profile": "creative"},
+    "ticker_validate": {"model": "deepseek-v4-flash", "profile": "analysis"},
+}
+
+
+def smart_dispatch(task_type: str, system_prompt: str, user_prompt: str,
+                   client: Optional[Any] = None, **kwargs) -> Dict[str, Any]:
+    """Route to the optimal model based on task type and complexity.
+
+    Follows the cost-optimized routing rules:
+      - Flash: data collection, simple classification, formatting (0.14/M input)
+      - Pro: deep analysis, adversarial reasoning, final reports (1.74/M input)
+
+    Args:
+        task_type: Key from ROUTING_RULES dict.
+        system_prompt: System prompt for the LLM.
+        user_prompt: User prompt for the LLM.
+        client: Optional DeepSeekClient instance.
+        **kwargs: Passed to dispatch_prompt.
+
+    Returns:
+        Dict with parsed response and cost metadata.
+    """
+    rule = ROUTING_RULES.get(task_type)
+    if rule is None:
+        # Unknown task type: use Pro conservatively
+        model = "deepseek-v4-pro"
+        profile = "analysis"
+    else:
+        model = rule["model"]
+        profile = rule["profile"]
+
+    if client is not None:
+        return client.dispatch(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=model,
+            call_profile=profile,
+            **kwargs,
+        )
+
+    return dispatch_prompt(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        model_name=model,
+        call_profile=profile,
+        **kwargs,
+    )

@@ -1,12 +1,12 @@
-"""Tests for Flash preprocessor."""
+﻿"""Tests for Flash preprocessor."""
 import json
 from unittest.mock import AsyncMock, patch
 import pytest
-from projects.marketmind.pipeline.flash_preprocessor import (
+from marketmind.pipeline.flash_preprocessor import (
     FlashSignal, preprocess_batch, preprocess_single,
     _parse_json_response, _build_headline_text, FLASH_SYSTEM_PROMPT,
 )
-from projects.marketmind.pipeline.scout import NewsItem
+from marketmind.pipeline.scout import NewsItem
 
 
 def make_item(idx: int, title: str) -> NewsItem:
@@ -116,7 +116,7 @@ async def test_preprocess_batch_returns_signals():
         "usage": {"total_tokens": 100},
         "latency_ms": 200,
     }
-    with patch("projects.marketmind.pipeline.flash_preprocessor.chat_flash", AsyncMock(return_value=mock_result)):
+    with patch("marketmind.pipeline.flash_preprocessor.chat_flash", AsyncMock(return_value=mock_result)):
         items = [make_item(0, "GDP Report Shows Growth")]
         signals = await preprocess_batch(items, batch_size=1)
         assert len(signals) == 1
@@ -145,7 +145,7 @@ async def test_preprocess_single_returns_signal():
             "cascade_potential": "medium",
         }]),
     }
-    with patch("projects.marketmind.pipeline.flash_preprocessor.chat_flash", AsyncMock(return_value=mock_result)):
+    with patch("marketmind.pipeline.flash_preprocessor.chat_flash", AsyncMock(return_value=mock_result)):
         item = make_item(0, "Apple Misses Earnings")
         signal = await preprocess_single(item)
         assert signal is not None

@@ -3,7 +3,7 @@
 通过齿轮按钮从 MainWindow 唤起。提供 5 个标签页:
   1. 外观 — 字体选择（动态读取系统字体）、字号、主题、色彩
   2. API — DeepSeek API Key 输入（密码框隐藏）
-  3. 调仓参数 — Optimizer 核心参数滑块
+  3. 算法超参数 — Optimizer 核心参数滑块
   4. 影子对比 — ShadowComparator 参数选择
   5. 高级 — 情报管线、信念系统等（折叠区）
 
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import tkinter.font as tkfont
+from tkinter import messagebox
 from typing import Any, Callable, Dict, List, Optional
 
 import customtkinter as ctk
@@ -28,8 +29,6 @@ logger = logging.getLogger(__name__)
 def _get_system_fonts() -> List[str]:
     """读取系统已安装字体列表。"""
     try:
-        # tkinter.font.families() 在现代 Python 上可能触发 warning
-        # 加 try-except 兜底
         return sorted(set(tkfont.families()))
     except Exception as exc:
         logger.warning("Failed to list system fonts: %s", exc)
@@ -75,16 +74,10 @@ class SettingsModal(ctk.CTkToplevel):
         # 创建各标签页
         self._tab_appearance = self._tabs.add("外观")
         self._tab_api = self._tabs.add("API")
-        self._tab_optimizer = self._tabs.add("调仓参数")
-        self._tab_shadow = self._tabs.add("影子对比")
-        self._tab_advanced = self._tabs.add("高级")
 
-        # 构建各标签页 UI
+        # 构建标签页 UI
         self._build_appearance_tab()
         self._build_api_tab()
-        self._build_optimizer_tab()
-        self._build_shadow_tab()
-        self._build_advanced_tab()
 
         # 底部按钮栏
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -109,6 +102,17 @@ class SettingsModal(ctk.CTkToplevel):
         # 居中显示
         self.after(50, self._center_on_parent)
 
+        # 强制应用全局字体配置 (Defect 4 修复: 子窗口继承主窗口字体)
+        try:
+            appearance = self._settings.get("appearance", {})
+            family = appearance.get("font_family", "Microsoft YaHei")
+            size = appearance.get("font_size_base", 14)
+            font = ctk.CTkFont(family=family, size=size)
+            from projects.command_center.ui.main_window import MainWindow
+            MainWindow._apply_font_recursive(self, font)
+        except Exception as exc:
+            logger.debug("SettingsModal font inheritance skipped: %s", exc)
+
         logger.info("SettingsModal opened with %d fonts available", len(self._font_list))
 
     # ============================================================
@@ -125,7 +129,7 @@ class SettingsModal(ctk.CTkToplevel):
             ph = parent.winfo_height()
             sw = self.winfo_reqwidth()
             sh = self.winfo_reqheight()
-            self.geometry(f"+{px + (pw - sw) // 2}+{py + (ph - sh) // 2}")
+            self.geometry(f"+{px + (pw - sw) // 2}+{py + (ph - py) // 2}")
         except Exception:
             pass
 
@@ -220,31 +224,13 @@ class SettingsModal(ctk.CTkToplevel):
         ctk.CTkLabel(tab, text="", anchor="w").grid(
             row=row, column=1, padx=(0, 12), pady=(0, 6), sticky="w")
         ctk.CTkLabel(
-            tab, text="API Key 将以混淆形式存储在 config.json 中。",
+            tab, text="Pro 模型: deepseek-v4-pro | Flash 模型: deepseek-v4-flash（已锁定）",
             text_color=("#666666", "#999999"),
             anchor="w",
         ).grid(row=row, column=1, padx=(0, 12), pady=(0, 6), sticky="w")
-        row += 1
-
-        # Pro 模型
-        ctk.CTkLabel(tab, text="Pro 模型:", anchor="w").grid(
-            row=row, column=0, padx=(12, 8), pady=6, sticky="w")
-        self._pro_model_var = ctk.StringVar(
-            value=self._settings.get("api.deepseek_pro_model", "deepseek-chat"))
-        pro_entry = ctk.CTkEntry(tab, textvariable=self._pro_model_var, width=300)
-        pro_entry.grid(row=row, column=1, padx=(0, 12), pady=6, sticky="w")
-        row += 1
-
-        # Flash 模型
-        ctk.CTkLabel(tab, text="Flash 模型:", anchor="w").grid(
-            row=row, column=0, padx=(12, 8), pady=6, sticky="w")
-        self._flash_model_var = ctk.StringVar(
-            value=self._settings.get("api.deepseek_flash_model", "deepseek-chat"))
-        flash_entry = ctk.CTkEntry(tab, textvariable=self._flash_model_var, width=300)
-        flash_entry.grid(row=row, column=1, padx=(0, 12), pady=6, sticky="w")
 
     # ============================================================
-    # Tab: 调仓参数
+    # Tab: 算法超参数
     # ============================================================
 
     def _build_optimizer_tab(self) -> None:
@@ -252,6 +238,16 @@ class SettingsModal(ctk.CTkToplevel):
         tab.grid_columnconfigure(0, weight=0)
         tab.grid_columnconfigure(1, weight=1)
         tab.grid_rowconfigure(10, weight=1)
+
+        # 顶部说明文字
+        note = ctk.CTkLabel(
+            tab,
+            text="以下参数控制优化算法行为，不直接操作持仓。",
+            text_color=("#888888", "#aaaaaa"),
+            anchor="w",
+            font=ctk.CTkFont(size=11),
+        )
+        note.grid(row=0, column=0, columnspan=3, padx=12, pady=(12, 4), sticky="w")
 
         params = [
             ("漂移阈值", "optimizer.drift_threshold", 0.01, 0.10, 0.01, "{:.2f}"),
@@ -264,7 +260,7 @@ class SettingsModal(ctk.CTkToplevel):
         self._optimizer_labels: Dict[str, ctk.CTkLabel] = {}
 
         for i, (label, path, lo, hi, step, fmt) in enumerate(params):
-            row = i
+            row = i + 1  # +1 因为第0行是说明文字
             ctk.CTkLabel(tab, text=f"{label}:", anchor="w").grid(
                 row=row, column=0, padx=(12, 8), pady=6, sticky="w")
             current_val = self._settings.get(path, (lo + hi) / 2)
@@ -282,7 +278,7 @@ class SettingsModal(ctk.CTkToplevel):
             self._optimizer_labels[path] = val_label
 
         # 最大建议数
-        row = len(params)
+        row = len(params) + 1
         ctk.CTkLabel(tab, text="最大建议数:", anchor="w").grid(
             row=row, column=0, padx=(12, 8), pady=6, sticky="w")
         self._max_sug_var = ctk.IntVar(
@@ -428,7 +424,7 @@ class SettingsModal(ctk.CTkToplevel):
         sm.set("api.deepseek_flash_model", self._flash_model_var.get())
 
         # 调仓参数
-        for path, _ in [
+        for path, in [
             ("optimizer.drift_threshold",),
             ("optimizer.max_single_position_weight",),
             ("optimizer.cash_weight_floor",),
@@ -454,22 +450,34 @@ class SettingsModal(ctk.CTkToplevel):
         return sm.get_all()
 
     def _on_save(self) -> None:
-        """保存并关闭弹窗。"""
+        """保存并关闭弹窗，成功后显示确认提示。"""
         try:
             self._collect_values()
             self._settings.save_and_notify()
             logger.info("Settings saved from modal")
+            messagebox.showinfo(
+                "设置已保存",
+                "所有设置已成功保存并应用。"
+            )
             if self._on_saved:
                 self._on_saved()
             self.destroy()
         except Exception as exc:
             logger.error("Failed to save settings: %s", exc)
+            messagebox.showerror(
+                "保存失败",
+                f"保存设置时出错: {exc}"
+            )
 
     def _on_reset(self) -> None:
         """重置为默认值并关闭。"""
         self._settings.reset_to_defaults()
         self._settings.save_and_notify()
         logger.info("Settings reset to defaults")
+        messagebox.showinfo(
+            "设置已重置",
+            "所有设置已恢复为默认值。"
+        )
         if self._on_saved:
             self._on_saved()
         self.destroy()

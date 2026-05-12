@@ -1,6 +1,6 @@
-"""Tests for centralized data cache."""
+﻿"""Tests for centralized data cache."""
 import pytest
-from projects.marketmind.pipeline.cache import DataCache
+from marketmind.pipeline.cache import DataCache
 
 
 @pytest.mark.asyncio
