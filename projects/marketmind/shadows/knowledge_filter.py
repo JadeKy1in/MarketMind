@@ -37,6 +37,12 @@ class KnowledgeItem:
     content: str
     verification_count: int = 0
     false_positive_count: int = 0
+    # Lineage tracking (Phase 4, Learngene + Coherence Burden)
+    origin_generation: int = 0
+    generations_inherited: int = 0
+    last_verified_date: str = ""
+    distinct_source_count: int = 1  # N distinct sources > N verifications from same source
+    inheritance_effectiveness: float | None = None  # did inheriting this improve performance?
 
     VALID_CATEGORIES = {"insight", "methodology_component", "heuristic", "rule"}
 
@@ -305,47 +311,70 @@ class KnowledgeFilter:
     def detect_ace_risk(self, items: list[KnowledgeItem]) -> float:
         """Compute ACE (Adversarial Cascade Effect) risk score.
 
-        Measures the risk of propagating unreliable knowledge through
-        multiple shadow generations. Score in [0, 1] where higher = more risk.
+        Phase 4 enhancement: adds coherence burden from lineage depth,
+        source diversity, and time-weighted verification decay.
 
-        - Returns 0.0 if ALL items are verified and have no false positives.
-        - Otherwise: unverified ratio (0.5 weight) + false positive ratio (0.3 weight)
-          + cascade depth interaction with unverified/fp items (0.2 weight).
-
-        Cascade depth only amplifies risk when unverified or false positive
-        items are present — verified-only chains have zero ACE risk.
-
-        Args:
-            items: Knowledge items being considered for inheritance.
-
-        Returns:
-            ACE risk score between 0.0 and 1.0.
+        Returns ACE risk score between 0.0 and 1.0.
         """
         if not items:
             return 0.0
 
         n = len(items)
+        from datetime import datetime, timezone, timedelta
 
-        # Count categories
-        unverified_count = sum(1 for item in items if item.verification_count == 0)
-        fp_count = sum(1 for item in items if item.false_positive_count > 0)
+        # Count categories with time decay
+        now = datetime.now(timezone.utc)
+        unverified_sum = 0.0
+        fp_sum = 0.0
+        coherence_burden = 0.0
 
-        unverified_ratio = unverified_count / n
-        fp_ratio = fp_count / n
+        for item in items:
+            # Time-decayed verification: old verifications count less
+            if item.verification_count == 0:
+                unverified_sum += 1.0
+            else:
+                # Apply time decay to verification counts (>90 days = half weight)
+                if item.last_verified_date:
+                    try:
+                        last_v = datetime.fromisoformat(item.last_verified_date.replace("Z", "+00:00"))
+                        age_days = (now - last_v).days
+                        decay = 0.5 ** (age_days / 90.0)  # half-life = 90 days
+                        item_risk = max(0.0, 1.0 - decay)
+                    except (ValueError, TypeError):
+                        item_risk = 1.0  # can't verify date → treat as unverified
+                else:
+                    item_risk = 1.0
+                # Source diversity bonus: more distinct sources = more reliable
+                if item.distinct_source_count >= 3:
+                    item_risk *= 0.5
+                unverified_sum += item_risk
 
-        # If everything is verified and no false positives, ACE risk is zero
-        if unverified_ratio == 0.0 and fp_ratio == 0.0:
+            if item.false_positive_count > 0:
+                fp_sum += min(item.false_positive_count, 3) / 3.0
+
+            # Coherence burden: deep lineage without re-verification accumulates risk
+            if item.generations_inherited > 1:
+                coherence_burden += min(item.generations_inherited / 10.0, 0.3)
+            if item.inheritance_effectiveness is not None and item.inheritance_effectiveness < 0:
+                coherence_burden += 0.1  # negative effectiveness = contamination risk
+
+        unverified_ratio = unverified_sum / n
+        fp_ratio = fp_sum / n
+        coherence_burden = coherence_burden / n
+
+        # If everything is verified and no false positives, ACE risk is near zero
+        if unverified_ratio == 0.0 and fp_ratio == 0.0 and coherence_burden == 0.0:
             return 0.0
 
-        # Source diversity / cascade depth
         source_ids = set(item.source_shadow_id for item in items)
         cascade_depth = min(len(source_ids) / max(n, 1), 1.0)
 
-        # ACE risk: cascade depth only amplifies when unverified/fp items exist
+        # Enhanced ACE: adds coherence burden as a 4th factor
         ace_score = (
             self.ACE_UNVERIFIED_WEIGHT * unverified_ratio +
             self.ACE_FALSE_POSITIVE_WEIGHT * fp_ratio +
-            self.ACE_CASCADE_INTERACTION * cascade_depth * max(unverified_ratio, fp_ratio)
+            self.ACE_CASCADE_INTERACTION * cascade_depth * max(unverified_ratio, fp_ratio) +
+            0.15 * coherence_burden  # Phase 4: lineage coherence risk
         )
 
         return min(ace_score, 1.0)

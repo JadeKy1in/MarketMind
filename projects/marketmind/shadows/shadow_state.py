@@ -46,7 +46,7 @@ class ShadowConfig:
             raise ValueError(f"status must be one of {self._VALID_STATUSES}, got '{self.status}'")
         if self.virtual_capital < 0:
             raise ValueError(f"virtual_capital must be >= 0, got {self.virtual_capital}")
-        if self.virtual_capital == 0 and self.shadow_type not in ("missed_path",):
+        if self.virtual_capital == 0 and self.shadow_type not in ("missed_path", "temp_event"):
             raise ValueError(f"virtual_capital must be positive for shadow_type '{self.shadow_type}'")
         if self.max_positions < 0:
             raise ValueError(f"max_positions must be >= 0, got {self.max_positions}")

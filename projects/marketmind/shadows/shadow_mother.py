@@ -188,33 +188,52 @@ class ShadowMother:
     # ── Temp shadow lifecycle ────────────────────────────────────────────
 
     async def create_temp_shadows(self, events: list[DetectedEvent]) -> list[str]:
-        """Create temporary event shadows for prioritized events."""
+        """Create Form C milestone-triggered event recorders (Phase 4).
+
+        NOT a full shadow. A recorder that:
+        - Day 1: Pro initial framework analysis (1 Pro call)
+        - Day 2-9: Python silent recording (0 Pro calls)
+        - Day 5: If volatility >3σ, trigger Pro check (≤1 extra Pro call)
+        - Day 10: Pro mid-term review (1 Pro call)
+        - Day 30: Pro final validation + Flash summary (1 Pro + 1 Flash)
+
+        Total: 3-5 Pro calls per 30-day event (vs. 30 previously).
+        """
         created_ids = []
         for event in events:
             ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
             shadow_id = f"temp_event:{event.event_type}:{ts}_{event.event_id[:8]}"
-            capital = 10000.0 + event.impact_score * 10000.0  # $10K-$20K
+
+            # Form C: milestone-triggered methodology
+            methodology_prompt = (
+                f"[FORM_C_EVENT_RECORDER] Event: {event.description}. "
+                f"Affected assets: {', '.join(event.affected_assets[:5])}. "
+                f"Impact score: {event.impact_score:.2f}. "
+                f"You are a milestone-triggered event recorder. "
+                f"Day 1: establish analysis framework. "
+                f"Day 2-9: only record OHLC + relevant news (no analysis). "
+                f"Day 5: if any affected asset moves >3σ, analyze whether driven by original event. "
+                f"Day 10: mid-term review of event impact. "
+                f"Day 30: final validation report comparing actual impact to Day 1 prediction. "
+                f"Max 30-day lifespan. Be concise — you have limited Pro calls."
+            )
 
             config = ShadowConfig(
                 shadow_id=shadow_id,
                 shadow_type="temp_event",
-                display_name=f"Temp {event.event_type} {ts}",
-                methodology_prompt=(
-                    f"You are a temporary market analyst activated for: {event.description}. "
-                    f"Focus on affected assets: {', '.join(event.affected_assets[:5])}. "
-                    f"Event impact score: {event.impact_score:.2f}. "
-                    f"You have 30 days max lifespan. Be aggressive with high-conviction trades."
-                ),
-                virtual_capital=capital,
+                display_name=f"FormC {event.event_type} {ts}",
+                methodology_prompt=methodology_prompt,
+                virtual_capital=0.0,  # Read-only recorder, no trading
                 domain=event.affected_assets[0] if event.affected_assets else "macro",
-                temperature=0.4,
+                temperature=0.3,
+                max_positions=0,
             )
             try:
                 self.state_db.create_shadow(config)
                 created_ids.append(shadow_id)
-                logger.info("Created temp shadow %s for event %s", shadow_id, event.event_type)
-            except ValueError:
-                logger.warning("Temp shadow %s already exists", shadow_id)
+                logger.info("Created Form C recorder %s for event %s", shadow_id, event.event_type)
+            except ValueError as e:
+                logger.warning("Form C recorder %s creation failed: %s", shadow_id, e)
 
         return created_ids
 
