@@ -381,6 +381,36 @@ class KnowledgeFilter:
 
     # ── Filter rule descriptions ─────────────────────────────────────────
 
+    def record_crystallization_result(
+        self, insight_id: str, action: str, source_shadow_id: str = ""
+    ) -> None:
+        """Wire crystallization results into knowledge filter (P0-1).
+
+        When an insight is promoted, increment verification_count.
+        When retired, increment false_positive_count.
+
+        Args:
+            insight_id: The insight/belief node ID from crystallization.
+            action: "promote" or "retire".
+            source_shadow_id: The shadow that generated the insight.
+        """
+        # Find matching knowledge items from the source shadow
+        for item in self._isolated_items + (
+            self._last_filtered_items if hasattr(self, '_last_filtered_items') else []
+        ):
+            if item.item_id == insight_id or insight_id in item.item_id:
+                if action == "promote":
+                    item.verification_count += 1
+                    item.last_verified_date = datetime.now(timezone.utc).isoformat()
+                elif action == "retire":
+                    item.false_positive_count += 1
+                break
+        else:
+            # Item not in current filter — create a minimal record
+            logger.debug(
+                "Crystallization result for untracked insight %s: %s", insight_id, action
+            )
+
     def get_filter_rules_description(self) -> dict:
         """Return human-readable description of current filter rules."""
         return {

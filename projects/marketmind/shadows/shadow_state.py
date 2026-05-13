@@ -517,6 +517,19 @@ class ShadowStateDB:
         finally:
             conn.close()
 
+    def update_shadow_type(self, shadow_id: str, new_type: str) -> bool:
+        """Change a shadow's type (e.g., challenger → expert on promotion)."""
+        conn = self._connect()
+        try:
+            conn.execute(
+                "UPDATE shadows SET shadow_type = ? WHERE id = ?",
+                (new_type, shadow_id)
+            )
+            conn.commit()
+            return conn.total_changes > 0
+        finally:
+            conn.close()
+
     def update_methodology_prompt(self, shadow_id: str, new_prompt: str,
                                     reason: str = "") -> bool:
         """Update a shadow's methodology prompt and log the change (P1-1).
