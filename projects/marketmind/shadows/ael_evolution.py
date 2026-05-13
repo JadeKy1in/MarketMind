@@ -75,10 +75,37 @@ class AELEvolutionEngine:
         ("expert:tech:silicon_oracle", "expert:macro:cycle_reader"),
     ]
 
-    def __init__(self):
+    def __init__(self, state_db=None):
+        self._state_db = state_db
         self._replica_pairs: dict[str, ReplicaPair] = {}
         self._debrief_history: dict[str, list[AELDebriefResult]] = {}
         self._active_lessons: dict[str, list[str]] = {}  # shadow_id -> [lesson_texts]
+        # P1-5: Load persisted lessons from DB on init
+        if state_db:
+            self._load_persisted_lessons()
+
+    def _load_persisted_lessons(self) -> None:
+        """Load AEL lessons from DB to survive process restart (P1-5)."""
+        conn = None
+        try:
+            conn = self._state_db._connect()
+            rows = conn.execute(
+                """SELECT shadow_id, reason FROM methodology_changes
+                   WHERE change_type = 'ael_lesson' AND changed_at > date('now', '-90 days')
+                   ORDER BY changed_at DESC"""
+            ).fetchall()
+            for row in rows:
+                sid = row["shadow_id"]
+                lesson = row["reason"].replace("AEL lesson: ", "")
+                if sid not in self._active_lessons:
+                    self._active_lessons[sid] = []
+                if len(self._active_lessons[sid]) < self.MAX_ACTIVE_LESSONS:
+                    self._active_lessons[sid].append(lesson)
+        except Exception:
+            pass
+        finally:
+            if conn:
+                conn.close()
 
     def create_replica(self, base_shadow_id: str) -> ReplicaPair:
         """Create a replica of a shadow for controlled A/B testing.
@@ -217,6 +244,16 @@ class AELEvolutionEngine:
 
         if len(lessons) < self.MAX_ACTIVE_LESSONS:
             lessons.append(lesson)
+            # P1-5: Persist lesson via state_db (uses proper connection handling)
+            if self._state_db:
+                try:
+                    self._state_db.update_methodology_prompt(
+                        shadow_id,
+                        f"[AEL LESSON] {lesson}",
+                        reason=f"AEL lesson: {lesson[:100]}"
+                    )
+                except Exception:
+                    pass
             return True
 
         # Cap reached: reject silently (no head-to-head test infrastructure yet)

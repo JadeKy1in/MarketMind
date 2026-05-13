@@ -591,6 +591,21 @@ class ShadowMother:
                             source_id, cr.action,
                             source_shadow_id=source_id.split(":")[1] if ":" in source_id else ""
                         )
+                # P1-2: Wire crystallization results to shadow methodology prompts
+                from marketmind.shadows.methodology_evolver import MethodologyInjector
+                injector = MethodologyInjector(self.state_db)
+                for cr in crystallization_results:
+                    sid = cr.source_shadow_id
+                    if not sid:
+                        continue
+                    if cr.action == "promote" and cr.methodology_changes:
+                        for change in cr.methodology_changes:
+                            if change:
+                                injector.inject_validated_insight(sid, change)
+                    elif cr.action == "retire":
+                        injector.inject_retired_insight(
+                            sid, cr.evidence_summary or "Failed validation"
+                        )
             except Exception as e:
                 logger.error("Crystallization check failed: %s", e)
 
@@ -598,7 +613,7 @@ class ShadowMother:
         if getattr(self.config, 'ael_experiment_enabled', False):
             try:
                 from marketmind.shadows.ael_evolution import AELEvolutionEngine
-                ael = AELEvolutionEngine()
+                ael = AELEvolutionEngine(state_db=self.state_db)
                 debrief_day = getattr(self.config, 'ael_debrief_day', 1)
                 today_day = int(today.split("-")[2])  # extract day-of-month
 
@@ -629,6 +644,13 @@ class ShadowMother:
                         if debrief.lessons_learned:
                             injected = ael.inject_lesson(sid, debrief.lessons_learned)
                             debrief.prompt_injected = injected
+                            if injected:
+                                # P1-3: Wire AEL lessons to shadow prompts via MethodologyInjector
+                                active_lessons = ael.get_active_lessons(sid)
+                                from marketmind.shadows.methodology_evolver import MethodologyInjector
+                                MethodologyInjector(self.state_db).inject_lessons(
+                                    sid, active_lessons
+                                )
                             logger.info(
                                 "AEL debrief for %s: lesson %s", sid,
                                 "injected" if injected else "rejected (cap)"
@@ -650,6 +672,16 @@ class ShadowMother:
             await self._execute_challenger_trials(challenger, result)
         except Exception as e:
             logger.error("Challenger check failed: %s", e)
+
+        # 7.5 Method breeding — weekly population maintenance (P1-4)
+        if today_day % 7 == 1:  # run every 7 days (day 1, 8, 15, 22, 29)
+            try:
+                from marketmind.shadows.methodology_evolver import MethodologyEvolver
+                evolver = MethodologyEvolver()
+                evolver.maintain_population(min_active=6, max_active=15)
+                logger.info("Methodology population maintained")
+            except Exception as e:
+                logger.error("Method breeding failed: %s", e)
 
         # 8. Audit emergency quotas
         try:
@@ -804,7 +836,7 @@ class ShadowMother:
                     # Transfer predecessor failure patterns to challenger
                     try:
                         from marketmind.shadows.ael_evolution import AELEvolutionEngine
-                        ael = AELEvolutionEngine()
+                        ael = AELEvolutionEngine(state_db=self.state_db)
                         debriefs = ael._debrief_history.get(target_id, [])
                         if debriefs:
                             failures = []

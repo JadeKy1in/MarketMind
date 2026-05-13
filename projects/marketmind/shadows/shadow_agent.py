@@ -90,6 +90,7 @@ class CrystallizationResult:
     methodology_changes: list[str] = field(default_factory=list)
     source_insight_ids: list[str] = field(default_factory=list)
     evidence_summary: str = ""
+    source_shadow_id: str = ""  # P1-2: direct shadow_id for prompt injection
 
 
 class ShadowAgent:

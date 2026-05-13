@@ -137,6 +137,7 @@ class CrystallizationEngine:
                 action="hold",
                 methodology_changes=[],
                 source_insight_ids=[insight_node_id],
+                source_shadow_id=shadow_id,
                 evidence_summary=f"Insufficient data: {sample_count}/{self._min_samples} minimum samples",
             )
 
