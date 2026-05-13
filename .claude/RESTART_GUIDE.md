@@ -67,12 +67,55 @@ P0-P3 is the improvement plan from the 3-agent review (Architect + Quant + Red T
 - ~170 lines, 3-4 hours
 **Red Team**: Approved with modifications
 
-### Step 4: Search External Research, then Implement P3-1 through P3-4
-**Process for each**: Search external → analyze → Red Team audit → implement → commit
-- P3-1: Challenger learns from predecessor failures (MNL/HHD frameworks)
-- P3-2: Main AI SHARP rubric evolution
-- P3-3: LLM gateway redundancy (fallback provider)
-- P3-4: Partial-state recovery for orchestrate_daily_cycle
+### Step 4: Implement P3-1 through P3-4 (in order, external research first)
+**Process for each**: Search external → analyze → Red Team audit → implement → commit.
+
+#### P3-1: Challenger Learns from Predecessor Failures
+**What**: When a challenger replaces a target, inject predecessor's failure patterns.
+**Where**: `shadows/challenger_engine.py` + `shadows/ael_evolution.py`
+**Specs**:
+- Query target's AEL debrief history (last 3 months)
+- Extract top failure patterns
+- Prepend `[FAILURE PATTERNS TO AVOID]` block to challenger's methodology_prompt
+- Uses MethodologyInjector.inject_failure_patterns() (already built in P1-1)
+- External research: Mistake Notebook Learning (MNL, ACL 2026), Hindsight Hint Distillation (HHD, May 2026)
+- ~50 lines, 1 day
+**Red Team**: Approved (from unified improvement plan)
+
+#### P3-2: Main AI Gate Iteration (SHARP Rubric Evolution)
+**What**: Decompose main AI's static DECISION_SYSTEM_PROMPT into auditable rules.
+**Where**: New file `pipeline/methodology_rules.py` + modify `pipeline/decision.py`
+**Specs**:
+- Decompose 3 main AI system prompts into MainAIRule objects (ID, condition, action, weight)
+- Build AttributionAgent (Flash model) that consumes MissedPathReport + TempEvent validation
+- Build RuleValidator with backtest gate before rule promotion
+- Dynamic prompt assembly from active rules (replace static prompt)
+- All changes logged with audit trail
+- ~500 lines, 2-3 days
+**Red Team**: ADOPT (Phase 1), from SHARP proposal audit
+**Dependencies**: MethodologyInjector (P1-1, ✅ done)
+
+#### P3-3: LLM Gateway Redundancy
+**What**: Fallback provider when DeepSeek API is down.
+**Where**: `gateway/async_client.py`
+**Specs**:
+- Add fallback provider configuration in settings
+- Exponential backoff with jitter on primary provider failure
+- Route to secondary provider when primary is unavailable
+- At minimum: degrade gracefully (cache responses, rule-based votes)
+- ~200 lines, 2-3 days
+**Red Team**: Approved
+
+#### P3-4: Partial-State Recovery
+**What**: Save checkpoint after shadow analyses, recover on restart.
+**Where**: `shadows/shadow_mother.py` + `shadows/shadow_state.py`
+**Specs**:
+- After step 4 (shadow analyses + vote save), write CycleCheckpoint to DB
+- On next cycle start, check for incomplete previous cycle
+- Resume from checkpoint rather than starting fresh
+- Group try/except blocks functionally for partial-result continuation
+- ~200 lines, 2-3 days
+**Red Team**: Approved
 
 ### Step 5: Start AEL Controlled Experiment
 **How**: Set `ael_experiment_enabled = True` in `config/settings.py`
