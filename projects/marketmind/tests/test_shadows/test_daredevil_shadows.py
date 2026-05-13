@@ -56,20 +56,23 @@ class TestDaredevilShadow:
         assert scalper.config.min_trades_for_ranking == 50
 
 
-def test_all_5_daredevil_configs_unique():
+def test_all_8_daredevil_configs_unique():
     ids = [c.shadow_id for c in DAREDEVIL_SHADOW_CONFIGS]
-    assert len(ids) == len(set(ids)) == 5
+    assert len(ids) == len(set(ids)) == 8  # Phase 6: 7+1
 
 
-def test_all_5_types_present():
-    types = {c.shadow_id.split(":")[2] for c in DAREDEVIL_SHADOW_CONFIGS}
-    assert types == {"scalper", "trend_rider", "news_hound", "fade_master", "rotation_engine"}
+def test_all_7_env_types_present():
+    env_types = {c.shadow_id.split(":")[2] for c in DAREDEVIL_SHADOW_CONFIGS}
+    assert env_types == {
+        "range_bound", "panic", "leveraged", "contrarian",
+        "momentum", "sector", "low_liq", "crash"
+    }
 
 
-def test_factory_creates_5_daredevils(temp_shadow_db):
+def test_factory_creates_8_daredevils(temp_shadow_db):
     settings = ShadowSettings()
     shadows = create_daredevil_shadows(temp_shadow_db, settings)
-    assert len(shadows) == 5
+    assert len(shadows) == 8  # Phase 6: 7+1
     assert all(isinstance(s, DaredevilShadow) for s in shadows)
 
 
@@ -110,34 +113,33 @@ async def test_daredevil_analyze_with_mock_llm(temp_shadow_db):
 
 
 @pytest.mark.asyncio
-async def test_scalper_must_pick_direction(temp_shadow_db):
-    """Scalper约束: _build_user_prompt 包含 DANGER ZONE"""
+async def test_range_bound_mode(temp_shadow_db):
+    """Range-Bound约束: _build_user_prompt 包含 RANGE-BOUND MODE"""
     from marketmind.shadows.daredevil_shadows import DaredevilShadow
     from marketmind.shadows.shadow_state import ShadowConfig
 
     config = ShadowConfig(
-        shadow_id="daredevil:intraday:scalper_test", shadow_type="daredevil",
-        display_name="Test Scalper", methodology_prompt="You are a scalper.",
-        virtual_capital=25000.0, temperature=0.5,
+        shadow_id="daredevil:range_bound:sideways_test", shadow_type="daredevil",
+        display_name="Test Sideways", methodology_prompt="You trade ranges.",
+        virtual_capital=25000.0, temperature=0.45,
     )
     agent = DaredevilShadow(config, temp_shadow_db, ShadowSettings())
 
     prompt = agent._build_user_prompt(
-        [{"headline": "Market volatile"}], {"SPY": 450.0}
+        [{"headline": "Market flat"}], {"SPY": 450.0}
     )
-    assert "DANGER ZONE" in prompt
-    assert "MUST pick a direction" in prompt
+    assert "RANGE-BOUND MODE" in prompt
 
 
 @pytest.mark.asyncio
-async def test_fade_master_contrarian_mode(temp_shadow_db):
-    """Fade Master约束: _build_user_prompt 包含 CONTRARIAN MODE"""
+async def test_contrarian_mode(temp_shadow_db):
+    """Contrarian约束: _build_user_prompt 包含 CONTRARIAN MODE"""
     from marketmind.shadows.daredevil_shadows import DaredevilShadow
     from marketmind.shadows.shadow_state import ShadowConfig
 
     config = ShadowConfig(
-        shadow_id="daredevil:contrarian:fade_test", shadow_type="daredevil",
-        display_name="Test Fader", methodology_prompt="You fade consensus.",
+        shadow_id="daredevil:contrarian:herd_test", shadow_type="daredevil",
+        display_name="Test Herd Fader", methodology_prompt="You fade consensus.",
         virtual_capital=20000.0, temperature=0.55,
     )
     agent = DaredevilShadow(config, temp_shadow_db, ShadowSettings())
