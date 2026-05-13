@@ -341,9 +341,9 @@ class KnowledgeFilter:
                         decay = 0.5 ** (age_days / 90.0)  # half-life = 90 days
                         item_risk = max(0.0, 1.0 - decay)
                     except (ValueError, TypeError):
-                        item_risk = 1.0  # can't verify date → treat as unverified
+                        item_risk = 0.0  # bad date format but verified → neutral
                 else:
-                    item_risk = 1.0
+                    item_risk = 0.0  # verified but no date → neutral (no time decay)
                 # Source diversity bonus: more distinct sources = more reliable
                 if item.distinct_source_count >= 3:
                     item_risk *= 0.5

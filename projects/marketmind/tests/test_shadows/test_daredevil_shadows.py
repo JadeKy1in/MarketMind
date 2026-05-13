@@ -64,8 +64,8 @@ def test_all_8_daredevil_configs_unique():
 def test_all_7_env_types_present():
     env_types = {c.shadow_id.split(":")[2] for c in DAREDEVIL_SHADOW_CONFIGS}
     assert env_types == {
-        "range_bound", "panic", "leveraged", "contrarian",
-        "momentum", "sector", "low_liq", "crash"
+        "sideways_scout", "vol_surfer", "lever_hunter", "herd_fader",
+        "trend_chaser", "sector_spinner", "depth_diver", "hunter"
     }
 
 

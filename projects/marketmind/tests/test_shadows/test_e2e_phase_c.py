@@ -51,7 +51,7 @@ async def test_full_daily_cycle_with_mock_llm(temp_shadow_db):
 
     # Verify 21 shadows registered
     visible = temp_shadow_db.get_visible_shadows()
-    assert len(visible) == 21
+    assert len(visible) == 25  # Phase 0-6: 16 experts + 8 daredevils + 1 catfish
 
     mother = ShadowMother(settings, temp_shadow_db)
 
@@ -111,12 +111,12 @@ async def test_full_daily_cycle_with_mock_llm(temp_shadow_db):
         result = await mother.orchestrate_daily_cycle(news, {})
 
     # Verify orchestration results
-    assert result.active_shadows == 21  # 15 experts + 5 daredevils + 1 catfish
+    assert result.active_shadows == 25  # Phase 0-6: 16 experts + 8 daredevils + 1 catfish
     assert result.votes_collected > 0
-    assert len(result.shadow_analyses) == 21
+    assert len(result.shadow_analyses) == 25
 
-    # Catfish returns no votes by design, so remaining 20 shadows should vote
-    assert result.votes_collected >= 20
+    # Catfish deprecated; all shadows produce votes
+    assert result.votes_collected >= 24
 
     # Rankings should be computed (even if empty for insufficient data)
     assert result.rankings is not None
@@ -189,7 +189,7 @@ async def test_run_daily_pipeline_mocked(temp_shadow_db):
                 )
 
                 assert result.active_shadows > 0
-                assert result.active_shadows == 15  # only experts created
+                assert result.active_shadows == 16  # Phase 5: +Bear Tracker
                 assert result.votes_collected > 0
                 assert result.votes_collected >= 15  # one vote per expert
 

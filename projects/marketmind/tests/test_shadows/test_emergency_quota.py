@@ -45,17 +45,17 @@ def test_emergency_quota_approved_when_confidence_8_plus(auditor):
     result = auditor.request_quota(
         "expert:gold:test_auditor",
         "Gold breakout on COMEX above $2500 resistance",
-        confidence=9,
+        base_quota_used=5, base_quota_total=5,
     )
     assert result is True
 
 
-def test_emergency_quota_denied_below_confidence_8(auditor):
-    """Emergency quota request should be denied when confidence < 8."""
+def test_emergency_quota_denied_quota_not_exhausted(auditor):
+    """Emergency quota request should be denied when base quota not exhausted."""
     result = auditor.request_quota(
         "expert:gold:test_auditor",
         "Mild gold uptick",
-        confidence=5,
+        base_quota_used=2, base_quota_total=5,
     )
     assert result is False
 
@@ -66,7 +66,7 @@ def test_emergency_quota_denied_when_penalized(auditor):
     auditor.request_quota(
         "expert:gold:test_auditor",
         "Gold breakout",
-        confidence=9,
+        base_quota_used=5, base_quota_total=5,
     )
     # Simulate auditing the pending request
     pending = auditor.state_db.get_pending_emergency_audits()
@@ -79,7 +79,7 @@ def test_emergency_quota_denied_when_penalized(auditor):
     result = auditor.request_quota(
         "expert:gold:test_auditor",
         "Another gold breakout",
-        confidence=9,
+        base_quota_used=5, base_quota_total=5,
     )
     assert result is False
 
@@ -89,7 +89,7 @@ def test_profitable_emergency_gains_permanent_quota(auditor):
     auditor.request_quota(
         "expert:gold:test_auditor",
         "Gold breakout opportunity",
-        confidence=9,
+        base_quota_used=5, base_quota_total=5,
     )
     pending = auditor.state_db.get_pending_emergency_audits()
     quota_id = pending[0].id if hasattr(pending[0], 'id') else 1
@@ -105,7 +105,7 @@ def test_loss_not_followed_penalty_3_days(auditor):
     auditor.request_quota(
         "expert:gold:test_auditor",
         "Gold breakout opportunity",
-        confidence=9,
+        base_quota_used=5, base_quota_total=5,
     )
     pending = auditor.state_db.get_pending_emergency_audits()
     quota_id = pending[0].id if hasattr(pending[0], 'id') else 1
@@ -121,7 +121,7 @@ def test_loss_followed_penalty_7_days(auditor):
     auditor.request_quota(
         "expert:gold:test_auditor",
         "Gold breakout opportunity",
-        confidence=9,
+        base_quota_used=5, base_quota_total=5,
     )
     pending = auditor.state_db.get_pending_emergency_audits()
     quota_id = pending[0].id if hasattr(pending[0], 'id') else 1
@@ -143,7 +143,7 @@ def test_three_consecutive_failures_permanent_minus_one(auditor):
         result = auditor.request_quota(
             "expert:gold:test_auditor",
             f"Gold breakout attempt {i+1}",
-            confidence=9,
+            base_quota_used=5, base_quota_total=5,
         )
         assert result is True, f"Request {i+1} should be approved"
 
@@ -164,15 +164,14 @@ def test_three_consecutive_failures_permanent_minus_one(auditor):
     assert state.consecutive_failures == 0
 
 
-def test_confidence_calibration_tracked(temp_shadow_db, settings):
-    """Confidence reports should be tracked for calibration analysis.
+def test_exhaustion_quota_requests_tracked(temp_shadow_db, settings):
+    """Emergency quota requests should be tracked with exhaustion status.
 
-    Uses separate shadows for each confidence level since only one pending
-    emergency quota per shadow is allowed at a time.
+    Uses separate shadows since only one pending emergency quota per shadow.
     """
     auditor = EmergencyQuotaAuditor(temp_shadow_db, settings)
 
-    for conf, idx in [(8, 0), (9, 1), (10, 2)]:
+    for idx in range(3):
         shadow_id = f"expert:test:calib_{idx}"
         config = ShadowConfig(
             shadow_id=shadow_id,
@@ -184,16 +183,13 @@ def test_confidence_calibration_tracked(temp_shadow_db, settings):
         temp_shadow_db.create_shadow(config)
         auditor.request_quota(
             shadow_id,
-            f"Gold opportunity at confidence {conf}",
-            confidence=conf,
+            f"Gold opportunity at quota exhaustion #{idx}",
+            base_quota_used=5, base_quota_total=5,
         )
 
     # Verify all requests are recorded
     pending = auditor.state_db.get_pending_emergency_audits()
-    confidences = [p.confidence_self_report for p in pending]
-    assert 8 in confidences
-    assert 9 in confidences
-    assert 10 in confidences
+    assert len(pending) == 3
 
 
 def test_get_shadow_state_returns_defaults_for_new_shadow(auditor):

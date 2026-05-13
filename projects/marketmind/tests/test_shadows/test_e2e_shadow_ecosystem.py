@@ -38,9 +38,9 @@ def mother_with_shadows(e2e_db, settings):
 
 
 def test_full_shadow_setup_21_shadows(mother_with_shadows, e2e_db):
-    """Verify 15 experts + 5 daredevils + 1 catfish = 21 shadows registered."""
+    """Verify 16 experts + 8 daredevils + 1 catfish = 25 shadows registered."""
     visible = e2e_db.get_visible_shadows()
-    assert len(visible) == 21
+    assert len(visible) == 25
 
 
 @pytest.mark.asyncio

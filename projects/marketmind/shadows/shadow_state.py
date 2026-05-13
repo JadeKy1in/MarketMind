@@ -204,6 +204,7 @@ CREATE TABLE IF NOT EXISTS daily_snapshots (
     pro_quota_used INTEGER DEFAULT 0,
     emergency_quotas_used INTEGER DEFAULT 0,
     insights_generated INTEGER DEFAULT 0,
+    votes_produced INTEGER DEFAULT 0,
     discount_rate REAL DEFAULT 0.20,
     UNIQUE(shadow_id, date),
     FOREIGN KEY (shadow_id) REFERENCES shadows(id)
