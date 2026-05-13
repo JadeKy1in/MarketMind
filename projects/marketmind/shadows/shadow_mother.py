@@ -51,6 +51,8 @@ class ShadowOrchestrationResult:
     collusion_flags: list = field(default_factory=list)
     ecosystem_alerts: list = field(default_factory=list)
     ecosystem_interpretation: str = ""
+    health_alerts: dict[str, list[str]] = field(default_factory=dict)
+    ecosystem_health_snapshot: dict | None = None
     plateau_flags: list = field(default_factory=list)
     reset_candidates: list = field(default_factory=list)
     challenger_actions: list[str] = field(default_factory=list)
@@ -488,6 +490,21 @@ class ShadowMother:
         except Exception as e:
             logger.error("Collusion detection failed: %s", e)
 
+        # 6.4 Shadow health monitor — individual checks (Phase 3, Item 11)
+        try:
+            from marketmind.shadows.shadow_health_monitor import ShadowHealthMonitor
+            health_monitor = ShadowHealthMonitor(state_db=self.state_db)
+            for sid, output in result.shadow_analyses.items():
+                raw_text = self.state_db.get_raw_output(sid, today) or ""
+                snapshot = health_monitor.run_daily_check(
+                    sid, raw_text, len(output.insights), today
+                )
+                if snapshot.alerts:
+                    result.health_alerts[sid] = snapshot.alerts
+                    logger.info("Health alert for %s: %s", sid, snapshot.alerts)
+        except Exception as e:
+            logger.error("Shadow health monitor failed: %s", e)
+
         # 6.5 Ecosystem audit — blind-spot scan (replaces Catfish, Phase 0)
         try:
             from marketmind.shadows.ecosystem_auditor import EcosystemAuditor
@@ -496,7 +513,6 @@ class ShadowMother:
             result.ecosystem_alerts = ecosystem_alerts
             if ecosystem_alerts:
                 logger.info("Ecosystem audit: %d blind-spot alerts", len(ecosystem_alerts))
-                # Trigger Pro interpretation for alerts
                 try:
                     interpretation = await auditor.interpret_alerts(
                         ecosystem_alerts, market_data
@@ -506,6 +522,30 @@ class ShadowMother:
                     logger.error("Ecosystem audit Pro interpretation failed: %s", e)
         except Exception as e:
             logger.error("Ecosystem audit failed: %s", e)
+
+        # 6.55 Ecosystem health — collective degradation detection (Phase 3, Item 12)
+        try:
+            from marketmind.shadows.ecosystem_health import EcosystemHealthMonitor
+            eco_health = EcosystemHealthMonitor()
+            token_data = {}
+            for config in visible:
+                tokens = self.state_db.get_token_history(config.shadow_id, days=30)
+                if tokens:
+                    token_data[config.shadow_id] = tokens
+            eco_snapshot = eco_health.run_daily_check(all_votes, token_data, today)
+            result.ecosystem_health_snapshot = {
+                "date": eco_snapshot.date,
+                "active_shadows": eco_snapshot.active_shadows,
+                "pattern_matcher_pct": eco_snapshot.pattern_matcher_pct,
+                "balanced_pct": eco_snapshot.balanced_pct,
+                "explorer_pct": eco_snapshot.explorer_pct,
+                "avg_entropy": eco_snapshot.avg_entropy,
+                "alerts": eco_snapshot.alerts,
+            }
+            if eco_snapshot.alerts:
+                logger.info("Ecosystem health: %d alerts", len(eco_snapshot.alerts))
+        except Exception as e:
+            logger.error("Ecosystem health check failed: %s", e)
 
         # 6.6 Memory update — ingest today's votes and analyses into shadow memory
         if getattr(self.config, 'crystallization_enabled', False):

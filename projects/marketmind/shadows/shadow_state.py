@@ -109,6 +109,7 @@ class DailySnapshot:
     pro_quota_used: int = 0
     emergency_quotas_used: int = 0
     insights_generated: int = 0
+    votes_produced: int = 0
     discount_rate: float | None = None
 
 
@@ -204,6 +205,17 @@ CREATE TABLE IF NOT EXISTS daily_snapshots (
     emergency_quotas_used INTEGER DEFAULT 0,
     insights_generated INTEGER DEFAULT 0,
     discount_rate REAL DEFAULT 0.20,
+    UNIQUE(shadow_id, date),
+    FOREIGN KEY (shadow_id) REFERENCES shadows(id)
+);
+
+CREATE TABLE IF NOT EXISTS shadow_outputs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shadow_id TEXT NOT NULL,
+    date TEXT NOT NULL,
+    raw_output TEXT NOT NULL,
+    token_count INTEGER DEFAULT 0,
+    model TEXT DEFAULT 'pro',
     UNIQUE(shadow_id, date),
     FOREIGN KEY (shadow_id) REFERENCES shadows(id)
 );
@@ -610,8 +622,9 @@ class ShadowStateDB:
                     sharpe_ratio, calmar_ratio, omega_ratio, mppm_score,
                     composite_score, deflated_score, percentile_rank,
                     achievement_tier, flash_quota_used, pro_quota_used,
-                    emergency_quotas_used, insights_generated, discount_rate)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    emergency_quotas_used, insights_generated, votes_produced,
+                    discount_rate)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (shadow_id, snapshot.date, snapshot.virtual_capital,
                  snapshot.daily_return_pct, snapshot.cumulative_return_pct,
                  snapshot.max_drawdown_pct, snapshot.win_rate_pct,
@@ -620,7 +633,7 @@ class ShadowStateDB:
                  snapshot.percentile_rank, snapshot.achievement_tier,
                  snapshot.flash_quota_used, snapshot.pro_quota_used,
                  snapshot.emergency_quotas_used, snapshot.insights_generated,
-                 snapshot.discount_rate)
+                 snapshot.votes_produced, snapshot.discount_rate)
             )
             conn.commit()
         finally:
@@ -710,6 +723,79 @@ class ShadowStateDB:
         finally:
             conn.close()
 
+    def save_raw_output(self, shadow_id: str, date: str, raw_output: str,
+                         token_count: int = 0, model: str = "pro") -> None:
+        """Persist raw LLM output for health monitoring (Phase 3)."""
+        conn = self._connect()
+        try:
+            # Ensure votes_produced column exists (migration safety)
+            self._ensure_votes_produced_column(conn)
+            conn.execute(
+                """INSERT OR REPLACE INTO shadow_outputs
+                   (shadow_id, date, raw_output, token_count, model)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (shadow_id, date, raw_output, token_count, model)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _ensure_votes_produced_column(conn) -> None:
+        """Add votes_produced column if missing (lazy migration)."""
+        try:
+            conn.execute("SELECT votes_produced FROM daily_snapshots LIMIT 0")
+        except Exception:
+            conn.execute(
+                "ALTER TABLE daily_snapshots ADD COLUMN votes_produced INTEGER DEFAULT 0"
+            )
+
+    def count_consecutive_zero_insights(self, shadow_id: str,
+                                         max_days: int = 8) -> int:
+        """Count consecutive recent days with zero insights (Phase 3)."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT date, insights_generated FROM daily_snapshots
+                   WHERE shadow_id = ? ORDER BY date DESC LIMIT ?""",
+                (shadow_id, max_days)
+            ).fetchall()
+            count = 0
+            for row in rows:
+                if (row["insights_generated"] or 0) == 0:
+                    count += 1
+                else:
+                    break
+            return count
+        finally:
+            conn.close()
+
+    def get_raw_output(self, shadow_id: str, date: str) -> str | None:
+        """Retrieve raw LLM output for a shadow on a given date."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT raw_output FROM shadow_outputs WHERE shadow_id = ? AND date = ?",
+                (shadow_id, date)
+            ).fetchone()
+            return row["raw_output"] if row else None
+        finally:
+            conn.close()
+
+    def get_token_history(self, shadow_id: str, days: int = 30) -> list[int]:
+        """Get token count history for trend analysis (Phase 3).
+        Returns oldest-first for Mann-Kendall computation."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT token_count FROM shadow_outputs
+                   WHERE shadow_id = ? ORDER BY date ASC LIMIT ?""",
+                (shadow_id, days)
+            ).fetchall()
+            return [r["token_count"] for r in rows if r["token_count"]]
+        finally:
+            conn.close()
+
     def update_snapshot_fields(self, shadow_id: str, date: str, **fields) -> None:
         """Update select fields on a snapshot after analysis (Phase 2)."""
         allowed = {"insights_generated", "votes_produced", "flash_quota_used",
@@ -755,6 +841,8 @@ class ShadowStateDB:
             if row["emergency_quotas_used"] is not None else 0,
             insights_generated=row["insights_generated"]
             if row["insights_generated"] is not None else 0,
+            votes_produced=row["votes_produced"]
+            if row["votes_produced"] is not None else 0,
             discount_rate=row["discount_rate"]
             if "discount_rate" in row.keys() and row["discount_rate"] is not None else None,
         )

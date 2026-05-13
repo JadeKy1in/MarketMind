@@ -172,6 +172,16 @@ class ShadowAgent:
         votes = self._parse_votes(content)
         insights = self._extract_insights(content, news_items)
 
+        # Persist raw LLM output for health monitoring (Phase 3)
+        if content:
+            try:
+                token_count = result.get("usage", {}).get("total_tokens", 0)
+                self.state_db.save_raw_output(
+                    self.shadow_id, today, content, token_count, self.config.model
+                )
+            except Exception as e:
+                logger.debug("Raw output persistence failed for %s: %s", self.shadow_id, e)
+
         return ShadowAnalysisOutput(
             shadow_id=self.shadow_id,
             date=today,
