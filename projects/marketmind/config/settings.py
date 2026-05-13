@@ -69,11 +69,18 @@ class ShadowSettings:
     cash_reframing_non_inferiority_margin: float = 0.02
     cash_reframing_de_alpha: float = 0.10
 
-    # Plateau detection
-    plateau_no_elite_days: int = 126
+    # Plateau detection (thresholds tightened in Phase 2)
+    plateau_no_elite_days: int = 60
     plateau_wr_range_pp: float = 10.0
-    plateau_no_insight_days: int = 63
+    plateau_no_insight_days: int = 30
     max_resets_per_month: int = 2
+    # Anti-conservatism weights (Phase 2)
+    abstention_penalty_weight: float = 0.05
+    quota_efficiency_weight: float = 0.05
+    # Reset eligibility (Phase 2)
+    reset_no_excellent_months: int = 6
+    reset_flat_wr_months: int = 3
+    reset_no_insight_months: int = 3
 
     # Scheduler settings
     scheduler_enabled: bool = False

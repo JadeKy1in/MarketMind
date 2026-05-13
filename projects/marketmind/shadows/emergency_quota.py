@@ -50,17 +50,21 @@ class EmergencyQuotaAuditor:
     # ── Public API ──────────────────────────────────────────────────────────
 
     def request_quota(self, shadow_id: str, opportunity_desc: str,
-                      confidence: int) -> bool:
+                      base_quota_used: int = 0, base_quota_total: int = 5) -> bool:
         """Request an emergency quota. Returns True if approved.
 
-        Requirements:
-        - Confidence must be >= emergency_confidence_threshold (default 8)
+        Requirements (Phase 2: exhaustion-based trigger):
+        - Base quota must be exhausted (used >= total)
         - Shadow must be in "normal" state (not currently penalized)
         - Shadow must exist in the DB
+
+        The old confidence threshold is kept as a secondary check:
+        if base quota is not exhausted, reject regardless of opportunity.
         """
-        if confidence < self.settings.emergency_confidence_threshold:
-            logger.info("Emergency quota denied for %s: confidence %d < %d",
-                        shadow_id, confidence, self.settings.emergency_confidence_threshold)
+        # Phase 2: primary trigger = base quota exhaustion
+        if base_quota_used < base_quota_total:
+            logger.info("Emergency quota denied for %s: base quota not exhausted (%d/%d)",
+                        shadow_id, base_quota_used, base_quota_total)
             return False
 
         current_state = self._get_or_create_state(shadow_id)
@@ -73,15 +77,14 @@ class EmergencyQuotaAuditor:
         quota = EmergencyQuotaRequest(
             shadow_id=shadow_id,
             requested_at=datetime.now(timezone.utc).isoformat(),
-            confidence_self_report=confidence,
+            confidence_self_report=8,  # exhaustion-triggered, confidence not relevant
             opportunity_description=opportunity_desc,
             result="pending",
         )
         quota_id = self.state_db.record_emergency_quota(shadow_id, quota)
-        logger.info("Emergency quota approved for %s: quota_id=%d confidence=%d",
-                    shadow_id, quota_id, confidence)
+        logger.info("Emergency quota approved for %s: quota_id=%d (exhaustion: %d/%d)",
+                    shadow_id, quota_id, base_quota_used, base_quota_total)
 
-        # Transition to PENDING state
         current_state.state = "pending"
         self._shadow_states[shadow_id] = current_state
 

@@ -411,14 +411,23 @@ class ShadowAgent:
     def get_pro_quota(self) -> int:
         return self.settings.shadow_pro_quota_default
 
-    async def request_emergency_quota(self, opportunity: str,
-                                       confidence: int) -> bool:
-        """Request emergency quota via the auditor state machine (not direct DB)."""
-        if confidence < self.settings.emergency_confidence_threshold:
-            return False
+    async def request_emergency_quota(self, opportunity: str) -> bool:
+        """Request emergency quota triggered by base quota exhaustion (Phase 2).
+
+        The shadow checks whether it has exhausted its daily base quota.
+        Emergency quota is only available after base quota is fully used.
+        """
+        base_quota_total = self.get_daily_quota()
+        latest = self.state_db.get_latest_snapshot(self.shadow_id)
+        base_quota_used = latest.flash_quota_used if latest else 0
+
         from marketmind.shadows.emergency_quota import EmergencyQuotaAuditor
         auditor = EmergencyQuotaAuditor(self.state_db, self.settings)
-        return auditor.request_quota(self.shadow_id, opportunity, confidence)
+        return auditor.request_quota(
+            self.shadow_id, opportunity,
+            base_quota_used=base_quota_used,
+            base_quota_total=base_quota_total,
+        )
 
     # ── Persistence ──────────────────────────────────────────────────────
 

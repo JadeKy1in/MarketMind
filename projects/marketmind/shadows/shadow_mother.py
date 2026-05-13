@@ -51,6 +51,8 @@ class ShadowOrchestrationResult:
     collusion_flags: list = field(default_factory=list)
     ecosystem_alerts: list = field(default_factory=list)
     ecosystem_interpretation: str = ""
+    plateau_flags: list = field(default_factory=list)
+    reset_candidates: list = field(default_factory=list)
     challenger_actions: list[str] = field(default_factory=list)
     emergency_audits: list[str] = field(default_factory=list)
 
@@ -400,6 +402,47 @@ class ShadowMother:
                     if agent_config:
                         agent = ShadowAgent(agent_config, self.state_db, self.config)
                         agent.apply_ranking_to_snapshot(rr)
+
+                # Plateau detection + reset eligibility checks (Phase 2)
+                for config in visible:
+                    try:
+                        # Gather data for plateau detection
+                        tier_hist = self.state_db.get_tier_history(
+                            config.shadow_id, days=self.config.plateau_no_elite_days * 2
+                        ) if hasattr(self.state_db, 'get_tier_history') else []
+                        wr_hist = self.state_db.get_wr_history(
+                            config.shadow_id, days=self.config.plateau_no_elite_days * 2
+                        ) if hasattr(self.state_db, 'get_wr_history') else []
+                        insight_dates = self.state_db.get_insight_dates(
+                            config.shadow_id
+                        ) if hasattr(self.state_db, 'get_insight_dates') else []
+
+                        # Plateau detection
+                        is_plateau, plateau_score = engine.detect_plateau(
+                            config.shadow_id, tier_hist, wr_hist, insight_dates
+                        )
+                        if is_plateau:
+                            logger.info("Plateau detected: %s (score=%.2f)", config.shadow_id, plateau_score)
+                            result.plateau_flags.append({
+                                "shadow_id": config.shadow_id,
+                                "plateau_score": plateau_score,
+                                "date": today,
+                            })
+
+                        # Reset eligibility
+                        should_reset, reset_reason = engine.check_reset_eligibility(
+                            tier_hist, wr_hist, insight_dates
+                        )
+                        if should_reset:
+                            logger.info("Reset eligible: %s — %s", config.shadow_id, reset_reason)
+                            result.reset_candidates.append({
+                                "shadow_id": config.shadow_id,
+                                "reason": reset_reason,
+                                "date": today,
+                            })
+                    except Exception as e:
+                        logger.debug("Plateau/reset check failed for %s: %s", config.shadow_id, e)
+
         except Exception as e:
             logger.error("Ranking computation failed: %s", e)
 

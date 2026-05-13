@@ -165,7 +165,7 @@ class RankingEngine:
             w["win_rate"] * wr_norm
         )
 
-        # —— Profitability penalty: negative cumulative return = largest penalty ——
+        # —— Profitability penalty ——
         if perf.cumulative_return < 0:
             penalty = min(
                 self._PROFIT_LOSS_PENALTY,
@@ -174,7 +174,16 @@ class RankingEngine:
             composite = max(composite * (1.0 - penalty), self._PROFIT_LOSS_FLOOR)
             modifiers["profitability_penalty"] = penalty
 
-        return composite, components, modifiers
+        # —— Abstention penalty (anti-conservatism, Phase 2) ——
+        abstention_penalty = 0.0
+        if career_days and career_days > 0:
+            abstention_rate = perf.abstention_days / career_days
+            if abstention_rate > 0.3:  # Only penalize if >30% days abstained
+                abstention_penalty = self.config.abstention_penalty_weight * abstention_rate
+                composite -= abstention_penalty
+        modifiers["abstention_penalty"] = abstention_penalty
+
+        return max(composite, 0.0), components, modifiers
 
     @staticmethod
     def _compute_wr_line(career_days: int | None, domain: str | None = None,
@@ -455,6 +464,37 @@ class RankingEngine:
             }
             component_pct[comp_name] = self.compute_percentile_ranks(comp_scores)
 
+        # —— Quota efficiency scoring (Phase 2) ——
+        # Group shadows by domain for within-domain normalization
+        domain_groups: dict[str, list[str]] = {}
+        for sid, perf in performances.items():
+            dom = perf.domain or "macro"
+            domain_groups.setdefault(dom, []).append(sid)
+
+        quota_eff_by_domain: dict[str, float] = {}
+        for domain, sids in domain_groups.items():
+            eff_values = []
+            for sid in sids:
+                trades = performances[sid].total_trades
+                eff = trades / max(trades, 1)  # placeholder: normalize within domain
+                eff_values.append(eff)
+            max_eff = max(eff_values) if eff_values else 1.0
+            for sid, eff in zip(sids, eff_values):
+                quota_eff_by_domain[sid] = eff / max_eff if max_eff > 0 else 0.5
+
+        # Apply quota efficiency as a composite bonus/penalty
+        qe_weight = getattr(self.config, 'quota_efficiency_weight', 0.05)
+        for sid in raw_scores:
+            qe = quota_eff_by_domain.get(sid, 0.5)
+            bonus = qe_weight * (qe - 0.5) * 2.0  # center at 0.5: below avg = penalty
+            raw_scores[sid] = raw_scores[sid] + bonus
+            modifiers_data[sid]["quota_efficiency"] = qe
+            modifiers_data[sid]["quota_efficiency_bonus"] = bonus
+
+        # Re-apply deflated after quota efficiency adjustment
+        deflated = {sid: s * haircut for sid, s in raw_scores.items()}
+        percentiles = self.compute_percentile_ranks(deflated)
+
         # Determine tiers and build results
         for sid in performances:
             perf = performances[sid]
@@ -502,3 +542,68 @@ class RankingEngine:
             return 0.0
         daily_sharpe = mean / math.sqrt(variance)
         return daily_sharpe * math.sqrt(252)
+
+    # ── Reset eligibility (Phase 2) ────────────────────────────────────
+
+    def check_reset_eligibility(
+        self,
+        tier_history: list[tuple[str, str]],     # (date, tier)
+        wr_history: list[tuple[str, float]],      # (date, win_rate)
+        insight_dates: list[str],                  # dates with insights
+    ) -> tuple[bool, str]:
+        """Check if a shadow should be reset to baseline methodology.
+
+        Three conditions must ALL be met:
+        1. No EXCELLENT or higher in reset_no_excellent_months
+        2. Win rate fluctuation < ±5% for reset_flat_wr_months
+        3. No insight produced in reset_no_insight_months
+
+        Returns (should_reset, reason).
+        """
+        from datetime import datetime, timedelta
+
+        cfg = self.config
+        today = datetime.now().date()
+        months_ago_6 = today - timedelta(days=cfg.reset_no_excellent_months * 30)
+        months_ago_3 = today - timedelta(days=cfg.reset_flat_wr_months * 30)
+        insight_cutoff = today - timedelta(days=cfg.reset_no_insight_months * 30)
+
+        # Condition 1: No EXCELLENT in N months
+        has_excellent = False
+        for date_str, tier in tier_history:
+            try:
+                d = datetime.strptime(date_str, "%Y-%m-%d").date()
+                if d >= months_ago_6 and tier in ("excellent", "elite"):
+                    has_excellent = True
+                    break
+            except ValueError:
+                continue
+
+        if has_excellent:
+            return False, ""
+
+        # Condition 2: WR flat for N months
+        recent_wr = [
+            wr for date_str, wr in wr_history
+            if (d := datetime.strptime(date_str, "%Y-%m-%d").date()) and d >= months_ago_3
+        ]
+        if recent_wr and len(recent_wr) >= 5:
+            wr_range = max(recent_wr) - min(recent_wr)
+            if wr_range > 0.05:
+                return False, ""
+
+        # Condition 3: No insight in N months
+        has_insight = any(
+            datetime.strptime(d, "%Y-%m-%d").date() >= insight_cutoff
+            for d in insight_dates
+        )
+
+        if not has_insight and (not recent_wr or len(recent_wr) < 5 or wr_range <= 0.05):
+            return True, (
+                f"No EXCELLENT tier in {cfg.reset_no_excellent_months} months, "
+                f"WR range {max(recent_wr)-min(recent_wr):.2%} in "
+                f"{cfg.reset_flat_wr_months} months, "
+                f"no insight in {cfg.reset_no_insight_months} months"
+            )
+
+        return False, ""
