@@ -1,181 +1,218 @@
-# Restart Guide — MarketMind Development Continuation
+# MarketMind Restart Guide — Development Continuation
 
-**Last updated**: 2026-05-13
-**Git branch**: master
-**Last commit**: `875a767` (P2 statistical rigor)
+**Last updated**: 2026-05-13 | **Branch**: master | **Last push**: `2fbba82`
 **All pushed to GitHub**: ✅
+
+---
+
+## Restart Command
+
+Type this exactly:
+
+> 继续 MarketMind 开发。阅读 `.claude/RESTART_GUIDE.md`。按顺序实施 P2-2 → P2-4 → P3-1 → P3-3 → P3-4 → P3-2。
 
 ---
 
 ## Current State
 
-### Completed: 7 Implementation Phases (17 features)
-All original Phase 0-7 implementation is complete. 218/218 tests pass.
+### ✅ Completed: 7 Implementation Phases (17 features) + P0-P2 Core (10/15)
+218/218 tests pass. All pushed to GitHub.
 
-### Completed: P0-P2 Improvement Plan (10 of 15 items)
-P0-P3 is the improvement plan from the 3-agent review (Architect + Quant + Red Team).
-
-| Priority | # | Item | Status |
-|----------|---|------|--------|
-| P0 | P0-1 | Knowledge filter wiring | ✅ |
-| P0 | P0-2 | Challenger verdict execution | ✅ |
-| P0 | P0-3 | Background scheduler data pollution | ✅ |
-| P1 | P1-1 | MethodologyInjector primitive | ✅ |
-| P1 | P1-2 | Crystallization→prompts | ✅ |
-| P1 | P1-3 | AEL lessons→prompts | ✅ |
-| P1 | P1-4 | Method breeding wired | ✅ |
-| P1 | P1-5 | AEL lesson persistence | ✅ |
-| P2 | P2-1 | Effective-N haircut | ✅ |
-| P2 | P2-2 | Walk-forward validation | ⏸️ NOT DONE |
-| P2 | P2-3 | Wilcoxon + 21-day trial | ✅ |
-| P2 | P2-4 | External market anchor | ⏸️ NOT DONE |
-| P2 | P2-5 | Holm-Bonferroni correction | ✅ |
-| P3 | P3-1 | Challenger learns from failures | ⏸️ NOT DONE |
-| P3 | P3-2 | Main AI gate iteration (SHARP) | ⏸️ NOT DONE |
-| P3 | P3-3 | LLM gateway redundancy | ⏸️ NOT DONE |
-| P3 | P3-4 | Partial-state recovery | ⏸️ NOT DONE |
+### ⏸️ Remaining: 6 items (P2-2, P2-4, P3-1, P3-2, P3-3, P3-4)
+All externally researched, Red Team audited, ready to implement.
 
 ---
 
-## What to Do After Restart
+## Implementation Order & Specs
 
-### Step 1: Say this to Claude
-```
-继续 MarketMind 开发。上次停在了 P2 改进计划。P2-1/3/5 已完成，P2-2 和 P2-4 还没做。
-重启指南在 .claude/RESTART_GUIDE.md。先实施 P2-2 和 P2-4。
-```
+**Development rule for EVERY item**: Search external research first → Red Team audit → implement → commit.
 
-### Step 2: Implement P2-2 (Walk-Forward Validation)
-**What**: Rolling walk-forward to detect overfitting. Based on HypoDriven framework.
-**Where**: `projects/marketmind/shadows/ranking_engine.py` + `shadow_mother.py`
-**Specs**:
+---
+
+### 1. P2-2: Walk-Forward Validation (~150 lines, 1 day)
+
+**VERDICT**: APPROVED | **Dependencies**: None
+
+**Why**: Detects overfitting. Current system evaluates all historical data in one window — no out-of-sample test. Based on AlgoXpert IS-WFA-OOS protocol (Pham, Mar 2026) and HypoDriven framework (Deep et al., Dec 2025).
+
+**What to build**:
+- `RankingEngine.WalkForwardValidator` class in `shadows/ranking_engine.py` (+120 lines)
+- Integration in `shadow_mother.py` after ranking step (+30 lines)
 - 90-day train / 2-day purge / 20-day test windows
-- Flag shadows with OOS_composite / IS_composite < 0.5
-- Minimum 120 career days required
-- Binomial sign test on test-period directional accuracy
-- ~180 lines, 3-4 hours
-**Red Team**: Approved with modifications (previous audit at `.claude/` logs)
+- WFE gate: `mean(OOS_deflated) / mean(IS_deflated) < 0.5` = overfit flag
+- Skip check if IS_deflated <= 0.001
+- Min 120 career days required
+- Binomial sign test on OOS directional accuracy
+- No new DB tables — uses existing `daily_snapshots`
 
-### Step 3: Implement P2-4 (External Market Anchor)
-**What**: Independent OHLC data source to break virtual PnL circularity.
-**Where**: New files + `shadow_state.py` + `ranking_engine.py`
-**Specs**:
-- New `market_prices` table (ticker, date, O/H/L/C/volume)
-- New `MarketDataFetcher` class using yfinance.history()
-- Wire into daily cycle BEFORE ranking
-- Hard tier gate: market_accuracy < 0.45 → cannot achieve ELITE
-- ~170 lines, 3-4 hours
-**Red Team**: Approved with modifications
-
-### Step 4: Implement P3-1 through P3-4 (in order, external research first)
-**Process for each**: Search external → analyze → Red Team audit → implement → commit.
-
-#### P3-1: Challenger Learns from Predecessor Failures
-**What**: When a challenger replaces a target, inject predecessor's failure patterns.
-**Where**: `shadows/challenger_engine.py` + `shadows/ael_evolution.py`
-**Specs**:
-- Query target's AEL debrief history (last 3 months)
-- Extract top failure patterns
-- Prepend `[FAILURE PATTERNS TO AVOID]` block to challenger's methodology_prompt
-- Uses MethodologyInjector.inject_failure_patterns() (already built in P1-1)
-- External research: Mistake Notebook Learning (MNL, ACL 2026), Hindsight Hint Distillation (HHD, May 2026)
-- ~50 lines, 1 day
-**Red Team**: Approved (from unified improvement plan)
-
-#### P3-2: Main AI Gate Iteration (SHARP Rubric Evolution)
-**What**: Decompose main AI's static DECISION_SYSTEM_PROMPT into auditable rules.
-**Where**: New file `pipeline/methodology_rules.py` + modify `pipeline/decision.py`
-**Specs**:
-- Decompose 3 main AI system prompts into MainAIRule objects (ID, condition, action, weight)
-- Build AttributionAgent (Flash model) that consumes MissedPathReport + TempEvent validation
-- Build RuleValidator with backtest gate before rule promotion
-- Dynamic prompt assembly from active rules (replace static prompt)
-- All changes logged with audit trail
-- ~500 lines, 2-3 days
-**Red Team**: ADOPT (Phase 1), from SHARP proposal audit
-**Dependencies**: MethodologyInjector (P1-1, ✅ done)
-
-#### P3-3: LLM Gateway Redundancy
-**What**: Fallback provider when DeepSeek API is down.
-**Where**: `gateway/async_client.py`
-**Specs**:
-- Add fallback provider configuration in settings
-- Exponential backoff with jitter on primary provider failure
-- Route to secondary provider when primary is unavailable
-- At minimum: degrade gracefully (cache responses, rule-based votes)
-- ~200 lines, 2-3 days
-**Red Team**: Approved
-
-#### P3-4: Partial-State Recovery
-**What**: Save checkpoint after shadow analyses, recover on restart.
-**Where**: `shadows/shadow_mother.py` + `shadows/shadow_state.py`
-**Specs**:
-- After step 4 (shadow analyses + vote save), write CycleCheckpoint to DB
-- On next cycle start, check for incomplete previous cycle
-- Resume from checkpoint rather than starting fresh
-- Group try/except blocks functionally for partial-result continuation
-- ~200 lines, 2-3 days
-**Red Team**: Approved
-
-### Step 5: Start AEL Controlled Experiment
-**How**: Set `ael_experiment_enabled = True` in `config/settings.py`
-- Creates 4 treatment/control replica pairs
-- Monthly Pro debriefs on treatment shadows
-- After 2-3 months: compare treatment vs control with z-test
-- Decision point: if treatment > control (statistically significant) → expand AEL to all shadows
+**Tests needed** (5): WFE passing, WFE flagging, insufficient data early-exit, near-zero IS handling, binomial test
 
 ---
 
-## Key Files Reference
+### 2. P2-4: External Market Anchor (~170 lines, 1 day)
+
+**VERDICT**: MODIFIED (3 corrections applied) | **Dependencies**: `yfinance` (already in requirements.txt)
+
+**Why**: Breaks virtual PnL circularity. Shadows are currently ranked against system-calculated PnL. Market accuracy < random (0.50) must block ELITE tier. Based on S&P Totem consensus validation and AlgoXpert defense-in-depth.
+
+**Corrections applied**:
+- Threshold raised: `market_accuracy < 0.50` → demote to NORMAL (not 0.45)
+- Accuracy defined as: `count(shadow_direction == sign(next_day_return)) / total_predictions`
+- Integration point: between step 4 (analyses) and step 5 (rankings) in daily cycle
+
+**What to build**:
+- NEW `shadows/market_data_fetcher.py` (+60 lines): `MarketDataFetcher` using `yfinance.history()`
+- MODIFY `shadows/shadow_state.py` (+40 lines): `market_prices` table + CODE_VERSION=3 migration
+- MODIFY `shadows/ranking_engine.py` (+25 lines): `accuracy_gate` param in `determine_achievement_tier()`
+- MODIFY `shadows/shadow_mother.py` (+45 lines): fetch→compute→gate integration
+
+**Tests needed** (6): OHLCV fetch, accuracy computation, ELITE demotion, tier retention, holiday skip, migration
+
+---
+
+### 3. P3-1: Challenger Learns from Predecessor Failures (~50 lines, 0.5 day)
+
+**VERDICT**: APPROVED | **Dependencies**: Soft dep on AEL (works without it)
+
+**Why**: Challenger currently inherits target's methodology VERBATIM — including the same biases. Based on Mistake Notebook Learning (ACL 2026) and Hindsight Hint Distillation (May 2026): training-free, predecessor failures → structured "what not to do" for successor.
+
+**What to build**:
+- MODIFY `shadows/challenger_engine.py` (+50 lines): in `create_challenger()`, query AEL debriefs (last 3 months) + crystallization retirements, call `MethodologyInjector.inject_failure_patterns()` (already built in P1-1)
+- Primary source: AEL debrief failure_patterns
+- Secondary source: crystallization retired insights from methodology_changes table
+- Cap at 5 total patterns to avoid prompt bloat
+- Graceful degradation if AEL data unavailable
+
+**Tests needed** (5): patterns injected, no AEL data ok, deduplication, crystallization retirements, cap at 5
+
+---
+
+### 4. P3-3: LLM Gateway Redundancy (~200 lines, 1.5 days)
+
+**VERDICT**: MODIFIED (2 corrections) | **Dependencies**: None
+
+**Why**: Single DeepSeek outage = all 22 shadows dead simultaneously. Based on circuit breaker pattern (llm-circuit, 2026) and ADR-021 Fallback Chain.
+
+**Corrections applied**:
+- HALF_OPEN probe interval depends on error type (429→Retry-After, 5xx→30s, quota→skip HALF_OPEN)
+- Fallback provider must be configurable: `fallback_provider_url` + `fallback_model` in settings
+
+**What to build**:
+- MODIFY `gateway/async_client.py` (+180 lines): `CircuitBreaker` class (CLOSED→OPEN→HALF_OPEN state machine), integration with existing `_call_with_retry()`, exponential backoff with jitter
+- MODIFY `config/settings.py` (+15 lines): `fallback_provider_url`, `fallback_model`, `circuit_breaker_threshold=3`, `circuit_breaker_timeout_s=30`
+
+**Tests needed** (8): CLOSED→OPEN transition, fallback routing, HALF_OPEN probe success, HALF_OPEN probe failure, 429 Retry-After, jitter, fallback output, config ordering
+
+---
+
+### 5. P3-4: Partial-State Recovery (~200 lines, 1.5 days)
+
+**VERDICT**: APPROVED (per-shadow granularity) | **Dependencies**: None
+
+**Why**: Crash during step 4 (most expensive — all LLM calls) loses 22 completed analyses. Based on Kitaru checkpoint pattern (ZenML, 2026).
+
+**Corrections applied**:
+- Per-shadow checkpoint after each individual analysis (not just after entire step 4)
+- Resume: skip completed shadows, re-run only incomplete ones
+
+**What to build**:
+- MODIFY `shadows/shadow_mother.py` (+140 lines): per-shadow checkpoint after each analysis in `_run_one`, resume detection on cycle start, cached replay logic
+- MODIFY `shadows/shadow_state.py` (+60 lines): `cycle_checkpoints` table + CODE_VERSION=4 migration + CRUD methods
+- Schema: `cycle_checkpoints(date TEXT PK, status TEXT, step_completed INT, shadow_states JSON, ...)`
+
+**Tests needed** (7): incomplete cycle resume, completed skip, incomplete re-run, per-shadow checkpoint, crash safety, two incomplete cycles, cleanup
+
+---
+
+### 6. P3-2: Main AI Gate Iteration — SHARP (~750 lines, 3-4 days)
+
+**VERDICT**: MODIFIED (split into P3-2a + P3-2b) | **Dependencies**: MissedPathReport (exists)
+
+**Why**: Main AI currently has ZERO self-improvement while shadows have 5+ mechanisms. SHARP bridges this by decomposing static DECISION_SYSTEM_PROMPT into auditable rules with the same pattern shadows already use (ID→decay→validation→audit).
+
+**Correction: Split into two sub-phases** (original 500-line estimate was too low):
+
+#### P3-2a: Rule Framework + Attribution (~350 lines, 1-2 days)
+- NEW `pipeline/methodology_rules.py`: `MainAIRule` dataclass, rule decomposition from DECISION_SYSTEM_PROMPT, `AttributionAgent` (Flash LLM → hypothesis only, NOT verdict), backtest gate makes final keep/retire decision
+- MODIFY `storage/archivist.py` (+20 lines): rule audit methods
+- Key: AttributionAgent output is `RuleImpactHypothesis` (rule_id, suspected_impact, confidence). Walk-forward backtest is the actual verdict. LLM is NOT the judge.
+
+#### P3-2b: Evolution + Dynamic Assembly (~400 lines, 2 days)
+- MODIFY `pipeline/methodology_rules.py`: `RuleValidator` with walk-forward gate, `RuleEvolver` (atomic edits: tune threshold, add/remove rule), dynamic prompt assembly from active rules
+- MODIFY `pipeline/decision.py` (+30 lines): replace static DECISION_SYSTEM_PROMPT with dynamic assembly
+
+**Tests needed** (6): rule decomposition, attribution hypothesis, dynamic assembly, backtest retirement, audit trail, error handling
+
+---
+
+## Dependency Graph
+
+```
+P3-3 (unblocks reliability)           P3-1 (quick win)
+    ↓                                       ↓
+P2-2 + P2-4 (validation gates)         [independent]
+    ↓
+P3-4 (recovery)
+    ↓
+P3-2a → P3-2b (largest, last)
+```
+
+P3-3, P3-1, and P2-2+P2-4 can all run in parallel (different files).
+
+---
+
+## After All 6 Items Complete
+
+### Start AEL Controlled Experiment
+1. Set `ael_experiment_enabled = True` in `config/settings.py`
+2. Create replica shadows for 4 treatment shadows
+3. Run 2-3 months, compare treatment vs control with z-test
+4. If significant: expand AEL to all shadows
+
+### Run Full Test Suite
+```bash
+python -m pytest projects/marketmind/tests/ -v --tb=short
+```
+
+---
+
+## Key Design Decisions (DO NOT CHANGE WITHOUT REVIEW)
+
+1. All shadows default to Pro model. Flash: queries, preprocessing, one-line comments.
+2. Challengers inherit ORIGINAL methodology prompts, not AEL-evolved ones.
+3. Daredevils are ENVIRONMENT-LOCKED (7+1). Each trades its own environment.
+4. Catfish → EcosystemAuditor (mechanism, not shadow).
+5. Temp Events = Form C milestone-triggered (3-5 Pro calls/30 days).
+6. Emergency quota triggers on exhaustion, not confidence.
+7. Tier quotas: ELITE=7, EXCELLENT=6, NORMAL=5, WATCH=3, ENDANGERED=1.
+8. Dynamic win-rate line: early boost WR, mature allow WR-for-profitability trade.
+9. Negative profitability = largest penalty regardless of win rate.
+10. ELITE Gate 2 participation: domain-triggered, no decision authority, once/session.
+11. SHARP rules apply the PATTERN to main AI, NOT shadow data.
+
+---
+
+## Key Files
 
 | File | Purpose |
 |------|---------|
-| `projects/marketmind/shadows/ranking_engine.py` | Composite scoring, Bayesian haircut, dynamic WR line, walk-forward (P2-2), market anchor (P2-4) |
-| `projects/marketmind/shadows/shadow_mother.py` | Daily orchestration, all Phase 0-7 wiring |
-| `projects/marketmind/shadows/shadow_state.py` | SQLite schema, CRUD, methodology_changes audit |
-| `projects/marketmind/shadows/methodology_evolver.py` | MethodologyInjector class (P1-1), method tracking |
-| `projects/marketmind/shadows/ael_evolution.py` | AEL slow-layer engine (Phase 7) |
-| `projects/marketmind/shadows/challenger_engine.py` | 3-stage elimination, Wilcoxon test (P2-3) |
-| `projects/marketmind/shadows/knowledge_filter.py` | Knowledge inheritance with lineage tracking (P0-1) |
-| `projects/marketmind/shadows/ecosystem_health.py` | Collective degradation detection (Phase 3) |
-| `projects/marketmind/shadows/shadow_health_monitor.py` | Individual shadow health (Phase 3) |
-| `projects/marketmind/shadows/ecosystem_auditor.py` | Blind-spot detection (Phase 0) |
-| `projects/marketmind/shadows/elite_participation.py` | ELITE Gate 2 participation (Phase 5) |
-| `projects/marketmind/shadows/parameter_beta_runner.py` | Quantitative parameter testing (Phase 4) |
-| `projects/marketmind/config/settings.py` | All configuration, AEL experiment flag |
-| `.claude/phase_b_ideation_notes.md` | Full ideation notes from Grill Me sessions |
-| `.claude/grill_me_roadmap.md` | Grill Me question framework (Round 3-5 pending) |
+| `projects/marketmind/shadows/ranking_engine.py` | Composite scoring, haircut, dynamic WR, walk-forward (P2-2) |
+| `projects/marketmind/shadows/shadow_mother.py` | Daily orchestration, all wiring, recovery (P3-4) |
+| `projects/marketmind/shadows/shadow_state.py` | SQLite schema, methodology_changes, market_prices (P2-4) |
+| `projects/marketmind/shadows/challenger_engine.py` | 3-stage elimination, Wilcoxon, failure patterns (P3-1) |
+| `projects/marketmind/shadows/methodology_evolver.py` | MethodologyInjector (P1-1) |
+| `projects/marketmind/gateway/async_client.py` | LLM calls, circuit breaker (P3-3) |
+| `projects/marketmind/pipeline/decision.py` | Main AI prompts, SHARP dynamic assembly (P3-2) |
+| `projects/marketmind/config/settings.py` | All configuration, AEL flag, fallback (P3-3) |
+| `.claude/phase_b_ideation_notes.md` | Full Grill Me ideation notes |
 | `.claude/forensics/phase-b-fdr.md` | Phase B forensic design reconstruction |
 | `.claude/audits/` | All Red Team audit reports |
-| `docs/superpowers/specs/2026-05-10-marketmind-design.md` | Original design document v1.2 |
+| `docs/superpowers/specs/2026-05-10-marketmind-design.md` | Original design doc v1.2 |
 
 ---
 
 ## Grill Me Status
 
-The 5-round Grill Me ideation session was partially completed:
-- Round 1: ✅ Pain Mining (extensive — spawned all shadow redesign)
-- Round 2: ✅ Vision Gap (all shadow types covered)
-- Round 3: ✅ Cross-Pollination (external research integration)
-- Round 4: ✅ Risk & Depth (5 questions covered)
-- Round 5: ✅ Prioritization (17 items sorted into 7 phases)
-
-Two closing questions for Round 5 remain unasked (optional):
-- "One year from now, MarketMind has become indispensable. What does it do?"
+Rounds 1-4 complete. Round 5 two closing questions (optional):
+- "One year from now, what makes MarketMind indispensable?"
 - "Is there anything we should STOP doing?"
-
----
-
-## Important Design Decisions (Don't Change Without Review)
-
-1. **All shadows default to Pro model** (was Flash). Flash reserved for queries, preprocessing, one-line comments.
-2. **Challengers inherit ORIGINAL methodology prompts**, not AEL-evolved ones (prevents bias accumulation).
-3. **Daredevils are ENVIRONMENT-LOCKED** (7+1). Each always trades its environment regardless of broad market.
-4. **Catfish is replaced** by EcosystemAuditor (mechanism, not shadow).
-5. **Temp Events use Form C** milestone-triggered recording (3-5 Pro calls/30 days).
-6. **Emergency quota triggers on exhaustion**, not confidence threshold.
-7. **Tier quotas**: ELITE=7, EXCELLENT=6, NORMAL=5, WATCH=3, ENDANGERED=1.
-8. **Dynamic win-rate line**: early career = boost WR weight, mature = allow WR-for-profitability trade.
-9. **Negative profitability = largest penalty** in composite score (regardless of win rate).
-10. **ELITE participation in Gate 2**: domain-triggered, no decision authority, once per session.
-11. **SHARP rules apply the PATTERN (ID→decay→validation→audit) to main AI**, NOT shadow data.
