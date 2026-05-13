@@ -55,6 +55,7 @@ class ShadowOrchestrationResult:
     ecosystem_health_snapshot: dict | None = None
     plateau_flags: list = field(default_factory=list)
     reset_candidates: list = field(default_factory=list)
+    ael_debriefs: list = field(default_factory=list)       # Phase 7
     challenger_actions: list[str] = field(default_factory=list)
     emergency_audits: list[str] = field(default_factory=list)
 
@@ -583,6 +584,49 @@ class ShadowMother:
                 )
             except Exception as e:
                 logger.error("Crystallization check failed: %s", e)
+
+        # 6.8 AEL Evolution — monthly debrief (Phase 7, gated behind config flag)
+        if getattr(self.config, 'ael_experiment_enabled', False):
+            try:
+                from marketmind.shadows.ael_evolution import AELEvolutionEngine
+                ael = AELEvolutionEngine()
+                debrief_day = getattr(self.config, 'ael_debrief_day', 1)
+                today_day = int(today.split("-")[2])  # extract day-of-month
+
+                # Run debrief on configured day of month
+                if today_day == debrief_day:
+                    # Build performance dicts for treatment shadows
+                    treatment_ids = {
+                        "daredevil:range_bound:sideways_scout",
+                        "daredevil:momentum:trend_chaser",
+                        "expert:tech:silicon_oracle",
+                        "expert:macro:cycle_reader",
+                    }
+                    for sid in treatment_ids:
+                        perf_data = performances.get(sid)
+                        if not perf_data:
+                            continue
+                        market_ctx = (
+                            f"VIX: {market_data.get('VIX', 'N/A')}, "
+                            f"SPY: {market_data.get('SPY', 'N/A')}"
+                        )
+                        debrief = await ael.run_monthly_debrief(sid, {
+                            "win_rate": perf_data.win_rate,
+                            "cumulative_return": perf_data.cumulative_return,
+                            "total_trades": perf_data.total_trades,
+                            "profitable_trades": perf_data.profitable_trades,
+                            "losing_trades": perf_data.losing_trades,
+                        }, market_ctx)
+                        if debrief.lessons_learned:
+                            injected = ael.inject_lesson(sid, debrief.lessons_learned)
+                            debrief.prompt_injected = injected
+                            logger.info(
+                                "AEL debrief for %s: lesson %s", sid,
+                                "injected" if injected else "rejected (cap)"
+                            )
+                        result.ael_debriefs.append(debrief)
+            except Exception as e:
+                logger.error("AEL evolution step failed: %s", e)
 
         # 7. Check challenger conditions
         try:

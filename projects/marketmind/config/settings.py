@@ -96,6 +96,15 @@ class ShadowSettings:
     missed_path_max_per_gate: int = 2
     missed_path_report_days: int = 30
 
+    # AEL Evolution Experiment (Phase 7 — set to True to activate)
+    # When enabled, selected shadows get monthly Pro debriefs (slow-layer evolution).
+    # Requires: Phase 6 daredevil restructure, Pro default (Phase 0), health monitoring (Phase 3).
+    # Experiment pairs: Range-Bound/Momentum Daredevils + Tech/Macro Experts.
+    # Each treatment shadow has a replica (control) — compare after 2-3 months.
+    # NOTE: Challengers inherit ORIGINAL methodology prompts, not AEL-evolved ones.
+    ael_experiment_enabled: bool = False
+    ael_debrief_day: int = 1  # day of month to run debrief (1st)
+
     # Crystallization (knowledge crystallization engine)
     crystallization_enabled: bool = False
     crystallization_significance_threshold: float = 0.6
