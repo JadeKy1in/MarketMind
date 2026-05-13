@@ -211,8 +211,36 @@ python -m pytest projects/marketmind/tests/ -v --tb=short
 
 ---
 
+---
+
+## Pending / Deferred Items (Not in Current Sprint)
+
+These were identified during research/audit but deferred or deprioritized. Documented so nothing is lost.
+
+### Deferred from 3-Proposal Review (You.com, SAC)
+- **You.com Recursive Improvement**: Deferred. Key insight (plateau→environment change) incorporated into SHARP. Standalone Judge Agent not needed. If SHARP plateaus → revisit.
+- **SAC Credit-Assigned Penalty**: Deferred to Phase 2 (after SHARP stabilizes 2+ weeks). Apply to shadow ecosystem first (daily votes), then main AI.
+
+### From Original Design Doc v1.2 (Possibly Not Built)
+These were in the May 2026 design spec but may not have been implemented:
+- **不交易信号生成器 (NoTrade Signal Generator)**: Design doc 4.0.1 — symmetric "why NOT to trade" analysis presented alongside buy/sell at Gate 3. Check if implemented in `pipeline/decision.py`.
+- **人类决策镜像 (Human Decision Mirror)**: Design doc 8.4 — track user decisions vs AI recommendations, identify patterns (bias toward over-trading, VIX-correlated decisions). Check `shadows/` or `pipeline/`.
+- **信号追踪器 (Signal Tracker)**: Design doc 8.2 — per-signal-type lying history, false signal context annotation. Check `shadows/` or `pipeline/`.
+- **三层复盘 (3-Tier Review)**: Design doc 8.1 — daily tactical + monthly strategic + quarterly systemic. Some daily review exists in AEL/crystallization. Monthly and quarterly may not be built.
+- **Phase C 复盘进化**: Original roadmap Phase C. Some components built (crystallization, methodology evolver). Full pipeline may be incomplete.
+- **Phase D 打磨**: Original roadmap Phase D — performance optimization, cost optimization, stability testing. Not started.
+
+### From Unified Improvement Plan
+- **P2-2, P2-4**: In current sprint (above).
+- **P3-1 through P3-4**: In current sprint (above).
+
+### Operational Items
+- **AEL Controlled Experiment**: Code ready (`ael_experiment_enabled=False`). Start after P2-4 done (needs external market data).
+- **Full End-to-End Test Run**: After all 6 items done, run complete test suite.
+- **Grill Me Round 5 closing questions** (optional): (1) What makes MarketMind indispensable in 1 year? (2) Anything we should STOP doing?
+
+---
+
 ## Grill Me Status
 
-Rounds 1-4 complete. Round 5 two closing questions (optional):
-- "One year from now, what makes MarketMind indispensable?"
-- "Is there anything we should STOP doing?"
+Rounds 1-4 complete. Round 5 two closing questions (optional — see Pending Items above).
