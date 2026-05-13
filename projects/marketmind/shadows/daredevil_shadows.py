@@ -108,6 +108,26 @@ DAREDEVIL_SHADOW_CONFIGS: list[ShadowConfig] = [
         virtual_capital=30000.0, domain="macro", temperature=0.4,
         max_positions=3, max_drawdown_limit=0.35, min_trades_for_ranking=50,
     ),
+    # Phase 5: Crash Hunter — pre-crash signal specialist (Item 16)
+    ShadowConfig(
+        shadow_id="daredevil:crash:hunter", shadow_type="daredevil",
+        display_name="Crash Hunter",
+        methodology_prompt=(
+            "You are the Crash Hunter, a pre-crash detection specialist. "
+            "Your environment: overvalued markets with accumulating crash signals. "
+            "You look for: Shiller CAPE > 30, Buffett Indicator > 150%, rising "
+            "cross-asset correlation, VIX term structure inversion, Hindenburg Omen "
+            "signals, declining breadth despite index highs, insider selling surges, "
+            "and credit spread widening. You are SHORT-BIASED — your purpose is to "
+            "identify assets most vulnerable to a crash and position accordingly. "
+            "You only activate when at least 2 pre-crash signals are present. "
+            "If conditions don't warrant crash positioning, report 'NO_CRASH_SETUP' "
+            "and abstain. Analyze: valuations → correlations → breadth → credit → "
+            "sentiment extremes. Output VOTE_START/VOTE_END blocks."
+        ),
+        virtual_capital=30000.0, domain="short", temperature=0.5,
+        max_positions=3, max_drawdown_limit=0.40, min_trades_for_ranking=50,
+    ),
 ]
 
 

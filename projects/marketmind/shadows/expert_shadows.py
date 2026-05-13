@@ -149,6 +149,23 @@ EXPERT_SHADOW_CONFIGS: list[ShadowConfig] = [
     ShadowConfig(shadow_id="expert:macro:cycle_reader", shadow_type="expert",
                  display_name="Cycle Reader", methodology_prompt=_EXPERT_PROMPTS["macro"],
                  virtual_capital=60000.0, domain="macro", temperature=0.3),
+    # Phase 5: Short Specialist — dedicated short-biased expert (Item 16)
+    ShadowConfig(shadow_id="expert:short:bear_tracker", shadow_type="expert",
+                 display_name="Bear Tracker",
+                 methodology_prompt=(
+                     "You are the Bear Tracker, a dedicated short-selling specialist. "
+                     "Your expertise: identifying overvalued assets, deteriorating "
+                     "fundamentals, accounting irregularities, peaked momentum, and "
+                     "crowded consensus ripe for reversal. You scan across ALL domains "
+                     "for short targets. Core skills: forensic financial analysis, "
+                     "short-interest tracking, put/call ratio interpretation, insider "
+                     "selling pattern detection, and technical breakdown confirmation. "
+                     "You are BIASED toward finding short opportunities. Your default "
+                     "vote direction is 'short'. Analyze: news → fundamentals → "
+                     "technicals → sentiment → insider activity. "
+                     "Output VOTE_START/VOTE_END blocks."
+                 ),
+                 virtual_capital=40000.0, domain="short", temperature=0.35),
 ]
 
 
