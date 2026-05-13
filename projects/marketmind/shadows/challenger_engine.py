@@ -68,7 +68,7 @@ class ChallengerEngine:
     STAGE3_WEEKS = 2     # 2-week paired trial
 
     # Default trial day count
-    TRIAL_DAYS = 10      # 2 trading weeks
+    TRIAL_DAYS = 21      # 1 trading month (P2-3: increased from 10 for statistical power)
 
     def __init__(self, state_db: ShadowStateDB, settings: ShadowSettings):
         self.state_db = state_db
@@ -82,7 +82,7 @@ class ChallengerEngine:
             self.STAGE3_WEEKS = settings.challenger_stage3_weeks
         self.trial_alpha = settings.challenger_trial_alpha
         self.calmar_gate = settings.challenger_calmar_gate
-        self.TRIAL_DAYS = self.STAGE3_WEEKS * 5  # trading days
+        self.TRIAL_DAYS = max(21, self.STAGE3_WEEKS * 5)  # P2-3: min 21 days
 
     # ── Stage detection ──────────────────────────────────────────────────
 
@@ -309,9 +309,9 @@ class ChallengerEngine:
         challenger_mean = sum(challenger_returns) / n
         target_mean = sum(target_returns) / n
 
-        # Paired t-test (one-sided: H0: challenger <= target, H1: challenger > target)
-        pvalue, t_stat, _ = self._compute_paired_ttest(
-            target_returns, challenger_returns, one_sided=True
+        # Wilcoxon signed-rank test (P2-3: non-parametric, handles fat tails)
+        pvalue, test_stat = self._compute_wilcoxon(
+            target_returns, challenger_returns
         )
 
         # Calmar ratios
@@ -355,6 +355,58 @@ class ChallengerEngine:
         )
 
     # ── Statistical helpers ──────────────────────────────────────────────
+
+    @staticmethod
+    def _compute_wilcoxon(
+        target_returns: list[float],
+        challenger_returns: list[float],
+    ) -> tuple[float, float]:
+        """Wilcoxon signed-rank test (P2-3: non-parametric, handles fat tails).
+
+        Tests H0: median difference = 0 vs H1: challenger > target.
+        Uses normal approximation for sample sizes >= 20.
+        """
+        n = min(len(target_returns), len(challenger_returns))
+        if n < 5:
+            return (1.0, 0.0)
+
+        # Compute paired differences
+        diffs = [c - t for t, c in zip(target_returns[-n:], challenger_returns[-n:])]
+        # Remove zeros (ties)
+        diffs = [d for d in diffs if d != 0]
+        if not diffs:
+            return (1.0, 0.0)
+
+        # Rank absolute differences
+        abs_diffs = [abs(d) for d in diffs]
+        ranked = sorted(range(len(abs_diffs)), key=lambda i: abs_diffs[i])
+        ranks = [0] * len(abs_diffs)
+        i = 0
+        while i < len(ranked):
+            j = i
+            while j < len(ranked) and abs_diffs[ranked[j]] == abs_diffs[ranked[i]]:
+                j += 1
+            avg_rank = sum(range(i + 1, j + 1)) / (j - i)
+            for k in range(i, j):
+                ranks[ranked[k]] = avg_rank
+            i = j
+
+        # Sum of ranks for positive differences
+        w_plus = sum(ranks[i] for i in range(len(diffs)) if diffs[i] > 0)
+        n_eff = len(diffs)
+
+        # Normal approximation
+        mean_w = n_eff * (n_eff + 1) / 4
+        std_w = (n_eff * (n_eff + 1) * (2 * n_eff + 1) / 24) ** 0.5
+
+        if std_w == 0:
+            return (1.0, float(w_plus))
+
+        z = (w_plus - mean_w) / std_w
+        # One-sided p-value: P(Z > z)
+        pvalue = 1.0 - 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+
+        return (max(0.0, min(1.0, pvalue)), float(w_plus))
 
     def _compute_paired_ttest(
         self,

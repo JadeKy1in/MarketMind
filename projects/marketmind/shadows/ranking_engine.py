@@ -4,9 +4,12 @@ Zero LLM calls. All computation is deterministic mathematical formulas.
 """
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+
+logger = logging.getLogger("marketmind.shadows.ranking_engine")
 
 from marketmind.config.settings import ShadowSettings
 
@@ -234,11 +237,51 @@ class RankingEngine:
 
     # ── Bayesian overfitting haircut ──────────────────────────────────────
 
-    def compute_haircut(self, n_shadows: int, evaluation_days: int) -> float:
-        """Witzany (2021): h(N,T) = T / (T + 8 + 24 * ln(N))."""
+    def compute_haircut(self, n_shadows: int, evaluation_days: int,
+                         daily_returns: dict[str, list[float]] | None = None) -> float:
+        """Witzany (2021) with Effective-N correction (P2-1).
+
+        If daily_returns is provided, computes the correlation matrix of
+        shadow returns and estimates effective N via:
+            Neff = N / (1 + (N-1) * mean_abs_corr)
+
+        This prevents the haircut from over-penalizing uncorrelated shadows
+        or under-penalizing tightly correlated ones.
+        """
         if n_shadows < 1:
             n_shadows = 1
-        return evaluation_days / (evaluation_days + 8.0 + 24.0 * math.log(n_shadows))
+
+        n_eff = float(n_shadows)
+        if daily_returns and len(daily_returns) >= 3:
+            mean_corr = self._mean_abs_correlation(daily_returns)
+            if mean_corr is not None:
+                n_eff = n_shadows / (1.0 + (n_shadows - 1) * mean_corr)
+                n_eff = max(1.5, min(n_eff, float(n_shadows)))  # clamp
+
+        return evaluation_days / (evaluation_days + 8.0 + 24.0 * math.log(max(n_eff, 1.5)))
+
+    @staticmethod
+    def _mean_abs_correlation(daily_returns: dict[str, list[float]]) -> float | None:
+        """Compute mean absolute pairwise correlation of shadow returns."""
+        ids = list(daily_returns.keys())
+        if len(ids) < 2:
+            return None
+        min_len = min(len(r) for r in daily_returns.values())
+        if min_len < 5:
+            return None
+        corrs = []
+        for i in range(len(ids)):
+            for j in range(i + 1, len(ids)):
+                ri = daily_returns[ids[i]][-min_len:]
+                rj = daily_returns[ids[j]][-min_len:]
+                mean_i = sum(ri) / min_len
+                mean_j = sum(rj) / min_len
+                cov = sum((a - mean_i) * (b - mean_j) for a, b in zip(ri, rj)) / min_len
+                std_i = (sum((a - mean_i) ** 2 for a in ri) / min_len) ** 0.5
+                std_j = (sum((b - mean_j) ** 2 for b in rj) / min_len) ** 0.5
+                if std_i > 0 and std_j > 0:
+                    corrs.append(abs(cov / (std_i * std_j)))
+        return sum(corrs) / len(corrs) if corrs else None
 
     def apply_bayesian_haircut(self, composite_score: float, n_shadows: int,
                                 evaluation_days: int) -> float:
@@ -448,8 +491,12 @@ class RankingEngine:
             component_data[sid] = components
             modifiers_data[sid] = modifiers
 
-        # Apply Bayesian haircut
-        haircut = self.compute_haircut(n, self.config.evaluation_window_days)
+        # Apply Bayesian haircut with Effective-N correction (P2-1)
+        returns_for_corr = {
+            sid: performances[sid].daily_returns for sid in performances
+            if performances[sid].daily_returns
+        }
+        haircut = self.compute_haircut(n, self.config.evaluation_window_days, returns_for_corr)
         deflated = {sid: s * haircut for sid, s in raw_scores.items()}
 
         # Compute percentiles on deflated scores
@@ -531,7 +578,52 @@ class RankingEngine:
         for i, r in enumerate(results):
             r.rank = i + 1
 
+        # P2-5: Holm-Bonferroni correction — downgrade tiers that fail FDR control
+        self._apply_holm_bonferroni(results)
+
         return results
+
+    @staticmethod
+    def _apply_holm_bonferroni(results: list[RankingResult]) -> None:
+        """Apply Holm-Bonferroni correction to achievement tier assignments.
+
+        For N shadows, the probability of at least one false ELITE is
+        ~1 - (1-alpha)^N. With 22 shadows, this is ~97% without correction.
+        This method steps down through ranked shadows and requires surviving
+        a corrected alpha threshold.
+
+        Shadows at the boundary that fail the corrected threshold are
+        downgraded to the next tier.
+        """
+        n = len(results)
+        if n < 2:
+            return
+
+        # Tier severity ordering (for downgrade logic)
+        tier_order = {"elite": 4, "excellent": 3, "normal": 2, "watch": 1, "endangered": 0}
+        reverse_tier = {4: "elite", 3: "excellent", 2: "normal", 1: "watch", 0: "endangered"}
+
+        # For ELITE/EXCELLENT shadows: require surviving step-down
+        # Sort by percentile_rank descending (most significant first) for Holm
+        alpha = 0.05  # family-wise error rate
+        ranked = sorted(results, key=lambda r: r.percentile_rank, reverse=True)
+
+        # Count how many ELITE + EXCELLENT exist
+        elevated = [r for r in ranked if r.achievement_tier in ("elite", "excellent")]
+        k = len(elevated)
+
+        for i, r in enumerate(elevated):
+            corrected_alpha = alpha / (k - i)  # Holm step-down
+            # If shadow's percentile rank would not be significant at corrected alpha,
+            # downgrade to NORMAL
+            if r.percentile_rank < (1.0 - corrected_alpha):
+                old_tier = r.achievement_tier
+                r.achievement_tier = "normal"
+                logger.info(
+                    "Holm-Bonferroni: %s downgraded from %s to normal "
+                    "(percentile=%.2f, corrected_alpha=%.4f)",
+                    r.shadow_id, old_tier, r.percentile_rank, corrected_alpha
+                )
 
     @staticmethod
     def _estimate_sharpe(returns: list[float]) -> float:
