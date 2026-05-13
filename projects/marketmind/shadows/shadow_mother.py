@@ -385,6 +385,9 @@ class ShadowMother:
                         losing_trades=sum(1 for r in returns if r <= 0),
                         abstention_days=0,
                         cagr=cum * 252 / len(returns) if len(returns) > 0 else 0.0,
+                        domain=config.domain,
+                        shadow_type=config.shadow_type,
+                        career_days=len(snapshots),
                     )
                     performances[config.shadow_id] = perf
 

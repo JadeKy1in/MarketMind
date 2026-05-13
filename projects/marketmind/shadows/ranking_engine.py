@@ -25,6 +25,9 @@ class ShadowPerformance:
     losing_trades: int
     abstention_days: int
     cagr: float
+    domain: str | None = None
+    shadow_type: str = "beta"
+    career_days: int = 0
 
 
 @dataclass
@@ -85,9 +88,32 @@ class RankingEngine:
 
     # ── Composite scoring ────────────────────────────────────────────────
 
-    def compute_composite_score(self, perf: ShadowPerformance) -> tuple[float, dict[str, float]]:
-        """Returns (C_raw, component_scores_dict) where each component is a raw score."""
-        w = self.config.composite_weights
+    # Dynamic win-rate line parameters
+    _WR_LINE_FLOOR = 0.45         # Hard floor — actual win rate can never go below this
+    _WR_WEIGHT_FLOOR = 0.12       # Minimum WR weight in composite (distinct from line)
+    _WR_EARLY_DAYS = 60           # New shadow: heavy WR emphasis
+    _WR_MATURE_DAYS = 180         # Mature shadow: can trade WR for profitability
+    _WR_EARLY_WEIGHT_BOOST = 0.10  # Extra WR weight during early career (+10pp)
+    _PROFIT_LOSS_PENALTY = 0.40   # Multiplicative penalty when cumulative return < 0
+    _PROFIT_LOSS_FLOOR = 0.02     # Minimum composite after penalty (prevent zero-division)
+
+    def compute_composite_score(
+        self, perf: ShadowPerformance, career_days: int | None = None
+    ) -> tuple[float, dict[str, float], dict[str, float]]:
+        """Returns (C_raw, component_scores_dict, modifiers_dict).
+
+        Modifiers track the dynamic WR line adjustments and profitability
+        penalties for transparency in ranking display.
+        """
+        w = dict(self.config.composite_weights)  # mutable copy
+        modifiers = {
+            "wr_weight_raw": w["win_rate"],
+            "wr_weight_adjusted": w["win_rate"],
+            "wr_line_value": 0.0,
+            "profitability_penalty": 0.0,
+            "career_days": career_days or 0,
+        }
+
         omega = self.compute_omega(perf.daily_returns)
         calmar = self.compute_calmar(perf.cumulative_return, perf.max_drawdown)
         mppm = self.compute_mppm(perf.daily_returns)
@@ -99,12 +125,38 @@ class RankingEngine:
             "win_rate": perf.win_rate,
         }
 
-        # Normalize each component to [0, 1] range for compositing
-        # Use sigmoid-like transforms for unbounded metrics
+        # —— Dynamic win-rate line ——
+        wr_line = self._compute_wr_line(
+            career_days,
+            domain=getattr(perf, 'domain', None),
+            shadow_type=getattr(perf, 'shadow_type', None),
+        )
+        modifiers["wr_line_value"] = wr_line
+
+        if career_days is not None and career_days < self._WR_EARLY_DAYS:
+            # Early career: boost WR weight to incentivize direction accuracy
+            w["win_rate"] = min(w["win_rate"] + self._WR_EARLY_WEIGHT_BOOST, 0.50)
+            # Slightly reduce other weights to keep sum ~1.0
+            ratio = (1.0 - w["win_rate"]) / (1.0 - (w["win_rate"] - self._WR_EARLY_WEIGHT_BOOST))
+            for key in ("mppm", "calmar", "omega"):
+                w[key] *= ratio
+
+        elif career_days is not None and career_days >= self._WR_MATURE_DAYS:
+            # Mature: allow WR weight to decrease if profitability is strong
+            if perf.cumulative_return > 0.10:
+                wr_discount = min(0.08, (perf.cumulative_return - 0.10) * 0.15)
+                w["win_rate"] = max(self._WR_WEIGHT_FLOOR, w["win_rate"] - wr_discount)
+                redist = wr_discount / 3.0
+                for key in ("mppm", "calmar", "omega"):
+                    w[key] += redist
+
+        modifiers["wr_weight_adjusted"] = w["win_rate"]
+
+        # Normalize each component to [0, 1]
         mppm_norm = self._normalize_mppm(mppm)
         calmar_norm = self._normalize_calmar(calmar)
-        omega_norm = omega / 10.0  # omega is [0, 10]
-        wr_norm = perf.win_rate     # already [0, 1]
+        omega_norm = omega / 10.0
+        wr_norm = perf.win_rate
 
         composite = (
             w["mppm"] * mppm_norm +
@@ -112,7 +164,48 @@ class RankingEngine:
             w["omega"] * omega_norm +
             w["win_rate"] * wr_norm
         )
-        return composite, components
+
+        # —— Profitability penalty: negative cumulative return = largest penalty ——
+        if perf.cumulative_return < 0:
+            penalty = min(
+                self._PROFIT_LOSS_PENALTY,
+                abs(perf.cumulative_return) * 0.5
+            )
+            composite = max(composite * (1.0 - penalty), self._PROFIT_LOSS_FLOOR)
+            modifiers["profitability_penalty"] = penalty
+
+        return composite, components, modifiers
+
+    @staticmethod
+    def _compute_wr_line(career_days: int | None, domain: str | None = None,
+                         shadow_type: str | None = None) -> float:
+        """Dynamic win-rate floor. Returns the minimum acceptable WR for ranking bonus.
+
+        Early career: higher line (encourage direction accuracy).
+        Mature career: line can relax if shadow is profitable.
+        Domain/shadow_type flexibility: daredevil and contrarian strategies
+        naturally have lower win rates.
+        """
+        if career_days is None:
+            return RankingEngine._WR_LINE_FLOOR
+
+        # Strategy-type adjustment: daredevils and contrarian strategies
+        # structurally have lower win rates by design
+        domain_adjust = 0.0
+        if shadow_type == "daredevil":
+            domain_adjust = -0.05
+        elif domain and domain in ("contrarian", "short"):
+            domain_adjust = -0.05
+
+        if career_days < RankingEngine._WR_EARLY_DAYS:
+            return max(RankingEngine._WR_LINE_FLOOR, 0.55 + domain_adjust)
+        elif career_days < RankingEngine._WR_MATURE_DAYS:
+            progress = (career_days - RankingEngine._WR_EARLY_DAYS) / (
+                RankingEngine._WR_MATURE_DAYS - RankingEngine._WR_EARLY_DAYS
+            )
+            return max(RankingEngine._WR_LINE_FLOOR, 0.55 - 0.10 * progress + domain_adjust)
+        else:
+            return max(RankingEngine._WR_LINE_FLOOR, 0.45 + domain_adjust)
 
     @staticmethod
     def _normalize_mppm(mppm: float) -> float:
@@ -337,10 +430,14 @@ class RankingEngine:
         # Compute raw composites
         raw_scores = {}
         component_data = {}
+        modifiers_data = {}
         for sid, perf in performances.items():
-            composite, components = self.compute_composite_score(perf)
+            composite, components, modifiers = self.compute_composite_score(
+                perf, career_days=perf.career_days
+            )
             raw_scores[sid] = composite
             component_data[sid] = components
+            modifiers_data[sid] = modifiers
 
         # Apply Bayesian haircut
         haircut = self.compute_haircut(n, self.config.evaluation_window_days)
