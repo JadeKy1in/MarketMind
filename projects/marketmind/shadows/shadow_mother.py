@@ -49,6 +49,8 @@ class ShadowOrchestrationResult:
     shadow_analyses: dict[str, ShadowAnalysisOutput] = field(default_factory=dict)
     rankings: list = field(default_factory=list)
     collusion_flags: list = field(default_factory=list)
+    ecosystem_alerts: list = field(default_factory=list)
+    ecosystem_interpretation: str = ""
     challenger_actions: list[str] = field(default_factory=list)
     emergency_audits: list[str] = field(default_factory=list)
 
@@ -426,14 +428,33 @@ class ShadowMother:
         except Exception as e:
             logger.error("Collusion detection failed: %s", e)
 
-        # 6.5 Memory update — ingest today's votes and analyses into shadow memory
+        # 6.5 Ecosystem audit — blind-spot scan (replaces Catfish, Phase 0)
+        try:
+            from marketmind.shadows.ecosystem_auditor import EcosystemAuditor
+            auditor = EcosystemAuditor()
+            ecosystem_alerts = auditor.run_audit(all_votes, today)
+            result.ecosystem_alerts = ecosystem_alerts
+            if ecosystem_alerts:
+                logger.info("Ecosystem audit: %d blind-spot alerts", len(ecosystem_alerts))
+                # Trigger Pro interpretation for alerts
+                try:
+                    interpretation = await auditor.interpret_alerts(
+                        ecosystem_alerts, market_data
+                    )
+                    result.ecosystem_interpretation = interpretation
+                except Exception as e:
+                    logger.error("Ecosystem audit Pro interpretation failed: %s", e)
+        except Exception as e:
+            logger.error("Ecosystem audit failed: %s", e)
+
+        # 6.6 Memory update — ingest today's votes and analyses into shadow memory
         if getattr(self.config, 'crystallization_enabled', False):
             try:
                 await self._update_shadow_memory(result, today)
             except Exception as e:
                 logger.error("Shadow memory update failed: %s", e)
 
-        # 6.6 Crystallization check — insight → hypothesis → validate → promote/retire
+        # 6.7 Crystallization check — insight → hypothesis → validate → promote/retire
         if getattr(self.config, 'crystallization_enabled', False):
             try:
                 crystallization_results = await self._run_crystallization_check()

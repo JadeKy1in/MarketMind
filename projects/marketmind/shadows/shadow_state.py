@@ -22,7 +22,7 @@ class ShadowConfig:
     methodology_prompt: str          # the shadow's entire system prompt
     virtual_capital: float
     max_positions: int = 3
-    model: str = "flash"             # "flash" | "pro"
+    model: str = "pro"               # "flash" | "pro"
     temperature: float = 0.3
     reasoning_effort: str = "max"
     domain: str | None = None
@@ -507,7 +507,7 @@ class ShadowStateDB:
             methodology_prompt=row["methodology_prompt"] or "",
             virtual_capital=config_json.get("virtual_capital", 0),
             max_positions=config_json.get("max_positions", 3),
-            model=config_json.get("model", "flash"),
+            model=config_json.get("model", "pro"),
             temperature=config_json.get("temperature", 0.3),
             reasoning_effort=config_json.get("reasoning_effort", "max"),
             domain=config_json.get("domain"),

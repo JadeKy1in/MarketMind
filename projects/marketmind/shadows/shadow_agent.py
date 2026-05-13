@@ -393,7 +393,19 @@ class ShadowAgent:
 
     # ── Quota ────────────────────────────────────────────────────────────
 
+    # Tier-based quota mapping (from design doc section 7.2)
+    _TIER_QUOTA = {
+        "elite": 7,
+        "excellent": 6,
+        "normal": 5,
+        "watch": 3,
+        "endangered": 1,
+    }
+
     def get_daily_quota(self) -> int:
+        latest = self.state_db.get_latest_snapshot(self.shadow_id)
+        if latest and latest.achievement_tier:
+            return self._TIER_QUOTA.get(latest.achievement_tier, self.settings.shadow_flash_quota_default)
         return self.settings.shadow_flash_quota_default
 
     def get_pro_quota(self) -> int:
@@ -461,8 +473,10 @@ def create_shadow_agent(config: ShadowConfig, state_db: ShadowStateDB,
         from marketmind.shadows.daredevil_shadows import DaredevilShadow
         return DaredevilShadow(config, state_db, settings)
     elif shadow_type == "catfish":
-        from marketmind.shadows.catfish_agent import CatfishAgent
-        return CatfishAgent(config, state_db, settings)
+        # Catfish is replaced by EcosystemAuditor (Phase 0).
+        # Catfish configs in DB are treated as beta shadows for backward compat.
+        logger.warning("Catfish shadow type is deprecated — use EcosystemAuditor")
+        return ShadowAgent(config, state_db, settings)
     elif shadow_type == "missed_path":
         from marketmind.shadows.missed_path import MissedPathAgent
         return MissedPathAgent(config, state_db, settings)
