@@ -65,6 +65,9 @@ class EcosystemAuditor:
 
         self._daily_alerts = []
 
+        if not votes:
+            return []
+
         # 1. Direction concentration
         self._check_direction_concentration(votes, date)
 
