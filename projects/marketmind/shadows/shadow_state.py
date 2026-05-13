@@ -165,6 +165,17 @@ CREATE TABLE IF NOT EXISTS shadows (
     eliminated_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS methodology_changes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shadow_id TEXT NOT NULL,
+    change_type TEXT NOT NULL,
+    old_prompt TEXT,
+    new_prompt TEXT,
+    reason TEXT,
+    changed_at TEXT NOT NULL,
+    FOREIGN KEY (shadow_id) REFERENCES shadows(id)
+);
+
 CREATE TABLE IF NOT EXISTS virtual_trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     shadow_id TEXT NOT NULL,
@@ -503,6 +514,67 @@ class ShadowStateDB:
                 (now[:10], shadow_id)
             )
             conn.commit()
+        finally:
+            conn.close()
+
+    def update_methodology_prompt(self, shadow_id: str, new_prompt: str,
+                                    reason: str = "") -> bool:
+        """Update a shadow's methodology prompt and log the change (P1-1).
+
+        Returns True if the shadow was found and updated.
+        """
+        conn = self._connect()
+        try:
+            old = conn.execute(
+                "SELECT methodology_prompt FROM shadows WHERE id = ?",
+                (shadow_id,)
+            ).fetchone()
+            if old is None:
+                return False
+            old_prompt = old["methodology_prompt"] or ""
+
+            now = datetime.now(timezone.utc).isoformat()
+            conn.execute(
+                "UPDATE shadows SET methodology_prompt = ? WHERE id = ?",
+                (new_prompt, shadow_id)
+            )
+            conn.execute(
+                """INSERT INTO methodology_changes
+                   (shadow_id, change_type, old_prompt, new_prompt, reason, changed_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (shadow_id, "update", old_prompt[:500], new_prompt[:500], reason, now)
+            )
+            conn.commit()
+            logger.info("Methodology updated for %s: %s", shadow_id, reason)
+            return True
+        finally:
+            conn.close()
+
+    def get_methodology_history(self, shadow_id: str,
+                                 limit: int = 20) -> list[dict]:
+        """Get methodology change history for a shadow (P1-1)."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT change_type, reason, changed_at FROM methodology_changes
+                   WHERE shadow_id = ? ORDER BY changed_at DESC LIMIT ?""",
+                (shadow_id, limit)
+            ).fetchall()
+            return [{"change_type": r["change_type"], "reason": r["reason"],
+                     "changed_at": r["changed_at"]} for r in rows]
+        finally:
+            conn.close()
+
+    def get_original_methodology(self, shadow_id: str) -> str | None:
+        """Get the first recorded methodology prompt (baseline) for a shadow."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """SELECT old_prompt FROM methodology_changes
+                   WHERE shadow_id = ? ORDER BY changed_at ASC LIMIT 1""",
+                (shadow_id,)
+            ).fetchone()
+            return row["old_prompt"] if row else None
         finally:
             conn.close()
 
