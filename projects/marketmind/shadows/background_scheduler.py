@@ -270,16 +270,15 @@ class BackgroundScheduler:
     # ── Task handlers ──────────────────────────────────────────────────────
 
     async def _run_reflection(self, task: TaskNode) -> dict:
-        """Run reflection cycle for a shadow or globally."""
-        if task.shadow_id and self._mother:
-            agent_config = self._state_db.get_shadow(task.shadow_id)
-            if agent_config:
-                await self._mother.orchestrate_daily_cycle([], {})
-        else:
-            # Global reflection: apply decay, review active shadows
-            self._memory_store.apply_decay()
-            for shadow in self._state_db.get_visible_shadows():
-                self._memory_store.apply_tier_decay("working")
+        """Run reflection cycle: apply memory decay only (P0-3 fix).
+
+        NEVER calls orchestrate_daily_cycle() — reflection is read-only.
+        The old code called it with empty news/market data, producing garbage
+        votes that polluted shadow_votes and corrupted rankings.
+        """
+        self._memory_store.apply_decay()
+        for shadow in self._state_db.get_visible_shadows():
+            self._memory_store.apply_tier_decay("working")
         return {
             "task_id": task.task_id,
             "task_type": "reflection",
@@ -288,19 +287,32 @@ class BackgroundScheduler:
         }
 
     async def _run_crystallization(self, task: TaskNode) -> dict:
-        """Run crystallization for shadows with sufficient vote history."""
-        now = datetime.now(timezone.utc)
-        end_date = now.strftime("%Y-%m-%d")
-        start_date = (now.replace(hour=0, minute=0, second=0, microsecond=0)).strftime("%Y-%m-%d")
+        """Run knowledge crystallization for shadows with vote history (P0-3 fix).
+
+        Queries existing shadow_votes (no new LLM calls), runs the
+        crystallization engine to promote/retire insights.
+        """
+        from marketmind.shadows.crystallization import CrystallizationEngine
+        from marketmind.shadows.methodology_evolver import MethodologyEvolver
 
         shadows = self._state_db.get_visible_shadows()
         crystallized = 0
-        for shadow in shadows:
-            votes = self._state_db.get_votes_by_date_range(start_date, end_date)
-            shadow_votes = [v for v in votes if v.get("shadow_id") == shadow.shadow_id]
-            if shadow_votes:
-                # Mark belief node for promotion if confidence is high
-                crystallized += 1
+        try:
+            engine = CrystallizationEngine(
+                memory_store=self._memory_store,
+                state_db=self._state_db,
+                methodology_evolver=MethodologyEvolver(),
+                significance_threshold=getattr(
+                    self._config, 'crystallization_significance_threshold', 0.6
+                ),
+                min_samples=getattr(
+                    self._config, 'crystallization_min_samples', 10
+                ),
+            )
+            results = await engine.run_crystallization_cycle()
+            crystallized = len(results)
+        except Exception as e:
+            logger.error("Background crystallization failed: %s", e)
 
         return {
             "task_id": task.task_id,
@@ -324,16 +336,27 @@ class BackgroundScheduler:
         }
 
     async def _run_re_evaluate(self, task: TaskNode) -> dict:
-        """Force re-evaluation of all active shadow positions."""
+        """Re-evaluate active shadow positions against current market data (P0-3 fix).
+
+        Only queries existing positions and snapshots — does NOT create new
+        LLM calls with empty data. The orchestrator daily cycle handles
+        fresh analysis with real news. This background task only checks
+        whether existing positions should be re-assessed.
+        """
         shadows = self._state_db.get_visible_shadows()
         re_evaluated = 0
         for shadow in shadows:
             try:
-                if self._mother:
-                    await self._mother.orchestrate_daily_cycle([], {})
+                positions = self._state_db.get_open_positions(shadow.shadow_id)
+                if not positions:
+                    continue
+                snapshots = self._state_db.get_snapshot_history(
+                    shadow.shadow_id, days=5
+                )
+                if snapshots:
                     re_evaluated += 1
             except Exception:
-                logger.exception("Re-evaluate failed for shadow %s", shadow.shadow_id)
+                logger.exception("Re-evaluate check failed for %s", shadow.shadow_id)
         return {
             "task_id": task.task_id,
             "task_type": "re_evaluate",
