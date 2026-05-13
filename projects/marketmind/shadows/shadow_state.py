@@ -653,6 +653,82 @@ class ShadowStateDB:
         finally:
             conn.close()
 
+    def get_tier_history(self, shadow_id: str, days: int = 120) -> list[tuple[str, str]]:
+        """Get (date, achievement_tier) history for plateau/reset detection."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT date, achievement_tier FROM daily_snapshots
+                   WHERE shadow_id = ? AND achievement_tier IS NOT NULL
+                   ORDER BY date DESC LIMIT ?""",
+                (shadow_id, days)
+            ).fetchall()
+            return [(r["date"], r["achievement_tier"]) for r in rows]
+        finally:
+            conn.close()
+
+    def get_wr_history(self, shadow_id: str, days: int = 120) -> list[tuple[str, float]]:
+        """Get (date, win_rate_pct) history for plateau/reset detection."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT date, win_rate_pct FROM daily_snapshots
+                   WHERE shadow_id = ? AND win_rate_pct IS NOT NULL
+                   ORDER BY date DESC LIMIT ?""",
+                (shadow_id, days)
+            ).fetchall()
+            return [(r["date"], r["win_rate_pct"] / 100.0) for r in rows]
+        finally:
+            conn.close()
+
+    def get_insight_dates(self, shadow_id: str, days: int = 120) -> list[str]:
+        """Get dates where shadow produced insights. Derives from snapshots
+        where insights_generated > 0."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT date FROM daily_snapshots
+                   WHERE shadow_id = ? AND insights_generated > 0
+                   ORDER BY date DESC LIMIT ?""",
+                (shadow_id, days)
+            ).fetchall()
+            return [r["date"] for r in rows]
+        finally:
+            conn.close()
+
+    def get_abstention_days(self, shadow_id: str, days: int = 180) -> int:
+        """Count days where shadow produced zero votes (abstained)."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """SELECT COUNT(*) as cnt FROM daily_snapshots
+                   WHERE shadow_id = ? AND votes_produced = 0
+                   AND date >= date('now', ? || ' days')""",
+                (shadow_id, f'-{days}')
+            ).fetchone()
+            return row["cnt"] if row else 0
+        finally:
+            conn.close()
+
+    def update_snapshot_fields(self, shadow_id: str, date: str, **fields) -> None:
+        """Update select fields on a snapshot after analysis (Phase 2)."""
+        allowed = {"insights_generated", "votes_produced", "flash_quota_used",
+                   "pro_quota_used", "emergency_quotas_used"}
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        if not updates:
+            return
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        values = list(updates.values()) + [shadow_id, date]
+        conn = self._connect()
+        try:
+            conn.execute(
+                f"UPDATE daily_snapshots SET {set_clause} WHERE shadow_id = ? AND date = ?",
+                values
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     @staticmethod
     def _row_to_snapshot(row: sqlite3.Row) -> DailySnapshot:
         return DailySnapshot(

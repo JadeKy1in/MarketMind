@@ -473,13 +473,15 @@ class RankingEngine:
 
         quota_eff_by_domain: dict[str, float] = {}
         for domain, sids in domain_groups.items():
-            eff_values = []
+            eff_entries = []
             for sid in sids:
-                trades = performances[sid].total_trades
-                eff = trades / max(trades, 1)  # placeholder: normalize within domain
-                eff_values.append(eff)
-            max_eff = max(eff_values) if eff_values else 1.0
-            for sid, eff in zip(sids, eff_values):
+                perf = performances[sid]
+                # Efficiency = profitable decisions / total trades within domain
+                # Higher profitable_trades ratio relative to peers = more efficient
+                eff = perf.profitable_trades / max(perf.total_trades, 1)
+                eff_entries.append((sid, eff))
+            max_eff = max(e[1] for e in eff_entries) if eff_entries else 1.0
+            for sid, eff in eff_entries:
                 quota_eff_by_domain[sid] = eff / max_eff if max_eff > 0 else 0.5
 
         # Apply quota efficiency as a composite bonus/penalty

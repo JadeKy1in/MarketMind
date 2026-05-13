@@ -356,6 +356,18 @@ class ShadowMother:
                 result.shadow_analyses[sid] = output
                 result.votes_collected += len(output.votes)
                 all_votes.extend(output.votes)
+                # Populate insights_generated + votes_produced in today's snapshot (Phase 2)
+                try:
+                    latest = self.state_db.get_latest_snapshot(sid)
+                    if latest and latest.date == today:
+                        self.state_db.update_snapshot_fields(
+                            sid, today,
+                            insights_generated=len(output.insights),
+                            votes_produced=len(output.votes),
+                            flash_quota_used=output.quota_used,
+                        )
+                except Exception as e:
+                    logger.debug("Snapshot update failed for %s: %s", sid, e)
 
         # 5. Compute rankings (if we have performance data)
         try:
@@ -375,6 +387,9 @@ class ShadowMother:
                         if running > peak: peak = running
                         dd = running - peak
                         if dd < mdd: mdd = dd
+                    # Count actual abstention days from snapshot history
+                    abst_days = sum(1 for s in snapshots
+                                    if getattr(s, 'votes_produced', 0) == 0)
                     perf = ShadowPerformance(
                         shadow_id=config.shadow_id,
                         daily_returns=returns,
@@ -385,7 +400,7 @@ class ShadowMother:
                         total_trades=len(returns),
                         profitable_trades=sum(1 for r in returns if r > 0),
                         losing_trades=sum(1 for r in returns if r <= 0),
-                        abstention_days=0,
+                        abstention_days=abst_days,
                         cagr=cum * 252 / len(returns) if len(returns) > 0 else 0.0,
                         domain=config.domain,
                         shadow_type=config.shadow_type,
@@ -406,16 +421,15 @@ class ShadowMother:
                 # Plateau detection + reset eligibility checks (Phase 2)
                 for config in visible:
                     try:
-                        # Gather data for plateau detection
                         tier_hist = self.state_db.get_tier_history(
                             config.shadow_id, days=self.config.plateau_no_elite_days * 2
-                        ) if hasattr(self.state_db, 'get_tier_history') else []
+                        )
                         wr_hist = self.state_db.get_wr_history(
                             config.shadow_id, days=self.config.plateau_no_elite_days * 2
-                        ) if hasattr(self.state_db, 'get_wr_history') else []
+                        )
                         insight_dates = self.state_db.get_insight_dates(
-                            config.shadow_id
-                        ) if hasattr(self.state_db, 'get_insight_dates') else []
+                            config.shadow_id, days=self.config.plateau_no_insight_days * 2
+                        )
 
                         # Plateau detection
                         is_plateau, plateau_score = engine.detect_plateau(
