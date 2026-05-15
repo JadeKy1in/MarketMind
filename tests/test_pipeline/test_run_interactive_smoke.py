@@ -124,7 +124,7 @@ async def test_interactive_full_flow_confirm():
     mock_archivist.index_document.return_value = None
 
     with patch("marketmind.app._setup_logging"):  # skip log dir creation
-        with patch("marketmind.app.init_gateway"):  # skip API key validation
+        with patch("marketmind.gateway.async_client.init_gateway"):  # skip API key validation
             with patch("marketmind.pipeline.scout.fetch_all_sources",
                        AsyncMock(return_value=[])):
                 with patch("marketmind.pipeline.flash_preprocessor.preprocess_batch",
