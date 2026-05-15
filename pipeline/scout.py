@@ -1,4 +1,4 @@
-﻿"""Multi-source news collection with 3-tier degradation strategy."""
+"""Multi-source news collection with 3-tier degradation strategy."""
 from __future__ import annotations
 import hashlib
 import logging
@@ -13,7 +13,7 @@ import feedparser
 import httpx
 
 from marketmind.config.settings import MarketMindConfig
-from marketmind.config.source_authority import Source, SourceTier, SourceStatus, get_working_sources
+from marketmind.config.source_authority import Source, SourceTier, SourceStatus, get_working_sources, SOURCES
 
 
 @dataclass
@@ -62,15 +62,66 @@ def _title_similarity(a: str, b: str) -> float:
     return len(intersection) / min(len(words_a), len(words_b))
 
 
+async def _fetch_sec_edgar() -> list[NewsItem]:
+    """Fetch recent 8-K filings from SEC EDGAR (free, no key, requires valid User-Agent)."""
+    items = []
+    try:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            # SEC requires: OrganizationName email@domain.com
+            headers = {"User-Agent": "MarketMind InvestmentResearch marketmind@github.io"}
+            # Use the EDGAR submission feed (Atom XML) — more reliable than the REST API
+            resp = await client.get(
+                "https://www.sec.gov/cgi-bin/browse-edgar",
+                headers=headers,
+                params={"action": "getcurrent", "type": "8-K", "output": "atom",
+                        "count": "20", "start": "0"},
+            )
+            if resp.status_code != 200:
+                logger.warning("SEC EDGAR returned %d: %s", resp.status_code, resp.text[:200])
+                return items
+            feed = feedparser.parse(resp.text)
+            for entry in feed.entries[:20]:
+                title = entry.get("title", "8-K Filing").strip()
+                url = entry.get("link", "")
+                summary_raw = entry.get("summary", entry.get("description", ""))
+                summary = _strip_html(summary_raw)[:500]
+                published = entry.get("published", entry.get("updated", ""))
+                item_id = hashlib.sha256(f"{title}{url}".encode()).hexdigest()[:16]
+                items.append(NewsItem(
+                    id=item_id,
+                    title=title,
+                    url=url,
+                    source_name="SEC EDGAR 8-K",
+                    source_tier=1,
+                    published_at=published,
+                    summary=summary,
+                ))
+    except Exception as e:
+        logger.warning("SEC EDGAR API fetch failed: %s", e)
+    return items
+
+
 async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsItem]:
     """Fetch a single source. Track A (RSS/API) → Track B (HTML) fallback."""
     items: list[NewsItem] = []
     try:
+        if source.feed_type == "sec_api":
+            items = await _fetch_sec_edgar()
+            if items:
+                source.status = SourceStatus.WORKING
+                source.consecutive_failures = 0
+            return items
         if source.feed_type in ("rss", "api") and source.url:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            client_kwargs = {"timeout": 30.0, "follow_redirects": True}
+            if config.proxy_url:
+                client_kwargs["proxy"] = config.proxy_url
+            async with httpx.AsyncClient(**client_kwargs) as client:
                 resp = await client.get(
                     source.url,
-                    headers={"User-Agent": "MarketMind/0.1 (Financial Research Bot; +https://github.com/marketmind)"}
+                    headers={
+                        "User-Agent": "MarketMind/0.1 (Financial Research Bot; +https://github.com/marketmind)",
+                        "Accept": "application/rss+xml, application/xml, text/xml, */*",
+                    }
                 )
                 resp.raise_for_status()
                 feed = feedparser.parse(resp.text)
@@ -98,13 +149,21 @@ async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsIte
 async def fetch_all_sources(config: MarketMindConfig) -> list[NewsItem]:
     """Fetch from all working sources, deduplicate, return sorted by tier."""
     sources = get_working_sources()
-    if not sources:
-        sources = [s for s in __import__("marketmind.config.source_authority", fromlist=["SOURCES"]).SOURCES
-                   if s.status == SourceStatus.UNTESTED]
+    # Always include UNTESTED sources alongside working/degraded ones
+    untested = [s for s in SOURCES if s.status == SourceStatus.UNTESTED]
+    sources = list({s.name: s for s in (sources + untested)}.values())  # deduplicate by name
     all_items: list[NewsItem] = []
+    fetch_errors: list[str] = []
     for source in sources:
         items = await fetch_source(source, config)
         all_items.extend(items)
+        if source.status in (SourceStatus.DEGRADED, SourceStatus.DEAD):
+            fetch_errors.append(f"{source.name}: {source.status.value}")
+    if fetch_errors:
+        logger.warning("Source fetch issues (%d/%d sources): %s",
+                       len(fetch_errors), len(sources), "; ".join(fetch_errors[:5]))
+        if len(fetch_errors) > 5:
+            logger.warning("  (+ %d more)", len(fetch_errors) - 5)
     return deduplicate(all_items)
 
 

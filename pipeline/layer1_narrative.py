@@ -1,4 +1,4 @@
-﻿"""Layer 1: Narrative analysis — event grading, 2x2 matrix, price-in, cascade, sentiment."""
+"""Layer 1: Narrative analysis — event grading, 2x2 matrix, price-in, cascade, sentiment."""
 from __future__ import annotations
 import json
 import logging
@@ -8,8 +8,10 @@ from typing import Any
 logger = logging.getLogger("marketmind.pipeline.layer1")
 
 from marketmind.gateway.async_client import chat_pro
+from marketmind.gateway.response_parser import strip_markdown_fences
 from marketmind.pipeline.flash_preprocessor import FlashSignal
 from marketmind.pipeline.scout import NewsItem
+from marketmind.shadows.shadow_agent import defang_text
 
 
 @dataclass
@@ -29,6 +31,17 @@ class Layer1Result:
     key_characters: list[dict]     # [{"name": str, "capability": str, "will": str, "market_trust": str}]
     tail_risk_flags: list[str]     # triggered tail risk indicators
     raw_analysis: str = ""
+
+    @classmethod
+    def empty_default(cls) -> "Layer1Result":
+        """Return a default Layer1Result representing no-signal / error state."""
+        return cls(
+            event_grade="E", surprise_level="low", market_size="small",
+            matrix_quadrant="observe_skip", price_in_score=0.5, cascade_rank=1,
+            cascade_hub=False, sentiment_direction="neutral", sentiment_intensity=0.0,
+            sentiment_vs_attention="neither", expert_signals=[],
+            institutional_surprise="", key_characters=[], tail_risk_flags=[]
+        )
 
 
 LAYER1_SYSTEM_PROMPT = """You are a financial narrative analyst specializing in event-driven macro analysis.
@@ -65,13 +78,7 @@ IMPORTANT: All numeric values must cite a verifiable source or be marked EST:. N
 async def analyze_layer1(signals: list[FlashSignal], news_items: list[NewsItem]) -> Layer1Result:
     """Run Layer 1 narrative analysis on preprocessed signals."""
     if not signals:
-        return Layer1Result(
-            event_grade="E", surprise_level="low", market_size="small",
-            matrix_quadrant="observe_skip", price_in_score=0.5, cascade_rank=1,
-            cascade_hub=False, sentiment_direction="neutral", sentiment_intensity=0.0,
-            sentiment_vs_attention="neither", expert_signals=[],
-            institutional_surprise="", key_characters=[], tail_risk_flags=[]
-        )
+        return Layer1Result.empty_default()
     signal_text = _format_signals(signals, news_items)
     user_prompt = f"Analyze these market signals for narrative structure:\n\n{signal_text}"
     try:
@@ -85,33 +92,22 @@ async def analyze_layer1(signals: list[FlashSignal], news_items: list[NewsItem])
         return _parse_layer1_response(content)
     except Exception as e:
         logger.warning("Layer 1 analysis failed: %s", e)
-        return Layer1Result(
-            event_grade="E", surprise_level="low", market_size="small",
-            matrix_quadrant="observe_skip", price_in_score=0.5, cascade_rank=1,
-            cascade_hub=False, sentiment_direction="neutral", sentiment_intensity=0.0,
-            sentiment_vs_attention="neither", expert_signals=[],
-            institutional_surprise="", key_characters=[], tail_risk_flags=[]
-        )
+        return Layer1Result.empty_default()
 
 
 def _format_signals(signals: list[FlashSignal], news_items: list[NewsItem]) -> str:
     lines = ["## Preprocessed Signals"]
     for s in signals:
-        lines.append(f"- [{s.event_grade}] {s.event_type} | {s.direction} (conf={s.confidence}) | {s.source_headline}")
+        lines.append(f"- [{s.event_grade}] {s.event_type} | {s.direction} (conf={s.confidence}) | {defang_text(s.source_headline)}")
     if news_items:
         lines.append("\n## Raw Headlines")
         for item in news_items[:20]:
-            lines.append(f"- [{item.source_name}] {item.title}")
+            lines.append(f"- [{item.source_name}] {defang_text(item.title)}")
     return "\n".join(lines)
 
 
 def _parse_layer1_response(content: str) -> Layer1Result:
-    content = content.strip()
-    if content.startswith("```"):
-        lines = content.split("\n")
-        content = "\n".join(lines[1:])
-        if content.endswith("```"):
-            content = content[:-3]
+    content = strip_markdown_fences(content)
     try:
         data = json.loads(content)
     except json.JSONDecodeError:
@@ -120,7 +116,8 @@ def _parse_layer1_response(content: str) -> Layer1Result:
         if start != -1 and end != -1:
             data = json.loads(content[start:end + 1])
         else:
-            raise
+            logger.warning("Layer1 response has no JSON block — %d chars, using empty defaults", len(content))
+            return Layer1Result.empty_default()
     return Layer1Result(
         event_grade=data.get("event_grade", "E"),
         surprise_level=data.get("surprise_level", "low"),

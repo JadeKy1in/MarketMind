@@ -1,11 +1,12 @@
-﻿"""Shadow Mother — event detection, temp shadow lifecycle, daily orchestration."""
+"""Shadow Mother — event detection, temp shadow lifecycle, daily orchestration."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
 from marketmind.shadows.shadow_agent import ShadowAgent, ShadowAnalysisOutput, ShadowVote
@@ -48,6 +49,13 @@ class ShadowOrchestrationResult:
     shadow_analyses: dict[str, ShadowAnalysisOutput] = field(default_factory=dict)
     rankings: list = field(default_factory=list)
     collusion_flags: list = field(default_factory=list)
+    ecosystem_alerts: list = field(default_factory=list)
+    ecosystem_interpretation: str = ""
+    health_alerts: dict[str, list[str]] = field(default_factory=dict)
+    ecosystem_health_snapshot: dict | None = None
+    plateau_flags: list = field(default_factory=list)
+    reset_candidates: list = field(default_factory=list)
+    ael_debriefs: list = field(default_factory=list)       # Phase 7
     challenger_actions: list[str] = field(default_factory=list)
     emergency_audits: list[str] = field(default_factory=list)
 
@@ -181,39 +189,58 @@ class ShadowMother:
     # ── Temp shadow lifecycle ────────────────────────────────────────────
 
     async def create_temp_shadows(self, events: list[DetectedEvent]) -> list[str]:
-        """Create temporary event shadows for prioritized events."""
+        """Create Form C milestone-triggered event recorders (Phase 4).
+
+        NOT a full shadow. A recorder that:
+        - Day 1: Pro initial framework analysis (1 Pro call)
+        - Day 2-9: Python silent recording (0 Pro calls)
+        - Day 5: If volatility >3σ, trigger Pro check (≤1 extra Pro call)
+        - Day 10: Pro mid-term review (1 Pro call)
+        - Day 30: Pro final validation + Flash summary (1 Pro + 1 Flash)
+
+        Total: 3-5 Pro calls per 30-day event (vs. 30 previously).
+        """
         created_ids = []
         for event in events:
             ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
             shadow_id = f"temp_event:{event.event_type}:{ts}_{event.event_id[:8]}"
-            capital = 10000.0 + event.impact_score * 10000.0  # $10K-$20K
+
+            # Form C: milestone-triggered methodology
+            methodology_prompt = (
+                f"[FORM_C_EVENT_RECORDER] Event: {event.description}. "
+                f"Affected assets: {', '.join(event.affected_assets[:5])}. "
+                f"Impact score: {event.impact_score:.2f}. "
+                f"You are a milestone-triggered event recorder. "
+                f"Day 1: establish analysis framework. "
+                f"Day 2-9: only record OHLC + relevant news (no analysis). "
+                f"Day 5: if any affected asset moves >3σ, analyze whether driven by original event. "
+                f"Day 10: mid-term review of event impact. "
+                f"Day 30: final validation report comparing actual impact to Day 1 prediction. "
+                f"Max 30-day lifespan. Be concise — you have limited Pro calls."
+            )
 
             config = ShadowConfig(
                 shadow_id=shadow_id,
                 shadow_type="temp_event",
-                display_name=f"Temp {event.event_type} {ts}",
-                methodology_prompt=(
-                    f"You are a temporary market analyst activated for: {event.description}. "
-                    f"Focus on affected assets: {', '.join(event.affected_assets[:5])}. "
-                    f"Event impact score: {event.impact_score:.2f}. "
-                    f"You have 30 days max lifespan. Be aggressive with high-conviction trades."
-                ),
-                virtual_capital=capital,
+                display_name=f"FormC {event.event_type} {ts}",
+                methodology_prompt=methodology_prompt,
+                virtual_capital=0.0,  # Read-only recorder, no trading
                 domain=event.affected_assets[0] if event.affected_assets else "macro",
-                temperature=0.4,
+                temperature=0.3,
+                max_positions=0,
             )
             try:
                 self.state_db.create_shadow(config)
                 created_ids.append(shadow_id)
-                logger.info("Created temp shadow %s for event %s", shadow_id, event.event_type)
-            except ValueError:
-                logger.warning("Temp shadow %s already exists", shadow_id)
+                logger.info("Created Form C recorder %s for event %s", shadow_id, event.event_type)
+            except ValueError as e:
+                logger.warning("Form C recorder %s creation failed: %s", shadow_id, e)
 
         return created_ids
 
     def check_destruction_conditions(self, shadow_id: str) -> bool:
         """Check if a temporary shadow should be destroyed."""
-        config = self.state_db.get_shadow(shadow_id)
+        config = self.state_db.get_shadow(shadow_id, caller_id="system")
         if config is None:
             return False
         if config.shadow_type != "temp_event":
@@ -224,7 +251,7 @@ class ShadowMother:
         if days_alive >= 30:
             return True
         # If shadow has been inactive (no snapshots or no trades)
-        snapshots = self.state_db.get_snapshot_history(shadow_id, days=5)
+        snapshots = self.state_db.get_snapshot_history(shadow_id, caller_id="system", days=5)
         if len(snapshots) < 1:
             return False  # New shadow, not yet active
         # Check for 5+ no-trade days
@@ -290,6 +317,8 @@ class ShadowMother:
         4. Run all shadow analyses (collect votes)
         5. Compute rankings + backfill snapshots
         6. Detect collusion
+        6.5. Update shadow memory (ingest today's votes/analyses)
+        6.6. Run crystallization check (insight → hypothesis → validate)
         7. Check challenger conditions
         8. Audit emergency quotas
         """
@@ -322,21 +351,173 @@ class ShadowMother:
         visible = self.state_db.get_visible_shadows()
         result.active_shadows = len(visible)
 
+        # 3.5 Read broadcast messages (user L1 viewpoints, chat history)
+        #     Shadows self-filter by domain relevance before using
+        broadcast_messages: list = []
+        try:
+            from pathlib import Path
+            from marketmind.shadows.broadcast import BroadcastReader
+            reader = BroadcastReader(str(Path(self.config.shadows_db_path).parent))
+            broadcast_messages = reader.poll_today(today)
+            if broadcast_messages:
+                logger.info("Broadcast: %d messages available for shadow analysis", len(broadcast_messages))
+        except Exception as e:
+            logger.debug("Broadcast read skipped (non-critical): %s", e)
+
         # 4. Run shadow analyses + collect votes
+        # P3-4: Check for incomplete checkpoint to enable resume after crash
+        checkpoint_lock = asyncio.Lock()
+        checkpoint = self.state_db.get_cycle_checkpoint(today)
+        completed_shadows: set[str] = set()
+
+        if checkpoint and checkpoint["status"] == "running":
+            completed_shadows = set(checkpoint["shadow_states"].get("completed", []))
+            logger.info(
+                "Resuming from checkpoint %s: %d/%d shadows already completed",
+                today, len(completed_shadows), len(visible)
+            )
+            # Replay cached outputs for already-completed shadows
+            for sid in completed_shadows:
+                cached_output = self.state_db.get_raw_output(sid, today, caller_id="system")
+                if cached_output:
+                    logger.debug("Replaying cached output for %s", sid)
+
+        from marketmind.shadows.shadow_agent import create_shadow_agent
         all_votes: list = []
-        for config in visible:
-            agent = ShadowAgent(config, self.state_db, self.config)
+        semaphore = asyncio.Semaphore(self.config.max_concurrent_shadows)
+
+        async def _run_one(config):
+            sid = config.shadow_id
+            # Skip if already completed in a previous run (crash recovery)
+            if sid in completed_shadows:
+                cached_output = self.state_db.get_raw_output(sid, today, caller_id="system")
+                if cached_output:
+                    return sid, None, None  # Will be replayed from cache
+                # Fall through if no cached output available
+
+            async with semaphore:
+                try:
+                    agent = create_shadow_agent(config, self.state_db, self.config)
+                    output = await agent.run_daily_analysis(
+                        news_items, market_data, broadcast_messages=broadcast_messages
+                    )
+                    # Persist votes for backtest/audit
+                    if output.votes:
+                        try:
+                            self.state_db.save_votes(sid, today, output.votes)
+                        except Exception as e:
+                            logger.error("Failed to save votes for %s: %s", sid, e)
+                    # Update snapshot fields BEFORE checkpoint (P3-4 audit fix)
+                    # This ensures data consistency: if crash happens, either
+                    # both snapshot AND checkpoint are updated, or neither is
+                    try:
+                        latest = self.state_db.get_latest_snapshot(sid, caller_id="system")
+                        if latest and latest.date == today:
+                            self.state_db.update_snapshot_fields(
+                                sid, today,
+                                insights_generated=len(output.insights),
+                                votes_produced=len(output.votes),
+                                flash_quota_used=output.quota_used,
+                            )
+                    except Exception as e:
+                        logger.debug("Snapshot update failed for %s: %s", sid, e)
+                    # P3-4: Per-shadow checkpoint after snapshot is updated
+                    async with checkpoint_lock:
+                        _cp = self.state_db.get_cycle_checkpoint(today)
+                        _completed = set((_cp or {}).get("shadow_states", {}).get("completed", []))
+                        _completed.add(sid)
+                        self.state_db.save_cycle_checkpoint(
+                            today, {"completed": sorted(_completed)}, step_completed=4
+                        )
+                    return sid, output, None
+                except Exception as e:
+                    logger.error("Shadow %s analysis failed: %s", sid, e)
+                    return sid, None, e
+
+        # Create initial checkpoint if resuming and not exists
+        if not checkpoint:
             try:
-                output = await agent.run_daily_analysis(news_items, market_data)
-                result.shadow_analyses[config.shadow_id] = output
+                self.state_db.save_cycle_checkpoint(
+                    today, {"completed": []}, step_completed=4
+                )
+            except Exception:
+                logger.debug("Checkpoint already exists for %s", today)
+
+        tasks = [_run_one(c) for c in visible]
+        results_list = await asyncio.gather(*tasks)
+        for sid, output, err in results_list:
+            if output is not None:
+                result.shadow_analyses[sid] = output
                 result.votes_collected += len(output.votes)
                 all_votes.extend(output.votes)
-                await agent.save_daily_snapshot()
-            except NotImplementedError:
-                # Base ShadowAgent has stub _analyze; concrete subclasses implement it
-                pass
-            except Exception as e:
-                logger.error("Shadow %s analysis failed: %s", config.shadow_id, e)
+            elif err is None and sid in completed_shadows:
+                # Replay from cache: restore votes from saved output
+                cached_raw = self.state_db.get_raw_output(sid, today, caller_id="system")
+                if cached_raw:
+                    logger.info("Replaying cached analysis for %s", sid)
+
+        # P3-4: Mark checkpoint as completed after all analyses done
+        try:
+            self.state_db.save_cycle_checkpoint(
+                today, {"completed": sorted(completed_shadows | set(
+                    sid for sid, out, _ in results_list if out is not None
+                ))}, status="completed", step_completed=4
+            )
+        except Exception as e:
+            logger.error("Failed to mark checkpoint complete: %s", e)
+
+        # 4.5 Market anchor: fetch external prices and compute accuracy (P2-4)
+        # Breaks virtual PnL circularity by anchoring to actual market returns
+        market_accuracy: dict[str, float] = {}
+        try:
+            from marketmind.shadows.market_data_fetcher import MarketDataFetcher
+            mdf = MarketDataFetcher()
+            # Collect all tickers mentioned in votes
+            all_tickers = set()
+            for vote in all_votes:
+                ticker = getattr(vote, "ticker", None) or vote.get("ticker", "")
+                if ticker:
+                    all_tickers.add(ticker)
+            if all_tickers:
+                lookback_start = (datetime.now(timezone.utc) -
+                                 timedelta(days=self.config.evaluation_window_days + 5)
+                                 ).strftime("%Y-%m-%d")
+                for ticker in list(all_tickers)[:10]:  # Cap at 10 tickers
+                    prices = mdf.fetch_ohlcv(ticker, lookback_start)
+                    if prices:
+                        self.state_db.save_market_prices(ticker, prices)
+                # Fetch all votes once, group by shadow in memory (fix N+1 query)
+                all_saved_votes = self.state_db.get_votes_by_date_range(
+                    lookback_start, today, caller_id="system"
+                )
+                votes_by_shadow: dict[str, list[dict]] = {}
+                from collections import Counter
+                for v in all_saved_votes:
+                    sid = v.get("shadow_id", "")
+                    if sid:
+                        votes_by_shadow.setdefault(sid, []).append(v)
+
+                # Compute per-shadow market accuracy
+                for config in visible:
+                    shadow_votes = votes_by_shadow.get(config.shadow_id, [])
+                    if not shadow_votes:
+                        continue
+                    ticker_counts = Counter(
+                        v.get("ticker", "") for v in shadow_votes
+                    )
+                    primary_ticker = ticker_counts.most_common(1)[0][0] if ticker_counts else ""
+                    if not primary_ticker:
+                        continue
+                    acc = mdf.compute_market_accuracy(
+                        shadow_votes, primary_ticker, lookback_start, today
+                    )
+                    market_accuracy[config.shadow_id] = acc
+                    logger.debug(
+                        "Market accuracy for %s on %s: %.3f",
+                        config.shadow_id, primary_ticker, acc
+                    )
+        except Exception as e:
+            logger.error("Market anchor computation failed: %s", e)
 
         # 5. Compute rankings (if we have performance data)
         try:
@@ -344,7 +525,7 @@ class ShadowMother:
             performances = {}
             for config in visible:
                 snapshots = self.state_db.get_snapshot_history(
-                    config.shadow_id, days=self.config.evaluation_window_days
+                    config.shadow_id, caller_id="system", days=self.config.evaluation_window_days
                 )
                 if snapshots:
                     returns = [s.daily_return_pct or 0.0 for s in snapshots
@@ -356,6 +537,9 @@ class ShadowMother:
                         if running > peak: peak = running
                         dd = running - peak
                         if dd < mdd: mdd = dd
+                    # Count actual abstention days from snapshot history
+                    abst_days = sum(1 for s in snapshots
+                                    if getattr(s, 'votes_produced', 0) == 0)
                     perf = ShadowPerformance(
                         shadow_id=config.shadow_id,
                         daily_returns=returns,
@@ -366,22 +550,124 @@ class ShadowMother:
                         total_trades=len(returns),
                         profitable_trades=sum(1 for r in returns if r > 0),
                         losing_trades=sum(1 for r in returns if r <= 0),
-                        abstention_days=0,
+                        abstention_days=abst_days,
                         cagr=cum * 252 / len(returns) if len(returns) > 0 else 0.0,
+                        domain=config.domain,
+                        shadow_type=config.shadow_type,
+                        career_days=len(snapshots),
                     )
                     performances[config.shadow_id] = perf
 
             if performances:
-                rankings = engine.rank_shadows(performances, {}, today)
+                # WFE data computed per-shadow in step 4 — rankings use None until
+                # WFE collection is refactored to aggregate before this call
+                rankings = engine.rank_shadows(performances, {}, today,
+                                                market_accuracy=market_accuracy if market_accuracy else None,
+                                                wfe_results=None)
                 result.rankings = rankings
                 # Backfill ranking data into snapshots
                 for rr in rankings:
-                    agent_config = self.state_db.get_shadow(rr.shadow_id)
+                    agent_config = self.state_db.get_shadow(rr.shadow_id, caller_id="system")
                     if agent_config:
                         agent = ShadowAgent(agent_config, self.state_db, self.config)
                         agent.apply_ranking_to_snapshot(rr)
+
+                # Plateau detection + reset eligibility checks (Phase 2)
+                for config in visible:
+                    try:
+                        tier_hist = self.state_db.get_tier_history(
+                            config.shadow_id, days=self.config.plateau_no_elite_days * 2
+                        )
+                        wr_hist = self.state_db.get_wr_history(
+                            config.shadow_id, days=self.config.plateau_no_elite_days * 2
+                        )
+                        insight_dates = self.state_db.get_insight_dates(
+                            config.shadow_id, days=self.config.plateau_no_insight_days * 2
+                        )
+
+                        # Plateau detection
+                        is_plateau, plateau_score = engine.detect_plateau(
+                            config.shadow_id, tier_hist, wr_hist, insight_dates
+                        )
+                        if is_plateau:
+                            logger.info("Plateau detected: %s (score=%.2f)", config.shadow_id, plateau_score)
+                            result.plateau_flags.append({
+                                "shadow_id": config.shadow_id,
+                                "plateau_score": plateau_score,
+                                "date": today,
+                            })
+
+                        # Reset eligibility
+                        should_reset, reset_reason = engine.check_reset_eligibility(
+                            tier_hist, wr_hist, insight_dates
+                        )
+                        if should_reset:
+                            logger.info("Reset eligible: %s — %s", config.shadow_id, reset_reason)
+                            result.reset_candidates.append({
+                                "shadow_id": config.shadow_id,
+                                "reason": reset_reason,
+                                "date": today,
+                            })
+                    except Exception as e:
+                        logger.debug("Plateau/reset check failed for %s: %s", config.shadow_id, e)
+
+                # Walk-forward validation (P2-2): detect overfitting
+                wfe_ratios: dict[str, float] = {}
+                try:
+                    from marketmind.shadows.ranking_engine import WalkForwardValidator
+                    wf_validator = WalkForwardValidator()
+                    for config in visible:
+                        snapshots = self.state_db.get_snapshot_history(
+                            config.shadow_id, caller_id="system", days=max(365, wf_validator.min_career_days)
+                        )
+                        if not snapshots:
+                            continue
+                        wf_result = wf_validator.validate(config.shadow_id, snapshots)
+                        if not wf_result.skipped:
+                            wfe_ratios[config.shadow_id] = wf_result.wfe_ratio
+                        if wf_result.skipped:
+                            logger.debug(
+                                "WFE skipped for %s: %s", config.shadow_id, wf_result.skip_reason
+                            )
+                            continue
+                        if wf_result.is_overfit:
+                            logger.warning(
+                                "WFE overfit detected: %s (WFE=%.3f, IS=%.4f, OOS=%.4f, "
+                                "OOS_acc=%.2f, windows=%d, binomial_p=%.4f)",
+                                config.shadow_id, wf_result.wfe_ratio,
+                                wf_result.mean_is_deflated, wf_result.mean_oos_deflated,
+                                wf_result.oos_directional_accuracy, wf_result.total_windows,
+                                wf_result.binomial_p_value
+                            )
+                            result.ecosystem_alerts.append({
+                                "type": "wfe_overfit",
+                                "shadow_id": config.shadow_id,
+                                "wfe_ratio": wf_result.wfe_ratio,
+                                "date": today,
+                            })
+                except Exception as e:
+                    logger.error("Walk-forward validation failed: %s", e)
+
         except Exception as e:
             logger.error("Ranking computation failed: %s", e)
+
+        # 5b. Calibrate paper-to-live gap (per-asset discount rate adjustment)
+        try:
+            from marketmind.shadows.paper_live_gap import PaperLiveGapManager
+            gap_manager = PaperLiveGapManager(self.state_db, self.config)
+            for config in visible:
+                trades = self.state_db.get_trade_history(config.shadow_id, caller_id="system", limit=100)
+                if not trades:
+                    continue
+                from collections import Counter
+                ticker_counts = Counter(t.ticker for t in trades)
+                most_common = ticker_counts.most_common(1)
+                if most_common:
+                    ticker = most_common[0][0]
+                    gap_manager.update_discount_rate(config.shadow_id, ticker)
+            gap_manager.save_all_states()
+        except Exception as e:
+            logger.error("Paper-to-live gap calibration failed: %s", e)
 
         # 6. Detect collusion
         try:
@@ -393,7 +679,206 @@ class ShadowMother:
         except Exception as e:
             logger.error("Collusion detection failed: %s", e)
 
-        # 7. Check challenger conditions
+        # 6.4 Shadow health monitor — individual checks (Phase 3, Item 11)
+        try:
+            from marketmind.shadows.shadow_health_monitor import ShadowHealthMonitor
+            health_monitor = ShadowHealthMonitor(state_db=self.state_db)
+            for sid, output in result.shadow_analyses.items():
+                raw_text = self.state_db.get_raw_output(sid, today, caller_id="system") or ""
+                snapshot = health_monitor.run_daily_check(
+                    sid, raw_text, len(output.insights), today
+                )
+                if snapshot.alerts:
+                    result.health_alerts[sid] = snapshot.alerts
+                    logger.info("Health alert for %s: %s", sid, snapshot.alerts)
+        except Exception as e:
+            logger.error("Shadow health monitor failed: %s", e)
+
+        # 6.5 Ecosystem audit — blind-spot scan (replaces Catfish, Phase 0)
+        try:
+            from marketmind.shadows.ecosystem_auditor import EcosystemAuditor
+            auditor = EcosystemAuditor()
+            ecosystem_alerts = auditor.run_audit(all_votes, today)
+            result.ecosystem_alerts = ecosystem_alerts
+            if ecosystem_alerts:
+                logger.info("Ecosystem audit: %d blind-spot alerts", len(ecosystem_alerts))
+                try:
+                    interpretation = await auditor.interpret_alerts(
+                        ecosystem_alerts, market_data
+                    )
+                    result.ecosystem_interpretation = interpretation
+                except Exception as e:
+                    logger.error("Ecosystem audit Pro interpretation failed: %s", e)
+        except Exception as e:
+            logger.error("Ecosystem audit failed: %s", e)
+
+        # 6.55 Ecosystem health — collective degradation detection (Phase 3, Item 12)
+        try:
+            from marketmind.shadows.ecosystem_health import EcosystemHealthMonitor
+            eco_health = EcosystemHealthMonitor()
+            token_data = {}
+            for config in visible:
+                tokens = self.state_db.get_token_history(config.shadow_id, days=30)
+                if tokens:
+                    token_data[config.shadow_id] = tokens
+            eco_snapshot = eco_health.run_daily_check(all_votes, token_data, today)
+            result.ecosystem_health_snapshot = {
+                "date": eco_snapshot.date,
+                "active_shadows": eco_snapshot.active_shadows,
+                "pattern_matcher_pct": eco_snapshot.pattern_matcher_pct,
+                "balanced_pct": eco_snapshot.balanced_pct,
+                "explorer_pct": eco_snapshot.explorer_pct,
+                "avg_entropy": eco_snapshot.avg_entropy,
+                "alerts": eco_snapshot.alerts,
+            }
+            if eco_snapshot.alerts:
+                logger.info("Ecosystem health: %d alerts", len(eco_snapshot.alerts))
+        except Exception as e:
+            logger.error("Ecosystem health check failed: %s", e)
+
+        # 6.6 Memory update — ingest today's votes and analyses into shadow memory
+        if getattr(self.config, 'crystallization_enabled', False):
+            try:
+                await self._update_shadow_memory(result, today)
+            except Exception as e:
+                logger.error("Shadow memory update failed: %s", e)
+
+        # 6.7 Crystallization check — insight → hypothesis → validate → promote/retire
+        if getattr(self.config, 'crystallization_enabled', False):
+            try:
+                crystallization_results = await self._run_crystallization_check()
+                logger.info(
+                    "Crystallization complete: %d results",
+                    len(crystallization_results),
+                )
+                # P0-1: Wire crystallization results to knowledge filter
+                from marketmind.shadows.knowledge_filter import KnowledgeFilter
+                kf = KnowledgeFilter()
+                for cr in crystallization_results:
+                    for source_id in cr.source_insight_ids:
+                        kf.record_crystallization_result(
+                            source_id, cr.action,
+                            source_shadow_id=source_id.split(":")[1] if ":" in source_id else ""
+                        )
+                # P1-2: Wire crystallization results to shadow methodology prompts
+                from marketmind.shadows.methodology_evolver import MethodologyInjector
+                injector = MethodologyInjector(self.state_db)
+                for cr in crystallization_results:
+                    sid = cr.source_shadow_id
+                    if not sid:
+                        continue
+                    if cr.action == "promote" and cr.methodology_changes:
+                        for change in cr.methodology_changes:
+                            if change:
+                                injector.inject_validated_insight(sid, change)
+                    elif cr.action == "retire":
+                        injector.inject_retired_insight(
+                            sid, cr.evidence_summary or "Failed validation"
+                        )
+            except Exception as e:
+                logger.error("Crystallization check failed: %s", e)
+
+        today_day = datetime.strptime(today, "%Y-%m-%d").day  # extract day-of-month (used by AEL + method breeding)
+
+        # 6.8 AEL Evolution — monthly debrief (Phase 7, gated behind config flag)
+        if getattr(self.config, 'ael_experiment_enabled', False):
+            try:
+                from marketmind.shadows.ael_evolution import AELEvolutionEngine
+                ael = AELEvolutionEngine(state_db=self.state_db)
+                debrief_day = getattr(self.config, 'ael_debrief_day', 1)
+
+                # Run debrief on configured day of month
+                if today_day == debrief_day:
+                    # Build performance dicts for treatment shadows
+                    treatment_ids = {
+                        "daredevil:range_bound:sideways_scout",
+                        "daredevil:momentum:trend_chaser",
+                        "expert:tech:silicon_oracle",
+                        "expert:macro:cycle_reader",
+                    }
+                    for sid in treatment_ids:
+                        perf_data = performances.get(sid)
+                        if not perf_data:
+                            continue
+                        market_ctx = (
+                            f"VIX: {market_data.get('VIX', 'N/A')}, "
+                            f"SPY: {market_data.get('SPY', 'N/A')}"
+                        )
+                        debrief = await ael.run_monthly_debrief(sid, {
+                            "win_rate": perf_data.win_rate,
+                            "cumulative_return": perf_data.cumulative_return,
+                            "total_trades": perf_data.total_trades,
+                            "profitable_trades": perf_data.profitable_trades,
+                            "losing_trades": perf_data.losing_trades,
+                        }, market_ctx)
+                        if debrief.lessons_learned:
+                            injected = ael.inject_lesson(sid, debrief.lessons_learned)
+                            debrief.prompt_injected = injected
+                            if injected:
+                                # P1-3: Wire AEL lessons to shadow prompts via MethodologyInjector
+                                active_lessons = ael.get_active_lessons(sid)
+                                from marketmind.shadows.methodology_evolver import MethodologyInjector
+                                MethodologyInjector(self.state_db).inject_lessons(
+                                    sid, active_lessons
+                                )
+                            logger.info(
+                                "AEL debrief for %s: lesson %s", sid,
+                                "injected" if injected else "rejected (cap)"
+                            )
+                        result.ael_debriefs.append(debrief)
+            except Exception as e:
+                logger.error("AEL evolution step failed: %s", e)
+
+        # 6.9 Quarterly systemic review (Phase B audit) + AEL experiment wiring
+        # Quarter end: Q1=Mar31, Q2=Jun30, Q3=Sep30, Q4=Dec31
+        _quarter_ends = {"03-31", "06-30", "09-30", "12-31"}
+        _today_md = today[5:]  # MM-DD
+        if _today_md in _quarter_ends:
+            try:
+                from marketmind.shadows.ael_evolution import AELEvolutionEngine
+                ael_q = AELEvolutionEngine(state_db=self.state_db)
+                eco_summary = {
+                    "active_shadows": result.active_shadows,
+                    "avg_win_rate": sum(
+                        p.win_rate for p in performances.values()
+                    ) / max(len(performances), 1) if performances else 0.0,
+                    "avg_cum_return": sum(
+                        p.cumulative_return for p in performances.values()
+                    ) / max(len(performances), 1) if performances else 0.0,
+                    "plateau_count": len(result.plateau_flags),
+                    "reset_count": len(result.reset_candidates),
+                }
+                col_summary = {
+                    "total_flags": len(result.collusion_flags),
+                    "herding_pct": 0.0,
+                    "convergence_pct": 0.0,
+                    "avg_agreement": 0.0,
+                }
+                _year = today[:4]
+                _q = {"03": "Q1", "06": "Q2", "09": "Q3", "12": "Q4"}.get(today[5:7], "Q?")
+                quarter = f"{_year}-{_q}"
+                review = await ael_q.run_quarterly_review(
+                    eco_summary, col_summary, quarter
+                )
+                logger.info(
+                    "Quarterly review for %s: %d action items, %d risks",
+                    quarter, len(review.get("action_items", [])),
+                    len(review.get("key_risks", []))
+                )
+                # Archive review
+                try:
+                    from marketmind.storage.archivist import get_archivist
+                    archivist = get_archivist()
+                    archivist.save_json(
+                        "review", f"quarterly_{quarter}",
+                        {"quarter": quarter, **review}
+                    )
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.error("Quarterly review failed: %s", e)
+
+        # 7. Check challenger conditions + execute trials (P0-2)
         try:
             challenger = ChallengerEngine(self.state_db, self.config)
             for config in visible:
@@ -402,8 +887,19 @@ class ShadowMother:
                     result.challenger_actions.append(
                         f"Shadow {config.shadow_id} at stage {stage.current_stage}"
                     )
+            # Execute pending challenger trials
+            await self._execute_challenger_trials(challenger, result)
         except Exception as e:
             logger.error("Challenger check failed: %s", e)
+
+        # 7.5 Method breeding — weekly population maintenance (P1-4)
+        if today_day % 7 == 1:  # run every 7 days (day 1, 8, 15, 22, 29)
+            try:
+                from marketmind.shadows.methodology_evolver import maintain_population
+                maintain_population(min_active=6, max_active=15)
+                logger.info("Methodology population maintained")
+            except Exception as e:
+                logger.error("Method breeding failed: %s", e)
 
         # 8. Audit emergency quotas
         try:
@@ -417,16 +913,192 @@ class ShadowMother:
 
         return result
 
+    # ── Memory & Crystallization ──────────────────────────────────────────
+
+    async def _update_shadow_memory(
+        self, result: ShadowOrchestrationResult, today: str
+    ) -> None:
+        """Ingest today's votes and analyses into shadow memory.
+
+        Stores shadow analyses as episodic memory observations, preserving
+        the reasoning chain for knowledge crystallization.
+        """
+        from marketmind.shadows.shadow_memory import ShadowMemoryStore
+        from marketmind.shadows.shadow_agent import ExternalObservation
+
+        store = ShadowMemoryStore(self.state_db)
+
+        for shadow_id, analysis in result.shadow_analyses.items():
+            # Create observations from insights
+            for insight in analysis.insights:
+                obs = ExternalObservation(
+                    observation_id=f"insight:{shadow_id}:{today}:{hash(insight) & 0xFFFFFFFF:x}",
+                    source_type="text",
+                    source_path=f"shadow:{shadow_id}",
+                    extracted_text=insight[:500],
+                    metadata={"shadow_id": shadow_id, "date": today, "type": "insight"},
+                    confidence=0.7,
+                    source_attribution=f"shadow:{shadow_id}:daily_analysis",
+                    evaluated_at=today,
+                )
+                store.ingest_observation_sync(shadow_id, obs, tier="episodic")
+
+            # Create observations from votes
+            for vote in analysis.votes:
+                ticker = vote.ticker
+                obs = ExternalObservation(
+                    observation_id=f"vote:{shadow_id}:{today}:{ticker}:{hash(vote.thesis) & 0xFFFFFFFF:x}",
+                    source_type="text",
+                    source_path=f"shadow:{shadow_id}",
+                    extracted_text=(
+                        f"VOTE: {vote.direction} {ticker} "
+                        f"(confidence={vote.confidence:.2f}) "
+                        f"Thesis: {vote.thesis[:200]}"
+                    ),
+                    metadata={
+                        "shadow_id": shadow_id,
+                        "date": today,
+                        "type": "vote",
+                        "ticker": ticker,
+                        "direction": vote.direction,
+                        "confidence": vote.confidence,
+                    },
+                    confidence=vote.confidence,
+                    source_attribution=f"shadow:{shadow_id}:daily_analysis",
+                    evaluated_at=today,
+                )
+                store.ingest_observation_sync(shadow_id, obs, tier="episodic")
+
+        logger.info(
+            "Shadow memory updated: ingested analyses for %d shadows",
+            len(result.shadow_analyses),
+        )
+
+    async def _run_crystallization_check(self) -> list:
+        """Run knowledge crystallization for shadows with sufficient vote history.
+
+        Queries episodic memory for insights with high belief but low confidence,
+        backtest validates against shadow_votes, and promotes or retires insights.
+        """
+        from marketmind.shadows.shadow_memory import ShadowMemoryStore
+        from marketmind.shadows.methodology_evolver import MethodologyEvolver
+        from marketmind.shadows.crystallization import CrystallizationEngine
+
+        store = ShadowMemoryStore(self.state_db)
+        evolver = MethodologyEvolver()
+
+        significance = getattr(
+            self.config, 'crystallization_significance_threshold', 0.6
+        )
+        min_samples = getattr(
+            self.config, 'crystallization_min_samples', 10
+        )
+
+        engine = CrystallizationEngine(
+            memory_store=store,
+            state_db=self.state_db,
+            methodology_evolver=evolver,
+            significance_threshold=significance,
+            min_samples=min_samples,
+        )
+
+        results = await engine.run_crystallization_cycle()
+        return results
+
     # ── Queries ──────────────────────────────────────────────────────────
 
     def get_active_temp_shadows(self) -> list[str]:
         return [s.shadow_id for s in self.state_db.get_active_shadows("temp_event")]
 
+    async def _execute_challenger_trials(
+        self, challenger: "ChallengerEngine", result: ShadowOrchestrationResult
+    ) -> None:
+        """Execute pending challenger comparison trials (P0-2).
+
+        For each challenger shadow with sufficient trial data:
+        1. Run paired t-test comparison (challenger vs target)
+        2. REPLACE_TARGET: eliminate target, promote challenger, transfer knowledge
+        3. RESTORE_TARGET: eliminate challenger
+        4. INCONCLUSIVE: extend trial by 10 days (max 2 extensions)
+        """
+        from marketmind.shadows.methodology_evolver import MethodologyInjector
+        injector = MethodologyInjector(self.state_db)
+
+        active_challengers = self.state_db.get_active_shadows("challenger")
+        for ch_config in active_challengers:
+            target_id = ch_config.parent_shadow_id
+            if not target_id:
+                continue
+
+            # Check if enough trial data exists
+            ch_snaps = self.state_db.get_snapshot_history(ch_config.shadow_id, caller_id="system", days=90)
+            tg_snaps = self.state_db.get_snapshot_history(target_id, caller_id="system", days=90)
+            if len(ch_snaps) < 10 or len(tg_snaps) < 10:
+                continue  # insufficient data for trial
+
+            trial = await challenger.run_comparison_trial(ch_config.shadow_id, target_id)
+            verdict = trial.verdict
+
+            if verdict == "REPLACE_TARGET":
+                # Promote challenger — change type from "challenger" to target's type
+                target_config = self.state_db.get_shadow(target_id, caller_id="system")
+                if target_config:
+                    self.state_db.eliminate_shadow(target_id, "challenger_replaced")
+                    # Update challenger's shadow_type to inherit target's role
+                    ch_config_new = self.state_db.get_shadow(ch_config.shadow_id, caller_id="system")
+                    if ch_config_new:
+                        self.state_db.update_shadow_type(
+                            ch_config.shadow_id,
+                            target_config.shadow_type
+                        )
+                    # Transfer predecessor failure patterns to challenger
+                    try:
+                        from marketmind.shadows.ael_evolution import AELEvolutionEngine
+                        ael = AELEvolutionEngine(state_db=self.state_db)
+                        debriefs = ael._debrief_history.get(target_id, [])
+                        if debriefs:
+                            failures = []
+                            for d in debriefs[-3:]:  # last 3 debriefs
+                                failures.extend(d.failure_patterns)
+                            if failures:
+                                injector.inject_failure_patterns(
+                                    ch_config.shadow_id, failures[:5]
+                                )
+                    except Exception as e:
+                        logger.debug("Failure pattern transfer skipped: %s", e)
+
+                    result.challenger_actions.append(
+                        f"REPLACED {target_id} with {ch_config.shadow_id}"
+                    )
+                    logger.info("Challenger %s replaces target %s", ch_config.shadow_id, target_id)
+
+            elif verdict == "RESTORE_TARGET":
+                self.state_db.eliminate_shadow(ch_config.shadow_id, "challenger_lost_trial")
+                result.challenger_actions.append(
+                    f"RESTORED {target_id}, eliminated challenger {ch_config.shadow_id}"
+                )
+                logger.info("Challenger %s eliminated, target %s restored", ch_config.shadow_id, target_id)
+
+            elif verdict == "INCONCLUSIVE":
+                trial_extensions = getattr(ch_config, 'trial_extensions', 0)
+                if trial_extensions < 2:
+                    # Extend trial — challenger continues collecting data
+                    result.challenger_actions.append(
+                        f"INCONCLUSIVE for {ch_config.shadow_id} vs {target_id} "
+                        f"(extension {trial_extensions + 1}/2)"
+                    )
+                else:
+                    # Max extensions reached — restore target, kill challenger
+                    self.state_db.eliminate_shadow(ch_config.shadow_id, "challenger_max_extensions")
+                    result.challenger_actions.append(
+                        f"MAX_EXTENSIONS for {ch_config.shadow_id} — restoring {target_id}"
+                    )
+
     def get_event_status(self, event_id: str) -> str:
         """Returns "active" | "resolved" | "decayed" | "unknown"."""
         for shadow_id in self.get_active_temp_shadows():
             if event_id in shadow_id:
-                shadow = self.state_db.get_shadow(shadow_id)
+                shadow = self.state_db.get_shadow(shadow_id, caller_id="system")
                 if shadow is None:
                     return "resolved"
                 created = datetime.fromisoformat(shadow.created_at.replace("Z", "+00:00"))
