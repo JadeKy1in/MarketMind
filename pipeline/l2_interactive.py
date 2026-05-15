@@ -180,12 +180,16 @@ async def _run_sector_drilldown(ctx: SessionContext, l2_result: Layer2Result, ch
     direction = chosen_sector.get("direction", "neutral")
     rationale = chosen_sector.get("rationale", "")
 
+    # Sanitize LLM-generated fields before re-injecting into new prompt (defense-in-depth)
+    safe_rationale = defang_text(rationale)
+    safe_assets = [defang_text(a) for a in l2_result.preferred_assets[:5]]
+
     user_prompt = (
-        f"行业: {sector_name}\n"
+        f"行业: {defang_text(sector_name)}\n"
         f"方向: {direction}\n"
-        f"理由: {rationale}\n"
+        f"理由: {safe_rationale}\n"
         f"宏观背景: 象限={l2_result.macro_quadrant}, 方向={l2_result.macro_direction}\n"
-        f"偏好资产: {', '.join(l2_result.preferred_assets[:5])}"
+        f"偏好资产: {', '.join(safe_assets)}"
     )
 
     try:
@@ -195,10 +199,31 @@ async def _run_sector_drilldown(ctx: SessionContext, l2_result: Layer2Result, ch
             temperature=0.3, max_tokens=3072, reasoning_effort="minimal",
         )
         content = strip_markdown_fences(resp.get("content", ""))
-        return _json.loads(content)
+        result = _json.loads(content)
+        # Post-hoc ticker validation against asset universe (prevents LLM hallucination)
+        _validate_drilldown_tickers(result)
+        return result
     except Exception as e:
         logger.warning("Sector drill-down failed for %s: %s", sector_name, e)
         return None
+
+
+def _validate_drilldown_tickers(result: dict) -> None:
+    """Remove hallucinated tickers from drill-down result. Mutates in-place."""
+    from marketmind.config.asset_universe import ASSET_UNIVERSE
+    valid_tickers = {a.ticker for a in ASSET_UNIVERSE.values()}
+
+    # Validate strategy_groups
+    for group in result.get("strategy_groups", {}).values():
+        if "tickers" in group:
+            group["tickers"] = [t for t in group["tickers"] if t in valid_tickers]
+            group["weights"] = {t: w for t, w in group.get("weights", {}).items() if t in valid_tickers}
+
+    # Validate tool_matrix
+    for tool in result.get("tool_matrix", {}).values():
+        if "tickers" in tool:
+            tool["tickers"] = [t for t in tool["tickers"] if t in valid_tickers]
+            tool["weights"] = {t: w for t, w in tool.get("weights", {}).items() if t in valid_tickers}
 
 
 async def _confirm_single_phase(ctx: SessionContext, l2_result: Layer2Result, cli_handler) -> bool:
