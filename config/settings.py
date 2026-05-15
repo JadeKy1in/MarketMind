@@ -15,6 +15,7 @@ class ShadowSettings:
     shadow_flash_quota_default: int = 5
     shadow_pro_quota_default: int = 1
     shadow_consensus_timeout_s: int = 60  # D: max wait for shadow results before Decision
+    shadow_analysis_timeout_s: int = 120  # M9: per-shadow wall-clock cap; covers primary + retry chain within 120s. httpx transport timeout is 120s per HTTP request
 
     # Ranking
     evaluation_window_days: int = 90

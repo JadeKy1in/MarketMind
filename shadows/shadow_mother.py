@@ -398,8 +398,11 @@ class ShadowMother:
             async with semaphore:
                 try:
                     agent = create_shadow_agent(config, self.state_db, self.config)
-                    output = await agent.run_daily_analysis(
-                        news_items, market_data, broadcast_messages=broadcast_messages
+                    output = await asyncio.wait_for(
+                        agent.run_daily_analysis(
+                            news_items, market_data, broadcast_messages=broadcast_messages
+                        ),
+                        timeout=self.config.shadow_analysis_timeout_s,
                     )
                     # Persist votes for backtest/audit
                     if output.votes:

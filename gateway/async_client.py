@@ -238,8 +238,7 @@ class KeyRotator:
         """Return per-key quota status for monitoring."""
         status = {}
         for i, key in enumerate(self._keys):
-            suffix = key[-6:] if len(key) > 6 else "***"
-            status[f"key_{i}_{suffix}"] = {
+            status[f"key_{i}"] = {
                 "in_use": i == self._idx,
                 "remaining": self._remaining.get(i),
                 "request_count": self._request_counts.get(i, 0),
@@ -449,7 +448,7 @@ def get_budget_report() -> dict:
         global SHARED_POOL_WARNED
         if report["key_status"].get("_shared_pool_warning") and not SHARED_POOL_WARNED:
             SHARED_POOL_WARNED = True
-            logger.warning(
+            logger.debug(
                 "All API keys appear to share one quota pool — "
                 "rotation provides resilience against key expiration but not quota expansion."
             )

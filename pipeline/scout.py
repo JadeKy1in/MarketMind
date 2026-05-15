@@ -68,7 +68,7 @@ async def _fetch_sec_edgar() -> list[NewsItem]:
     try:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             # SEC requires: OrganizationName email@domain.com
-            headers = {"User-Agent": "MarketMind InvestmentResearch marketmind@github.io"}
+            headers = {"User-Agent": "MarketMind/0.1 (contact via GitHub)"}
             # Use the EDGAR submission feed (Atom XML) — more reliable than the REST API
             resp = await client.get(
                 "https://www.sec.gov/cgi-bin/browse-edgar",

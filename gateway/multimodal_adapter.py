@@ -15,6 +15,7 @@ as DeepSeekGateway in async_client.py.
 from __future__ import annotations
 
 import asyncio
+import atexit
 import base64
 import logging
 import os
@@ -585,7 +586,9 @@ def _write_temp_image(image_bytes: bytes) -> str | None:
         import tempfile
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
             f.write(image_bytes)
-            return f.name
+            tmp_path = f.name
+        atexit.register(os.unlink, tmp_path)
+        return tmp_path
     except Exception as exc:
         logger.debug("Failed to write temp image: %s", exc)
     return None
