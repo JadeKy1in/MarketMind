@@ -34,6 +34,21 @@ async def run_decision_interactive(ctx: SessionContext, cli_handler) -> bool:
     # Display decision cards
     print(f"\n{'='*60}")
     print(f"  [DECISION] 投资决策方案")
+
+    # R5: Progressive disclosure — one-line summary before detail
+    n_cards = len(decision.decision_cards) if decision.decision_cards else 0
+    long_count = sum(1 for c in decision.decision_cards if getattr(c, 'direction', '') in ('long', 'Long', 'LONG'))
+    short_count = sum(1 for c in decision.decision_cards if getattr(c, 'direction', '') in ('short', 'Short', 'SHORT'))
+    if long_count > short_count:
+        bias = "做多偏向"
+    elif short_count > long_count:
+        bias = "做空偏向"
+    elif n_cards == 0:
+        bias = "无偏向"
+    else:
+        bias = "混合偏向"
+    no_trade_status = "有No-Trade" if decision.no_trade_card else "无No-Trade"
+    print(f"  [DECISION] {n_cards}个交易方案 | {bias} | {no_trade_status}")
     if decision.decision_cards:
         print(f"\n  交易方案 ({len(decision.decision_cards)} cards):")
         print(f"  {'标的':<6} {'方向':<6} {'仓位':<6} {'入场':<14} {'止损':<8} {'目标':<8} {'持有天':<8}")
@@ -60,6 +75,23 @@ async def run_decision_interactive(ctx: SessionContext, cli_handler) -> bool:
             print(f"  结构性优势: {', '.join(decision.no_trade_card.structural_advantages[:3])}")
 
     print(f"  {'='*60}")
+
+    # R6: Pre-Decision Challenge Protocol — contrarian risk review
+    if decision.contrarian_challenges:
+        print(f"  ┌─ 逆向风控挑战 ─────────────────────────────────┐")
+        for ch in decision.contrarian_challenges:
+            risk = ch.get("risk", "?")
+            loss_pct = ch.get("loss_pct", 0.0)
+            trigger = ch.get("trigger", "?")
+            print(f"  │ ⚠ {risk}: 潜在损失 {loss_pct}%, 触发条件: {trigger}")
+        print(f"  └{'─'*48}┘")
+
+    print(f"  ┌─ 确认前检查清单 ─────────────────────────────┐")
+    print(f"  │ □ 反向论点是否经得起推敲？                    │")
+    print(f"  │ □ 止损位是否在可承受范围内？                  │")
+    print(f"  │ □ 如果今天不交易，会错过什么？                │")
+    print(f"  │ □ 未来48小时是否有重大事件？（FOMC/财报/数据） │")
+    print(f"  └{'─'*48}┘")
     print(f"  输入'确认'接受方案 | 输入'observe'放弃交易 | 输入标的代码移除该标的")
 
     decision_response = await cli_handler("> ")

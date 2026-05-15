@@ -140,6 +140,7 @@ class MarketMindConfig:
     proxy_url: str = field(default_factory=lambda: os.getenv("HTTP_PROXY", os.getenv("HTTPS_PROXY", "")))
     session_checkpoint_dir: Path | None = None
     position_protection_days: int = 60
+    market_open_utc: str = "13:30"  # US equity market open in UTC (9:30 AM ET during EDT Mar-Nov; 14:30 during EST Nov-Mar)
     shadow: ShadowSettings = field(default_factory=ShadowSettings)
 
     def __post_init__(self):

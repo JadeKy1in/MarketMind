@@ -1,9 +1,49 @@
-"""Shadow state persistence -- SQLite schema, config models, CRUD operations."""
+"""Shadow state persistence -- SQLite schema, config models, CRUD operations.
+
+Data Classification Scheme (Resolution 6-B, Phase 4 Red Team):
+--------------------------------------------------------------------
+20 persistent tables are classified into three tiers:
+
+L1 (Public / Non-Sensitive):
+    - archive_fts              (full-text search index, derived from public data)
+    - collusion_flags          (aggregate agreement stats, no PII)
+    - ranking_history          (composite/deflated scores, no raw methodology)
+    - cycle_checkpoints        (step-completion markers, no position data)
+    - access_audit_log         (operation metadata, no payload content)
+    - shadow_rankings_fts      (tier/rank search index)
+
+L2 (Internal / Shadow Ecosystem — Business Logic):
+    - shadows                  (shadow configs + methodology prompts)
+    - virtual_trades           (entry/exit/pnl — virtual only, no real capital)
+    - daily_snapshots          (performance metrics: sharpe, calmar, drawdown)
+    - shadow_outputs           (raw LLM outputs — contains proprietary analysis)
+    - integrity_events         (claim verification history)
+    - emergency_quotas         (confidence + opportunity descriptions)
+    - emergency_quota_state    (runtime quota tracking)
+    - paper_live_gap_state     (slippage calibration data)
+    - shadow_votes             (ticker/direction/confidence/thesis — core IP)
+    - methodology_changes      (prompt evolution history)
+    - shadow_analyses_fts      (vote thesis/risk_note search index)
+    - shadow_trades_fts        (exit_reason search index)
+    - belief_nodes             (propositions + alpha/beta state)
+    - forecast_scenarios        (scenario predictions + belief state)
+
+L3 (Restricted / Real-Money Sensitive — None Currently):
+    (No L3 tables exist at this time. If real brokerage integration or
+     actual account balances are stored, they must be classified L3
+     with access limited to system-only callers.)
+
+The DB-level access control matrix in ShadowStateDB._ACCESS_MATRIX
+enforces read isolation: shadows can only read their own L2 data;
+main_ai cannot read any shadow data; collusion_detector/backtest_runner
+can read all shadows; system has full access.
+"""
 from __future__ import annotations
 
 import json
 import logging
 import sqlite3
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,7 +62,7 @@ class ShadowConfig:
     methodology_prompt: str          # the shadow's entire system prompt
     virtual_capital: float
     max_positions: int = 3
-    model: str = "flash"             # "flash" | "pro"
+    model: str = "pro"               # "flash" | "pro"
     temperature: float = 0.3
     reasoning_effort: str = "max"
     domain: str | None = None
@@ -46,7 +86,7 @@ class ShadowConfig:
             raise ValueError(f"status must be one of {self._VALID_STATUSES}, got '{self.status}'")
         if self.virtual_capital < 0:
             raise ValueError(f"virtual_capital must be >= 0, got {self.virtual_capital}")
-        if self.virtual_capital == 0 and self.shadow_type not in ("missed_path",):
+        if self.virtual_capital == 0 and self.shadow_type not in ("missed_path", "temp_event"):
             raise ValueError(f"virtual_capital must be positive for shadow_type '{self.shadow_type}'")
         if self.max_positions < 0:
             raise ValueError(f"max_positions must be >= 0, got {self.max_positions}")
@@ -109,6 +149,8 @@ class DailySnapshot:
     pro_quota_used: int = 0
     emergency_quotas_used: int = 0
     insights_generated: int = 0
+    votes_produced: int = 0
+    discount_rate: float | None = None
 
 
 @dataclass
@@ -145,7 +187,13 @@ class CollusionFlag:
 
 # ── SQLite database ──────────────────────────────────────────────────────────
 
+CODE_VERSION = 8  # Increment on any schema change; add migration to _MIGRATIONS
+
 _SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS shadows (
     id TEXT PRIMARY KEY,
     shadow_type TEXT NOT NULL,
@@ -155,6 +203,17 @@ CREATE TABLE IF NOT EXISTS shadows (
     config_json TEXT,
     created_at TEXT NOT NULL,
     eliminated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS methodology_changes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shadow_id TEXT NOT NULL,
+    change_type TEXT NOT NULL,
+    old_prompt TEXT,
+    new_prompt TEXT,
+    reason TEXT,
+    changed_at TEXT NOT NULL,
+    FOREIGN KEY (shadow_id) REFERENCES shadows(id)
 );
 
 CREATE TABLE IF NOT EXISTS virtual_trades (
@@ -196,6 +255,20 @@ CREATE TABLE IF NOT EXISTS daily_snapshots (
     pro_quota_used INTEGER DEFAULT 0,
     emergency_quotas_used INTEGER DEFAULT 0,
     insights_generated INTEGER DEFAULT 0,
+    votes_produced INTEGER DEFAULT 0,
+    discount_rate REAL DEFAULT 0.20,
+    post_collaboration_quarantine INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(shadow_id, date),
+    FOREIGN KEY (shadow_id) REFERENCES shadows(id)
+);
+
+CREATE TABLE IF NOT EXISTS shadow_outputs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shadow_id TEXT NOT NULL,
+    date TEXT NOT NULL,
+    raw_output TEXT NOT NULL,
+    token_count INTEGER DEFAULT 0,
+    model TEXT DEFAULT 'pro',
     UNIQUE(shadow_id, date),
     FOREIGN KEY (shadow_id) REFERENCES shadows(id)
 );
@@ -245,6 +318,169 @@ CREATE TABLE IF NOT EXISTS collusion_flags (
     verdict TEXT NOT NULL,
     user_action TEXT
 );
+
+CREATE TABLE IF NOT EXISTS emergency_quota_state (
+    shadow_id TEXT PRIMARY KEY,
+    state_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (shadow_id) REFERENCES shadows(id)
+);
+
+CREATE TABLE IF NOT EXISTS paper_live_gap_state (
+    shadow_id TEXT PRIMARY KEY,
+    state_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (shadow_id) REFERENCES shadows(id)
+);
+
+CREATE TABLE IF NOT EXISTS shadow_votes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    shadow_id TEXT NOT NULL,
+    date TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    direction TEXT NOT NULL CHECK(direction IN ('long','short','abstain')),
+    confidence REAL NOT NULL,
+    thesis TEXT,
+    risk_note TEXT,
+    created_at TEXT NOT NULL,
+    outcome_label TEXT DEFAULT NULL,
+    outcome_return_pct REAL DEFAULT NULL,
+    FOREIGN KEY (shadow_id) REFERENCES shadows(id)
+);
+CREATE INDEX IF NOT EXISTS idx_shadow_votes_date ON shadow_votes(date);
+CREATE INDEX IF NOT EXISTS idx_shadow_votes_shadow_date ON shadow_votes(shadow_id, date);
+
+CREATE TABLE IF NOT EXISTS belief_nodes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id TEXT NOT NULL UNIQUE,
+    proposition TEXT NOT NULL,
+    alpha REAL NOT NULL DEFAULT 1.0,
+    beta REAL NOT NULL DEFAULT 1.0,
+    status TEXT NOT NULL DEFAULT 'active',
+    tier TEXT NOT NULL DEFAULT 'working',
+    source TEXT NOT NULL DEFAULT 'shadow',
+    tags TEXT DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    decayed_at TEXT DEFAULT NULL,
+    retired_at TEXT DEFAULT NULL,
+    retire_reason TEXT DEFAULT NULL
+);
+
+CREATE TABLE IF NOT EXISTS belief_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    observation_id TEXT NOT NULL UNIQUE,
+    node_id TEXT NOT NULL,
+    shadow_id TEXT NOT NULL,
+    value REAL NOT NULL,
+    confidence REAL NOT NULL,
+    source_type TEXT NOT NULL,
+    source_path TEXT DEFAULT '',
+    extracted_text TEXT DEFAULT '',
+    metadata_json TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (node_id) REFERENCES belief_nodes(node_id)
+);
+
+CREATE TABLE IF NOT EXISTS belief_retirements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id TEXT NOT NULL,
+    retired_confidence REAL NOT NULL,
+    threshold REAL NOT NULL,
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (node_id) REFERENCES belief_nodes(node_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_belief_nodes_status ON belief_nodes(status);
+CREATE INDEX IF NOT EXISTS idx_belief_nodes_tier ON belief_nodes(tier);
+CREATE INDEX IF NOT EXISTS idx_belief_observations_node ON belief_observations(node_id);
+CREATE INDEX IF NOT EXISTS idx_belief_observations_shadow ON belief_observations(shadow_id);
+
+CREATE TABLE IF NOT EXISTS market_prices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker TEXT NOT NULL,
+    date TEXT NOT NULL,
+    open REAL NOT NULL,
+    high REAL NOT NULL,
+    low REAL NOT NULL,
+    close REAL NOT NULL,
+    volume INTEGER NOT NULL DEFAULT 0,
+    next_day_return REAL,
+    UNIQUE(ticker, date)
+);
+CREATE INDEX IF NOT EXISTS idx_market_prices_ticker_date ON market_prices(ticker, date);
+
+CREATE TABLE IF NOT EXISTS cycle_checkpoints (
+    date TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'running',
+    step_completed INTEGER NOT NULL DEFAULT 0,
+    shadow_states TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS forecast_scenarios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scenario_group_id TEXT NOT NULL,
+    trigger_event_summary TEXT NOT NULL,
+    prediction_label TEXT NOT NULL,
+    predicted_probability REAL NOT NULL DEFAULT 0.5,
+    trigger_conditions TEXT DEFAULT '{}',
+    evidence_chain TEXT DEFAULT '',
+    forecast_window_end TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    belief_alpha REAL NOT NULL DEFAULT 1.0,
+    belief_beta REAL NOT NULL DEFAULT 1.0,
+    matched_actual TEXT DEFAULT NULL,
+    matched_at TEXT DEFAULT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    created_by TEXT NOT NULL DEFAULT 'main_ai'
+);
+CREATE INDEX IF NOT EXISTS idx_forecast_scenarios_group ON forecast_scenarios(scenario_group_id);
+CREATE INDEX IF NOT EXISTS idx_forecast_scenarios_status ON forecast_scenarios(status);
+
+CREATE TABLE IF NOT EXISTS pipeline_run_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_date TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    model_name TEXT NOT NULL,
+    input_summary TEXT DEFAULT '',
+    output_summary TEXT DEFAULT '',
+    latency_ms INTEGER DEFAULT 0,
+    error TEXT DEFAULT NULL,
+    ai_labeled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pipeline_run_log_date ON pipeline_run_log(run_date);
+CREATE INDEX IF NOT EXISTS idx_pipeline_run_log_stage ON pipeline_run_log(stage, run_date);
+
+CREATE TABLE IF NOT EXISTS red_team_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_date TEXT NOT NULL,
+    observation_type TEXT NOT NULL,
+    target_context TEXT NOT NULL,
+    description TEXT NOT NULL,
+    severity TEXT NOT NULL DEFAULT 'minor',
+    evidence TEXT DEFAULT '',
+    resolved_by_user INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_red_team_obs_date ON red_team_observations(session_date);
+CREATE INDEX IF NOT EXISTS idx_red_team_obs_type ON red_team_observations(observation_type);
+CREATE INDEX IF NOT EXISTS idx_red_team_obs_severity ON red_team_observations(severity);
+
+CREATE TABLE IF NOT EXISTS access_audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    caller_id TEXT NOT NULL,
+    target_shadow_id TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    detail TEXT DEFAULT '',
+    accessed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_access_audit_log_caller ON access_audit_log(caller_id);
+CREATE INDEX IF NOT EXISTS idx_access_audit_log_accessed_at ON access_audit_log(accessed_at);
 """
 
 
@@ -253,6 +489,7 @@ class ShadowStateDB:
 
     def __init__(self, db_path: str = "data/shadows/shadows.db"):
         self.db_path = db_path
+        self._access_audit_enabled = True
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
     def _connect(self) -> sqlite3.Connection:
@@ -264,13 +501,112 @@ class ShadowStateDB:
         conn.row_factory = sqlite3.Row
         return conn
 
+    def _execute_with_retry(self, operation, max_retries: int = 3, retry_delay: float = 0.5):
+        """Execute a DB operation with retry on database locked errors.
+
+        Intended for write operations in high-contention paths (e.g. shadow_mother
+        orchestration) where multiple concurrent connections may contend for the
+        same SQLite database.
+        """
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                return operation()
+            except sqlite3.OperationalError as e:
+                if "locked" in str(e).lower() and attempt < max_retries - 1:
+                    time.sleep(retry_delay * (attempt + 1))
+                    last_error = e
+                    continue
+                raise
+        raise last_error
+
+    # Access matrix: who can read what
+    _ACCESS_MATRIX = {
+        "main_ai": {"self_only": False, "other_shadows": False, "all_shadows": False, "system": False},
+        "system": {"self_only": True, "other_shadows": True, "all_shadows": True, "system": True},
+        "collusion_detector": {"self_only": False, "other_shadows": False, "all_shadows": True, "system": False},
+        "backtest_runner": {"self_only": False, "other_shadows": False, "all_shadows": True, "system": False},
+    }
+
+    def _check_access(self, caller_id: str, target_shadow_id: str, operation: str) -> bool:
+        """Check if caller_id is authorized to access target_shadow_id.
+
+        Rules:
+        - "shadow:{id}" can only read its own data (caller_id == "shadow:{target_shadow_id}")
+        - "main_ai" cannot read any shadow data
+        - "collusion_detector" and "backtest_runner" can read all shadows
+        - "system" can read everything
+        """
+        if caller_id.startswith("shadow:"):
+            caller_shadow = caller_id.split(":", 1)[1]
+            return caller_shadow == target_shadow_id
+        if caller_id in ("collusion_detector", "backtest_runner", "system"):
+            return True
+        if caller_id == "main_ai":
+            return False  # Main AI must not read shadow data (permanent isolation)
+        return False
+
+    def _log_access(self, caller_id: str, target_shadow_id: str, operation: str, detail: str = "") -> None:
+        """Log access attempt to audit log (best-effort, non-blocking)."""
+        if not self._access_audit_enabled:
+            return
+        try:
+            conn = self._connect()
+            try:
+                now = datetime.now(timezone.utc).isoformat()
+                conn.execute(
+                    """INSERT INTO access_audit_log
+                       (caller_id, target_shadow_id, operation, detail, accessed_at)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (caller_id, target_shadow_id, operation, detail, now)
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:
+            pass  # Audit logging must never block primary operation
+
     def init_schema(self) -> None:
         conn = self._connect()
         try:
             conn.executescript(_SCHEMA_SQL)
+            row = conn.execute(
+                "SELECT value FROM metadata WHERE key = 'schema_version'"
+            ).fetchone()
+            db_version = int(row["value"]) if row else 0
+
+            if db_version > CODE_VERSION:
+                logger.warning(
+                    "DB schema_version %d > code CODE_VERSION %d — "
+                    "database was opened with newer code. Skipping migrations.",
+                    db_version, CODE_VERSION
+                )
+            else:
+                for ver, func in _MIGRATIONS:
+                    if ver > db_version:
+                        func(conn)
+                        conn.execute(
+                            "INSERT OR REPLACE INTO metadata (key, value) "
+                            "VALUES ('schema_version', ?)",
+                            (str(ver),)
+                        )
+                        logger.info("Migration %d applied successfully.", ver)
+
             conn.commit()
         finally:
             conn.close()
+
+    @staticmethod
+    def _migrate_add_column(conn: sqlite3.Connection, table: str,
+                            column: str, col_type: str) -> None:
+        """Safe ALTER TABLE ADD COLUMN — ignores if column already exists."""
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+            logger.info("Migration: added %s.%s %s", table, column, col_type)
+        except sqlite3.OperationalError as e:
+            if "duplicate column" not in str(e).lower():
+                raise
+            # Column already exists — safe to ignore
 
     def close(self) -> None:
         pass  # SQLite connections are closed per-operation
@@ -311,7 +647,11 @@ class ShadowStateDB:
         finally:
             conn.close()
 
-    def get_shadow(self, shadow_id: str) -> ShadowConfig | None:
+    def get_shadow(self, shadow_id: str, caller_id: str) -> ShadowConfig | None:
+        if not self._check_access(caller_id, shadow_id, "get_shadow"):
+            logger.warning("Access denied: caller=%s target=%s op=get_shadow", caller_id, shadow_id)
+            return None
+        self._log_access(caller_id, shadow_id, "get_shadow")
         conn = self._connect()
         try:
             row = conn.execute(
@@ -377,6 +717,88 @@ class ShadowStateDB:
         finally:
             conn.close()
 
+    def update_shadow_type(self, shadow_id: str, new_type: str) -> bool:
+        """Change a shadow's type (e.g., challenger → expert on promotion)."""
+        conn = self._connect()
+        try:
+            conn.execute(
+                "UPDATE shadows SET shadow_type = ? WHERE id = ?",
+                (new_type, shadow_id)
+            )
+            conn.commit()
+            return conn.total_changes > 0
+        finally:
+            conn.close()
+
+    def update_methodology_prompt(self, shadow_id: str, new_prompt: str,
+                                    reason: str = "") -> bool:
+        """Update a shadow's methodology prompt and log the change (P1-1).
+
+        Returns True if the shadow was found and updated.
+        """
+        conn = self._connect()
+        try:
+            old = conn.execute(
+                "SELECT methodology_prompt FROM shadows WHERE id = ?",
+                (shadow_id,)
+            ).fetchone()
+            if old is None:
+                return False
+            old_prompt = old["methodology_prompt"] or ""
+
+            now = datetime.now(timezone.utc).isoformat()
+            conn.execute(
+                "UPDATE shadows SET methodology_prompt = ? WHERE id = ?",
+                (new_prompt, shadow_id)
+            )
+            conn.execute(
+                """INSERT INTO methodology_changes
+                   (shadow_id, change_type, old_prompt, new_prompt, reason, changed_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (shadow_id, "update", old_prompt[:500], new_prompt[:500], reason, now)
+            )
+            conn.commit()
+            logger.info("Methodology updated for %s: %s", shadow_id, reason)
+            return True
+        finally:
+            conn.close()
+
+    def get_methodology_history(self, shadow_id: str,
+                                 caller_id: str, limit: int = 20) -> list[dict]:
+        """Get methodology change history for a shadow (P1-1)."""
+        if not self._check_access(caller_id, shadow_id, "get_methodology_history"):
+            logger.warning("Access denied: caller=%s target=%s op=get_methodology_history", caller_id, shadow_id)
+            return []
+        self._log_access(caller_id, shadow_id, "get_methodology_history")
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT change_type, reason, changed_at FROM methodology_changes
+                   WHERE shadow_id = ? ORDER BY changed_at DESC LIMIT ?""",
+                (shadow_id, limit)
+            ).fetchall()
+            return [{"change_type": r["change_type"], "reason": r["reason"],
+                     "changed_at": r["changed_at"]} for r in rows]
+        finally:
+            conn.close()
+
+    def get_original_methodology(self, shadow_id: str, caller_id: str) -> str | None:
+        """Get the first recorded methodology prompt (baseline) for a shadow."""
+        if not self._check_access(caller_id, shadow_id, "get_original_methodology"):
+            logger.warning("Access denied: caller=%s target=%s op=get_original_methodology", caller_id, shadow_id)
+            return None
+        self._log_access(caller_id, shadow_id, "get_original_methodology")
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """SELECT old_prompt FROM methodology_changes
+                   WHERE shadow_id = ? ORDER BY changed_at ASC LIMIT 1""",
+                (shadow_id,)
+            ).fetchone()
+            return row["old_prompt"] if row else None
+        finally:
+            conn.close()
+
     @staticmethod
     def _row_to_config(row: sqlite3.Row) -> ShadowConfig:
         try:
@@ -391,7 +813,7 @@ class ShadowStateDB:
             methodology_prompt=row["methodology_prompt"] or "",
             virtual_capital=config_json.get("virtual_capital", 0),
             max_positions=config_json.get("max_positions", 3),
-            model=config_json.get("model", "flash"),
+            model=config_json.get("model", "pro"),
             temperature=config_json.get("temperature", 0.3),
             reasoning_effort=config_json.get("reasoning_effort", "max"),
             domain=config_json.get("domain"),
@@ -446,7 +868,11 @@ class ShadowStateDB:
         finally:
             conn.close()
 
-    def get_trade_history(self, shadow_id: str, limit: int = 90) -> list[VirtualTrade]:
+    def get_trade_history(self, shadow_id: str, caller_id: str, limit: int = 90) -> list[VirtualTrade]:
+        if not self._check_access(caller_id, shadow_id, "get_trade_history"):
+            logger.warning("Access denied: caller=%s target=%s op=get_trade_history", caller_id, shadow_id)
+            return []
+        self._log_access(caller_id, shadow_id, "get_trade_history")
         conn = self._connect()
         try:
             rows = conn.execute(
@@ -494,8 +920,9 @@ class ShadowStateDB:
                     sharpe_ratio, calmar_ratio, omega_ratio, mppm_score,
                     composite_score, deflated_score, percentile_rank,
                     achievement_tier, flash_quota_used, pro_quota_used,
-                    emergency_quotas_used, insights_generated)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    emergency_quotas_used, insights_generated, votes_produced,
+                    discount_rate)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (shadow_id, snapshot.date, snapshot.virtual_capital,
                  snapshot.daily_return_pct, snapshot.cumulative_return_pct,
                  snapshot.max_drawdown_pct, snapshot.win_rate_pct,
@@ -503,13 +930,18 @@ class ShadowStateDB:
                  snapshot.mppm_score, snapshot.composite_score, snapshot.deflated_score,
                  snapshot.percentile_rank, snapshot.achievement_tier,
                  snapshot.flash_quota_used, snapshot.pro_quota_used,
-                 snapshot.emergency_quotas_used, snapshot.insights_generated)
+                 snapshot.emergency_quotas_used, snapshot.insights_generated,
+                 snapshot.votes_produced, snapshot.discount_rate)
             )
             conn.commit()
         finally:
             conn.close()
 
-    def get_snapshot_history(self, shadow_id: str, days: int = 90) -> list[DailySnapshot]:
+    def get_snapshot_history(self, shadow_id: str, caller_id: str, days: int = 90) -> list[DailySnapshot]:
+        if not self._check_access(caller_id, shadow_id, "get_snapshot_history"):
+            logger.warning("Access denied: caller=%s target=%s op=get_snapshot_history", caller_id, shadow_id)
+            return []
+        self._log_access(caller_id, shadow_id, "get_snapshot_history")
         conn = self._connect()
         try:
             rows = conn.execute(
@@ -523,7 +955,11 @@ class ShadowStateDB:
         finally:
             conn.close()
 
-    def get_latest_snapshot(self, shadow_id: str) -> DailySnapshot | None:
+    def get_latest_snapshot(self, shadow_id: str, caller_id: str) -> DailySnapshot | None:
+        if not self._check_access(caller_id, shadow_id, "get_latest_snapshot"):
+            logger.warning("Access denied: caller=%s target=%s op=get_latest_snapshot", caller_id, shadow_id)
+            return None
+        self._log_access(caller_id, shadow_id, "get_latest_snapshot")
         conn = self._connect()
         try:
             row = conn.execute(
@@ -533,6 +969,159 @@ class ShadowStateDB:
             if row is None:
                 return None
             return self._row_to_snapshot(row)
+        finally:
+            conn.close()
+
+    def get_tier_history(self, shadow_id: str, days: int = 120) -> list[tuple[str, str]]:
+        """Get (date, achievement_tier) history for plateau/reset detection."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT date, achievement_tier FROM daily_snapshots
+                   WHERE shadow_id = ? AND achievement_tier IS NOT NULL
+                   ORDER BY date DESC LIMIT ?""",
+                (shadow_id, days)
+            ).fetchall()
+            return [(r["date"], r["achievement_tier"]) for r in rows]
+        finally:
+            conn.close()
+
+    def get_wr_history(self, shadow_id: str, days: int = 120) -> list[tuple[str, float]]:
+        """Get (date, win_rate_pct) history for plateau/reset detection."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT date, win_rate_pct FROM daily_snapshots
+                   WHERE shadow_id = ? AND win_rate_pct IS NOT NULL
+                   ORDER BY date DESC LIMIT ?""",
+                (shadow_id, days)
+            ).fetchall()
+            return [(r["date"], r["win_rate_pct"] / 100.0) for r in rows]
+        finally:
+            conn.close()
+
+    def get_insight_dates(self, shadow_id: str, days: int = 120) -> list[str]:
+        """Get dates where shadow produced insights. Derives from snapshots
+        where insights_generated > 0."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT date FROM daily_snapshots
+                   WHERE shadow_id = ? AND insights_generated > 0
+                   ORDER BY date DESC LIMIT ?""",
+                (shadow_id, days)
+            ).fetchall()
+            return [r["date"] for r in rows]
+        finally:
+            conn.close()
+
+    def get_abstention_days(self, shadow_id: str, days: int = 180) -> int:
+        """Count days where shadow produced zero votes (abstained)."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """SELECT COUNT(*) as cnt FROM daily_snapshots
+                   WHERE shadow_id = ? AND votes_produced = 0
+                   AND date >= date('now', ? || ' days')""",
+                (shadow_id, f'-{days}')
+            ).fetchone()
+            return row["cnt"] if row else 0
+        finally:
+            conn.close()
+
+    def save_raw_output(self, shadow_id: str, date: str, raw_output: str,
+                         token_count: int = 0, model: str = "pro") -> None:
+        """Persist raw LLM output for health monitoring (Phase 3)."""
+        conn = self._connect()
+        try:
+            # Ensure votes_produced column exists (migration safety)
+            self._ensure_votes_produced_column(conn)
+            conn.execute(
+                """INSERT OR REPLACE INTO shadow_outputs
+                   (shadow_id, date, raw_output, token_count, model)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (shadow_id, date, raw_output, token_count, model)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _ensure_votes_produced_column(conn) -> None:
+        """Add votes_produced column if missing (lazy migration)."""
+        try:
+            conn.execute("SELECT votes_produced FROM daily_snapshots LIMIT 0")
+        except Exception:
+            conn.execute(
+                "ALTER TABLE daily_snapshots ADD COLUMN votes_produced INTEGER DEFAULT 0"
+            )
+
+    def count_consecutive_zero_insights(self, shadow_id: str,
+                                         max_days: int = 8) -> int:
+        """Count consecutive recent days with zero insights (Phase 3)."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT date, insights_generated FROM daily_snapshots
+                   WHERE shadow_id = ? ORDER BY date DESC LIMIT ?""",
+                (shadow_id, max_days)
+            ).fetchall()
+            count = 0
+            for row in rows:
+                if (row["insights_generated"] or 0) == 0:
+                    count += 1
+                else:
+                    break
+            return count
+        finally:
+            conn.close()
+
+    def get_raw_output(self, shadow_id: str, date: str, caller_id: str) -> str | None:
+        """Retrieve raw LLM output for a shadow on a given date."""
+        if not self._check_access(caller_id, shadow_id, "get_raw_output"):
+            logger.warning("Access denied: caller=%s target=%s op=get_raw_output", caller_id, shadow_id)
+            return None
+        self._log_access(caller_id, shadow_id, "get_raw_output")
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT raw_output FROM shadow_outputs WHERE shadow_id = ? AND date = ?",
+                (shadow_id, date)
+            ).fetchone()
+            return row["raw_output"] if row else None
+        finally:
+            conn.close()
+
+    def get_token_history(self, shadow_id: str, days: int = 30) -> list[int]:
+        """Get token count history for trend analysis (Phase 3).
+        Returns oldest-first for Mann-Kendall computation."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT token_count FROM shadow_outputs
+                   WHERE shadow_id = ? ORDER BY date ASC LIMIT ?""",
+                (shadow_id, days)
+            ).fetchall()
+            return [r["token_count"] for r in rows if r["token_count"]]
+        finally:
+            conn.close()
+
+    def update_snapshot_fields(self, shadow_id: str, date: str, **fields) -> None:
+        """Update select fields on a snapshot after analysis (Phase 2)."""
+        allowed = {"insights_generated", "votes_produced", "flash_quota_used",
+                   "pro_quota_used", "emergency_quotas_used"}
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        if not updates:
+            return
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        values = list(updates.values()) + [shadow_id, date]
+        conn = self._connect()
+        try:
+            conn.execute(
+                f"UPDATE daily_snapshots SET {set_clause} WHERE shadow_id = ? AND date = ?",
+                values
+            )
+            conn.commit()
         finally:
             conn.close()
 
@@ -562,6 +1151,10 @@ class ShadowStateDB:
             if row["emergency_quotas_used"] is not None else 0,
             insights_generated=row["insights_generated"]
             if row["insights_generated"] is not None else 0,
+            votes_produced=row["votes_produced"]
+            if row["votes_produced"] is not None else 0,
+            discount_rate=row["discount_rate"]
+            if "discount_rate" in row.keys() and row["discount_rate"] is not None else None,
         )
 
     # ── Rankings ──────────────────────────────────────────────────────────
@@ -748,6 +1341,64 @@ class ShadowStateDB:
         finally:
             conn.close()
 
+    # ── Emergency quota runtime state ──────────────────────────────────────
+
+    def save_emergency_quota_state(self, shadow_id: str, state_json: str) -> None:
+        """Save emergency quota state for a shadow (dedicated table, no read-merge-write)."""
+        conn = self._connect()
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            conn.execute(
+                """INSERT OR REPLACE INTO emergency_quota_state
+                   (shadow_id, state_json, updated_at)
+                   VALUES (?, ?, ?)""",
+                (shadow_id, state_json, now)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def load_emergency_quota_state(self, shadow_id: str) -> str | None:
+        """Load emergency quota state JSON for a shadow, or None if no state exists."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT state_json FROM emergency_quota_state WHERE shadow_id = ?",
+                (shadow_id,)
+            ).fetchone()
+            return row["state_json"] if row else None
+        finally:
+            conn.close()
+
+    # ── Paper/live gap runtime state ───────────────────────────────────────
+
+    def save_paper_live_gap_state(self, shadow_id: str, state_json: str) -> None:
+        """Save paper/live gap state for a shadow (dedicated table, no read-merge-write)."""
+        conn = self._connect()
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            conn.execute(
+                """INSERT OR REPLACE INTO paper_live_gap_state
+                   (shadow_id, state_json, updated_at)
+                   VALUES (?, ?, ?)""",
+                (shadow_id, state_json, now)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def load_paper_live_gap_state(self, shadow_id: str) -> str | None:
+        """Load paper/live gap state JSON for a shadow, or None if no state exists."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT state_json FROM paper_live_gap_state WHERE shadow_id = ?",
+                (shadow_id,)
+            ).fetchone()
+            return row["state_json"] if row else None
+        finally:
+            conn.close()
+
     # ── Bulk operations ───────────────────────────────────────────────────
 
     def get_all_daily_snapshots(self, date: str) -> list[DailySnapshot]:
@@ -758,6 +1409,31 @@ class ShadowStateDB:
                 (date,)
             ).fetchall()
             return [self._row_to_snapshot(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_ready_count(self, today: str) -> tuple[int, int]:
+        """R4: Count shadows that have completed today's analysis.
+
+        Returns (completed, total) where:
+          completed = shadows with a daily_snapshot for today's date
+          total     = active visible shadows (not eliminated, not challenger)
+        """
+        conn = self._connect()
+        try:
+            completed_row = conn.execute(
+                "SELECT COUNT(DISTINCT shadow_id) FROM daily_snapshots WHERE date = ?",
+                (today,)
+            ).fetchone()
+            completed = completed_row[0] if completed_row else 0
+
+            total_row = conn.execute(
+                "SELECT COUNT(*) FROM shadows WHERE status != 'eliminated'"
+                " AND shadow_type != 'challenger'"
+            ).fetchone()
+            total = total_row[0] if total_row else 0
+
+            return (completed, total)
         finally:
             conn.close()
 
@@ -775,3 +1451,512 @@ class ShadowStateDB:
                      "date": date, "ticker": ticker} for r in rows]
         finally:
             conn.close()
+
+    # ── Next-day return lookup ─────────────────────────────────────────────
+
+    def get_next_day_return_sign(self, ticker_or_shadow: str, date: str) -> int | None:
+        """Get return sign for a ticker/shadow on a given date. 1=positive, -1=negative, None=no data."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """SELECT pnl_pct FROM virtual_trades
+                   WHERE ticker = ? AND exit_date = ? AND pnl_pct IS NOT NULL
+                   LIMIT 1""",
+                (ticker_or_shadow, date)
+            ).fetchone()
+            if row and row["pnl_pct"] is not None:
+                return 1 if row["pnl_pct"] > 0 else -1
+            snap_row = conn.execute(
+                """SELECT daily_return_pct FROM daily_snapshots
+                   WHERE shadow_id = ? AND date = ? AND daily_return_pct IS NOT NULL
+                   LIMIT 1""",
+                (ticker_or_shadow, date)
+            ).fetchone()
+            if snap_row and snap_row["daily_return_pct"] is not None:
+                return 1 if snap_row["daily_return_pct"] > 0 else -1
+            return None
+        finally:
+            conn.close()
+
+    # ── Vote persistence ───────────────────────────────────────────────────
+
+    def save_votes(self, shadow_id: str, date: str, votes: list) -> None:
+        """Persist shadow votes for backtest/audit. Uses executemany for batch insert."""
+        if not votes:
+            return
+        conn = self._connect()
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            rows = [
+                (shadow_id, date, v.ticker, v.direction, v.confidence,
+                 getattr(v, 'thesis', '') or '', getattr(v, 'risk_note', '') or '', now)
+                for v in votes
+            ]
+            conn.executemany(
+                """INSERT INTO shadow_votes (shadow_id, date, ticker, direction,
+                   confidence, thesis, risk_note, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                rows
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def label_vote_outcomes(self, ticker: str, date: str,
+                            atr_mult: float = 2.0) -> int:
+        """Label unlabeled votes for a ticker+date using next-day close vs ATR.
+
+        Returns count of votes labeled. Uses market_prices for actual returns.
+        Writes: outcome_label='upper_barrier'/'lower_barrier'/'time_expired',
+                outcome_return_pct=actual next-day return.
+        """
+        conn = self._connect()
+        try:
+            # Get unlabeled votes for this ticker+date
+            votes = conn.execute(
+                """SELECT id FROM shadow_votes
+                   WHERE ticker = ? AND date = ? AND outcome_label IS NULL""",
+                (ticker, date)
+            ).fetchall()
+            if not votes:
+                return 0
+
+            # Get next-day close from market_prices
+            price_row = conn.execute(
+                """SELECT close, next_day_return FROM market_prices
+                   WHERE ticker = ? AND date = ?""",
+                (ticker, date)
+            ).fetchone()
+
+            if price_row and price_row["next_day_return"] is not None:
+                ret = price_row["next_day_return"]
+                # Simplified Triple-Barrier: positive ret = upper, negative = lower
+                label = "upper_barrier" if ret > 0 else "lower_barrier"
+                ids = [v["id"] for v in votes]
+                conn.executemany(
+                    """UPDATE shadow_votes SET outcome_label = ?, outcome_return_pct = ?
+                       WHERE id = ?""",
+                    [(label, ret, vid) for vid in ids]
+                )
+            else:
+                # No market data available — mark as time_expired
+                ids = [v["id"] for v in votes]
+                conn.executemany(
+                    """UPDATE shadow_votes SET outcome_label = 'time_expired'
+                       WHERE id = ?""",
+                    [(vid,) for vid in ids]
+                )
+            conn.commit()
+            return len(votes)
+        finally:
+            conn.close()
+
+    def get_votes_by_date_range(self, start_date: str, end_date: str, caller_id: str) -> list[dict]:
+        """Get all votes within a date range, ordered by date DESC.
+        Requires all_shadows access (collusion_detector, backtest_runner, system)."""
+        if not self._check_access(caller_id, "_all_", "get_votes_by_date_range"):
+            logger.warning("Access denied: caller=%s op=get_votes_by_date_range", caller_id)
+            return []
+        self._log_access(caller_id, "_all_", "get_votes_by_date_range")
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT * FROM shadow_votes
+                   WHERE date >= ? AND date <= ?
+                   ORDER BY date DESC""",
+                (start_date, end_date)
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    # ── Market prices (P2-4) ─────────────────────────────────────────────
+
+    def save_market_prices(self, ticker: str, prices: dict[str, dict[str, float]]) -> int:
+        """Batch insert/replace OHLCV data. Returns rows inserted."""
+        if not prices:
+            return 0
+        conn = self._connect()
+        try:
+            rows = [
+                (ticker, date, p["open"], p["high"], p["low"], p["close"],
+                 p.get("volume", 0), p.get("next_day_return"))
+                for date, p in prices.items()
+            ]
+            conn.executemany(
+                """INSERT OR REPLACE INTO market_prices
+                   (ticker, date, open, high, low, close, volume, next_day_return)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                rows
+            )
+            conn.commit()
+            return len(rows)
+        finally:
+            conn.close()
+
+    def get_market_prices(self, ticker: str, start_date: str,
+                          end_date: str | None = None) -> dict[str, dict[str, float]]:
+        """Get OHLCV data for a ticker in date range. Returns {date: {open, high, low, close, volume}}."""
+        conn = self._connect()
+        try:
+            if end_date:
+                rows = conn.execute(
+                    """SELECT * FROM market_prices
+                       WHERE ticker = ? AND date >= ? AND date <= ?
+                       ORDER BY date ASC""",
+                    (ticker, start_date, end_date)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT * FROM market_prices
+                       WHERE ticker = ? AND date >= ?
+                       ORDER BY date ASC""",
+                    (ticker, start_date)
+                ).fetchall()
+            return {
+                r["date"]: {
+                    "open": r["open"], "high": r["high"], "low": r["low"],
+                    "close": r["close"], "volume": r["volume"],
+                    "next_day_return": r["next_day_return"],
+                }
+                for r in rows
+            }
+        finally:
+            conn.close()
+
+    # ── Cycle checkpoints (P3-4: partial-state recovery) ────────────────
+
+    def save_cycle_checkpoint(self, date: str, shadow_states: dict[str, str],
+                              step_completed: int = 4,
+                              status: str = "running") -> None:
+        """Save or update a cycle checkpoint for crash recovery."""
+        import json
+        conn = self._connect()
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            conn.execute(
+                """INSERT OR REPLACE INTO cycle_checkpoints
+                   (date, status, step_completed, shadow_states, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, COALESCE(
+                       (SELECT created_at FROM cycle_checkpoints WHERE date = ?), ?), ?)""",
+                (date, status, step_completed, json.dumps(shadow_states),
+                 date, now, now)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_cycle_checkpoint(self, date: str) -> dict | None:
+        """Get checkpoint for a date. Returns None if no checkpoint exists."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM cycle_checkpoints WHERE date = ?",
+                (date,)
+            ).fetchone()
+            if row is None:
+                return None
+            import json
+            return {
+                "date": row["date"],
+                "status": row["status"],
+                "step_completed": row["step_completed"],
+                "shadow_states": json.loads(row["shadow_states"] or "{}"),
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+        finally:
+            conn.close()
+
+    def get_incomplete_checkpoints(self) -> list[dict]:
+        """Get all checkpoints with status != 'completed', oldest first."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT * FROM cycle_checkpoints
+                   WHERE status != 'completed'
+                   ORDER BY date ASC"""
+            ).fetchall()
+            import json
+            return [{
+                "date": r["date"],
+                "status": r["status"],
+                "step_completed": r["step_completed"],
+                "shadow_states": json.loads(r["shadow_states"] or "{}"),
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+            } for r in rows]
+        finally:
+            conn.close()
+
+    def cleanup_old_checkpoints(self, keep_days: int = 30) -> int:
+        """Remove checkpoints older than keep_days. Returns count deleted."""
+        conn = self._connect()
+        try:
+            from datetime import timedelta
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=keep_days)
+                     ).strftime("%Y-%m-%d")
+            cur = conn.execute(
+                "DELETE FROM cycle_checkpoints WHERE date < ?",
+                (cutoff,)
+            )
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+    # ── PnL by domain ──────────────────────────────────────────────────────
+
+    def get_pnl_by_domain(self, domain: str) -> list[float]:
+        """Get PnL values from virtual_trades for shadows in a given domain.
+        Domain is extracted from config_json JSON field."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT vt.pnl_pct FROM virtual_trades vt
+                   JOIN shadows s ON vt.shadow_id = s.id
+                   WHERE vt.pnl_pct IS NOT NULL
+                     AND s.status != 'eliminated'
+                     AND json_extract(s.config_json, '$.domain') = ?""",
+                (domain,)
+            ).fetchall()
+            return [r["pnl_pct"] for r in rows]
+        except Exception:
+            logger.warning("json_extract failed for domain=%s — SQLite JSON1 may be missing", domain)
+            return []
+
+    def set_quarantine(self, shadow_id: str) -> None:
+        """Mark a shadow as in post-collaboration quarantine for 7 days."""
+        from datetime import datetime, timezone
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        conn = self._connect()
+        try:
+            conn.execute(
+                """UPDATE daily_snapshots SET post_collaboration_quarantine = 1
+                   WHERE shadow_id = ? AND date = ?""",
+                (shadow_id, today)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def is_quarantined(self, shadow_id: str) -> bool:
+        """Check if a shadow is in quarantine (flag=1 and within 7 days)."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """SELECT 1 FROM daily_snapshots
+                   WHERE shadow_id = ? AND post_collaboration_quarantine = 1
+                   AND date >= date('now', '-7 days') LIMIT 1""",
+                (shadow_id,)
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+
+    def cleanup_expired_quarantines(self) -> int:
+        """Clear quarantine flags older than 7 days. Returns count cleared."""
+        conn = self._connect()
+        try:
+            cur = conn.execute(
+                """UPDATE daily_snapshots SET post_collaboration_quarantine = 0
+                   WHERE post_collaboration_quarantine = 1
+                   AND date < date('now', '-7 days')"""
+            )
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+
+# ── Migration registry (module-level, after class definition) ───────────────
+
+def _migration_1_add_discount_rate(conn: sqlite3.Connection) -> None:
+    """Phase D: add discount_rate column to daily_snapshots."""
+    ShadowStateDB._migrate_add_column(
+        conn, "daily_snapshots", "discount_rate", "REAL DEFAULT 0.20"
+    )
+
+
+def _migration_2_add_belief_tables(conn: sqlite3.Connection) -> None:
+    """Phase F-3: add 3-tier layered memory tables for ShadowMemoryStore."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS belief_nodes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            node_id TEXT NOT NULL UNIQUE,
+            proposition TEXT NOT NULL,
+            alpha REAL NOT NULL DEFAULT 1.0,
+            beta REAL NOT NULL DEFAULT 1.0,
+            status TEXT NOT NULL DEFAULT 'active',
+            tier TEXT NOT NULL DEFAULT 'working',
+            source TEXT NOT NULL DEFAULT 'shadow',
+            tags TEXT DEFAULT '[]',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            decayed_at TEXT DEFAULT NULL,
+            retired_at TEXT DEFAULT NULL,
+            retire_reason TEXT DEFAULT NULL
+        );
+        CREATE TABLE IF NOT EXISTS belief_observations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            observation_id TEXT NOT NULL UNIQUE,
+            node_id TEXT NOT NULL,
+            shadow_id TEXT NOT NULL,
+            value REAL NOT NULL,
+            confidence REAL NOT NULL,
+            source_type TEXT NOT NULL,
+            source_path TEXT DEFAULT '',
+            extracted_text TEXT DEFAULT '',
+            metadata_json TEXT DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (node_id) REFERENCES belief_nodes(node_id)
+        );
+        CREATE TABLE IF NOT EXISTS belief_retirements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            node_id TEXT NOT NULL,
+            retired_confidence REAL NOT NULL,
+            threshold REAL NOT NULL,
+            reason TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (node_id) REFERENCES belief_nodes(node_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_belief_nodes_status ON belief_nodes(status);
+        CREATE INDEX IF NOT EXISTS idx_belief_nodes_tier ON belief_nodes(tier);
+        CREATE INDEX IF NOT EXISTS idx_belief_observations_node ON belief_observations(node_id);
+        CREATE INDEX IF NOT EXISTS idx_belief_observations_shadow ON belief_observations(shadow_id);
+    """)
+
+
+def _migration_3_add_market_prices(conn: sqlite3.Connection) -> None:
+    """P2-4: add market_prices table for external market anchor validation."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS market_prices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            date TEXT NOT NULL,
+            open REAL NOT NULL,
+            high REAL NOT NULL,
+            low REAL NOT NULL,
+            close REAL NOT NULL,
+            volume INTEGER NOT NULL DEFAULT 0,
+            next_day_return REAL,
+            UNIQUE(ticker, date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_market_prices_ticker_date ON market_prices(ticker, date);
+    """)
+
+
+def _migration_4_add_cycle_checkpoints(conn: sqlite3.Connection) -> None:
+    """P3-4: add cycle_checkpoints table for partial-state recovery."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS cycle_checkpoints (
+            date TEXT PRIMARY KEY,
+            status TEXT NOT NULL DEFAULT 'running',
+            step_completed INTEGER NOT NULL DEFAULT 0,
+            shadow_states TEXT DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+    """)
+
+
+def _migration_5_add_signal_quality(conn: sqlite3.Connection) -> None:
+    """Phase B audit: add outcome_label + outcome_return_pct to shadow_votes."""
+    for col, col_type in [("outcome_label", "TEXT DEFAULT NULL"),
+                           ("outcome_return_pct", "REAL DEFAULT NULL")]:
+        try:
+            conn.execute(f"ALTER TABLE shadow_votes ADD COLUMN {col} {col_type}")
+        except sqlite3.OperationalError:
+            pass
+
+
+def _migration_6_add_access_audit_log(conn: sqlite3.Connection) -> None:
+    """N2 + N-S4: add access_audit_log table for ELITE DB access control."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS access_audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            caller_id TEXT NOT NULL,
+            target_shadow_id TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            detail TEXT DEFAULT '',
+            accessed_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_access_audit_log_caller ON access_audit_log(caller_id);
+        CREATE INDEX IF NOT EXISTS idx_access_audit_log_accessed_at ON access_audit_log(accessed_at);
+    """)
+
+
+def _migration_7_add_phase_c_tables(conn: sqlite3.Connection) -> None:
+    """H10+C6+H8: add forecast_scenarios, pipeline_run_log, red_team_observations."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS forecast_scenarios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scenario_group_id TEXT NOT NULL,
+            trigger_event_summary TEXT NOT NULL,
+            prediction_label TEXT NOT NULL,
+            predicted_probability REAL NOT NULL DEFAULT 0.5,
+            trigger_conditions TEXT DEFAULT '{}',
+            evidence_chain TEXT DEFAULT '',
+            forecast_window_end TEXT DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending',
+            belief_alpha REAL NOT NULL DEFAULT 1.0,
+            belief_beta REAL NOT NULL DEFAULT 1.0,
+            matched_actual TEXT DEFAULT NULL,
+            matched_at TEXT DEFAULT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            created_by TEXT NOT NULL DEFAULT 'main_ai'
+        );
+        CREATE INDEX IF NOT EXISTS idx_forecast_scenarios_group ON forecast_scenarios(scenario_group_id);
+        CREATE INDEX IF NOT EXISTS idx_forecast_scenarios_status ON forecast_scenarios(status);
+
+        CREATE TABLE IF NOT EXISTS pipeline_run_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_date TEXT NOT NULL,
+            stage TEXT NOT NULL,
+            model_name TEXT NOT NULL,
+            input_summary TEXT DEFAULT '',
+            output_summary TEXT DEFAULT '',
+            latency_ms INTEGER DEFAULT 0,
+            error TEXT DEFAULT NULL,
+            ai_labeled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_pipeline_run_log_date ON pipeline_run_log(run_date);
+        CREATE INDEX IF NOT EXISTS idx_pipeline_run_log_stage ON pipeline_run_log(stage, run_date);
+
+        CREATE TABLE IF NOT EXISTS red_team_observations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_date TEXT NOT NULL,
+            observation_type TEXT NOT NULL,
+            target_context TEXT NOT NULL,
+            description TEXT NOT NULL,
+            severity TEXT NOT NULL DEFAULT 'minor',
+            evidence TEXT DEFAULT '',
+            resolved_by_user INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_red_team_obs_date ON red_team_observations(session_date);
+        CREATE INDEX IF NOT EXISTS idx_red_team_obs_type ON red_team_observations(observation_type);
+        CREATE INDEX IF NOT EXISTS idx_red_team_obs_severity ON red_team_observations(severity);
+    """)
+
+
+def _migration_8_add_quarantine_column(conn: sqlite3.Connection) -> None:
+    """P3: add post_collaboration_quarantine column to daily_snapshots (Resolution 4-C)."""
+    ShadowStateDB._migrate_add_column(
+        conn, "daily_snapshots", "post_collaboration_quarantine",
+        "INTEGER NOT NULL DEFAULT 0"
+    )
+
+
+_MIGRATIONS: list[tuple[int, callable]] = [
+    (1, _migration_1_add_discount_rate),
+    (2, _migration_2_add_belief_tables),
+    (3, _migration_3_add_market_prices),
+    (4, _migration_4_add_cycle_checkpoints),
+    (5, _migration_5_add_signal_quality),
+    (6, _migration_6_add_access_audit_log),
+    (7, _migration_7_add_phase_c_tables),
+    (8, _migration_8_add_quarantine_column),
+]
