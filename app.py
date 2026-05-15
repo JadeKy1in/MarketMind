@@ -954,11 +954,13 @@ def main():
     if args.backtest:
         return _run_backtest(config, args)
 
-    if args.mode == "shadows":
+    if args.shadow_only:
+        return asyncio.run(run_shadows_only(config, verbose=args.verbose))
+    elif args.mode == "shadows":
         return asyncio.run(run_shadows_only(config, verbose=args.verbose))
     elif args.mode == "interactive":
         return asyncio.run(run_interactive(config, mock=args.mock, verbose=args.verbose,
-                                           shadow_count=None if args.no_shadows else args.shadows))
+                                           shadow_count=0 if args.no_shadows else args.shadows))
     elif args.mode == "gui":
         return run_gui(config)
     else:

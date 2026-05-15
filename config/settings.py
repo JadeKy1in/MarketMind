@@ -14,6 +14,7 @@ class ShadowSettings:
     max_concurrent_shadows: int = 5
     shadow_flash_quota_default: int = 5
     shadow_pro_quota_default: int = 1
+    shadow_consensus_timeout_s: int = 60  # D: max wait for shadow results before Decision
 
     # Ranking
     evaluation_window_days: int = 90
@@ -53,6 +54,7 @@ class ShadowSettings:
     confidence_discount_default: float = 0.20
     confidence_discount_floor: float = 0.05
     gap_closure_adjustment_factor: float = 0.75
+    absolute_return_benchmark: float = 0.04  # risk-free rate proxy for calibration
     live_ready_min_trades: int = 10
     live_ready_max_gap: float = 0.30
 
@@ -68,20 +70,62 @@ class ShadowSettings:
     cash_reframing_non_inferiority_margin: float = 0.02
     cash_reframing_de_alpha: float = 0.10
 
-    # Plateau detection
-    plateau_no_elite_days: int = 126
+    # Plateau detection (thresholds tightened in Phase 2)
+    plateau_no_elite_days: int = 60
     plateau_wr_range_pp: float = 10.0
-    plateau_no_insight_days: int = 63
+    plateau_no_insight_days: int = 30
     max_resets_per_month: int = 2
+    # Anti-conservatism weights (Phase 2)
+    abstention_penalty_weight: float = 0.05
+    quota_efficiency_weight: float = 0.05
+    # Reset eligibility (Phase 2)
+    reset_no_excellent_months: int = 6
+    reset_flat_wr_months: int = 3
+    reset_no_insight_months: int = 3
+
+    # Scheduler settings
+    scheduler_enabled: bool = False
+    reflection_interval_minutes: int = 60
+    crystallization_interval_hours: int = 6
+    max_concurrent_tasks: int = 3
+
+    # Gemini Flash settings
+    gemini_api_key: str = field(default="", repr=False)
+    gemini_flash_enabled: bool = False
 
     # Missed paths
     missed_path_max_per_gate: int = 2
     missed_path_report_days: int = 30
 
+    # AEL Evolution Experiment (Phase 7 — set to True to activate)
+    # When enabled, selected shadows get monthly Pro debriefs (slow-layer evolution).
+    # Requires: Phase 6 daredevil restructure, Pro default (Phase 0), health monitoring (Phase 3).
+    # Experiment pairs: Range-Bound/Momentum Daredevils + Tech/Macro Experts.
+    # Each treatment shadow has a replica (control) — compare after 2-3 months.
+    # NOTE: Challengers inherit ORIGINAL methodology prompts, not AEL-evolved ones.
+    ael_experiment_enabled: bool = False
+    ael_debrief_day: int = 1  # day of month to run debrief (1st)
+
+    # Crystallization (knowledge crystallization engine)
+    crystallization_enabled: bool = False
+    crystallization_significance_threshold: float = 0.6
+    crystallization_min_samples: int = 10
+
+    # Circuit breaker (P3-3)
+    fallback_provider_url: str = ""
+    fallback_model: str = ""
+    fallback_api_key: str = field(default="", repr=False)
+    circuit_breaker_threshold: int = 3
+    circuit_breaker_timeout_s: int = 30
+    proxy_url: str = ""  # HTTP(S) proxy for outbound requests (e.g., VPN local proxy)
+
 
 @dataclass
 class MarketMindConfig:
     deepseek_api_key: str = field(default_factory=lambda: os.getenv("DEEPSEEK_API_KEY", ""))
+    deepseek_api_keys: list[str] = field(default_factory=lambda: [
+        k.strip() for k in os.getenv("DEEPSEEK_API_KEYS", "").split(",") if k.strip()
+    ])
     deepseek_base_url: str = field(default_factory=lambda: os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"))
     newsapi_key: str | None = field(default_factory=lambda: os.getenv("NEWSAPI_KEY"))
     gnews_key: str | None = field(default_factory=lambda: os.getenv("GNEWS_API_KEY"))
@@ -92,6 +136,7 @@ class MarketMindConfig:
     daily_pro_limit: int = 30
     daily_flash_limit: int = 100
     cache_ttl_seconds: int = 300
+    proxy_url: str = field(default_factory=lambda: os.getenv("HTTP_PROXY", os.getenv("HTTPS_PROXY", "")))
     session_checkpoint_dir: Path | None = None
     position_protection_days: int = 60
     shadow: ShadowSettings = field(default_factory=ShadowSettings)

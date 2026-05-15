@@ -39,7 +39,7 @@ class InteractiveState:
     user_ideas: list[str] = field(default_factory=list)
     ai_evaluations: list[str] = field(default_factory=list)
     data_mining_results: list[str] = field(default_factory=list)
-    forecast_predictions: list[dict] = field(default_factory=list)  # B1-B4 scenarios
+    forecast_predictions: list[dict] = field(default_factory=list)  # directional scenarios: dominant, alternative, tail-risk
     stage: str = "initial"              # initial | discussing | mining | confirming | done
     should_observe: bool = False         # both agree to skip trading today
 
@@ -263,13 +263,14 @@ async def run_l1_interactive(
         signal_text = "News headlines (no preprocessed signals available):\n" + "\n".join(f"- {h}" for h in headlines)
     else:
         # No data at all — use mock news to keep interactive test working
-        signal_text = "Mock market signals for interactive testing:\n"
-        signal_text += "- [CNBC] Fed holds rates steady, signals patience on inflation\n"
-        signal_text += "- [Bloomberg] Oil prices surge on Middle East supply concerns\n"
-        signal_text += "- [Yahoo] Tech earnings beat expectations, AI demand accelerates\n"
-        signal_text += "- [BBC] ECB hints at rate cut amid slowing eurozone growth\n"
-        signal_text += "- [SCMP] China export data beats forecasts, yuan strengthens\n"
-        print("\n[L1] 无可用新闻数据，使用测试模拟信号继续。")
+        # Generic themes only — avoid hardcoding specific events that go stale
+        print(f"\n[L1] 无可用新闻数据（{today_str}），使用测试模拟信号继续。")
+        signal_text = f"Mock market signals for interactive testing ({today_str}):\n"
+        signal_text += "- [Gateway] Central bank policy decision: no change in benchmark rate\n"
+        signal_text += "- [Commodity] Energy markets volatile on geopolitical developments\n"
+        signal_text += "- [Tech] Sector earnings broadly in line; AI demand remains a key theme\n"
+        signal_text += "- [Macro] Mixed economic data from major economies\n"
+        signal_text += "- [Trade] Export data varies by region; currency markets fluctuate\n"
 
     deep_result = await chat_pro(
         system_prompt=L1_DEEP_ANALYSIS_PROMPT + date_context,

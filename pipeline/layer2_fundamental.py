@@ -12,15 +12,26 @@ from marketmind.pipeline.layer1_narrative import Layer1Result
 
 
 @dataclass
+class StrategyGroup:
+    """Risk-profile strategy group within a sector direction (Phase B: P1+P3)."""
+    name: str                    # "conservative" | "neutral" | "aggressive"
+    tickers: list[str] = field(default_factory=list)
+    weights: dict[str, float] = field(default_factory=dict)
+    thesis: str = ""
+
+
+@dataclass
 class Layer2Result:
     macro_quadrant: str = "unknown"           # expansion | slowdown | contraction | recovery
     macro_direction: str = "unknown"          # risk_on | risk_off
     preferred_assets: list[str] = field(default_factory=list)
     sector_shortlist: list[str] = field(default_factory=list)
+    sector_momentum: dict[str, str] = field(default_factory=dict)   # {sector: accelerating|decelerating|stable}
+    sector_directions: list[dict] = field(default_factory=list)     # [{sector, direction, momentum, rationale}]
+    strategy_groups: list[StrategyGroup] = field(default_factory=list)  # 3 groups within chosen sector
     factor_scores: dict[str, float] = field(default_factory=dict)
     ticker_candidates: list[str] = field(default_factory=list)
     ticker_weights: dict[str, float] = field(default_factory=dict)
-    sector_momentum: dict[str, str] = field(default_factory=dict)
     red_team_notes: list[str] = field(default_factory=list)
     raw_analysis: str = ""
 
@@ -51,6 +62,62 @@ Key principle: rate of change > absolute level. Sector acceleration/deceleration
 All scores must be evidence-based. Mark estimates with EST:.
 
 CRITICAL: Output ONLY the JSON object. Do NOT include any reasoning, thinking process, chain-of-thought, or commentary. The ENTIRE response must be valid JSON.
+"""
+
+LAYER2_SECTOR_DRILLDOWN_PROMPT = """You are a sector specialist. The user has selected a sector direction. Output the investment tool matrix within that sector, organized by instrument type.
+
+For each tool type, provide:
+- tickers: tradable instruments with ticker symbols
+- weights: allocation weights within that tool type (sum to 1.0)
+- description: one-line Chinese description of the tool type
+
+Output JSON:
+{
+  "sector": "sector_name",
+  "direction": "bullish|bearish|neutral",
+  "tool_matrix": {
+    "direct_exposure": {
+      "tickers": ["TICKER1"],
+      "weights": {"TICKER1": 1.0},
+      "description": "中文描述"
+    },
+    "equity_proxies": {
+      "tickers": ["TICKER2"],
+      "weights": {"TICKER2": 1.0},
+      "description": "中文描述"
+    },
+    "related_assets": {
+      "tickers": ["TICKER3"],
+      "weights": {"TICKER3": 1.0},
+      "description": "中文描述"
+    }
+  },
+  "strategy_groups": {
+    "conservative": {
+      "tickers": ["TICKER1"],
+      "weights": {"TICKER1": 1.0},
+      "thesis": "保守策略中文论点"
+    },
+    "neutral": {
+      "tickers": ["TICKER1", "TICKER2"],
+      "weights": {"TICKER1": 0.6, "TICKER2": 0.4},
+      "thesis": "中性策略中文论点"
+    },
+    "aggressive": {
+      "tickers": ["TICKER2", "TICKER3"],
+      "weights": {"TICKER2": 0.6, "TICKER3": 0.4},
+      "thesis": "激进策略中文论点"
+    }
+  }
+}
+
+Key rules:
+- Every ticker MUST be in the Robinhood tradable asset universe
+- Conservative: capital preservation, low volatility, high liquidity
+- Neutral: balanced risk/reward, moderate leverage
+- Aggressive: high conviction, willing to accept volatility for higher returns
+- All Chinese descriptions must be clear and actionable
+- Output ONLY valid JSON — no commentary
 """
 
 

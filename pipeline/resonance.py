@@ -12,7 +12,7 @@ class ResonanceResult:
     forward_validation_ratio: float  # out-of-sample / in-sample performance
     signal_count: int
     dimensions_active: list[str]   # which dimensions contributed
-    verdict: str                   # "STRONG_SIGNAL" | "WEAK_SIGNAL" | "NO_SIGNAL"
+    verdict: str                   # "STRONG_SIGNAL" | "WEAK_SIGNAL" | "NO_SIGNAL" | "INSUFFICIENT_DATA"
 
 
 def compute_returns(price_series: list[float]) -> list[float]:
@@ -78,9 +78,9 @@ def cscv_pbo(
     is_sharpes: list[float] = []
     os_sharpes: list[float] = []
 
-    for _ in range(min(n_splits, n - split_size)):
+    for trial_idx in range(min(n_splits, n - split_size)):
         # Simple sequential split with rotation
-        start = _ % (n - split_size + 1)
+        start = trial_idx % (n - split_size + 1)
         in_sample = returns[start:start + split_size]
         out_sample = returns[:start] + returns[start + split_size:]
         if len(in_sample) >= 2 and len(out_sample) >= 2:
