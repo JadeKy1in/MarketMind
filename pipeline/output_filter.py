@@ -13,6 +13,10 @@ import logging
 
 logger = logging.getLogger("marketmind.pipeline.output_filter")
 
+# Thresholds for number filtering
+_SMALL_NUMBER_THRESHOLD = 0.001   # skip very small numbers (often structural)
+_WHITELIST_MATCH_TOLERANCE = 0.01 # relative tolerance for whitelist matching
+
 # Patterns that should NOT be flagged as fabricated numbers
 _SAFE_PATTERNS = [
     r"\b[12]\d{3}年\d{1,2}月\d{1,2}日\b",   # dates: 2026年05月15日
@@ -80,11 +84,11 @@ def scan_output(output: str, source_numbers: set[float],
             continue
 
         # Skip zero and very small numbers (often structural, not fabricated)
-        if abs(num_val) < 0.001:
+        if abs(num_val) < _SMALL_NUMBER_THRESHOLD:
             continue
 
         # Check against whitelist with tolerance
-        found = any(abs(num_val - src) / max(abs(src), 0.001) < 0.01
+        found = any(abs(num_val - src) / max(abs(src), _SMALL_NUMBER_THRESHOLD) < _WHITELIST_MATCH_TOLERANCE
                     for src in source_numbers if src != 0)
         if not found:
             warnings.append(f"Fabricated number: {num_str}")

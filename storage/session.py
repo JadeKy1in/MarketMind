@@ -1,11 +1,14 @@
 """Session checkpoint persistence — auto-save after each gate, resume on restart."""
 from __future__ import annotations
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -72,7 +75,7 @@ class SessionManager:
                     "complete": (data.get("gate3") or {}).get("completed", False),
                 })
             except Exception:
-                pass
+                logger.warning("Skipping corrupt session file: %s", f.name)
         return sessions
 
     def delete(self, session_id: str) -> bool:

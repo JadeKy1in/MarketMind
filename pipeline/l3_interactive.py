@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from marketmind.gateway.async_client import chat_pro
 from marketmind.pipeline.layer3_technical import analyze_layer3, Layer3BatchResult
 from marketmind.pipeline.session_context import SessionContext
+from marketmind.shadows.shadow_agent import defang_text
 
 logger = logging.getLogger("marketmind.pipeline.l3_interactive")
 
@@ -117,7 +118,7 @@ async def _handle_l3_question(user_text: str, green_lights: list, yellow_red: li
                 f"日线结构破坏、200周均线下方、或缺乏明确入场区间。"
                 f"这不是失败——现金持仓也是一种有效策略。"
             ),
-            user_prompt=f"用户问题: {user_text}\n\n直接回答。不超过150字。",
+            user_prompt=f"用户问题: {defang_text(user_text)}\n\n直接回答。不超过150字。",
             temperature=0.3,
             max_tokens=512, reasoning_effort="minimal",
         )

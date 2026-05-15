@@ -4,12 +4,8 @@ Extracted from app.py per Red Team-approved refactoring plan.
 """
 from __future__ import annotations
 
-import logging
-
-from marketmind.pipeline.decision import generate_decision, DecisionOutput
+from marketmind.pipeline.decision import generate_decision
 from marketmind.pipeline.session_context import SessionContext
-
-logger = logging.getLogger("marketmind.pipeline.decision_interactive")
 
 
 async def run_decision_interactive(ctx: SessionContext, cli_handler) -> bool:

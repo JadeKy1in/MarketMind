@@ -143,7 +143,6 @@ class BroadcastWriter:
 
         # Write sentinel file (F: guarantees shadow reads complete broadcast set)
         if paths:
-            import hashlib
             sentinel = {
                 "file_count": len(paths),
                 "content_hash": hashlib.sha256(

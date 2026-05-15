@@ -52,12 +52,12 @@ def _shadow_progress_done(task: "asyncio.Task") -> None:
     try:
         result = task.result()
         if result:
-            print(f"Shadows complete: {result.active_shadows} shadows, "
-                  f"{result.temp_shadows_created} temp created")
+            logger.info("Shadows complete: %s shadows, %s temp created",
+                        result.active_shadows, result.temp_shadows_created)
             global _shadow_result
             _shadow_result = result
-    except Exception as e:
-        print(f"Shadows error: {e}")
+    except Exception:
+        logger.exception("Shadows error")
 
 
 async def run_daily_legacy(config: MarketMindConfig, mock: bool = False, verbose: bool = False,

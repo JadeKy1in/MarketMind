@@ -52,6 +52,9 @@ Output JSON:
   "preferred_assets": ["asset_class1", "asset_class2"],
   "sector_shortlist": ["sector1", "sector2", "sector3"],
   "sector_momentum": {"sector1": "accelerating|decelerating|stable"},
+  "sector_directions": [
+    {"sector": "sector1", "direction": "bullish|bearish|neutral", "momentum": "accelerating|decelerating|stable", "rationale": "brief Chinese rationale"}
+  ],
   "factor_scores": {"TICKER": 0.0-1.0},
   "ticker_candidates": ["TICKER1", "TICKER2"],
   "ticker_weights": {"TICKER1": 0.3, "TICKER2": 0.2},
@@ -60,6 +63,7 @@ Output JSON:
 
 Key principle: rate of change > absolute level. Sector acceleration/deceleration matters more than current position.
 All scores must be evidence-based. Mark estimates with EST:.
+All sector names and rationales MUST be in Chinese (e.g., "黄金" not "gold", "科技" not "tech").
 
 CRITICAL: Output ONLY the JSON object. Do NOT include any reasoning, thinking process, chain-of-thought, or commentary. The ENTIRE response must be valid JSON.
 """
@@ -168,6 +172,23 @@ def _build_context(l1: Layer1Result, market_context: dict | None) -> str:
     return "\n".join(lines)
 
 
+def _parse_strategy_groups(raw: dict) -> list[StrategyGroup]:
+    """Parse strategy_groups from LLM JSON output. Returns empty list on any failure."""
+    if not isinstance(raw, dict):
+        return []
+    groups = []
+    for name in ("conservative", "neutral", "aggressive"):
+        g = raw.get(name, {})
+        if isinstance(g, dict):
+            groups.append(StrategyGroup(
+                name=name,
+                tickers=g.get("tickers", []),
+                weights=g.get("weights", {}),
+                thesis=g.get("thesis", ""),
+            ))
+    return groups
+
+
 def _parse_layer2_response(content: str) -> Layer2Result:
     content = strip_markdown_fences(content)
 
@@ -209,6 +230,8 @@ def _parse_layer2_response(content: str) -> Layer2Result:
             "macro_quadrant": quadrant_match.group(1) if quadrant_match else "contraction",
             "macro_direction": direction_match.group(1) if direction_match else "risk_off",
             "sector_shortlist": [],
+            "sector_directions": [],
+            "strategy_groups": {},
             "ticker_candidates": [],
             "preferred_assets": [],
             "factor_scores": {},
@@ -236,15 +259,22 @@ def _parse_layer2_response(content: str) -> Layer2Result:
         except Exception:
             pass
 
+    # Parse new Phase B fields (optional — backward compatible)
+    sector_directions = data.get("sector_directions", [])
+    strategy_groups_raw = data.get("strategy_groups", {})
+    strategy_groups = _parse_strategy_groups(strategy_groups_raw)
+
     return Layer2Result(
         macro_quadrant=data.get("macro_quadrant", "contraction"),
         macro_direction=data.get("macro_direction", "risk_off"),
         preferred_assets=data.get("preferred_assets", []),
         sector_shortlist=sectors,
+        sector_momentum=data.get("sector_momentum", {}),
+        sector_directions=sector_directions,
+        strategy_groups=strategy_groups,
         factor_scores=data.get("factor_scores", {}),
         ticker_candidates=tickers,
         ticker_weights=data.get("ticker_weights", {}),
-        sector_momentum=data.get("sector_momentum", {}),
         red_team_notes=data.get("tier_challenges", []),
         raw_analysis=content,
     )

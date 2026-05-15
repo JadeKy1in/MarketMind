@@ -122,10 +122,10 @@ class ShadowSettings:
 
 @dataclass
 class MarketMindConfig:
-    deepseek_api_key: str = field(default_factory=lambda: os.getenv("DEEPSEEK_API_KEY", ""))
+    deepseek_api_key: str = field(default_factory=lambda: os.getenv("DEEPSEEK_API_KEY", ""), repr=False)
     deepseek_api_keys: list[str] = field(default_factory=lambda: [
         k.strip() for k in os.getenv("DEEPSEEK_API_KEYS", "").split(",") if k.strip()
-    ])
+    ], repr=False)
     deepseek_base_url: str = field(default_factory=lambda: os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"))
     newsapi_key: str | None = field(default_factory=lambda: os.getenv("NEWSAPI_KEY"))
     gnews_key: str | None = field(default_factory=lambda: os.getenv("GNEWS_API_KEY"))

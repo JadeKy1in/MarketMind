@@ -38,6 +38,7 @@ class SessionContext:
 
     # User selections
     selected_tickers: list[str] = field(default_factory=list)
+    selected_strategy: str = ""  # "conservative" | "neutral" | "aggressive" | "" (not chosen)
 
     # ELITE snapshot (populated once after L1, before L2)
     elite_opinions: list[str] = field(default_factory=list)

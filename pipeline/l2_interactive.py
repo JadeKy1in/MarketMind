@@ -63,33 +63,20 @@ async def run_l2_interactive(ctx: SessionContext, cli_handler) -> bool:
 
     ctx.l2_result = l2_result
 
-    # Display results
-    print(f"\n{'─'*60}")
-    print(f"  [L2] 基本面分析 — 宏观象限: {l2_result.macro_quadrant} | 方向: {l2_result.macro_direction}")
-    if l2_result.sector_shortlist:
-        momentum_str = ""
-        if l2_result.sector_momentum:
-            momentum_str = " (动量: " + ", ".join(
-                f"{k}:{v}" for k, v in l2_result.sector_momentum.items()
-                if k in l2_result.sector_shortlist
-            ) + ")"
-        print(f"  推荐板块{momentum_str}: {', '.join(l2_result.sector_shortlist[:6])}")
-    if l2_result.preferred_assets:
-        print(f"  偏好资产: {', '.join(l2_result.preferred_assets[:5])}")
-    if l2_result.ticker_candidates:
-        print(f"\n  候选标的 (宏观匹配度):")
-        for tc in l2_result.ticker_candidates[:15]:
-            score = l2_result.factor_scores.get(tc, 0)
-            weight = l2_result.ticker_weights.get(tc, 0)
-            bar = "█" * int(score * 10) + "░" * (10 - int(score * 10))
-            label = ticker_cn(tc)
-            print(f"    {label:<20} 匹配:{bar} {score:.2f}  权重:{weight:.1%}")
+    # Determine interaction mode: two-phase (Phase B) if sector_directions available,
+    # otherwise fall back to single-phase (legacy behavior).
+    if l2_result.sector_directions:
+        confirmed = await _run_two_phase_l2(ctx, l2_result, cli_handler)
     else:
-        _display_no_candidates(l2_result)
+        confirmed = await _run_single_phase_l2(ctx, l2_result, cli_handler)
 
-    print(f"  {'─'*60}")
+    return confirmed
 
-    # Interaction loop
+
+async def _run_single_phase_l2(ctx: SessionContext, l2_result: Layer2Result, cli_handler) -> bool:
+    """Legacy single-phase L2: display ticker list, single confirmation loop."""
+    _display_l2_results(l2_result)
+
     selected_tickers = list(l2_result.ticker_candidates[:10])
     l2_confirmed = False
     while not l2_confirmed:
@@ -120,11 +107,213 @@ async def run_l2_interactive(ctx: SessionContext, cli_handler) -> bool:
             l2_confirmed = True
             break
 
-        # Structured or free-form question → AI response
         await _handle_l2_question(l2_text, l2_result)
 
     ctx.selected_tickers = selected_tickers
     return True
+
+
+async def _run_two_phase_l2(ctx: SessionContext, l2_result: Layer2Result, cli_handler) -> bool:
+    """Phase B two-phase L2: sector selection → strategy group selection."""
+    # Phase A: Display sector directions, let user pick a sector
+    print(f"\n{'─'*60}")
+    print(f"  [L2] 基本面分析 — 宏观象限: {l2_result.macro_quadrant} | 方向: {l2_result.macro_direction}")
+    print(f"\n  行业方向判断:")
+    for i, sd in enumerate(l2_result.sector_directions[:6], 1):
+        direction_cn = {"bullish": "看多", "bearish": "看空", "neutral": "中性"}.get(sd.get("direction", ""), sd.get("direction", ""))
+        momentum_cn = {"accelerating": "加速", "decelerating": "减速", "stable": "稳定"}.get(sd.get("momentum", ""), "")
+        print(f"    {i}. {sd.get('sector', '?')} — {direction_cn} ({momentum_cn})")
+        if sd.get("rationale"):
+            print(f"       {sd['rationale'][:120]}")
+    print(f"\n  输入行业编号选择方向 | 输入'全部'使用默认组合 | 输入'observe'观望")
+
+    # Sector selection loop
+    chosen_sector = None
+    while chosen_sector is None:
+        response = await cli_handler("> ")
+        text = response.strip().lower() if response else ""
+        if not text:
+            continue
+        if text in ("observe", "等等看", "等等", "观望", "跳过"):
+            print("\n同意——今日观望。\n")
+            return False
+        if text in ("全部", "all", "好", "ok", "yes"):
+            # Use all-sector default: fall back to flat ticker list
+            _display_l2_results(l2_result)
+            return await _confirm_single_phase(ctx, l2_result, cli_handler)
+
+        # Try numeric sector selection
+        try:
+            idx = int(text) - 1
+            if 0 <= idx < len(l2_result.sector_directions):
+                chosen_sector = l2_result.sector_directions[idx]
+                break
+        except ValueError:
+            pass
+        print(f"  请输入1-{len(l2_result.sector_directions)}之间的编号")
+
+    sector_name = chosen_sector.get("sector", "未知行业")
+
+    # Phase B: Run sector drill-down
+    print(f"\n  已选择: {sector_name} — 正在分析该行业投资工具...")
+    drill_result = await _run_sector_drilldown(ctx, l2_result, chosen_sector)
+    if drill_result is None:
+        # Drill-down failed — fall back to flat ticker list
+        print(f"  [L2] 行业分析调用失败 — 使用默认标的列表。")
+        _display_l2_results(l2_result)
+        return await _confirm_single_phase(ctx, l2_result, cli_handler)
+
+    # Display strategy groups
+    _display_strategy_groups(drill_result, sector_name)
+
+    # Strategy group selection loop
+    return await _select_strategy_group(ctx, drill_result, sector_name, cli_handler)
+
+
+async def _run_sector_drilldown(ctx: SessionContext, l2_result: Layer2Result, chosen_sector: dict) -> dict | None:
+    """Run the sector drill-down LLM call. Returns parsed JSON or None on failure."""
+    from marketmind.pipeline.layer2_fundamental import LAYER2_SECTOR_DRILLDOWN_PROMPT
+    from marketmind.gateway.response_parser import strip_markdown_fences
+    import json as _json
+
+    sector_name = chosen_sector.get("sector", "")
+    direction = chosen_sector.get("direction", "neutral")
+    rationale = chosen_sector.get("rationale", "")
+
+    user_prompt = (
+        f"行业: {sector_name}\n"
+        f"方向: {direction}\n"
+        f"理由: {rationale}\n"
+        f"宏观背景: 象限={l2_result.macro_quadrant}, 方向={l2_result.macro_direction}\n"
+        f"偏好资产: {', '.join(l2_result.preferred_assets[:5])}"
+    )
+
+    try:
+        resp = await chat_pro(
+            system_prompt=LAYER2_SECTOR_DRILLDOWN_PROMPT,
+            user_prompt=user_prompt,
+            temperature=0.3, max_tokens=3072, reasoning_effort="minimal",
+        )
+        content = strip_markdown_fences(resp.get("content", ""))
+        return _json.loads(content)
+    except Exception as e:
+        logger.warning("Sector drill-down failed for %s: %s", sector_name, e)
+        return None
+
+
+async def _confirm_single_phase(ctx: SessionContext, l2_result: Layer2Result, cli_handler) -> bool:
+    """Simple confirm/observe prompt for single-phase (no strategy groups)."""
+    print(f"\n  {'─'*60}")
+    print(f"  输入'好'进入L3 | 输入'observe'观望 | 或输入问题")
+    response = await cli_handler("> ")
+    text = response.strip().lower() if response else ""
+    if text in ("observe", "等等看", "观望", "跳过"):
+        print("\n同意——今日观望。\n")
+        return False
+    ctx.selected_tickers = list(l2_result.ticker_candidates[:10])
+    return True
+
+
+async def _select_strategy_group(ctx: SessionContext, drill_result: dict, sector_name: str, cli_handler) -> bool:
+    """Let user pick a strategy group (conservative/neutral/aggressive) and tickers."""
+    strategy_groups = drill_result.get("strategy_groups", {})
+    if not strategy_groups:
+        # No strategy groups in drill-down result — fall back to tool matrix tickers
+        all_tickers = []
+        for tool_type, tool_data in drill_result.get("tool_matrix", {}).items():
+            all_tickers.extend(tool_data.get("tickers", []))
+        ctx.selected_tickers = all_tickers[:10]
+        ctx.selected_strategy = ""
+        return True
+
+    chosen_group = None
+    while chosen_group is None:
+        print(f"  输入策略名称 (conservative/neutral/aggressive) | 输入'observe'观望 | 输入'好'接受中性")
+        response = await cli_handler("> ")
+        text = response.strip().lower() if response else ""
+        if not text:
+            continue
+        if text in ("observe", "等等看", "观望", "跳过"):
+            print("\n同意——今日观望。\n")
+            return False
+        if text in ("好", "ok", "yes", "neutral", "中性", "all"):
+            chosen_group = "neutral"
+            break
+        if text in ("conservative", "保守", "conservative", "safe"):
+            chosen_group = "conservative"
+            break
+        if text in ("aggressive", "激进", "aggressive", "risk"):
+            chosen_group = "aggressive"
+            break
+        if text in strategy_groups:
+            chosen_group = text
+            break
+        print(f"  请选择: conservative(保守) / neutral(中性) / aggressive(激进)")
+
+    group_data = strategy_groups.get(chosen_group, {})
+    tickers = group_data.get("tickers", [])
+    ctx.selected_tickers = tickers if tickers else list(drill_result.get("tool_matrix", {}).get("direct_exposure", {}).get("tickers", []))
+    ctx.selected_strategy = chosen_group
+
+    thesis = group_data.get("thesis", "")
+    if thesis:
+        print(f"\n  策略论点: {thesis[:200]}")
+    print(f"  已选择: {chosen_group} — {len(ctx.selected_tickers)} 个标的")
+    return True
+
+
+def _display_l2_results(l2_result: Layer2Result) -> None:
+    """Display L2 macro results and ticker candidates (legacy single-phase)."""
+    print(f"\n{'─'*60}")
+    print(f"  [L2] 基本面分析 — 宏观象限: {l2_result.macro_quadrant} | 方向: {l2_result.macro_direction}")
+    if l2_result.sector_shortlist:
+        momentum_str = ""
+        if l2_result.sector_momentum:
+            momentum_str = " (动量: " + ", ".join(
+                f"{k}:{v}" for k, v in l2_result.sector_momentum.items()
+                if k in l2_result.sector_shortlist
+            ) + ")"
+        print(f"  推荐板块{momentum_str}: {', '.join(l2_result.sector_shortlist[:6])}")
+    if l2_result.preferred_assets:
+        print(f"  偏好资产: {', '.join(l2_result.preferred_assets[:5])}")
+    if l2_result.ticker_candidates:
+        print(f"\n  候选标的 (宏观匹配度):")
+        for tc in l2_result.ticker_candidates[:15]:
+            score = l2_result.factor_scores.get(tc, 0)
+            weight = l2_result.ticker_weights.get(tc, 0)
+            bar = "█" * int(score * 10) + "░" * (10 - int(score * 10))
+            label = ticker_cn(tc)
+            print(f"    {label:<20} 匹配:{bar} {score:.2f}  权重:{weight:.1%}")
+    else:
+        _display_no_candidates(l2_result)
+    print(f"  {'─'*60}")
+
+
+def _display_strategy_groups(drill_result: dict, sector_name: str) -> None:
+    """Display strategy groups from sector drill-down result."""
+    print(f"\n{'─'*60}")
+    print(f"  [{sector_name}] 投资工具矩阵 + 策略选择")
+
+    tool_matrix = drill_result.get("tool_matrix", {})
+    if tool_matrix:
+        print(f"\n  可用工具类型:")
+        for tool_type, tool_data in tool_matrix.items():
+            desc = tool_data.get("description", tool_type)
+            tickers = tool_data.get("tickers", [])
+            labeled = [ticker_cn(t) for t in tickers]
+            print(f"    {tool_type}: {', '.join(labeled)} — {desc}")
+
+    strategy_groups = drill_result.get("strategy_groups", {})
+    if strategy_groups:
+        print(f"\n  策略选择:")
+        for name, group in strategy_groups.items():
+            name_cn = {"conservative": "保守", "neutral": "中性", "aggressive": "激进"}.get(name, name)
+            tickers = group.get("tickers", [])
+            thesis = group.get("thesis", "")
+            print(f"    {name_cn} ({name}): {', '.join(ticker_cn(t) for t in tickers)}")
+            if thesis:
+                print(f"      {thesis[:150]}")
+    print(f"  {'─'*60}")
 
 
 def _display_no_candidates(l2_result: Layer2Result) -> None:
@@ -168,9 +357,9 @@ async def _handle_l2_question(user_text: str, l2_result: Layer2Result) -> None:
             resp = await chat_pro(
                 system_prompt=(
                     f"你是基本面分析师。今天是{today}。用中文，简洁回答。\n"
-                    f"L2结果: {l2_result.raw_analysis[:600]}"
+                    f"L2结果: {defang_text(l2_result.raw_analysis)[:600]}"
                 ),
-                user_prompt=f"用户请求: {user_text}\n\n直接回答，不超过200字。",
+                user_prompt=f"用户请求: {defang_text(user_text)}\n\n直接回答，不超过200字。",
                 temperature=0.3, max_tokens=512, reasoning_effort="minimal",
             )
             reply = resp.get("content", "无法处理。")
@@ -187,9 +376,9 @@ async def _handle_l2_question(user_text: str, l2_result: Layer2Result) -> None:
         resp = await chat_pro(
             system_prompt=(
                 f"你是基本面分析师。今天是{today}。用中文，简明扼要。\n"
-                f"L2结果: {l2_result.raw_analysis[:600]}"
+                f"L2结果: {defang_text(l2_result.raw_analysis)[:600]}"
             ),
-            user_prompt=f"用户问题: {user_text}\n\n直接回答。",
+            user_prompt=f"用户问题: {defang_text(user_text)}\n\n直接回答。",
             temperature=0.3, max_tokens=512, reasoning_effort="minimal",
         )
         reply = resp.get("content", "无法处理。输入'好'进入L3或'observe'观望。")

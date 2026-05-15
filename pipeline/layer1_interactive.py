@@ -274,7 +274,7 @@ async def run_l1_interactive(
 
     deep_result = await chat_pro(
         system_prompt=L1_DEEP_ANALYSIS_PROMPT + date_context,
-        user_prompt=f"Analyze these market signals for narrative structure:\n\n{signal_text}",
+        user_prompt=f"Analyze these market signals for narrative structure:\n\n{defang_text(signal_text)}",
         temperature=0.3,
         max_tokens=8192,
     ) if not mock else {"content": MOCK_DEEP_ANALYSIS}
@@ -366,7 +366,7 @@ async def run_l1_interactive(
             mining_prompt = L1_DATA_MINING_PROMPT.format(direction=user_text[:200])
             analysis = await chat_pro(
                 system_prompt=mining_prompt + date_context,
-                user_prompt=f"Search results:\n{search_results}\n\nOriginal hypothesis: {user_text}\n\nAnalyze:",
+                user_prompt=f"Search results:\n{search_results}\n\nOriginal hypothesis: {defang_text(user_text)}\n\nAnalyze:",
                 temperature=0.3,
                 max_tokens=4096,
             ) if not mock else {"content": MOCK_MINING_RESPONSE}
@@ -388,7 +388,7 @@ async def run_l1_interactive(
         history_text = _format_history(discussion_history[-20:])  # last 10 exchanges (was 3 — too little context)
         discussion_prompt = (
             f"## Discussion Context\n{history_text}\n\n"
-            f"## Investor's Latest Point\n{user_text}\n\n"
+            f"## Investor's Latest Point\n{defang_text(user_text)}\n\n"
             f"Respond following the Rules of Engagement. Be direct, evidence-based, "
             f"and label your confidence levels."
         )
@@ -612,7 +612,7 @@ async def _execute_data_mining(direction: str, state: InteractiveState) -> str:
                 "something or the information may be outdated, clearly state that limitation. "
                 "Summarize what you know concisely."
             ),
-            user_prompt=f"Find data related to: {direction[:500]}. Summarize key findings concisely. ",
+            user_prompt=f"Find data related to: {defang_text(direction)[:500]}. Summarize key findings concisely. ",
             temperature=0.1,
             max_tokens=1024,
         )

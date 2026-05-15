@@ -27,7 +27,7 @@ class DataCache:
             self._hits += 1
             return data
 
-    async def set(self, key: str, data: Any, ttl: int | None = None) -> None:
+    async def set(self, key: str, data: Any) -> None:
         async with self._lock:
             self._store[key] = (time.time(), data)
 
