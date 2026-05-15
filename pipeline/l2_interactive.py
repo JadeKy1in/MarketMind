@@ -202,16 +202,26 @@ async def _run_sector_drilldown(ctx: SessionContext, l2_result: Layer2Result, ch
 
 
 async def _confirm_single_phase(ctx: SessionContext, l2_result: Layer2Result, cli_handler) -> bool:
-    """Simple confirm/observe prompt for single-phase (no strategy groups)."""
-    print(f"\n  {'─'*60}")
-    print(f"  输入'好'进入L3 | 输入'observe'观望 | 或输入问题")
-    response = await cli_handler("> ")
-    text = response.strip().lower() if response else ""
-    if text in ("observe", "等等看", "观望", "跳过"):
-        print("\n同意——今日观望。\n")
-        return False
-    ctx.selected_tickers = list(l2_result.ticker_candidates[:10])
-    return True
+    """Explicit confirmation loop for single-phase (no strategy groups).
+
+    Requires explicit confirmation ("好"/"ok"/"yes") to proceed. Empty input
+    re-prompts. Unknown input shows a hint and re-prompts. Matches the
+    pattern of _select_strategy_group which loops on unrecognized input.
+    """
+    while True:
+        print(f"\n  {'─'*60}")
+        print(f"  输入'好'进入L3 | 输入'observe'观望 | 或输入问题")
+        response = await cli_handler("> ")
+        text = response.strip().lower() if response else ""
+        if not text:
+            continue
+        if text in ("observe", "等等看", "观望", "跳过"):
+            print("\n同意——今日观望。\n")
+            return False
+        if text in ("好", "ok", "yes", "行", "可以", "go", "sure", "确认"):
+            ctx.selected_tickers = list(l2_result.ticker_candidates[:10])
+            return True
+        print(f"  请输入'好'确认或'observe'观望")
 
 
 async def _select_strategy_group(ctx: SessionContext, drill_result: dict, sector_name: str, cli_handler) -> bool:

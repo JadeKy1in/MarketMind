@@ -25,6 +25,12 @@ async def run_decision_interactive(ctx: SessionContext, cli_handler) -> bool:
     )
     ctx.decision = decision
 
+    # Display selected strategy if one was chosen (H: strategy → output visibility)
+    if ctx.selected_strategy:
+        strategy_labels = {"conservative": "保守", "neutral": "中性", "aggressive": "激进"}
+        label = strategy_labels.get(ctx.selected_strategy, ctx.selected_strategy)
+        print(f"\n  策略: {ctx.selected_strategy}({label})")
+
     # Display decision cards
     print(f"\n{'='*60}")
     print(f"  [DECISION] 投资决策方案")
