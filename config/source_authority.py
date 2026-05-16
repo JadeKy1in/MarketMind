@@ -83,6 +83,25 @@ SOURCES: list[Source] = [
     # ── Commodities / Futures ─────────────────────────────────────
     Source("Investing.com", SourceTier.BEST_EFFORT, "https://www.investing.com/rss/news_1063.rss", "rss", 0.40, 1.0),
 
+    # ── Social Media (BEST_EFFORT) ────────────────────────────────
+    # Reliability weights are domain-reasoned, not backtest-optimized (Law 3 compliance).
+    # Swiss Finance Institute (2026): finfluencer picks = -2.3% returns; fading them = +6.8% alpha.
+    # Social sentiment captures positioning/crowding — structurally independent from news flow.
+    # ApeWisdom: 0.15 — anonymous, unverifiable, prone to manipulation. ApeWisdom is a hobby
+    #   project with no SLA, no versioned API, and no per-account data for manipulation detection.
+    # Bluesky: 0.20 — identified accounts, smaller sample, demographic selection bias (users who
+    #   migrated from X due to content moderation concerns). AT Protocol is open and free.
+    # Truth Social (Trump): 0.15 — single-person source, ~90% noise ratio, dependent on
+    #   third-party RSS aggregator (trumpstruth.org by Defending Democracy Together).
+    #   BUT: when it fires on investment-relevant content, it is a LEADING indicator of
+    #   market-moving policy — a unique capability no other source provides.
+    Source("ApeWisdom", SourceTier.BEST_EFFORT,
+           "https://apewisdom.io/api/v1/filter/trending", "api", 0.15, 1.0),
+    Source("Bluesky Social", SourceTier.BEST_EFFORT,
+           "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q={QUERY}", "api", 0.20, 1.0),
+    Source("Truth Social (Trump)", SourceTier.BEST_EFFORT,
+           "https://trumpstruth.org/feed", "rss", 0.15, 1.0),
+
     # ── API-based (require keys) ──────────────────────────────────
     Source("NewsAPI", SourceTier.RELIABLE, "https://newsapi.org/v2/top-headlines?country=us&category=business&apiKey={API_KEY}", "api", 0.90, 10.0, True),
     Source("GNews", SourceTier.RELIABLE, "https://gnews.io/api/v4/top-headlines?category=business&lang=en&country=us&apikey={API_KEY}", "api", 0.85, 10.0, True),
