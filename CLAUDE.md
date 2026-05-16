@@ -1,169 +1,274 @@
-# MarketMind — Investment Analysis Platform
+# AI Studio Workspace (Global)
 
-**Scope:** This file applies when working in `projects/marketmind/`. Load this FIRST for architecture, quick start, model routing, testing commands, and key file paths. For global conventions (Cognitive Loop, Project Boundaries, Development Workflow, PICA Protocol, Modular Architecture, MRP format), fall back to the root `CLAUDE.md` at the workspace level.
+**Scope:** This file applies to ALL projects in this workspace. It contains global conventions, workflow rules, and design philosophy. Claude Code loads this file automatically for every session.
 
-Multi-agent shadow ecosystem for investment signal validation and decision support. Built on DeepSeek Flash/Pro for production, developed with Claude (Cowork) for engineering.
+**Project-specific instructions:** Each project has its own `projects/<name>/CLAUDE.md`. When working inside a project directory, load that project's CLAUDE.md FIRST, then fall back to this file for global rules. The project CLAUDE.md takes precedence for architecture, commands, and file paths; this file governs workflow, methodology, and cross-project standards.
 
-## Project Constraints (Three System Laws)
+**Active project:** MarketMind (`projects/marketmind/`). See `projects/marketmind/CLAUDE.md`.
 
-These constraints are specific to MarketMind and are verified on every restart.
+**Archived projects:** `projects/robinhood/` and `projects/command_center/` have been removed locally and archived on GitHub. Do not reference them.
 
-**Law 1 (Output Discipline):** Final Markdown reports must be ASCII-only, no emoji. Code comments and console output are exempt.
+## Core Rules
 
-**Law 2 (Operational Boundary):** MarketMind is an analysis tool — it may READ public market data but must NEVER execute, modify, or cancel trades. Account state is maintained manually, never automated. Market data feeds must not be used for screening, ranking, or systematic parameter optimization (per Law 3).
+### 1. Cognitive Loop (Triumvirate: Opus → Sonnet → Haiku)
 
-- **PROHIBITED**: Any API call that places/modifies/cancels orders; any call accessing account balances, positions, or trading history; any authenticated connection to a brokerage account with trading permissions.
-- **ALLOWED**: Read-only market data APIs (yfinance, Alpha Vantage, FMP, CoinGecko); exchange public endpoints (Binance `/api/v3/ticker/price`, `/api/v3/klines` — unauthenticated only; no Binance API keys, even read-only); APIs requiring read-only keys with zero trading permissions.
-- **Boundary test**: If an API key grants trading capability, it must not be configured. If a platform's only key type grants trading, the platform is off-limits.
+Before any non-trivial code change:
+- **Architect (Opus)**: Spawn an Opus Plan Agent for architecture review, prompt engineering, and strategic design
+- **Plan (Sonnet)**: Spawn a Sonnet Plan Agent to decompose architecture into implementation steps
+- **Execute (Haiku)**: Implement the plan yourself, following each step in order
+- Verify changes by reading files back and running syntax checks
 
-Verify: `grep -r "brokerage\|api\.trade\|place_order\|binance.*key\|Binance.*Key" --include="*.py" .` must return empty; `grep -r "yfinance\|finnhub\|alpha_vantage\|fmp\|coingecko" --include="*.py" .` confirms allowed sources.
+This cognitive loop is a design philosophy — apply it manually when scoping architecture changes.
 
-**Law 3 (Anti-Overfitting):** Price data is a timing filter, not a signal source. Market data (fundamentals, OHLCV, technical indicators) may enrich analysis context but must NOT be fed into screening, ranking, or systematic parameter optimization pipelines. No parameter brute-forcing (no GridSearchCV, no brute_force loops over strategy params). Empty positions are valid outcomes. Verify: `grep -r "grid_search\|brute_force\|GridSearchCV\|Optuna\|hyperopt" --include="*.py" .` must return empty.
+### 2. Project Boundaries
 
-## Quick Start
+Every project defines its own operational constraints in its `CLAUDE.md`. The root rules below govern *how* we work; project CLAUDE.md files govern *what* the project may and may not do.
 
-```bash
-# GUI (Command Center dashboard)
-cd projects/marketmind
-python app.py
+**MarketMind example** (see `projects/marketmind/CLAUDE.md`):
+- **Physical Isolation**: Analysis tools only — never connect to brokerage APIs
+- **Anti-Overfitting**: Price data is a timing filter, not a signal source
+- **Output Discipline**: Final Markdown reports ASCII-only, no emoji
 
-# CLI daily analysis
-python app.py --mode daily --mock --verbose
+When verifying restart compliance, check the active project's CLAUDE.md for its specific constraints. The `grep` commands in the restart guide are project-specific — adapt them per project.
 
-# With custom shadow count
-python app.py --mode daily --shadow-count 21 --verbose
+### 3. Design Patterns
+
+- **Single-Navigation Architecture**: Navigate once, all fallback tracks operate on the current page
+- **Safe Timeout**: Use explicit timeout + clear pattern, never bare Promise.race()
+- **Context-Aware Matching**: Anti-crawl keywords use contextual verification (~500 chars), not global substring
+- **Append-Only State**: Never modify early context; add updates as new messages at the tail
+- **Modular Architecture (Extract-Module Pattern)**: Split monoliths by extracting one cohesive concern at a time into focused modules with clear interfaces. Keep the top-level file as a thin glue/orchestration layer that composes modules — it should call and coordinate, not implement. Each module handles exactly one business capability (Single Responsibility). See §3.1 below for size limits and extraction rules.
+
+### 3.1 Modular Architecture Rules (MANDATORY)
+
+**These rules apply to ALL projects in this workspace. They prevent monoliths from forming and keep blast radius small.**
+
+#### File Size: Two-Tier Check
+
+Check once at commit time or phase completion — NOT during active development.
+
+The table below is the **default for Python projects**. Static-language projects (Java, Go, Rust) should scale up ~20% (e.g., 300/600 for modules). Each project may override these in its own `CLAUDE.md`; document the reason (e.g., "data pipeline with long transformation chains → soft threshold 350"). Review thresholds at phase boundaries, not mid-phase.
+
+| Role | Soft Threshold | Hard Ceiling |
+|------|:---:|:---:|
+| Python modules | 250 lines | 500 lines |
+| CLI entry points | 100 lines | 150 lines |
+| Glue / orchestration | 200 lines | 300 lines |
+| Test files | 300 lines | 500 lines |
+
+**Tier 1 — Soft threshold (triggers investigation):**
+When a file exceeds the soft threshold, answer 4 questions:
+1. Does the module do more than one thing? (description needs "and"/"or" → SRP violation)
+2. Does it export more than 10 public functions? (likely mixed responsibilities)
+3. Do any functions have >4 parameters? (poor encapsulation)
+4. Is any function's cyclomatic complexity >10? (run `radon cc <file> -a`; >10 means too many paths)
+
+If ALL answers are "no" → the file is large but clean; proceed.
+If ANY answer is "yes" → extract the violating responsibility into its own module.
+
+**Tier 2 — Hard ceiling (automatic split):**
+At this size, SRP violation is presumed. Do NOT run the 4 questions — split the file.
+The hard ceiling exists to save debate time, not to punish long files.
+
+**Principle**: Size triggers the question, responsibility answers it.
+A 200-line module doing one thing is clean. A 40-line module doing three things is not.
+
+Files exceeding the hard maximum trigger a mandatory refactoring before any new features can be added to that file.
+
+**Grandfather clause**: Files that exceed limits as of 2026-05-15 (app.py: 971, layer1_interactive.py: 657, methodology_rules.py: 639, shadow_agent.py: 567, multimodal_adapter.py: 591) may receive extraction-only changes and bug fixes. New feature work on these files requires extraction first. Bug fixes exceeding 20 lines require a brief justification in the commit message. Target: all files compliant by end of Phase D.
+
+#### Extraction Rules
+
+1. **One module = one concern.** Each extracted module handles exactly one business capability (e.g., `l3_interactive.py` for L3 review, not "pipeline utilities").
+2. **Clear contract.** Every module exports a single public entry point with well-defined inputs/outputs (e.g., `async def run_X(ctx: SessionContext, cli_handler) -> bool`).
+3. **No back-imports.** Extracted modules must NOT import from the glue layer or from sibling modules at the same level. Imports form a DAG: glue → modules → shared data types.
+4. **Test-before-extract.** Write at least 3 tests for the new module (confirm/observe/question paths) BEFORE integrating it into the glue layer.
+5. **PICA triggers on extraction.** Every new extracted `.py` file triggers the full PICA protocol (§4): PICA-Unit → PICA-Security → PICA-Integration → PICA-Regression before commit. Extraction is a code change like any other.
+6. **Commit after each extraction.** Extract one module → PICA → test → commit. Never extract multiple modules in one commit.
+
+**Anti-pattern — over-extraction**: Files under 30 lines exporting a single function create unnecessary indirection. Keep these in the parent module unless the function is shared across 3+ consumers.
+
+**Exception — data modules**: Constants, enums, label maps, and configuration modules may export multiple names. The single-entry-point rule applies to behavioral modules, not data containers.
+
+#### Extraction Priority (extract in this order)
+
+| Priority | What to Extract | Why First |
+|:---:|------|------|
+| 1 | Independent interaction stages (L1, L2, L3, Decision) | Zero dependencies, lowest risk |
+| 2 | Shared data types (SessionContext, dataclasses) | Needed by stages above |
+| 3 | Utility/shared logic (output filter, parsers) | Depends on data types |
+| 4 | Orchestration helpers (broadcast, ELITE) | May depend on glue globals — use snapshots |
+
+#### Glue Layer Contract
+
+The glue layer (e.g., `app.py`) must ONLY:
+- Initialize shared state (SessionContext)
+- Call extracted modules in sequence
+- Handle module-level coordination (shadow launch, archive)
+- Display cross-module results (shadow consensus, ELITE)
+
+The glue layer must NOT:
+- Contain business logic (analysis, decision-making, formatting)
+- Access module-internal implementation details
+- Include standalone execution paths (these belong in separate modules, e.g., `pipeline/orchestration.py`)
+
+**Glue file size**: The two-tier check above applies — 200 lines soft (trigger SRP investigation), 300 lines hard (automatic split). The soft check asks one primary question: "Is there business logic hiding here?" A 250-line file that only orchestrates is acceptable; a 150-line file with inline analysis is not. The hard ceiling exists because at 300+ lines of orchestration, the coordination logic itself has become complex enough to warrant decomposition.
+
+**Entry point files** (`app.py`, `main.py`): These naturally contain CLI argument parsing, mode dispatch, and initialization (~50-100 lines). If run-mode functions (e.g., `run_daily`, `run_gui`) live in the same file, extract them to a dedicated orchestration module. The entry point should read like a table of contents.
+
+#### Measurable Criteria
+
+After extraction, verify:
+- [ ] Glue layer contains only orchestration calls (no analysis/decision code)
+- [ ] Standalone run modes extracted to orchestration module
+- [ ] Each module ≤ 500 lines (hard)
+- [ ] Each module has ≥ 3 tests
+- [ ] No module imports from glue or sibling modules
+- [ ] 0 test regressions (full suite passes)
+- [ ] New module interface documented with docstring Args/Returns
+
+### 3.2 Time-Awareness Rule (MANDATORY)
+
+**AI has no native time awareness — the mental anchor for "now" defaults to training cutoff (~Jan 2026). This rule prevents timestamp hallucination.**
+
+1. **Always verify current date before time-sensitive operations.** Run `date` or `powershell Get-Date -AsUTC -Format 'yyyy-MM-dd HH:mm:ss'` before generating any timestamp.
+2. **Progress files**: `**Updated**: YYYY-MM-DD HH:MM` must use command output, never LLM-generated.
+3. **Git commits**: Verify date references against `date` output.
+4. **Relative dates** ("next Monday", "tomorrow"): Compute from `date` output, never training data.
+5. **MarketMind runtime**: `datetime.now()` MUST use `datetime.now(timezone.utc)`. All 18 non-UTC calls fixed 2026-05-17.
+6. **Dual time anchor**: LLM prompts must include BOTH current date AND knowledge cutoff.
+7. **Memory freshness**: Verify memory entries against current file/code state before recommending.
+
+## Development Workflow
+
+1. **Research first**: Search for existing solutions before building new
+2. **Skill evaluation (Security-First)**: All third-party files (skills, plugins, GitHub repos, MCP servers) MUST pass through `.claude/sandbox/` before installation. See `.claude/sandbox/SANDBOX.md` for the full protocol: isolate → scan → approve → install. Updates follow the same process.
+3. **Plan before code**: Use Triumvirate pipeline (Opus→Sonnet→Haiku) for architecture decisions
+4. **Verify after code**: Syntax check + run tests before declaring done
+5. **Commit after each sub-phase**: `git add` + `git commit` after every sub-phase completes with passing tests. Never accumulate multiple sub-phases in the working directory without version control.
+6. **Red Team before completion**: Independent Red Team audit produces `.claude/audits/phase-X-red-team.md` BEFORE the phase is marked complete. Completion is never self-declared without external audit confirmation.
+7. **Memory after milestone**: Save key decisions and state to auto-memory
+
+### 4. PICA Protocol: Pre-Integration Code Audit (MANDATORY)
+
+**Every code change MUST pass through the 4-level PICA protocol before integration. This applies to ALL projects in this workspace, now and in the future. This is NOT optional — it is enforced by audit artifact requirements.**
+
+Full specification: `.claude/plans/4-gate-audit-protocol.md`
+
+#### PICA Levels (sequential, each must pass before proceeding)
+
+```
+Code written → PICA-Unit → PICA-Security → PICA-Integration → PICA-Regression → Commit
 ```
 
-## Architecture
+| Level | What | Who | Mandatory? |
+|-------|------|-----|:---:|
+| **PICA-Unit** | pytest: 0 failures, 0 regressions | Developer | Always |
+| **PICA-Security** | Security Agent + Data Agent (parallel audit) | 2 AI Agents | For new modules, API changes, schema migrations, config changes, dependency upgrades |
+| **PICA-Integration** | Static: backward compat, data flow, dead loops, import boundaries. Dynamic: generated integration test scenarios | 1 AI Agent + pytest | For new modules, API changes, control flow changes, schema migrations |
+| **PICA-Regression** | Full pytest suite + optimization review | Developer + 1 AI Agent | Always (except test-only and doc changes) |
 
+#### Risk Tiers (Critical/High/Medium/Low)
+
+PICA-Security and PICA-Integration requirements scale with risk:
+- **Critical** (`async_client.py`, `shadow_state.py`, `decision.py`): Full PICA-Security (2 agents) + Full PICA-Integration
+- **High** (pipeline stages, shadow logic): Full PICA-Security + Static-only PICA-Integration
+- **Medium** (config, storage, utilities): 1 Security Agent only
+- **Low** (UI, formatting, comments): Skip to PICA-Regression
+
+#### Enforcement: Audit Artifacts
+
+After each level passes, write a JSON or Markdown artifact to `.claude/audits/{phase}/`:
+- `pica-unit-{module}.json`
+- `pica-security-{module}.json`
+- `pica-integration-{module}.json`
+- `pica-regression.json`
+
+**Artifact rule**: For every modified `.py` file, the corresponding audit artifact MUST exist with a timestamp newer than the file's last modification. If missing, stop and run the missing level. No artifact = no commit.
+
+#### Emergency Channel
+
+Production hotfixes and security patches: PICA-Unit + 1 Security Agent + PICA-Regression (mandatory). Remaining levels must be backfilled within 24 hours with a recorded justification.
+
+#### Verification (do this at session START)
+
+When starting a session with modified files:
+1. Check each modified `.py` file against `.claude/audits/` for matching artifacts
+2. If artifacts missing or stale, run the missing PICA level BEFORE any new work
+3. Record findings in the progress file
+
+### 5. Hard Rule: Progress Checkpoint After EVERY Sub-Task (MANDATORY)
+
+**This rule exists to prevent lost work from crashes, power loss, or session termination. It is NOT optional. Violating it means progress is invisible to future sessions.**
+
+#### When to write a checkpoint:
+- After completing ANY sub-task (a single bug fix, a file edit, a test passing, a commit)
+- After finishing a discussion/design decision
+- Before starting a risky operation (destructive git, large refactor)
+- When stopping work (end of session, or user says they're done for now)
+- **Rule of thumb: if you did something you'd hate to redo, write it down.**
+
+#### Where to write it:
+- **Active progress file**: `.claude/progress/phase-X-batch-Y-progress.md` (or create one if it doesn't exist)
+- **Format**: Markdown checklist. Mark completed items with `[x]`, add new items with `[ ]`. Append a timestamp line at the bottom: `**Updated**: YYYY-MM-DD HH:MM — <what just happened>`
+
+#### What to record (minimum):
 ```
-marketmind/
-├── app.py (entry point)
-├── backtest_runner.py
-├── gateway/                    # LLM gateway layer
-│   ├── async_client.py         # Flash/Pro routing + M1 integrity injection
-│   ├── token_budget.py         # Priority-based token budget
-│   ├── response_parser.py      # Structured output parsing
-│   └── multimodal_adapter.py   # Image/PDF/screenshot ingestion
-├── shadows/                    # Shadow ecosystem (Phase B-F)
-│   ├── shadow_agent.py         # Base ShadowAgent class
-│   ├── shadow_state.py         # SQLite persistence + ShadowConfig
-│   ├── shadow_mother.py        # Daily orchestration + event detection + temp shadows
-│   ├── shadow_memory.py        # Layered memory (working/episodic/semantic)
-│   ├── expert_shadows.py       # 15 domain-specific analyst shadows
-│   ├── daredevil_shadows.py    # 5 contrarian/high-risk shadows
-│   ├── catfish_agent.py        # Minority-opinion enforcer (>=80% consensus trigger)
-│   ├── ranking_engine.py       # MPPM/Calmar/Omega composite ranking
-│   ├── challenger_engine.py    # 3-stage elimination buffer + paired t-test
-│   ├── collusion_detector.py   # Agreement stats → convergence vs herding
-│   ├── emergency_quota.py      # Confidence-based extra LLM calls + audit trail
-│   ├── cash_reframing.py       # A/B test: treatment/control cohorts + Mann-Whitney
-│   ├── paper_live_gap.py       # Virtual slippage + confidence discount
-│   ├── knowledge_filter.py     # Learn-genes selective inheritance + ACE risk
-│   ├── missed_path.py          # Counterfactual tracking + survivorship warning
-│   ├── crystallization.py      # Insight → hypothesis → validate → promote/retire
-│   ├── methodology_evolver.py  # Shadow methodology drift + evolution
-│   ├── belief_types.py         # Belief state data types
-│   ├── belief_math.py          # Belief update + decay math
-│   ├── broadcast.py            # User→shadow JSON broadcast
-│   ├── elite_participation.py  # ELITE shadow interaction registry
-│   └── background_scheduler.py # Periodic tasks (crystallization, cleanup)
-├── pipeline/                   # Daily analysis pipeline
-│   ├── scout.py                # News discovery
-│   ├── flash_preprocessor.py   # Flash model data prep
-│   ├── layer1_narrative.py     # Narrative layer
-│   ├── layer1_interactive.py   # L1 Socratic dialogue (interactive)
-│   ├── layer2_fundamental.py   # Fundamental analysis
-│   ├── l2_interactive.py       # L2 ticker selection (interactive)
-│   ├── layer3_technical.py     # Technical analysis
-│   ├── l3_interactive.py       # L3 technical review (interactive)
-│   ├── decision.py             # Decision aggregation
-│   ├── decision_interactive.py # Decision confirmation (interactive)
-│   ├── session_context.py      # Shared pipeline state
-│   ├── resonance.py            # Multi-dimensional resonance
-│   ├── position_patrol.py      # Position monitoring
-│   ├── red_team.py             # Red Team adversarial review
-│   ├── cache.py                # Response caching
-│   ├── methodology_rules.py    # Methodology rule engine
-│   ├── output_filter.py        # Hallucination guard
-│   └── causal_review.py        # Causal post-mortem analysis
-├── ui/                         # Command Center GUI (customtkinter)
-│   ├── main_window.py          # Main application window
-│   ├── dashboard_panel.py      # Market overview dashboard
-│   ├── shadow_panel.py         # Shadow ranking table (color-coded by tier)
-│   ├── shadow_status_card.py   # Individual shadow detail card
-│   ├── shadow_charts.py        # Ranking trend + discount rate charts
-│   ├── decision_card.py        # Investment decision display
-│   ├── position_card.py        # Position status display
-│   ├── gate_panel.py           # Gate 1/2/3 decision panels
-│   ├── pause_screen.py         # Pause/override screen
-│   ├── async_bridge.py         # Async/sync bridge for UI
-│   └── progress.py             # Progress indicators
-├── storage/                    # Persistence
-│   ├── session.py              # Session state management
-│   └── archivist.py            # Decision archive
-├── integrity/                  # Quality assurance
-│   ├── watchdog.py             # Integrity monitoring
-│   └── fact_checker.py         # Claim verification
-├── config/                     # Configuration
-│   ├── settings.py             # MarketMindConfig + ShadowSettings
-│   ├── asset_universe.py       # Tradable asset matrix
-│   └── source_authority.py     # Source authority tiers
-└── tests/                      # Test suite
-    ├── test_gateway/           # Gateway + token budget tests
-    ├── test_shadows/           # Shadow ecosystem tests (147+ tests)
-    ├── test_pipeline/          # Pipeline stage tests
-    ├── test_ui/                # UI component tests
-    ├── test_integrity/         # Integrity watchdog tests
-    └── test_storage/           # Storage layer tests
+**Updated**: 2026-05-15 14:30 — Fixed C1 wfe_ratios NameError, tests pass
+```
+For new tasks:
+```
+- [ ] <task id>: <description> — <file(s) affected>
 ```
 
-## Model Routing (Flash vs Pro)
+#### Verification (do this at session START):
+1. Check `.claude/progress/` for the most recent progress file
+2. Cross-reference with `git log` and `git diff` to verify the recorded state matches reality
+3. If there's a discrepancy, update the progress file BEFORE doing any new work
+4. If no progress file exists, create one immediately from `git log` + working tree state
 
-DeepSeek Flash: data collection, simple classification, auxiliary processing
-DeepSeek Pro: deep analysis, adversarial reasoning, shadow analysis, final report writing
+#### Crash recovery:
+When a session starts and uncommitted changes exist with no matching progress file, the FIRST action is to reconstruct state:
+1. Read `git diff --stat` to see what files changed
+2. Read any new untracked files
+3. Write a progress file capturing what was in flight
+4. Then (and only then) continue work
 
-All LLM calls route through `gateway/async_client.py` — no module should call httpx directly.
+#### Anti-patterns (DO NOT DO):
+- "I'll write the checkpoint after I finish this next thing" → crash happens first
+- "This is a small change, no need to log it" → 10 small changes = 1 lost day
+- "The git log is enough" → git doesn't track task-level progress or what's half-done
 
-M1 Data Integrity Protocol is injected at the gateway level for all shadow calls.
+## Merge-Readiness Pack (MRP) Format
 
-## Shadow Ecosystem
+When completing a major module or encountering a complex logic deadlock, halt and produce an MRP:
 
-21+ independent shadow analysts across 7 types:
-- **Expert** (15): gold, crypto, energy, bonds, volatility, emerging, tech, financials, healthcare, consumer, industrials, metals, real_estate, macro
-- **Daredevil** (5): scalper, trend_rider, news_hound, fade_master, rotation_engine
-- **Catfish** (1): minority-opinion enforcer, activates at >=80% consensus
-- **Temp events** (dynamic): created/destroyed based on market events
-- **Missed path** (dynamic): counterfactual tracking for rejected directions
-- **Challenger** (dynamic): 3-stage elimination trials
-- **Beta** (configurable): experimental shadows
-
-Daily cycle: event scan → temp shadow lifecycle → parallel vote collection → ranking → collusion detection → challenger checks → emergency quota audit → memory update → crystallization.
-
-## Testing
-
-```bash
-# All tests
-cd projects/marketmind
-python -m pytest tests/ -v --tb=short -p no:warnings
-
-# Shadow ecosystem only
-python -m pytest tests/test_shadows/ -v --tb=short
-
-# Specific module
-python -m pytest tests/test_shadows/test_ranking_engine.py -v --tb=short
+```
+### MRP: <module name>
+**Status**: READY_FOR_REVIEW / BLOCKED / NEEDS_DECISION
+**Files changed**: <list>
+**Test results**: <passed/failed count>
+**Architecture decisions**: <list of AD-XXX if any>
+**Open questions**: <things needing human input>
+**Risk items**: <what could break>
+**Review requested from**: Sonnet (code review) / Opus (architecture review)
 ```
 
-Mock mode available for all pipeline stages via `--mock` flag.
+## Self-Correction Protocol
 
-## Design Constraints
+When encountering repeated errors or inefficient patterns caused by existing rules:
+1. Identify the root cause (specific rule, prompt, or workflow)
+2. Propose a concrete amendment to this CLAUDE.md
+3. Upon human approval, apply the edit
+4. Log the correction to auto-memory
 
-1. All tickers must be Robinhood-tradable (from `config/asset_universe.py`)
-2. DeepSeek Flash for data tasks, Pro for analysis tasks
-3. All LLM calls through `gateway/async_client.py` gateway
-4. Account state from `input/account_state.json` — no brokerage API
-5. Final report in Chinese, ASCII-only, narrative essay style
-6. Include specific price levels, not ranges
-7. Shadow analysis is independent — no shadow reads another's output during analysis
-8. Challenger data is opaque — invisible to target shadow until trial completes
-9. Append-only state — never modify early context
+## Agent Skills
+
+### Issue tracker
+GitHub Issues — use `gh issue` CLI for all operations. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+Default five-label vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+Multi-context — `CONTEXT-MAP.md` at repo root points to per-context `CONTEXT.md` files. Currently active: `projects/marketmind/`. See `docs/agents/domain.md`.
