@@ -227,24 +227,27 @@ async def fetch_all_sources(config: MarketMindConfig) -> list[NewsItem]:
 
 
 def _record_z0_metrics(sources, counts, issues, rss_count, api_count, rss_health, pre_dedup, post_dedup) -> None:
-    """Z0 baseline: append per-run metrics to data/metrics/baseline.jsonl (accumulates across days)."""
+    """Z0 baseline: append per-run metrics to .claude/metrics/baseline.jsonl (accumulates across days)."""
     import json as _json, os as _os
     from datetime import datetime, timezone
-    metrics_root = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".claude", "metrics")
-    _os.makedirs(metrics_root, exist_ok=True)
-    record = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "source_count": len(sources),
-        "rss_article_count": rss_count,
-        "api_article_count": api_count,
-        "rss_health_score": round(rss_health, 3),
-        "pre_dedup_total": pre_dedup,
-        "post_dedup_total": post_dedup,
-        "issues": issues[:10],
-    }
-    fpath = _os.path.join(metrics_root, "baseline.jsonl")
-    with open(fpath, "a", encoding="utf-8") as f:
-        f.write(_json.dumps(record, ensure_ascii=False) + "\n")
+    try:
+        metrics_root = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".claude", "metrics")
+        _os.makedirs(metrics_root, exist_ok=True)
+        record = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "source_count": len(sources),
+            "rss_article_count": rss_count,
+            "api_article_count": api_count,
+            "rss_health_score": round(rss_health, 3),
+            "pre_dedup_total": pre_dedup,
+            "post_dedup_total": post_dedup,
+            "issues": issues[:10],
+        }
+        fpath = _os.path.join(metrics_root, "baseline.jsonl")
+        with open(fpath, "a", encoding="utf-8") as f:
+            f.write(_json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 def _print_scout_report(sources: list, counts: dict[str, int], issues: list[str], total: int) -> None:
