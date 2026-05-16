@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger("marketmind.integrity.watchdog")
 
@@ -73,7 +73,7 @@ def extract_claims_m2(content: str, source_agent: str, session_id: str) -> list[
                 context=context,
                 source_agent=source_agent,
                 session_id=session_id,
-                timestamp=datetime.now().isoformat(),
+                timestamp=datetime.now(timezone.utc).isoformat(),
             ))
     return claims
 

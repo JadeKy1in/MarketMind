@@ -95,7 +95,9 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
     print("\nAI can also actively investigate using tools:")
     print("  - lookup_fundamentals: verify P/E, market cap, sector")
     print("  - search_news: search GNews for additional articles")
-    print("  - get_elite_opinion: query ELITE shadow analysts\n")
+    print("  - get_elite_opinion: query ELITE shadow analysts")
+    print("  - get_economic_calendar: upcoming FOMC, CPI, NFP events")
+    print("  - get_earnings_date: earnings dates for ticker(s)\n")
 
     # 0. Shadow Mother init
     shadow_db = None
@@ -112,6 +114,18 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
         create_daredevil_shadows(shadow_db, config.shadow)
         create_catfish_agent(shadow_db, config.shadow)
         mother = ShadowMother(config.shadow, shadow_db)
+
+    # 0.5 Economic calendar check (before news — informs pipeline confidence)
+    from marketmind.pipeline.economic_calendar import check_economic_calendar, get_event_confidence_discount
+    ctx.economic_events = await check_economic_calendar(
+        lookahead_hours=24,
+        fred_key=config.fred_key,
+    )
+    if ctx.economic_events.get("has_high_impact"):
+        discount = get_event_confidence_discount(ctx.economic_events)
+        print(f"\n  [Economic Calendar] HIGH-IMPACT event(s) detected — confidence discount: {discount:.0%}")
+        for evt in ctx.economic_events.get("high_impact_events", [])[:3]:
+            print(f"    - {evt['name']} ({evt['date']}, ~{evt['hours_until']}h)")
 
     # 1. News
     tracker.advance(1, "Fetching news...", ctx.stage_times)

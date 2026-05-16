@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timezone
 
 from marketmind.shadows.shadow_agent import (
-    ShadowAgent, ShadowAnalysisOutput, ShadowVote
+    ShadowAgent, ShadowAnalysisOutput, ShadowVote, defang_text
 )
 from marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
 from marketmind.config.settings import ShadowSettings
@@ -55,11 +55,15 @@ class CatfishAgent(ShadowAgent):
         return triggered, agreement_pct, max_dir
 
     async def _analyze(self, news_items: list[dict],
-                        market_data: dict) -> ShadowAnalysisOutput:
-        """Run minority-opinion analysis. Looks for consensus signals and counters."""
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                        market_data: dict,
+                        broadcast_messages: list | None = None) -> ShadowAnalysisOutput:
+        """Consensus-triggered minority opinion analysis.
 
-        # Check if we have a trigger from vote aggregation
+        When >=80% consensus detected (via market_data trigger), calls LLM at
+        temperature=0.8 to construct the best possible counter-argument.
+        Without a trigger, returns NO_CONSENSUS_DETECTED without an LLM call.
+        """
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         trigger_ticker = market_data.get("catfish_trigger_ticker")
         trigger_direction = market_data.get("catfish_trigger_direction")
         trigger_pct = market_data.get("catfish_trigger_agreement_pct", 0.0)
@@ -71,31 +75,42 @@ class CatfishAgent(ShadowAgent):
                 "agreement_pct": trigger_pct,
                 "date": today,
             }
-            # In production, this calls Flash at temperature=0.8 to construct counter-argument
-            thesis = (
-                f"CONSENSUS DETECTED on {trigger_ticker}: {trigger_direction} "
-                f"({trigger_pct:.0%}). Constructing counter-argument..."
-            )
-            votes = [ShadowVote(
-                shadow_id=self.shadow_id, shadow_type="catfish",
-                date=today, ticker=trigger_ticker,
-                direction="short" if trigger_direction == "long" else "long",
-                confidence=0.5,  # Catfish trades at low conviction
-                thesis=thesis[:200],
-                risk_note="Counter-consensus position; higher adverse-selection risk",
-                emergency_flag=False,
-            )]
+            return await super()._analyze(news_items, market_data)
         else:
-            thesis = "NO_CONSENSUS_DETECTED"
-            votes = []
+            return ShadowAnalysisOutput(
+                shadow_id=self.shadow_id,
+                date=today,
+                votes=[],
+                insights=["NO_CONSENSUS_DETECTED"],
+                methodology_notes=CATFISH_SYSTEM_PROMPT[:200],
+                quota_used=0,
+            )
 
-        return ShadowAnalysisOutput(
-            shadow_id=self.shadow_id,
-            date=today,
-            votes=votes,
-            insights=[thesis],
-            methodology_notes=CATFISH_SYSTEM_PROMPT[:200],
-            quota_used=1 if votes else 0,
+    def _build_user_prompt(self, news_items: list[dict], market_data: dict,
+                           broadcast_messages: list | None = None) -> str:
+        """Catfish-specific: construct the consensus challenge prompt."""
+        trigger_ticker = market_data.get("catfish_trigger_ticker", "UNKNOWN")
+        trigger_direction = market_data.get("catfish_trigger_direction", "UNKNOWN")
+        trigger_pct = market_data.get("catfish_trigger_agreement_pct", 0.8)
+
+        headlines = []
+        for item in news_items[:20]:
+            h = (getattr(item, "headline", None) or
+                 getattr(item, "title", None) or
+                 str(item.get("headline", "")) if hasattr(item, "get") else str(item))
+            if h and h not in headlines:
+                headlines.append(defang_text(str(h)[:200]))
+        news_context = "\n".join(f"- {h}" for h in headlines[:15]) if headlines else "No news"
+
+        return (
+            f"CONSENSUS DETECTED on {trigger_ticker}: {trigger_direction} "
+            f"({trigger_pct:.0%} agreement across shadows).\n\n"
+            f"You MUST construct the best possible argument for the OPPOSITE direction "
+            f"({ 'short' if trigger_direction == 'long' else 'long'}) using only "
+            f"verifiable data. If no legitimate counter-argument exists, state "
+            f"'NO_VALID_COUNTER' — never fabricate.\n\n"
+            f"News headlines:\n{news_context}\n\n"
+            f"Output using VOTE_START/VOTE_END blocks with confidence 0.3-0.6."
         )
 
 
@@ -115,6 +130,6 @@ CATFISH_CONFIG = ShadowConfig(
 def create_catfish_agent(state_db: ShadowStateDB,
                           settings: ShadowSettings) -> CatfishAgent:
     """Create the singleton catfish agent."""
-    if state_db.get_shadow(CATFISH_CONFIG.shadow_id) is None:
+    if state_db.get_shadow(CATFISH_CONFIG.shadow_id, caller_id="system") is None:
         state_db.create_shadow(CATFISH_CONFIG)
     return CatfishAgent(CATFISH_CONFIG, state_db, settings)

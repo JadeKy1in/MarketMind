@@ -44,7 +44,7 @@ def test_create_and_get_shadow(temp_db):
     )
     shadow_id = temp_db.create_shadow(config)
     assert shadow_id == "expert:gold:test_01"
-    retrieved = temp_db.get_shadow(shadow_id)
+    retrieved = temp_db.get_shadow(shadow_id, caller_id="system")
     assert retrieved is not None
     assert retrieved.display_name == "Test Gold Bug"
     assert retrieved.virtual_capital == 50000.0
@@ -105,7 +105,7 @@ def test_record_and_get_trades(temp_db):
     trade_id = temp_db.record_trade_open("test", trade)
     assert trade_id > 0
     temp_db.record_trade_close(trade_id, 160.0, "target", 0.0667)
-    history = temp_db.get_trade_history("test", limit=90)
+    history = temp_db.get_trade_history("test", caller_id="system", limit=90)
     assert len(history) == 1
     assert history[0].ticker == "AAPL"
     assert history[0].pnl_pct == pytest.approx(0.0667, rel=0.01)
@@ -126,7 +126,7 @@ def test_save_and_get_snapshot(temp_db):
         insights_generated=1
     )
     temp_db.save_snapshot("test", snap)
-    history = temp_db.get_snapshot_history("test", days=90)
+    history = temp_db.get_snapshot_history("test", caller_id="system", days=90)
     assert len(history) == 1
     assert history[0].achievement_tier == "elite"
 
@@ -153,7 +153,7 @@ def test_eliminate_shadow_marks_eliminated_at(temp_db):
                           display_name="T", methodology_prompt="...", virtual_capital=10000)
     temp_db.create_shadow(config)
     temp_db.eliminate_shadow("test", "Failed challenger comparison")
-    shadow = temp_db.get_shadow("test")
+    shadow = temp_db.get_shadow("test", caller_id="system")
     assert shadow.status == "eliminated"
     assert shadow.eliminated_at is not None
 
@@ -208,3 +208,35 @@ def test_wal_mode_enabled(temp_db):
     journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
     assert journal_mode.upper() == "WAL"
     conn.close()
+
+
+def test_emergency_quota_state_save_and_load(temp_db, sample_expert_config):
+    temp_db.create_shadow(sample_expert_config)
+    temp_db.save_emergency_quota_state(sample_expert_config.shadow_id, '{"test": 123}')
+    loaded = temp_db.load_emergency_quota_state(sample_expert_config.shadow_id)
+    assert loaded == '{"test": 123}'
+
+
+def test_emergency_quota_state_overwrite(temp_db, sample_expert_config):
+    temp_db.create_shadow(sample_expert_config)
+    temp_db.save_emergency_quota_state(sample_expert_config.shadow_id, '{"v": 1}')
+    temp_db.save_emergency_quota_state(sample_expert_config.shadow_id, '{"v": 2}')
+    loaded = temp_db.load_emergency_quota_state(sample_expert_config.shadow_id)
+    assert loaded == '{"v": 2}'
+
+
+def test_emergency_quota_state_missing_returns_none(temp_db):
+    result = temp_db.load_emergency_quota_state("nonexistent")
+    assert result is None
+
+
+def test_paper_live_gap_state_save_and_load(temp_db, sample_expert_config):
+    temp_db.create_shadow(sample_expert_config)
+    temp_db.save_paper_live_gap_state(sample_expert_config.shadow_id, '{"discount_rate": 0.12}')
+    loaded = temp_db.load_paper_live_gap_state(sample_expert_config.shadow_id)
+    assert loaded == '{"discount_rate": 0.12}'
+
+
+def test_paper_live_gap_state_missing_returns_none(temp_db):
+    result = temp_db.load_paper_live_gap_state("nonexistent")
+    assert result is None

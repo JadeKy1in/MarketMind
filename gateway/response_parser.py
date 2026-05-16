@@ -4,6 +4,24 @@ import json
 import re
 
 
+def strip_markdown_fences(content: str) -> str:
+    """Remove ```json / ``` ... ``` wrappers from LLM output.
+
+    Handles the common pattern where LLMs wrap JSON output in markdown code
+    fences. Strips the opening fence line (with or without language tag) and
+    the closing fence marker.
+    """
+    content = content.strip()
+    if content.startswith("```"):
+        lines = content.split("\n")
+        # Remove opening fence line (e.g. ```json or bare ```)
+        content = "\n".join(lines[1:]) if len(lines) > 1 else content[len(lines[0]):]
+        # Remove trailing ``` if present
+        if content.endswith("```"):
+            content = content[:-3]
+    return content
+
+
 def extract_json(content: str) -> dict | list:
     """Extract JSON object/array from LLM response.
 

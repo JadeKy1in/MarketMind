@@ -48,7 +48,7 @@ SOURCES: list[Source] = [
 
     # ── China / Greater China ──────────────────────────────────────
     Source("SCMP Business", SourceTier.RELIABLE, "https://www.scmp.com/rss/4/feed/", "rss", 0.80, 2.0),
-    Source("Caixin", SourceTier.PRIMARY, "", "rss", 0.82, 2.0, status=SourceStatus.DEAD),  # API endpoint requires unknown Accept header; RSSHub route /caixinglobal/latest available for self-hosted
+    Source("China Money Network", SourceTier.RELIABLE, "https://www.chinamoneynetwork.com/feed/", "rss", 0.72, 1.0),  # Replaces Caixin — free English China finance/VC news RSS
     Source("Xinhua Finance", SourceTier.RELIABLE, "http://www.xinhuanet.com/english/rss/worldrss.xml", "rss", 0.72, 2.0),
 
     # ── Japan / Asia Pacific ───────────────────────────────────────
@@ -105,8 +105,13 @@ SOURCES: list[Source] = [
            "https://trumpstruth.org/feed", "rss", 0.15, 1.0),
 
     # ── Insider / Smart Money (Phase G Layer 4) ─────────────────────
+    # House Stock Watcher S3 bucket DEAD as of 2026-05 — all regions return 403.
+    # Senate Stock Watcher API (senatestockwatcher.com) and CapitolTrades BFF
+    # (bff.capitoltrades.com) also confirmed DEAD (503/TLS errors). No free,
+    # programmatic congressional trade endpoint currently available.
     Source("Congress Trades", SourceTier.BEST_EFFORT,
-           "https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json", "congress_api", 0.20, 1.0),
+           "https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json",
+           "congress_api", 0.20, 1.0, status=SourceStatus.DEAD),
     Source("SEC Form 4", SourceTier.BEST_EFFORT,
            "", "sec_form4", 0.20, 1.0),
     Source("SEC 13F", SourceTier.BEST_EFFORT,

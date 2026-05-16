@@ -1,4 +1,4 @@
-﻿"""Flash preprocessor: batch signal extraction, classification, denoising."""
+"""Flash preprocessor: batch signal extraction, classification, denoising."""
 from __future__ import annotations
 import json
 import logging
@@ -7,6 +7,7 @@ logger = logging.getLogger("marketmind.pipeline.flash")
 from dataclasses import dataclass, field
 
 from marketmind.gateway.async_client import chat_batch_flash, chat_flash
+from marketmind.gateway.response_parser import strip_markdown_fences
 from marketmind.pipeline.scout import NewsItem
 
 
@@ -125,12 +126,7 @@ async def preprocess_single(item: NewsItem) -> FlashSignal | None:
 
 def _parse_json_response(content: str) -> list[dict]:
     """Extract JSON array from LLM response, handling markdown wrapping."""
-    content = content.strip()
-    if content.startswith("```"):
-        lines = content.split("\n")
-        content = "\n".join(lines[1:]) if len(lines) > 1 else content
-        if content.endswith("```"):
-            content = content[:-3]
+    content = strip_markdown_fences(content)
     try:
         parsed = json.loads(content)
         if isinstance(parsed, list):

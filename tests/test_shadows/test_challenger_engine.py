@@ -109,7 +109,7 @@ def test_stage2_challenger_created_3_consecutive_bottom(engine, temp_shadow_db):
     assert "challenger" in stage.challenger_id
 
     # Verify challenger exists in DB
-    challenger = temp_shadow_db.get_shadow(stage.challenger_id)
+    challenger = temp_shadow_db.get_shadow(stage.challenger_id, caller_id="system")
     assert challenger is not None
     assert challenger.shadow_type == "challenger"
     assert challenger.parent_shadow_id == "expert:test:s2_challenger"
@@ -135,6 +135,7 @@ def test_challenger_not_visible_in_rankings(engine, temp_shadow_db):
 # ── Stage 3: Comparison trial ─────────────────────────────────────────────
 
 @pytest.mark.asyncio
+@pytest.mark.filterwarnings("ignore:Precision loss occurred:RuntimeWarning:scipy")
 async def test_stage3_replacement_when_challenger_outperforms(engine, temp_shadow_db):
     """When challenger significantly outperforms target, verdict is REPLACE_TARGET."""
     target_id = "expert:test:s3_replace"
@@ -151,18 +152,19 @@ async def test_stage3_replacement_when_challenger_outperforms(engine, temp_shado
 
     # Manually add snapshots for the challenger to simulate a 2-week trial
     # Challenger consistently outperforms target with higher daily returns
+    # Slight noise avoids scipy precision-loss warning on uniform data
     for i in range(10):
         date = f"2026-05-{10 + i:02d}"
-        # Target: low returns (0.001 per day)
+        # Target: low returns (~0.001 per day with noise)
         _add_snapshot(temp_shadow_db, target_id, date,
                       composite_score=0.2 + i * 0.005, percentile_rank=0.1,
-                      daily_return_pct=0.001,
+                      daily_return_pct=0.001 + i * 0.0001,
                       cumulative_return_pct=0.01 + i * 0.001,
                       calmar_ratio=0.2)
-        # Challenger: higher returns (0.03 per day)
+        # Challenger: higher returns (~0.03 per day with noise)
         _add_snapshot(temp_shadow_db, challenger_id, date,
                       composite_score=0.5 + i * 0.01, percentile_rank=0.5,
-                      daily_return_pct=0.03,
+                      daily_return_pct=0.03 + i * 0.0001,
                       cumulative_return_pct=0.10 + i * 0.03,
                       max_drawdown_pct=0.05,
                       calmar_ratio=0.8)
@@ -181,6 +183,7 @@ async def test_stage3_replacement_when_challenger_outperforms(engine, temp_shado
 
 
 @pytest.mark.asyncio
+@pytest.mark.filterwarnings("ignore:Precision loss occurred:RuntimeWarning:scipy")
 async def test_stage3_restore_when_challenger_underperforms(engine, temp_shadow_db):
     """When challenger underperforms target, verdict is RESTORE_TARGET."""
     target_id = "expert:test:s3_restore"
@@ -194,16 +197,17 @@ async def test_stage3_restore_when_challenger_underperforms(engine, temp_shadow_
     challenger_id = stage.challenger_id
 
     # Add trial snapshots: target performs well, challenger does poorly
+    # Slight noise avoids scipy precision-loss warning on uniform data
     for i in range(10):
         date = f"2026-06-{10 + i:02d}"
         _add_snapshot(temp_shadow_db, target_id, date,
                       composite_score=0.7, percentile_rank=0.7,
-                      daily_return_pct=0.02,
+                      daily_return_pct=0.02 + i * 0.0001,
                       cumulative_return_pct=0.15 + i * 0.02,
                       calmar_ratio=0.8)
         _add_snapshot(temp_shadow_db, challenger_id, date,
                       composite_score=0.15, percentile_rank=0.05,
-                      daily_return_pct=-0.01,
+                      daily_return_pct=-0.01 - i * 0.0001,
                       cumulative_return_pct=-0.05 - i * 0.01,
                       max_drawdown_pct=0.20,
                       calmar_ratio=-0.1)
@@ -215,6 +219,7 @@ async def test_stage3_restore_when_challenger_underperforms(engine, temp_shadow_
 
 # ── Statistical and gate tests ────────────────────────────────────────────
 
+@pytest.mark.filterwarnings("ignore:Precision loss occurred:RuntimeWarning:scipy")
 def test_paired_ttest_statistical_gate(engine, temp_shadow_db):
     """Paired t-test correctly computes p-value for one-sided test at alpha=0.10."""
     target_id = "expert:test:s3_ttest"
@@ -224,8 +229,9 @@ def test_paired_ttest_statistical_gate(engine, temp_shadow_db):
 
     # Add 10 daily snapshots for paired trial
     # Target daily returns (simulated via cumulative changes)
-    target_returns = [0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01]
-    challenger_returns = [0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02]
+    # Slight noise avoids scipy precision-loss warning on uniform data
+    target_returns = [0.01 + i * 0.0001 for i in range(10)]
+    challenger_returns = [0.02 + i * 0.0001 for i in range(10)]
 
     # We need daily return values in snapshots for the t-test
     for i in range(10):
@@ -327,6 +333,32 @@ def test_challenger_created_from_existing_config(engine, temp_shadow_db):
     assert challenger_id is not None
     assert "challenger" in challenger_id
 
-    challenger = temp_shadow_db.get_shadow(challenger_id)
+    challenger = temp_shadow_db.get_shadow(challenger_id, caller_id="system")
     assert challenger.shadow_type == "challenger"
     assert challenger.parent_shadow_id == "expert:test:manual"
+
+
+# ── C.7 Integration test ─────────────────────────────────────────────────────
+
+def test_challenger_config_inherits_parent(temp_shadow_db):
+    """挑战者创建时正确继承父shadow_id和generation"""
+    from marketmind.shadows.challenger_engine import ChallengerEngine
+    from marketmind.shadows.shadow_state import ShadowConfig
+
+    settings = ShadowSettings()
+    parent_config = ShadowConfig(
+        shadow_id="expert:gold:parent_test", shadow_type="expert",
+        display_name="Parent Gold", methodology_prompt="Gold expert.",
+        virtual_capital=50000.0, domain="gold", generation=2,
+    )
+    temp_shadow_db.create_shadow(parent_config)
+
+    engine = ChallengerEngine(temp_shadow_db, settings)
+    challenger_id = engine.create_challenger("expert:gold:parent_test")
+
+    assert challenger_id is not None
+    challenger = temp_shadow_db.get_shadow(challenger_id, caller_id="system")
+    assert challenger is not None
+    assert challenger.parent_shadow_id == "expert:gold:parent_test"
+    assert challenger.generation == 3  # parent=2 -> challenger=3
+    assert challenger.shadow_type == "challenger"

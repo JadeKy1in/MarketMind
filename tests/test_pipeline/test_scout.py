@@ -74,6 +74,7 @@ def test_deduplicate_keeps_distinct_items():
 
 
 @pytest.mark.asyncio
+@pytest.mark.filterwarnings("ignore::DeprecationWarning:feedparser")
 async def test_fetch_source_rss_returns_items():
     rss_xml = """<?xml version="1.0"?>
     <rss version="2.0"><channel>

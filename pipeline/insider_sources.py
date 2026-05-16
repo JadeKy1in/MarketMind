@@ -1,7 +1,9 @@
 """Phase G Layer 4: Insider / Smart Money data sources.
 
-Congress trades via House Stock Watcher (public S3), SEC Form 4 and 13F via
-EDGAR Atom feeds, plus insider cluster detection for priority boosting.
+Congress trades: SOURCE DEAD as of 2026-05 (House Stock Watcher S3 403,
+Senate Stock Watcher 503/TLS, CapitolTrades BFF 503). Returns empty list
+with one-time warning. SEC Form 4 and 13F via EDGAR Atom feeds remain
+active. Insider cluster detection for priority boosting.
 
 All sources are free, use no API keys, and return NewsItem objects
 with content_type="insider_signal" for Flash bypass routing.
@@ -11,7 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 from typing import Any
 
 import feedparser
@@ -20,70 +22,28 @@ import httpx
 logger = logging.getLogger("marketmind.pipeline.insider_sources")
 
 
+# One-time warning flag for dead sources (module-level, persists for process lifetime)
+_congress_trades_dead_warned: bool = False
+
+
 async def fetch_congress_trades() -> list[Any]:
-    """Fetch Congressional stock trades from House Stock Watcher (public S3, free, no key).
+    """Fetch Congressional stock trades — SOURCE DEAD as of 2026-05.
 
-    Data: https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json
-    Source: STOCK Act disclosures — legally-mandated public filings by Congress members.
-    Filter: last 30 days. Cluster bonus: 3+ members same ticker within 14 days → 1.5x priority.
+    House Stock Watcher S3 (all regions 403), Senate Stock Watcher API (503/TLS),
+    and CapitolTrades BFF (503 CloudFront) are all confirmed DEAD. No free,
+    programmatic congressional trade endpoint is currently available.
+
+    Returns empty list with a one-time warning log.
     """
-    # Lazy imports to avoid circular deps at module level
-    from marketmind.config.source_authority import SourceTier
-    from marketmind.pipeline.scout import NewsItem
-
-    items: list[NewsItem] = []
-    try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            resp = await client.get(
-                "https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json",
-                headers={"User-Agent": "MarketMind/0.1 (Financial Research Bot)"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            if not isinstance(data, list):
-                return items
-
-            cutoff = datetime.now(timezone.utc) - timedelta(days=30)
-            for tx in data:
-                try:
-                    tx_date_str = tx.get("transaction_date", "")
-                    if not tx_date_str:
-                        continue
-                    tx_date = datetime.fromisoformat(tx_date_str.replace("Z", "+00:00"))
-                    if tx_date < cutoff:
-                        continue
-                    ticker = (tx.get("ticker") or "").upper()
-                    rep = tx.get("representative", tx.get("name", "Unknown"))
-                    tx_type = tx.get("type", "unknown")
-                    amount = tx.get("amount", "unknown")
-                    if not ticker:
-                        continue
-                    direction = "bullish" if tx_type.lower() in ("purchase", "buy") else "bearish"
-                    title = f"[Congress] {rep} — {tx_type.upper()} ${ticker} | {amount}"
-                    items.append(NewsItem(
-                        id=hashlib.sha256(
-                            f"congress:{rep}:{ticker}:{tx_date_str}".encode()
-                        ).hexdigest()[:16],
-                        title=title,
-                        url="",
-                        source_name="Congress Trades",
-                        source_tier=int(SourceTier.BEST_EFFORT),
-                        published_at=tx_date_str,
-                        summary=(
-                            f"Congress member {rep} reported {tx_type} of ${ticker}. "
-                            f"Amount: {amount}. Filed under STOCK Act public disclosure. "
-                            f"Direction: {direction}. Individual trade — cluster weight if "
-                            f"3+ members trade same ticker within 14 days."
-                        ),
-                        source_reliability=0.20,
-                        content_type="insider_signal",
-                    ))
-                except Exception:
-                    continue
-        logger.info("Congress trades: %d fetched (30-day window)", len(items))
-    except Exception as e:
-        logger.warning("Congress trades fetch failed: %s", e)
-    return items
+    global _congress_trades_dead_warned
+    if not _congress_trades_dead_warned:
+        _congress_trades_dead_warned = True
+        logger.warning(
+            "Congress Trades source is DEAD (House Stock Watcher S3: 403, "
+            "Senate Stock Watcher API: 503/TLS, CapitolTrades BFF: 503 CloudFront). "
+            "No free congressional trade endpoint available. Returning empty list."
+        )
+    return []
 
 
 async def fetch_form4_insider() -> list[Any]:
@@ -98,7 +58,7 @@ async def fetch_form4_insider() -> list[Any]:
     items: list[NewsItem] = []
     try:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            headers = {"User-Agent": "MarketMind/0.1 (contact via GitHub)"}
+            headers = {"User-Agent": "MarketMind/0.1 (contact@marketmind.dev)"}
             resp = await client.get(
                 "https://www.sec.gov/cgi-bin/browse-edgar",
                 headers=headers,
@@ -145,7 +105,7 @@ async def fetch_13f_holdings() -> list[Any]:
     items: list[NewsItem] = []
     try:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            headers = {"User-Agent": "MarketMind/0.1 (contact via GitHub)"}
+            headers = {"User-Agent": "MarketMind/0.1 (contact@marketmind.dev)"}
             resp = await client.get(
                 "https://www.sec.gov/cgi-bin/browse-edgar",
                 headers=headers,

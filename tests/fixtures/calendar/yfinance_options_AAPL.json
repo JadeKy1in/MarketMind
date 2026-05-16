@@ -1,0 +1,80 @@
+{
+  "ticker": "AAPL",
+  "underlying_price": 195.0,
+  "market_cap": 3000000000000,
+  "avg_daily_option_volume": 1200000,
+  "options": [
+    {
+      "contractSymbol": "AAPL250620C00200000",
+      "strike": 200.0,
+      "optionType": "call",
+      "lastPrice": 4.80,
+      "volume": 45000,
+      "openInterest": 180000,
+      "expiration": "2025-06-20",
+      "dte": 35,
+      "impliedVolatility": 0.22,
+      "premium_notional": 216000.0
+    },
+    {
+      "contractSymbol": "AAPL250620P00190000",
+      "strike": 190.0,
+      "optionType": "put",
+      "lastPrice": 3.20,
+      "volume": 32000,
+      "openInterest": 140000,
+      "expiration": "2025-06-20",
+      "dte": 35,
+      "impliedVolatility": 0.24,
+      "premium_notional": 102400.0
+    },
+    {
+      "contractSymbol": "AAPL250719C00210000",
+      "strike": 210.0,
+      "optionType": "call",
+      "lastPrice": 3.50,
+      "volume": 18000,
+      "openInterest": 95000,
+      "expiration": "2025-07-19",
+      "dte": 64,
+      "impliedVolatility": 0.20,
+      "premium_notional": 63000.0
+    },
+    {
+      "contractSymbol": "AAPL250621C00195000",
+      "strike": 195.0,
+      "optionType": "call",
+      "lastPrice": 1.50,
+      "volume": 2500,
+      "openInterest": 5000,
+      "expiration": "2025-06-21",
+      "dte": 1,
+      "impliedVolatility": 0.15,
+      "premium_notional": 3750.0
+    },
+    {
+      "contractSymbol": "AAPL260117C00220000",
+      "strike": 220.0,
+      "optionType": "call",
+      "lastPrice": 8.50,
+      "volume": 8500,
+      "openInterest": 42000,
+      "expiration": "2026-01-17",
+      "dte": 215,
+      "impliedVolatility": 0.26,
+      "premium_notional": 72250.0
+    },
+    {
+      "contractSymbol": "AAPL250620C00195000",
+      "strike": 195.0,
+      "optionType": "call",
+      "lastPrice": 2.80,
+      "volume": 38000,
+      "openInterest": 160000,
+      "expiration": "2025-06-20",
+      "dte": 35,
+      "impliedVolatility": 0.18,
+      "premium_notional": 106400.0
+    }
+  ]
+}

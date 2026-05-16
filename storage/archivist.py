@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -49,7 +49,7 @@ class MarketMindArchive:
                 pass
 
     def today_path(self) -> Path:
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         return self.base_dir / str(now.year) / f"{now.month:02d}" / f"{now.day:02d}"
 
     def ensure_dirs(self) -> Path:
@@ -160,11 +160,11 @@ class MarketMindArchive:
             "rule_id": rule_id,
             "event": event,
             "details": details,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         audit_dir = self.base_dir / "rule_audit"
         audit_dir.mkdir(parents=True, exist_ok=True)
-        audit_file = audit_dir / f"{datetime.now().strftime('%Y-%m-%d')}.jsonl"
+        audit_file = audit_dir / f"{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.jsonl"
         with open(audit_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
@@ -175,7 +175,7 @@ class MarketMindArchive:
         audit_dir = self.base_dir / "rule_audit"
         if not audit_dir.exists():
             return []
-        cutoff = datetime.now() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         entries = []
         for f in sorted(audit_dir.glob("*.jsonl"), reverse=True):
             with open(f, "r", encoding="utf-8") as fh:

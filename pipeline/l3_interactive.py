@@ -40,8 +40,11 @@ async def run_l3_interactive(ctx: SessionContext, cli_handler) -> bool:
     results = l3_result.results if hasattr(l3_result, 'results') else []
 
     # Display results
+    g_count = sum(1 for r in results if getattr(r, 'light', '') == 'green') if results else 0
+    y_count = sum(1 for r in results if getattr(r, 'light', '') == 'yellow') if results else 0
+    r_count = sum(1 for r in results if getattr(r, 'light', '') == 'red') if results else 0
     print(f"\n{'─'*60}")
-    print(f"  [L3] 技术面分析完成 — 共分析 {len(results)} 个标的")
+    print(f"  [L3] 共{len(results)}标的 | 绿灯{g_count}个 | 黄灯{y_count}个 | 红灯{r_count}个")
 
     if green_lights:
         print(f"\n  绿灯标的 (入场信号确认):")

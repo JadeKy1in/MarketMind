@@ -53,6 +53,19 @@ def extract_numbers(text: str) -> set[float]:
     return numbers
 
 
+def update_whitelist(existing_whitelist: set[float], new_numbers: set[float]) -> set[float]:
+    """Extend the numeric whitelist with post-hoc tool result numbers.
+
+    Red Team Resolution (finding 1.2): L1 tool results inject NEW numbers after
+    the original whitelist was built from news text. This function adds tool-
+    derived numbers so scan_output() does not flag them as fabricated.
+
+    Call this after each tool execution, before the next LLM generation.
+    Returns the updated whitelist (union of existing + new).
+    """
+    return existing_whitelist | new_numbers
+
+
 def scan_output(output: str, source_numbers: set[float],
                 strip_hallucinations: bool = True) -> tuple[str, list[str]]:
     """Scan LLM output for numbers not in the source whitelist.
@@ -121,19 +134,49 @@ def strip_meta_commentary(text: str) -> str:
 
     Strips SHORT clauses (up to 60 chars) containing meta phrases.
     Uses non-greedy matching to avoid eating the entire text.
+
+    Preserves knowledge-cutoff mentions that include temporal awareness
+    (e.g., "my knowledge cutoff is 2023, but today is 2026-05-16")
+    to avoid stripping time-anchor context injected by the gateway.
     """
-    patterns = [
-        # Chinese patterns — match single clause only
+    # Temporal markers — if a meta-commentary match contains any of these,
+    # it is preserved because it shows the LLM has integrated the time anchor.
+    _TEMPORAL_MARKERS = re.compile(
+        r'today is|current date|current year|今天[是日]|当前日期|当前时间|20[2-9]\d[/\-年]',
+        re.IGNORECASE,
+    )
+
+    # Unconditional patterns — always strip, no temporal-awareness check needed
+    unconditional = [
+        # Chinese patterns
         (r'作为(AI|人工智能|语言模型)[^，。]{0,50}[，。]', ''),
         (r'(基于|根据)(我|我的|训练)(数据|知识)[^，。]{0,50}[，。]', ''),
         (r'(我|我们)(不知道|不清楚|没有|无法获取)(实时|当前|最新)[^，。]{0,50}[，。]', ''),
-        (r'(我的|我们的)(知识|数据)(截止|只到)[^，。]{0,50}[，。]', ''),
-        # English patterns — match single sentence only
+        # English patterns
         (r'(?i)as an (AI|language model|artificial intelligence)[^.!]{0,50}[.!]', ''),
         (r'(?i)based on my (training|knowledge)[^.!]{0,50}[.!]', ''),
         (r'(?i)I (don\.t have|do not have) (access to |real.time |current )[^.!]{0,50}[.!]', ''),
+    ]
+
+    # Temporal-aware patterns — strip ONLY if the matched clause does NOT
+    # contain a temporal-awareness marker (date, "today", "当前日期", etc.).
+    # This preserves sentences like "my knowledge cutoff is 2023, but today
+    # is 2026-05-16" that demonstrate the LLM has integrated the time anchor.
+    temporal_aware = [
+        (r'(我的|我们的)(知识|数据)(截止|只到)[^，。]{0,50}[，。]', ''),
         (r'(?i)(my |the )?(knowledge cutoff|training data)[^.!]{0,50}[.!]', ''),
     ]
-    for pattern, replacement in patterns:
+
+    for pattern, replacement in unconditional:
         text = re.sub(pattern, replacement, text)
+
+    for pattern, replacement in temporal_aware:
+        def _preserve_temporal(match):
+            matched = match.group(0)
+            if _TEMPORAL_MARKERS.search(matched):
+                return matched  # keep — contains temporal awareness
+            return replacement  # strip — pure meta-commentary
+
+        text = re.sub(pattern, _preserve_temporal, text)
+
     return text

@@ -1,5 +1,6 @@
 ﻿"""Tests for ExpertShadow and factory."""
 import pytest
+from unittest.mock import AsyncMock, patch
 
 from marketmind.shadows.expert_shadows import (
     ExpertShadow, create_expert_shadows, EXPERT_SHADOW_CONFIGS
@@ -109,24 +110,122 @@ VOTE_END"""
         assert votes[0].emergency_flag is True
 
 
-def test_all_15_configs_unique_ids():
+def test_all_16_configs_unique_ids():
     ids = [c.shadow_id for c in EXPERT_SHADOW_CONFIGS]
-    assert len(ids) == len(set(ids)) == 15
+    assert len(ids) == len(set(ids)) == 16
 
 
-def test_all_15_configs_valid_domains():
+def test_all_16_configs_valid_domains():
     domains = {c.domain for c in EXPERT_SHADOW_CONFIGS}
     expected = {"gold", "crypto", "energy", "bonds", "volatility", "emerging",
                 "tech", "financials", "healthcare", "consumer", "industrials",
-                "metals", "real_estate", "fx", "macro"}
+                "metals", "real_estate", "fx", "macro", "short"}
     assert domains == expected
 
 
-def test_factory_creates_15_shadows(temp_shadow_db):
-    """Factory creates 15 shadows without errors."""
+def test_factory_creates_16_shadows(temp_shadow_db):
+    """Factory creates 16 shadows without errors."""
     settings = ShadowSettings()
     shadows = create_expert_shadows(temp_shadow_db, settings)
-    assert len(shadows) == 15
+    assert len(shadows) == 16
     assert all(isinstance(s, ExpertShadow) for s in shadows)
     visible = temp_shadow_db.get_visible_shadows()
-    assert len(visible) == 15
+    assert len(visible) == 16
+
+
+# ── C.7 LLM integration tests ────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_expert_analyze_with_mock_llm_produces_votes(temp_shadow_db):
+    """ExpertShadow._analyze() 调用 mock LLM 并正确解析投票"""
+    from marketmind.shadows.expert_shadows import ExpertShadow
+    from marketmind.shadows.shadow_state import ShadowConfig
+
+    config = ShadowConfig(
+        shadow_id="expert:gold:test_llm", shadow_type="expert",
+        display_name="Test Gold LLM", methodology_prompt="You are a gold expert.",
+        virtual_capital=50000.0, domain="gold", temperature=0.3,
+    )
+    agent = ExpertShadow(config, temp_shadow_db, ShadowSettings())
+
+    mock_result = {
+        "content": (
+            "INSIGHT: Gold looks bullish\n"
+            "VOTE_START\n"
+            "ticker: GLD\ndirection: long\nconfidence: 0.75\n"
+            "thesis: Central bank buying supports prices\n"
+            "risk_note: USD strength could reverse\n"
+            "VOTE_END\n"
+            "VOTE_START\n"
+            "ticker: GDX\ndirection: short\nconfidence: 0.45\n"
+            "thesis: Mining costs rising\n"
+            "risk_note: Gold price may offset costs\n"
+            "VOTE_END"
+        ),
+        "latency_ms": 600,
+    }
+
+    with patch("marketmind.gateway.async_client.chat_with_integrity",
+               new_callable=AsyncMock, return_value=mock_result):
+        output = await agent._analyze(
+            [{"headline": "Gold hits new high as central banks stockpile"}], {}
+        )
+
+    assert len(output.votes) == 2
+    assert output.votes[0].ticker == "GLD"
+    assert output.votes[0].direction == "long"
+    assert output.votes[0].confidence == 0.75
+    assert output.votes[1].ticker == "GDX"
+    assert output.votes[1].direction == "short"
+
+
+@pytest.mark.asyncio
+async def test_expert_domain_filtering_applied(temp_shadow_db):
+    """领域过滤生效：无关新闻被排除"""
+    from marketmind.shadows.expert_shadows import ExpertShadow
+    from marketmind.shadows.shadow_state import ShadowConfig
+
+    config = ShadowConfig(
+        shadow_id="expert:gold:test_filter", shadow_type="expert",
+        display_name="Test Filter", methodology_prompt="Gold expert.",
+        virtual_capital=50000.0, domain="gold", temperature=0.3,
+    )
+    agent = ExpertShadow(config, temp_shadow_db, ShadowSettings())
+
+    news = [
+        {"headline": "Gold prices surge on safe-haven demand"},
+        {"headline": "Bitcoin drops 5% as crypto selloff intensifies"},
+        {"headline": "Oil prices steady after OPEC meeting"},
+        {"headline": "Silver follows gold higher in precious metals rally"},
+    ]
+
+    # 验证过滤逻辑
+    filtered = agent._filter_news_by_domain(news)
+    headlines = [item.get("headline", "") for item in filtered]
+    assert any("Gold" in h for h in headlines)
+    assert any("Silver" in h for h in headlines)
+    # Bitcoin和Oil不应出现在黄金领域的过滤结果中
+    bitcoin_items = [h for h in headlines if "Bitcoin" in h]
+    assert len(bitcoin_items) == 0
+
+
+@pytest.mark.asyncio
+async def test_expert_empty_llm_response_graceful(temp_shadow_db):
+    """LLM返回空内容 -> 不崩溃，不产生投票"""
+    from marketmind.shadows.expert_shadows import ExpertShadow
+    from marketmind.shadows.shadow_state import ShadowConfig
+
+    config = ShadowConfig(
+        shadow_id="expert:gold:test_empty", shadow_type="expert",
+        display_name="Test Empty", methodology_prompt="Gold expert.",
+        virtual_capital=50000.0, domain="gold", temperature=0.3,
+    )
+    agent = ExpertShadow(config, temp_shadow_db, ShadowSettings())
+
+    mock_result = {"content": "", "latency_ms": 100}
+    with patch("marketmind.gateway.async_client.chat_with_integrity",
+               new_callable=AsyncMock, return_value=mock_result):
+        output = await agent._analyze([{"headline": "Gold steady"}], {})
+
+    assert len(output.votes) == 0
+    assert output.quota_used == 0  # 空内容不消耗配额

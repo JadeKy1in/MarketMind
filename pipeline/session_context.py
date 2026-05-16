@@ -49,5 +49,30 @@ class SessionContext:
     red_team_report: Any = None
     resonance: Any = None
 
+    # Phase G Layer 6: Economic calendar (set by glue layer at stage 0.5)
+    economic_events: dict = field(default_factory=dict)  # from check_economic_calendar()
+
     # Timing
     stage_times: dict[str, float] = field(default_factory=dict)
+
+
+def get_date_context() -> str:
+    """Generate standardized date context for LLM prompts — dual time anchor.
+
+    Called fresh on every use (not cached) to avoid timestamp staleness
+    during long-running sessions. Uses UTC to eliminate DST ambiguity.
+
+    Returns a string suitable for appending to system prompts.
+    """
+    from datetime import datetime, timezone as _tz
+    now = datetime.now(_tz.utc)
+    today_str = now.strftime("%Y年%m月%d日")
+    return (
+        f"\n\n[TIME ANCHOR — READ CAREFULLY]\n"
+        f"CURRENT DATE: {today_str} (UTC).\n"
+        f"YOUR TRAINING CUTOFF: approximately January 2026.\n"
+        f"All data from the current month that you do not have in training "
+        f"is provided via the NEWS HEADLINES and MARKET SIGNALS below.\n"
+        f"Do NOT assume any post-cutoff events unless they appear in the provided data.\n"
+        f"Do NOT fabricate dates or timestamps — use only the CURRENT DATE above."
+    )

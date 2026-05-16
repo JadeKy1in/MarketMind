@@ -179,7 +179,7 @@ class CashReframingTest:
 
         Returns DE as a float (clamped to reasonable range to avoid division issues).
         """
-        trades = self.state_db.get_trade_history(shadow_id, limit=days * 2)
+        trades = self.state_db.get_trade_history(shadow_id, caller_id="system", limit=days * 2)
         open_trades = self.state_db.get_open_trades(shadow_id)
 
         # Categorize closed trades
@@ -336,12 +336,12 @@ class CashReframingTest:
 
     def _get_cumulative_return(self, shadow_id: str) -> float:
         """Get cumulative return from snapshot or compute from trades."""
-        snap = self.state_db.get_latest_snapshot(shadow_id)
+        snap = self.state_db.get_latest_snapshot(shadow_id, caller_id="system")
         if snap and snap.cumulative_return_pct is not None:
             return snap.cumulative_return_pct
 
         # Fallback: compute from trade history
-        trades = self.state_db.get_trade_history(shadow_id, limit=500)
+        trades = self.state_db.get_trade_history(shadow_id, caller_id="system", limit=500)
         return sum(t.pnl_pct or 0.0 for t in trades if t.exit_price is not None)
 
     @staticmethod

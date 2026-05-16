@@ -184,6 +184,23 @@ def test_non_inferiority_tost_on_returns(reframing_test, temp_shadow_db):
 
 # ── Test 6: cash reframing injection in gateway ────────────────────────────
 
+def _gateway_mock_response(content):
+    resp = MagicMock()
+    resp.json.return_value = {
+        "choices": [{"message": {"content": content}}],
+        "usage": {"total_tokens": 200}
+    }
+    resp.status_code = 200
+    resp.raise_for_status.return_value = None
+    return resp
+
+
+def _gateway_mock_client(mock_response):
+    client = MagicMock()
+    client.post = AsyncMock(return_value=mock_response)
+    return client
+
+
 @pytest.mark.asyncio
 async def test_cash_reframing_injection_in_gateway():
     """Verify that cash_reframing_ticker triggers M1 injection in gateway."""
@@ -191,13 +208,9 @@ async def test_cash_reframing_injection_in_gateway():
         chat_with_integrity, init_gateway,
     )
 
-    mock_response = {
-        "choices": [{"message": {"content": "I would not buy AAPL today."}}],
-        "usage": {"total_tokens": 200}
-    }
-    mock_http = AsyncMock()
-    mock_http.post.return_value.json = MagicMock(return_value=mock_response)
-    mock_http.post.return_value.status_code = 200
+    mock_http = _gateway_mock_client(
+        _gateway_mock_response("I would not buy AAPL today.")
+    )
 
     with patch("httpx.AsyncClient", return_value=mock_http):
         init_gateway("test-key")
@@ -224,13 +237,9 @@ async def test_cash_reframing_injection_not_applied_without_ticker():
         chat_with_integrity, init_gateway,
     )
 
-    mock_response = {
-        "choices": [{"message": {"content": "Hold position."}}],
-        "usage": {"total_tokens": 100}
-    }
-    mock_http = AsyncMock()
-    mock_http.post.return_value.json = MagicMock(return_value=mock_response)
-    mock_http.post.return_value.status_code = 200
+    mock_http = _gateway_mock_client(
+        _gateway_mock_response("Hold position.")
+    )
 
     with patch("httpx.AsyncClient", return_value=mock_http):
         init_gateway("test-key")

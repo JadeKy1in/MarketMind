@@ -8,3 +8,4 @@ from marketmind.gateway.multimodal_adapter import (
     MultimodalAdapter, GeminiFlashGateway,
 )
 from marketmind.gateway.market_data import get_market_data
+from marketmind.gateway.options_flow import get_options_flow

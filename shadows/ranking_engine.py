@@ -1,42 +1,36 @@
-﻿"""Ranking Engine -- pure Python composite score, Bayesian haircut, achievement ladder.
+"""Ranking Engine -- orchestrator for composite scoring and statistical testing.
+
+Delegates calculation to ranking_composite (metrics, scoring, percentiles, haircut)
+and ranking_stats (walk-forward validation, Sharpe, reset eligibility).
 
 Zero LLM calls. All computation is deterministic mathematical formulas.
 """
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass
-from datetime import datetime, timedelta
+import logging
+from datetime import datetime, timezone
+
+logger = logging.getLogger("marketmind.shadows.ranking_engine")
 
 from marketmind.config.settings import ShadowSettings
-
-
-@dataclass
-class ShadowPerformance:
-    """Single shadow's performance metrics for one evaluation period."""
-    shadow_id: str
-    daily_returns: list[float]
-    cumulative_return: float
-    max_drawdown: float
-    max_drawdown_duration_days: int
-    win_rate: float
-    total_trades: int
-    profitable_trades: int
-    losing_trades: int
-    abstention_days: int
-    cagr: float
-
-
-@dataclass
-class RankingResult:
-    shadow_id: str
-    rank: int
-    composite_score: float
-    deflated_score: float
-    percentile_rank: float
-    achievement_tier: str
-    component_scores: dict[str, float]
-    component_percentiles: dict[str, float]
+from marketmind.shadows.ranking_composite import (
+    ShadowPerformance,
+    RankingResult,
+    compute_mppm,
+    compute_calmar,
+    compute_omega,
+    compute_cagr,
+    compute_composite_score as _compute_composite_score,
+    compute_haircut as _compute_haircut,
+    apply_bayesian_haircut as _apply_bayesian_haircut,
+    compute_percentile_ranks as _compute_percentile_ranks,
+)
+from marketmind.shadows.ranking_stats import (
+    WFValidationResult,
+    WalkForwardValidator,
+    estimate_sharpe as _estimate_sharpe_raw,
+    check_reset_eligibility as _check_reset_eligibility,
+)
 
 
 class RankingEngine:
@@ -45,156 +39,47 @@ class RankingEngine:
     def __init__(self, config: ShadowSettings):
         self.config = config
 
-    # ── Core metrics ─────────────────────────────────────────────────────
+    # ── Core metrics ──────────────────────────────────────────────────────
 
     def compute_mppm(self, returns: list[float], gamma: float = 3.0) -> float:
-        """Goetzmann et al. MPPM: (1/(1-gamma)) * ln((1/T) * sum((1+r_t)^(1-gamma)))."""
-        if not returns or gamma == 1.0:
-            return 0.0
-        T = len(returns)
-        exponent = 1.0 - gamma
-        powered = [(1.0 + r) ** exponent for r in returns]
-        avg = sum(powered) / T
-        if avg <= 0:
-            return float("-inf") if avg == 0 else float("nan")
-        return (1.0 / exponent) * math.log(avg)
+        return compute_mppm(returns, gamma)
 
-    def compute_calmar(self, cumulative_return: float, max_drawdown: float) -> float:
-        """Calmar = CAGR / max(|MDD|, floor). Capped at 100."""
-        mdd_floor = max(max_drawdown, 0.001)
-        cagr = cumulative_return
-        calmar = cagr / mdd_floor
-        return min(calmar, 100.0)
+    def compute_calmar(self, cumulative_return: float, max_drawdown: float,
+                       days: int = 252) -> float:
+        return compute_calmar(cumulative_return, max_drawdown, days)
 
     def compute_omega(self, returns: list[float], threshold: float = 0.0) -> float:
-        """Omega(L=0) = sum(gains) / sum(|losses|). Capped at 10."""
-        if not returns:
-            return 1.0
-        gains = sum(max(r - threshold, 0) for r in returns)
-        losses = sum(abs(min(r - threshold, 0)) for r in returns)
-        if losses == 0:
-            return 10.0
-        omega = gains / losses
-        return min(omega, 10.0)
+        return compute_omega(returns, threshold)
 
     def compute_cagr(self, cumulative_return: float, days: int) -> float:
-        """Annualize cumulative return over N trading days."""
-        if days <= 0:
-            return 0.0
-        return cumulative_return * 252 / days
+        return compute_cagr(cumulative_return, days)
 
-    # ── Composite scoring ────────────────────────────────────────────────
+    # ── Composite scoring ─────────────────────────────────────────────────
 
-    def compute_composite_score(self, perf: ShadowPerformance) -> tuple[float, dict[str, float]]:
-        """Returns (C_raw, component_scores_dict) where each component is a raw score."""
-        w = self.config.composite_weights
-        omega = self.compute_omega(perf.daily_returns)
-        calmar = self.compute_calmar(perf.cumulative_return, perf.max_drawdown)
-        mppm = self.compute_mppm(perf.daily_returns)
-
-        components = {
-            "mppm": mppm,
-            "calmar": calmar,
-            "omega": omega,
-            "win_rate": perf.win_rate,
-        }
-
-        # Normalize each component to [0, 1] range for compositing
-        # Use sigmoid-like transforms for unbounded metrics
-        mppm_norm = self._normalize_mppm(mppm)
-        calmar_norm = self._normalize_calmar(calmar)
-        omega_norm = omega / 10.0  # omega is [0, 10]
-        wr_norm = perf.win_rate     # already [0, 1]
-
-        composite = (
-            w["mppm"] * mppm_norm +
-            w["calmar"] * calmar_norm +
-            w["omega"] * omega_norm +
-            w["win_rate"] * wr_norm
+    def compute_composite_score(
+        self, perf: ShadowPerformance, career_days: int | None = None
+    ) -> tuple[float, dict[str, float], dict[str, float]]:
+        return _compute_composite_score(
+            perf,
+            self.config.composite_weights,
+            career_days=career_days,
+            abstention_penalty_weight=self.config.abstention_penalty_weight,
         )
-        return composite, components
 
-    @staticmethod
-    def _normalize_mppm(mppm: float) -> float:
-        """Normalize MPPM to [0, 1]. Log-sigmoid transform.
-        MPPM typically ranges from -2 to +2 for daily returns.
-        """
-        if mppm == float("-inf"):
-            return 0.0
-        if math.isnan(mppm):
-            return 0.0
-        return 1.0 / (1.0 + math.exp(-mppm))
+    # ── Bayesian overfitting haircut ───────────────────────────────────────
 
-    @staticmethod
-    def _normalize_calmar(calmar: float) -> float:
-        """Normalize Calmar to [0, 1]. Calmar > 3 is exceptional."""
-        return min(calmar / 3.0, 1.0)
-
-    # ── Bayesian overfitting haircut ──────────────────────────────────────
-
-    def compute_haircut(self, n_shadows: int, evaluation_days: int) -> float:
-        """Witzany (2021): h(N,T) = T / (T + 8 + 24 * ln(N))."""
-        if n_shadows < 1:
-            n_shadows = 1
-        return evaluation_days / (evaluation_days + 8.0 + 24.0 * math.log(n_shadows))
+    def compute_haircut(self, n_shadows: int, evaluation_days: int,
+                        daily_returns: dict[str, list[float]] | None = None) -> float:
+        return _compute_haircut(n_shadows, evaluation_days, daily_returns)
 
     def apply_bayesian_haircut(self, composite_score: float, n_shadows: int,
-                                evaluation_days: int) -> float:
-        """C_deflated = C_raw * h(N,T)."""
-        return composite_score * self.compute_haircut(n_shadows, evaluation_days)
+                               evaluation_days: int) -> float:
+        return _apply_bayesian_haircut(composite_score, n_shadows, evaluation_days)
 
-    # ── Percentile computation ───────────────────────────────────────────
+    # ── Percentile computation ────────────────────────────────────────────
 
     def compute_percentile_ranks(self, scores: dict[str, float]) -> dict[str, float]:
-        """Map each shadow_id to its percentile rank (0-1) within the cohort.
-        Hybrid parametric/empirical approach.
-        """
-        if not scores:
-            return {}
-        n = len(scores)
-        score_list = list(scores.values())
-
-        if n >= self.config.parametric_threshold_n:
-            return self._empirical_percentiles(scores, score_list)
-        elif n <= 15:
-            return self._parametric_percentiles(scores, score_list)
-        else:
-            alpha = n / self.config.parametric_threshold_n
-            emp = self._empirical_percentiles(scores, score_list)
-            par = self._parametric_percentiles(scores, score_list)
-            return {
-                sid: alpha * emp.get(sid, 0.5) + (1 - alpha) * par.get(sid, 0.5)
-                for sid in scores
-            }
-
-    @staticmethod
-    def _empirical_percentiles(scores: dict[str, float],
-                                score_list: list[float]) -> dict[str, float]:
-        """Fraction of scores <= x (with continuity correction)."""
-        n = len(score_list)
-        sorted_scores = sorted(score_list)
-        result = {}
-        for sid, score in scores.items():
-            count_le = sum(1 for s in sorted_scores if s <= score)
-            result[sid] = (count_le - 0.5) / n
-        return result
-
-    @staticmethod
-    def _parametric_percentiles(scores: dict[str, float],
-                                 score_list: list[float]) -> dict[str, float]:
-        """Logistic-normal parametric percentile estimation for small N."""
-        n = len(score_list)
-        # Fit logistic-normal: first map scores to (0,1) via logit, fit normal
-        # Simplified: use rank-based logistic approximation
-        sorted_scores = sorted(score_list)
-        result = {}
-        for sid, score in scores.items():
-            rank = sum(1 for s in sorted_scores if s <= score)
-            # Logistic percentile: smooth interpolation
-            p = (rank - 0.5) / n
-            # Apply logistic smoothing for small N
-            result[sid] = 1.0 / (1.0 + math.exp(-2.0 * (p - 0.5) * math.sqrt(n)))
-        return result
+        return _compute_percentile_ranks(scores, self.config.parametric_threshold_n)
 
     # ── Achievement ladder ────────────────────────────────────────────────
 
@@ -204,10 +89,15 @@ class RankingEngine:
         percentile_history: list[tuple[str, float]],
         mdd: float,
         deflated_sharpe: float,
+        market_accuracy: float | None = None,
     ) -> str:
         """Returns tier based on consecutive day rules.
 
         States: ELITE, EXCELLENT, NORMAL, WATCH, ENDANGERED
+
+        P2-4 accuracy_gate: if market_accuracy < 0.50, ELITE is demoted to NORMAL.
+        This breaks virtual PnL circularity by requiring shadows to outperform
+        random chance against actual market returns.
         """
         if not percentile_history:
             return "normal"
@@ -228,7 +118,15 @@ class RankingEngine:
 
         # Elite check
         if days_at_elite >= cfg.elite_consecutive_days and deflated_sharpe > cfg.elite_deflated_sharpe_min:
-            return "elite"
+            tier = "elite"
+            # P2-4 accuracy gate: demote ELITE if market accuracy < 0.50
+            if market_accuracy is not None and market_accuracy < 0.50:
+                logger.info(
+                    "ELITE demoted to NORMAL: market_accuracy=%.3f < 0.50",
+                    market_accuracy
+                )
+                return "normal"
+            return tier
 
         # Excellent check
         if days_at_excellent >= cfg.excellent_consecutive_days and deflated_sharpe > cfg.excellent_deflated_sharpe_min:
@@ -312,7 +210,7 @@ class RankingEngine:
         # Insight drought
         if insight_dates:
             latest_insight = max(insight_dates)
-            days_since = (datetime.now().date() -
+            days_since = (datetime.now(timezone.utc).date() -
                           datetime.strptime(latest_insight, "%Y-%m-%d").date()).days
             drought = min(days_since / cfg.plateau_no_insight_days, 1.0)
         else:
@@ -329,6 +227,8 @@ class RankingEngine:
         performances: dict[str, ShadowPerformance],
         score_histories: dict[str, list[dict]],
         date: str,
+        market_accuracy: dict[str, float] | None = None,
+        wfe_results: dict[str, float] | None = None,
     ) -> list[RankingResult]:
         """Full ranking: metrics -> composite -> haircut -> percentile -> ladder."""
         n = len(performances)
@@ -337,14 +237,35 @@ class RankingEngine:
         # Compute raw composites
         raw_scores = {}
         component_data = {}
+        modifiers_data = {}
         for sid, perf in performances.items():
-            composite, components = self.compute_composite_score(perf)
+            composite, components, modifiers = self.compute_composite_score(
+                perf, career_days=perf.career_days
+            )
             raw_scores[sid] = composite
             component_data[sid] = components
+            modifiers_data[sid] = modifiers
 
-        # Apply Bayesian haircut
-        haircut = self.compute_haircut(n, self.config.evaluation_window_days)
+        # Apply Bayesian haircut with Effective-N correction (P2-1)
+        returns_for_corr = {
+            sid: performances[sid].daily_returns for sid in performances
+            if performances[sid].daily_returns
+        }
+        haircut = self.compute_haircut(n, self.config.evaluation_window_days, returns_for_corr)
         deflated = {sid: s * haircut for sid, s in raw_scores.items()}
+
+        # ── WFE overfit penalty (P2-2 audit fix) ──
+        # Shadows with WFE ratio < 0.5 have inflated IS -> penalty on deflated score
+        if wfe_results:
+            for sid, wfe_ratio in wfe_results.items():
+                if sid in deflated and wfe_ratio < 0.5:
+                    penalty = (0.5 - wfe_ratio) * 2.0  # 0->0 penalty, 0->1 max penalty
+                    penalty = min(penalty, 0.5)  # Cap at 50% reduction
+                    deflated[sid] = max(deflated[sid] * (1.0 - penalty), 0.001)
+                    logger.info(
+                        "WFE penalty applied to %s: wfe=%.3f penalty=%.2f%% deflated=%.4f",
+                        sid, wfe_ratio, penalty * 100, deflated[sid]
+                    )
 
         # Compute percentiles on deflated scores
         percentiles = self.compute_percentile_ranks(deflated)
@@ -358,17 +279,52 @@ class RankingEngine:
             }
             component_pct[comp_name] = self.compute_percentile_ranks(comp_scores)
 
+        # ── Quota efficiency scoring (Phase 2) ──
+        # Group shadows by domain for within-domain normalization
+        domain_groups: dict[str, list[str]] = {}
+        for sid, perf in performances.items():
+            dom = perf.domain or "macro"
+            domain_groups.setdefault(dom, []).append(sid)
+
+        quota_eff_by_domain: dict[str, float] = {}
+        for domain, sids in domain_groups.items():
+            eff_entries = []
+            for sid in sids:
+                perf = performances[sid]
+                # Efficiency = profitable decisions / total trades within domain
+                # Higher profitable_trades ratio relative to peers = more efficient
+                eff = perf.profitable_trades / max(perf.total_trades, 1)
+                eff_entries.append((sid, eff))
+            max_eff = max(e[1] for e in eff_entries) if eff_entries else 1.0
+            for sid, eff in eff_entries:
+                quota_eff_by_domain[sid] = eff / max_eff if max_eff > 0 else 0.5
+
+        # Apply quota efficiency as a composite bonus/penalty
+        qe_weight = getattr(self.config, 'quota_efficiency_weight', 0.05)
+        for sid in raw_scores:
+            qe = quota_eff_by_domain.get(sid, 0.5)
+            bonus = qe_weight * (qe - 0.5) * 2.0  # center at 0.5: below avg = penalty
+            raw_scores[sid] = raw_scores[sid] + bonus
+            modifiers_data[sid]["quota_efficiency"] = qe
+            modifiers_data[sid]["quota_efficiency_bonus"] = bonus
+
+        # Re-apply deflated after quota efficiency adjustment
+        deflated = {sid: s * haircut for sid, s in raw_scores.items()}
+        percentiles = self.compute_percentile_ranks(deflated)
+
         # Determine tiers and build results
         for sid in performances:
             perf = performances[sid]
             score_hist = score_histories.get(sid, [])
 
             deflated_sharpe = self._estimate_sharpe(perf.daily_returns)
+            shadow_accuracy = market_accuracy.get(sid) if market_accuracy else None
             tier = self.determine_achievement_tier(
                 [(h["date"], h.get("deflated_score", 0)) for h in score_hist],
                 [(h["date"], h.get("percentile_rank", 0)) for h in score_hist],
                 perf.max_drawdown,
                 deflated_sharpe,
+                market_accuracy=shadow_accuracy,
             )
 
             comp_pct_for_shadow = {
@@ -392,16 +348,74 @@ class RankingEngine:
         for i, r in enumerate(results):
             r.rank = i + 1
 
+        # P2-5: Holm-Bonferroni correction -- downgrade tiers that fail FDR control
+        self._apply_holm_bonferroni(results)
+
         return results
 
     @staticmethod
+    def _apply_holm_bonferroni(results: list[RankingResult]) -> None:
+        """Apply Holm-Bonferroni correction to achievement tier assignments.
+
+        For N shadows, the probability of at least one false ELITE is
+        ~1 - (1-alpha)^N. With 22 shadows, this is ~97% without correction.
+        This method steps down through ranked shadows and requires surviving
+        a corrected alpha threshold.
+
+        Shadows at the boundary that fail the corrected threshold are
+        downgraded to the next tier.
+        """
+        n = len(results)
+        if n < 2:
+            return
+
+        # Tier severity ordering (for downgrade logic)
+        tier_order = {"elite": 4, "excellent": 3, "normal": 2, "watch": 1, "endangered": 0}
+        reverse_tier = {4: "elite", 3: "excellent", 2: "normal", 1: "watch", 0: "endangered"}
+
+        # For ELITE/EXCELLENT shadows: require surviving step-down
+        # Sort by percentile_rank descending (most significant first) for Holm
+        alpha = 0.05  # family-wise error rate
+        ranked = sorted(results, key=lambda r: r.percentile_rank, reverse=True)
+
+        # Count how many ELITE + EXCELLENT exist
+        elevated = [r for r in ranked if r.achievement_tier in ("elite", "excellent")]
+        k = len(elevated)
+
+        for i, r in enumerate(elevated):
+            corrected_alpha = alpha / (k - i)  # Holm step-down
+            # If shadow's percentile rank would not be significant at corrected alpha,
+            # downgrade to NORMAL
+            if r.percentile_rank < (1.0 - corrected_alpha):
+                old_tier = r.achievement_tier
+                r.achievement_tier = "normal"
+                logger.info(
+                    "Holm-Bonferroni: %s downgraded from %s to normal "
+                    "(percentile=%.2f, corrected_alpha=%.4f)",
+                    r.shadow_id, old_tier, r.percentile_rank, corrected_alpha
+                )
+
+    @staticmethod
     def _estimate_sharpe(returns: list[float]) -> float:
-        """Estimate annualized Sharpe from daily returns."""
-        if len(returns) < 2:
-            return 0.0
-        mean = sum(returns) / len(returns)
-        variance = sum((r - mean) ** 2 for r in returns) / (len(returns) - 1)
-        if variance <= 0:
-            return 0.0
-        daily_sharpe = mean / math.sqrt(variance)
-        return daily_sharpe * math.sqrt(252)
+        return _estimate_sharpe_raw(returns)
+
+    # ── Reset eligibility (Phase 2) ───────────────────────────────────────
+
+    def check_reset_eligibility(
+        self,
+        tier_history: list[tuple[str, str]],     # (date, tier)
+        wr_history: list[tuple[str, float]],      # (date, win_rate)
+        insight_dates: list[str],                  # dates with insights
+    ) -> tuple[bool, str]:
+        """Check if a shadow should be reset to baseline methodology.
+
+        Three conditions must ALL be met:
+        1. No EXCELLENT or higher in reset_no_excellent_months
+        2. Win rate fluctuation < +-5% for reset_flat_wr_months
+        3. No insight produced in reset_no_insight_months
+
+        Returns (should_reset, reason).
+        """
+        return _check_reset_eligibility(
+            self.config, tier_history, wr_history, insight_dates
+        )

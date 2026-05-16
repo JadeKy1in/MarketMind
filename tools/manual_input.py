@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "manual"
@@ -68,7 +68,7 @@ def input_bluesky() -> None:
 
     if lines:
         fpath = DATA_DIR / "bluesky_posts.json"
-        posts = [{"text": l, "timestamp": datetime.now().isoformat()} for l in lines]
+        posts = [{"text": l, "timestamp": datetime.now(timezone.utc).isoformat()} for l in lines]
         with open(fpath, "w", encoding="utf-8") as f:
             json.dump(posts, f, indent=2, ensure_ascii=False)
         print(f"  已保存 {len(lines)} 条帖子 → {fpath}")

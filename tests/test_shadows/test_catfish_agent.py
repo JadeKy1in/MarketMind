@@ -102,12 +102,18 @@ class TestCatfishAgent:
 
     @pytest.mark.asyncio
     async def test_catfish_analyze_with_trigger(self, catfish):
+        from unittest.mock import AsyncMock, patch
+        mock_result = {
+            "content": "VOTE_START\nticker: SPY\ndirection: short\nconfidence: 0.5\nthesis: counter argument\nrisk_note: adverse selection\nVOTE_END",
+            "latency_ms": 450
+        }
         market_data = {
             "catfish_trigger_ticker": "SPY",
             "catfish_trigger_direction": "long",
             "catfish_trigger_agreement_pct": 0.85,
         }
-        output = await catfish._analyze([{"headline": "Test"}], market_data)
+        with patch("marketmind.gateway.async_client.chat_with_integrity", new_callable=AsyncMock, return_value=mock_result):
+            output = await catfish._analyze([{"headline": "Test"}], market_data)
         assert len(output.votes) == 1
         assert output.votes[0].direction == "short"  # opposes long consensus
         assert output.votes[0].ticker == "SPY"

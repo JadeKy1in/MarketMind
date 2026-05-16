@@ -4,8 +4,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from marketmind.gateway.async_client import (
     chat_flash, chat_pro, chat_batch_flash, chat_with_integrity,
-    DeepSeekGateway, init_gateway, get_gateway, RateLimitError,
+    DeepSeekGateway, init_gateway, get_gateway, RateLimitError, KeyRotator,
 )
+
+
+def _mock_response(data):
+    """Build a plain MagicMock response to avoid AsyncMock chain coroutine warnings."""
+    resp = MagicMock()
+    resp.json.return_value = data
+    resp.status_code = 200
+    resp.raise_for_status.return_value = None
+    return resp
+
+
+def _mock_client(mock_response):
+    client = MagicMock()
+    client.post = AsyncMock(return_value=mock_response)
+    return client
 
 
 @pytest.mark.asyncio
@@ -14,9 +29,7 @@ async def test_chat_flash_returns_structured_response():
         "choices": [{"message": {"content": "Test analysis result"}}],
         "usage": {"total_tokens": 150, "prompt_tokens": 50, "completion_tokens": 100}
     }
-    mock_http = AsyncMock()
-    mock_http.post.return_value.json = MagicMock(return_value=mock_response)
-    mock_http.post.return_value.status_code = 200
+    mock_http = _mock_client(_mock_response(mock_response))
 
     with patch("httpx.AsyncClient", return_value=mock_http):
         init_gateway("test-key")
@@ -37,9 +50,7 @@ async def test_chat_pro_returns_structured_response():
         "choices": [{"message": {"content": "Deep Pro analysis"}}],
         "usage": {"total_tokens": 500, "prompt_tokens": 100, "completion_tokens": 400}
     }
-    mock_http = AsyncMock()
-    mock_http.post.return_value.json = MagicMock(return_value=mock_response)
-    mock_http.post.return_value.status_code = 200
+    mock_http = _mock_client(_mock_response(mock_response))
 
     with patch("httpx.AsyncClient", return_value=mock_http):
         init_gateway("test-key")
@@ -54,14 +65,11 @@ async def test_chat_pro_returns_structured_response():
 
 @pytest.mark.asyncio
 async def test_chat_batch_flash_runs_concurrently():
-    call_count = 0
     mock_response = {
         "choices": [{"message": {"content": "Batch item"}}],
         "usage": {"total_tokens": 100}
     }
-    mock_http = AsyncMock()
-    mock_http.post.return_value.json = MagicMock(return_value=mock_response)
-    mock_http.post.return_value.status_code = 200
+    mock_http = _mock_client(_mock_response(mock_response))
 
     with patch("httpx.AsyncClient", return_value=mock_http):
         init_gateway("test-key")
@@ -78,9 +86,7 @@ async def test_chat_with_integrity_injects_protocol():
         "choices": [{"message": {"content": "Verified analysis"}}],
         "usage": {"total_tokens": 200}
     }
-    mock_http = AsyncMock()
-    mock_http.post.return_value.json = MagicMock(return_value=mock_response)
-    mock_http.post.return_value.status_code = 200
+    mock_http = _mock_client(_mock_response(mock_response))
 
     with patch("httpx.AsyncClient", return_value=mock_http):
         init_gateway("test-key")
@@ -91,20 +97,22 @@ async def test_chat_with_integrity_injects_protocol():
             caller_agent="builder-test"
         )
         assert result["content"] == "Verified analysis"
-        # Verify the integrity header was injected into the system prompt
+        # Verify the integrity header and time context were injected
         call_args = mock_http.post.call_args
         sent_messages = call_args[1]["json"]["messages"]
         assert "DATA_INTEGRITY_PROTOCOL" in sent_messages[0]["content"]
         assert "builder-test" in sent_messages[0]["content"]
+        assert "TIME_CONTEXT" in sent_messages[0]["content"]
+        assert "TODAY is" in sent_messages[0]["content"]
+        assert "SINGLE SOURCE OF TRUTH" in sent_messages[0]["content"]
 
 
 @pytest.mark.asyncio
 async def test_rate_limit_error_raised_on_429():
-    mock_http = AsyncMock()
-    mock_response = AsyncMock()
+    mock_response = MagicMock()
     mock_response.status_code = 429
     mock_response.headers = {"Retry-After": "10"}
-    mock_http.post.return_value = mock_response
+    mock_http = _mock_client(mock_response)
 
     with patch("httpx.AsyncClient", return_value=mock_http):
         init_gateway("test-key")
@@ -124,6 +132,6 @@ async def test_gateway_not_initialized_raises():
 def test_gateway_context_manager():
     mock_http = AsyncMock()
     with patch("httpx.AsyncClient", return_value=mock_http):
-        gw = DeepSeekGateway("test-key")
-        assert gw.api_key == "test-key"
+        gw = DeepSeekGateway(["test-key"])
+        assert gw.key_rotator.current() == "test-key"
         assert gw.base_url == "https://api.deepseek.com/v1"

@@ -30,7 +30,7 @@ class NewsItem:
     published_at: str
     summary: str
     raw_text: str | None = None
-    fetched_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    fetched_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     # Z1: content-aware fields for priority rebalance + two-layer dedup
     content_hash: str | None = None
     source_reliability: float = 0.5
@@ -45,7 +45,7 @@ class NewsItem:
         url = entry.get("link", "")
         summary_raw = entry.get("summary", entry.get("description", ""))
         summary = _strip_html(summary_raw)[:500]
-        published = entry.get("published", entry.get("updated", datetime.now().isoformat()))
+        published = entry.get("published", entry.get("updated", datetime.now(timezone.utc).isoformat()))
         item_id = hashlib.sha256(f"{title}{url}".encode()).hexdigest()[:16]
         try:
             reliability = float(source.reliability)
@@ -294,7 +294,7 @@ async def _fetch_sec_edgar() -> list[NewsItem]:
     try:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             # SEC requires: OrganizationName email@domain.com
-            headers = {"User-Agent": "MarketMind/0.1 (contact via GitHub)"}
+            headers = {"User-Agent": "MarketMind/0.1 (contact@marketmind.dev)"}
             # Use the EDGAR submission feed (Atom XML) — more reliable than the REST API
             resp = await client.get(
                 "https://www.sec.gov/cgi-bin/browse-edgar",
@@ -328,70 +328,6 @@ async def _fetch_sec_edgar() -> list[NewsItem]:
     return items
 
 
-async def _fetch_apewisdom() -> list[NewsItem]:
-    """Fetch trending tickers from ApeWisdom (Reddit/4chan retail sentiment).
-
-    Swiss Finance Institute (2026): finfluencer picks = -2.3% returns;
-    fading them = +6.8% alpha. Retail sentiment is a CONTRARIAN INDICATOR.
-    ApeWisdom API lacks per-account data — manipulation detection is probabilistic.
-
-    Multi-factor filter: mention_count >= 100, >2 unique subreddits,
-    mentions span >2 hours. Without per-account data, pump-and-dump detection
-    is best-effort. Items tagged content_type="social_mention" to bypass Flash.
-    """
-    items: list[NewsItem] = []
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get("https://apewisdom.io/api/v1/filter/trending",
-                                     headers={"User-Agent": "MarketMind/0.1"})
-            resp.raise_for_status()
-            data = resp.json()
-            results = data.get("results", [])
-            if not isinstance(results, list):
-                return items
-            for entry in results[:10]:  # top 10 trending
-                ticker = entry.get("ticker", "")
-                mentions = int(entry.get("mentions", 0))
-                # Multi-factor filter (Red Team Q2 recommendations)
-                if mentions < 100:
-                    continue
-                # Check subreddit diversity if available
-                subreddits = entry.get("subreddits", [])
-                if isinstance(subreddits, list) and len(subreddits) < 3:
-                    continue
-                sentiment = float(entry.get("sentiment", 0))
-                # Contrarian signal: extreme sentiment is most actionable
-                # >85% bullish = contrarian bearish; >85% bearish = contrarian bullish
-                if sentiment > 0.85:
-                    direction = "CONTRARIAN BEARISH (fade retail bullishness)"
-                elif sentiment < 0.15:
-                    direction = "CONTRARIAN BULLISH (fade retail panic)"
-                else:
-                    continue  # Moderate sentiment = noise
-                title = (
-                    f"[Retail Sentiment] ${ticker} — {mentions} mentions, "
-                    f"{sentiment:.0%} bullish — {direction}"
-                )
-                items.append(NewsItem(
-                    id=hashlib.sha256(f"apewisdom:{ticker}:{mentions}".encode()).hexdigest()[:16],
-                    title=title,
-                    url="",
-                    source_name="ApeWisdom",
-                    source_tier=int(SourceTier.BEST_EFFORT),
-                    published_at=datetime.now().isoformat(),
-                    summary=(
-                        f"Reddit/4chan retail sentiment: {ticker} mentioned {mentions} times, "
-                        f"{sentiment:.0%} bullish. CONTRARIAN INDICATOR — "
-                        f"high retail bullishness often precedes pullbacks. "
-                        f"{direction}. Source: ApeWisdom (hobby project, no per-account data)."
-                    ),
-                    source_reliability=0.15,
-                    content_type="social_mention",
-                ))
-    except Exception as e:
-        logger.debug("ApeWisdom fetch skipped: %s", e)
-    return items
-
 
 # ── Phase G Layer 4: Insider sources ─────────────────────────────────────────
 # Extracted to pipeline/insider_sources.py for modular architecture compliance.
@@ -402,9 +338,18 @@ from marketmind.pipeline.insider_sources import (
     detect_insider_clusters,
 )
 
+# ── Social media sources ────────────────────────────────────────────────────
+# Extracted to pipeline/social_sources.py for modular architecture compliance.
+from marketmind.pipeline.social_sources import fetch_apewisdom, fetch_bluesky_posts
+
 async def _fetch_api_source(source: Source, config: MarketMindConfig) -> list[NewsItem]:
     """Fetch from a JSON API source (NewsAPI, GNews, etc.). Injects API key into URL."""
     items: list[NewsItem] = []
+
+    # Bluesky Social: delegate to social_sources module (special parsing)
+    if source.name == "Bluesky Social":
+        return await fetch_bluesky_posts(source, config)
+
     # Determine which API key to use
     api_key = None
     if source.name == "NewsAPI":
@@ -412,14 +357,9 @@ async def _fetch_api_source(source: Source, config: MarketMindConfig) -> list[Ne
     elif source.name == "GNews":
         api_key = config.gnews_key
 
-    # Bluesky Social: replace {QUERY} with financial keyword search (no API key needed)
-    if source.name == "Bluesky Social":
-        query = "finance OR stocks OR market OR $AAPL OR $MSFT OR $NVDA OR $TSLA"
-        url = source.url.replace("{QUERY}", query)
-    elif not api_key:
+    if not api_key:
         return items
-    else:
-        url = source.url.replace("{API_KEY}", api_key)
+    url = source.url.replace("{API_KEY}", api_key)
     client_kwargs = {"timeout": 30.0, "follow_redirects": True}
     if config.proxy_url:
         client_kwargs["proxy"] = config.proxy_url
@@ -427,50 +367,25 @@ async def _fetch_api_source(source: Source, config: MarketMindConfig) -> list[Ne
         resp = await client.get(url, headers={"User-Agent": "MarketMind/0.1"})
         resp.raise_for_status()
         data = resp.json()
-        # Bluesky format: {"posts": [{"post": {"record": {"text": "..."}, "author": {...}, "indexedAt": "..."}}]}
         # NewsAPI format: {"articles": [{...}]}
         # GNews format: {"articles": [{...}]}
-        if source.name == "Bluesky Social":
-            posts = data.get("posts", [])
-            for post_data in posts[:10]:  # max 10 Bluesky posts
-                post = post_data.get("post", {})
-                record = post.get("record", {})
-                text = (record.get("text") or "").strip()
-                author = post.get("author", {})
-                handle = author.get("handle", "unknown")
-                # Bluesky posts have no real title; use first 100 chars of text
-                title = (text[:100] + "..." if len(text) > 100 else text) if text else "(Bluesky post)"
-                indexed_at = post.get("indexedAt", datetime.now().isoformat())
-                item_id = hashlib.sha256(f"bluesky:{handle}:{text[:80]}".encode()).hexdigest()[:16]
-                try:
-                    reliability = float(source.reliability)
-                except (TypeError, ValueError):
-                    reliability = 0.5
-                items.append(NewsItem(
-                    id=item_id, title=title, url=f"https://bsky.app/profile/{handle}",
-                    source_name=source.name, source_tier=int(source.tier),
-                    published_at=indexed_at, summary=text[:500],
-                    source_reliability=reliability,
-                    content_type="social_mention",
-                ))
-        else:
-            articles = data.get("articles", [])
-            for art in articles[:20]:
-                title = (art.get("title") or "Untitled").strip()
-                link = art.get("url", "")
-                desc = (art.get("description") or "").strip()
-                published = art.get("publishedAt", datetime.now().isoformat())
-                item_id = hashlib.sha256(f"{title}{link}".encode()).hexdigest()[:16]
-                try:
-                    reliability = float(source.reliability)
-                except (TypeError, ValueError):
-                    reliability = 0.5
-                items.append(NewsItem(
-                    id=item_id, title=title, url=link,
-                    source_name=source.name, source_tier=int(source.tier),
-                    published_at=published, summary=desc[:500],
-                    source_reliability=reliability,
-                ))
+        articles = data.get("articles", [])
+        for art in articles[:20]:
+            title = (art.get("title") or "Untitled").strip()
+            link = art.get("url", "")
+            desc = (art.get("description") or "").strip()
+            published = art.get("publishedAt", datetime.now(timezone.utc).isoformat())
+            item_id = hashlib.sha256(f"{title}{link}".encode()).hexdigest()[:16]
+            try:
+                reliability = float(source.reliability)
+            except (TypeError, ValueError):
+                reliability = 0.5
+            items.append(NewsItem(
+                id=item_id, title=title, url=link,
+                source_name=source.name, source_tier=int(source.tier),
+                published_at=published, summary=desc[:500],
+                source_reliability=reliability,
+            ))
     return items
 
 
@@ -504,7 +419,7 @@ async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsIte
                 source.consecutive_failures = 0
             return items
         if source.name == "ApeWisdom":
-            items = await _fetch_apewisdom()
+            items = await fetch_apewisdom()
             if items:
                 source.status = SourceStatus.WORKING
                 source.consecutive_failures = 0
@@ -523,7 +438,7 @@ async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsIte
                 resp = await client.get(
                     source.url,
                     headers={
-                        "User-Agent": "MarketMind/0.1 (Financial Research Bot; +https://github.com/marketmind)",
+                        "User-Agent": "Mozilla/5.0 (compatible; MarketMind/0.1; Financial Research Bot)",
                         "Accept": "application/rss+xml, application/xml, text/xml, */*",
                     }
                 )
@@ -548,7 +463,7 @@ async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsIte
             source.status = SourceStatus.DEAD
         else:
             source.status = SourceStatus.DEGRADED
-    source.last_checked = datetime.now().isoformat()
+    source.last_checked = datetime.now(timezone.utc).isoformat()
     return items
 
 

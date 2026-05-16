@@ -299,7 +299,10 @@ async def _select_strategy_group(ctx: SessionContext, drill_result: dict, sector
 
 def _display_l2_results(l2_result: Layer2Result) -> None:
     """Display L2 macro results and ticker candidates (legacy single-phase)."""
+    n_sectors = len(l2_result.sector_shortlist) if l2_result.sector_shortlist else 0
+    n_candidates = len(l2_result.ticker_candidates) if l2_result.ticker_candidates else 0
     print(f"\n{'─'*60}")
+    print(f"  宏观: {l2_result.macro_quadrant} | {n_sectors}个板块 | {n_candidates}个候选标的")
     print(f"  [L2] 基本面分析 — 宏观象限: {l2_result.macro_quadrant} | 方向: {l2_result.macro_direction}")
     if l2_result.sector_shortlist:
         momentum_str = ""

@@ -100,7 +100,7 @@ def test_composite_score_range(engine):
         total_trades=50, profitable_trades=30, losing_trades=20,
         abstention_days=0, cagr=0.252
     )
-    score, components = engine.compute_composite_score(perf)
+    score, components, modifiers = engine.compute_composite_score(perf)
     assert "mppm" in components
     assert "calmar" in components
     assert "omega" in components

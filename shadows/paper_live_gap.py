@@ -10,6 +10,7 @@ Manages the gap between virtual (paper) returns and real-world expected returns:
 """
 from __future__ import annotations
 
+import json
 import logging
 import math
 import statistics
@@ -88,8 +89,33 @@ class PaperLiveGapManager:
     def _get_discount_rate(self, shadow_id: str) -> float:
         """Get current discount rate for a shadow, initializing to default if needed."""
         if shadow_id not in self._discount_rates:
-            self._discount_rates[shadow_id] = self.settings.confidence_discount_default
+            # Try restoring from dedicated DB table
+            raw = self.state_db.load_paper_live_gap_state(shadow_id)
+            if raw:
+                try:
+                    data = json.loads(raw)
+                    if "discount_rate" in data:
+                        self._discount_rates[shadow_id] = float(data["discount_rate"])
+                    if "cumulative_slippage" in data:
+                        self._cumulative_slippage[shadow_id] = float(data["cumulative_slippage"])
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    pass
+            if shadow_id not in self._discount_rates:
+                self._discount_rates[shadow_id] = self.settings.confidence_discount_default
         return self._discount_rates[shadow_id]
+
+    def _save_state(self, shadow_id: str) -> None:
+        """Persist paper/live gap state to dedicated DB table (atomic write, no race)."""
+        data = json.dumps({
+            "discount_rate": self._discount_rates.get(shadow_id, self.settings.confidence_discount_default),
+            "cumulative_slippage": self._cumulative_slippage.get(shadow_id, 0.0),
+        })
+        self.state_db.save_paper_live_gap_state(shadow_id, data)
+
+    def save_all_states(self) -> None:
+        """Persist all tracked shadow paper-to-live states."""
+        for shadow_id in set(list(self._discount_rates.keys()) + list(self._cumulative_slippage.keys())):
+            self._save_state(shadow_id)
 
     def apply_confidence_discount(self, reported_return: float, shadow_id: str) -> float:
         """Apply confidence discount to a reported return.
@@ -112,7 +138,7 @@ class PaperLiveGapManager:
         - 1.0 = 100% deviation from median
         - Large values = extreme deviation
         """
-        trades = self.state_db.get_trade_history(shadow_id, limit=500)
+        trades = self.state_db.get_trade_history(shadow_id, caller_id="system", limit=500)
         own_pnls = [
             t.pnl_pct for t in trades
             if t.ticker == ticker and t.pnl_pct is not None
@@ -128,7 +154,7 @@ class PaperLiveGapManager:
         for other in all_active:
             if other.shadow_id == shadow_id:
                 continue
-            other_trades = self.state_db.get_trade_history(other.shadow_id, limit=500)
+            other_trades = self.state_db.get_trade_history(other.shadow_id, caller_id="system", limit=500)
             for t in other_trades:
                 if t.ticker == ticker and t.pnl_pct is not None:
                     other_pnls.append(t.pnl_pct)
@@ -144,26 +170,41 @@ class PaperLiveGapManager:
 
     # ── Discount rate evolution ──────────────────────────────────────────
 
-    def update_discount_rate(self, shadow_id: str) -> float:
-        """Update the discount rate based on current inter-shadow gap.
+    def update_discount_rate(self, shadow_id: str,
+                                ticker: str | None = None) -> float:
+        """Update the discount rate based on PnL dispersion and inter-shadow gap.
 
-        As GapRatio decreases (shadow converges toward peer median), the discount
-        rate is reduced proportionally. The floor is 5%, ceiling is 20%.
+        Per-asset calibration (ticker provided):
+          - Computes coefficient of variation (CV) of shadow's PnL for this ticker
+            vs. domain peers
+          - CV > 1.0 → discount near ceiling (high dispersion = less reliable)
+          - CV < 0.3 → discount near floor (low dispersion = more reliable)
+          - Returns below absolute_return_benchmark → penalty factor applied
+
+        Aggregate (ticker=None):
+          - Falls back to the existing gap-based adjustment (backward compatible)
+
+        Cold start (< 10 trades): returns confidence_discount_default (0.20).
+        Floor is 5%, ceiling is 20%.
 
         Returns the new discount rate.
         """
         current_rate = self._get_discount_rate(shadow_id)
         default = self.settings.confidence_discount_default
         floor = self.settings.confidence_discount_floor
-        factor = self.settings.gap_closure_adjustment_factor  # 0.75
+        factor = self.settings.gap_closure_adjustment_factor
+        benchmark = getattr(self.settings, 'absolute_return_benchmark', 0.04)
 
-        # Compute current gap — use most recent date and common tickers
-        trades = self.state_db.get_trade_history(shadow_id, limit=100)
+        if ticker is not None:
+            # Per-asset calibration via PnL dispersion
+            return self._calibrate_per_asset(shadow_id, ticker, current_rate,
+                                             default, floor, factor, benchmark)
+
+        # Aggregate mode — use gap-based adjustment (backward compatible)
+        trades = self.state_db.get_trade_history(shadow_id, caller_id="system", limit=100)
         if not trades:
-            # No trade data — keep current rate
             return current_rate
 
-        # Find the most common ticker for this shadow
         from collections import Counter
         ticker_counts = Counter(t.ticker for t in trades)
         most_common_ticker = ticker_counts.most_common(1)
@@ -177,18 +218,77 @@ class PaperLiveGapManager:
         if gap == float("inf"):
             return current_rate
 
-        # Target discount: as gap approaches 0, discount approaches floor
-        # When gap >= 1.0, discount = default
-        # When gap < 1.0, discount = max(floor, gap * default)
         target_rate = max(floor, min(default, gap * default))
-
-        # Smooth adjustment: move current rate toward target by factor
         new_rate = current_rate + factor * (target_rate - current_rate)
         new_rate = max(floor, min(default, new_rate))
         self._discount_rates[shadow_id] = new_rate
 
         logger.debug("Shadow %s discount: %.3f -> %.3f (gap=%.3f)",
                       shadow_id, current_rate, new_rate, gap)
+        self._save_state(shadow_id)
+        return new_rate
+
+    def _calibrate_per_asset(self, shadow_id: str, ticker: str,
+                              current_rate: float, default: float, floor: float,
+                              factor: float, benchmark: float) -> float:
+        """Calibrate discount rate for a specific asset using PnL dispersion."""
+        trades = self.state_db.get_trade_history(shadow_id, caller_id="system", limit=200)
+        own_pnls = [t.pnl_pct for t in trades
+                     if t.ticker == ticker and t.pnl_pct is not None]
+        if len(own_pnls) < 10:
+            # Cold start: use domain peer CV as Bayesian prior if available
+            config = self.state_db.get_shadow(shadow_id, caller_id="system")
+            domain = config.domain if config else None
+            if domain:
+                peer_pnls = self.state_db.get_pnl_by_domain(domain)
+                if peer_pnls and len(peer_pnls) >= 3:
+                    import statistics
+                    peer_mean = statistics.mean(peer_pnls)
+                    peer_std = statistics.stdev(peer_pnls) if len(peer_pnls) > 1 else 0.0
+                    peer_cv = peer_std / abs(peer_mean) if abs(peer_mean) > 0.001 else 2.0
+                    peer_cv_clamped = max(0.0, min(peer_cv, 2.0))
+                    peer_target = floor + (peer_cv_clamped / 2.0) * (default - floor)
+                    new_rate = current_rate + factor * (peer_target - current_rate)
+                    new_rate = max(floor, min(default, new_rate))
+                    self._discount_rates[shadow_id] = new_rate
+                    logger.debug("Shadow %s ticker=%s cold-start discount: %.3f -> %.3f (peer CV=%.3f, peers=%d)",
+                                  shadow_id, ticker, current_rate, new_rate, peer_cv, len(peer_pnls))
+                    self._save_state(shadow_id)
+                    return new_rate
+            return current_rate if current_rate != default else default
+
+        import statistics
+        own_mean = statistics.mean(own_pnls)
+        own_std = statistics.stdev(own_pnls) if len(own_pnls) > 1 else 0.0
+        cv = own_std / abs(own_mean) if abs(own_mean) > 0.001 else 2.0
+
+        # Get domain peer PnL for this ticker from config
+        config = self.state_db.get_shadow(shadow_id, caller_id="system")
+        domain = config.domain if config else None
+        if domain:
+            peer_pnls = self.state_db.get_pnl_by_domain(domain)
+        else:
+            peer_pnls = []
+
+        # CV-based target: CV > 1.0 → near ceiling, CV < 0.3 → near floor
+        cv_clamped = max(0.0, min(cv, 2.0))
+        cv_target = floor + (cv_clamped / 2.0) * (default - floor)
+
+        # Benchmark penalty: if mean return < benchmark, add penalty
+        if own_mean < benchmark and peer_pnls:
+            peer_mean = statistics.mean(peer_pnls) if peer_pnls else benchmark
+            if own_mean < peer_mean:
+                penalty = min(0.05, (peer_mean - own_mean) * 0.5)
+                cv_target = min(default, cv_target + penalty)
+
+        # Smooth adjustment
+        new_rate = current_rate + factor * (cv_target - current_rate)
+        new_rate = max(floor, min(default, new_rate))
+        self._discount_rates[shadow_id] = new_rate
+
+        logger.debug("Shadow %s ticker=%s discount: %.3f -> %.3f (CV=%.3f, trades=%d)",
+                      shadow_id, ticker, current_rate, new_rate, cv, len(own_pnls))
+        self._save_state(shadow_id)
         return new_rate
 
     # ── Live-ready certification ─────────────────────────────────────────
@@ -206,7 +306,7 @@ class PaperLiveGapManager:
 
         Returns (is_ready, reason_string).
         """
-        config = self.state_db.get_shadow(shadow_id)
+        config = self.state_db.get_shadow(shadow_id, caller_id="system")
         if config is None:
             return False, f"Shadow '{shadow_id}' not found"
 
@@ -214,7 +314,7 @@ class PaperLiveGapManager:
         mdd_limit = 0.35 if is_daredevil else 0.25
         pbo_limit = 0.10 if is_daredevil else 0.05
 
-        trades = self.state_db.get_trade_history(shadow_id, limit=500)
+        trades = self.state_db.get_trade_history(shadow_id, caller_id="system", limit=500)
         closed_trades = [t for t in trades if t.exit_price is not None]
 
         # Criterion 1: >= 10 paired trades
@@ -247,7 +347,7 @@ class PaperLiveGapManager:
             return False, f"PBO {pbo:.3f} >= {pbo_limit}"
 
         # Criterion 6: MDD check
-        latest = self.state_db.get_latest_snapshot(shadow_id)
+        latest = self.state_db.get_latest_snapshot(shadow_id, caller_id="system")
         if latest and latest.max_drawdown_pct is not None:
             if latest.max_drawdown_pct >= mdd_limit:
                 return False, f"MDD {latest.max_drawdown_pct:.1%} >= {mdd_limit:.0%}"
@@ -286,7 +386,7 @@ class PaperLiveGapManager:
 
     def get_gap_metrics(self, shadow_id: str) -> GapMetrics:
         """Produce a comprehensive GapMetrics snapshot for a shadow."""
-        trades = self.state_db.get_trade_history(shadow_id, limit=500)
+        trades = self.state_db.get_trade_history(shadow_id, caller_id="system", limit=500)
         closed_trades = [t for t in trades if t.exit_price is not None]
 
         discount = self._get_discount_rate(shadow_id)
