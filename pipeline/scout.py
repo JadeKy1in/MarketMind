@@ -227,17 +227,13 @@ async def fetch_all_sources(config: MarketMindConfig) -> list[NewsItem]:
 
 
 def _record_z0_metrics(sources, counts, issues, rss_count, api_count, rss_health, pre_dedup, post_dedup) -> None:
-    """Z0 baseline: record per-run news metrics to data/metrics/YYYY/MM/DD/news_metrics_HHMMSS.json."""
+    """Z0 baseline: append per-run metrics to data/metrics/baseline.jsonl (accumulates across days)."""
     import json as _json, os as _os
     from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
-    date_dir = now.strftime("%Y/%m/%d")
-    metrics_root = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "data", "metrics")
-    metrics_dir = _os.path.join(metrics_root, date_dir)
-    _os.makedirs(metrics_dir, exist_ok=True)
-    ts = now.strftime("%H%M%S")
+    metrics_root = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".claude", "metrics")
+    _os.makedirs(metrics_root, exist_ok=True)
     record = {
-        "timestamp": now.isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "source_count": len(sources),
         "rss_article_count": rss_count,
         "api_article_count": api_count,
@@ -246,10 +242,9 @@ def _record_z0_metrics(sources, counts, issues, rss_count, api_count, rss_health
         "post_dedup_total": post_dedup,
         "issues": issues[:10],
     }
-    fpath = _os.path.join(metrics_dir, f"news_metrics_{ts}.json")
-    with open(fpath, "w", encoding="utf-8") as f:
-        f.write(_json.dumps(record, ensure_ascii=False, indent=2) + "\n")
-    logger.debug("Z0 metrics saved: %s", fpath)
+    fpath = _os.path.join(metrics_root, "baseline.jsonl")
+    with open(fpath, "a", encoding="utf-8") as f:
+        f.write(_json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def _print_scout_report(sources: list, counts: dict[str, int], issues: list[str], total: int) -> None:

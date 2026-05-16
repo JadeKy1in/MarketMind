@@ -135,6 +135,7 @@ async def _do_flash_preprocessing(news_items: list, tracker: _StageTracker) -> l
     tracker.advance(2, "Flash: preprocessing signals...")
     from marketmind.pipeline.flash_preprocessor import preprocess_batch
     signals = await preprocess_batch(news_items[:50])
+    _record_z0_flash(len(news_items[:50]), len(signals))
     tracker.result(f"{len(signals)} signals extracted")
     return signals
 
@@ -143,6 +144,7 @@ async def _do_l1_analysis(signals: list, news_items: list, tracker: _StageTracke
     tracker.advance(3, "Layer 1: narrative analysis...")
     from marketmind.pipeline.layer1_narrative import analyze_layer1
     result = await analyze_layer1(signals[:15], news_items)
+    _record_z0_l1(result)
     tracker.result(f"grade={result.event_grade}, quadrant={result.matrix_quadrant}")
     return result
 
@@ -216,6 +218,38 @@ async def _do_daily_archive(config, l1_result, l2_result, resonance, tracker: _S
 # ══════════════════════════════════════════════════════════════════════════════
 # Shadow ecosystem init (deduplicated from run_daily / run_daily_legacy)
 # ══════════════════════════════════════════════════════════════════════════════
+
+def _record_z0_flash(input_count: int, signal_count: int) -> None:
+    """Z0: append Flash batch metrics to baseline.jsonl."""
+    import json as _j, os as _o
+    from datetime import datetime, timezone
+    try:
+        d = _o.path.join(_o.path.dirname(_o.path.abspath(__file__)), "..", ".claude", "metrics")
+        _o.makedirs(d, exist_ok=True)
+        r = {"timestamp": datetime.now(timezone.utc).isoformat(), "type": "flash",
+             "articles_in": input_count, "signals_out": signal_count}
+        with open(_o.path.join(d, "baseline.jsonl"), "a", encoding="utf-8") as f:
+            f.write(_j.dumps(r, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def _record_z0_l1(l1_result) -> None:
+    """Z0: append L1 analysis metrics to baseline.jsonl."""
+    import json as _j, os as _o
+    from datetime import datetime, timezone
+    try:
+        d = _o.path.join(_o.path.dirname(_o.path.abspath(__file__)), "..", ".claude", "metrics")
+        _o.makedirs(d, exist_ok=True)
+        r = {"timestamp": datetime.now(timezone.utc).isoformat(), "type": "l1",
+             "event_grade": getattr(l1_result, "event_grade", "N/A"),
+             "matrix_quadrant": getattr(l1_result, "matrix_quadrant", "N/A"),
+             "sentiment": getattr(l1_result, "sentiment_direction", "N/A")}
+        with open(_o.path.join(d, "baseline.jsonl"), "a", encoding="utf-8") as f:
+            f.write(_j.dumps(r, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
 
 def _init_shadow_ecosystem(config, shadow_count: int | None, tracker: _StageTracker):
     """Init shadow DB + permanent shadows + optional Phase F modules."""
