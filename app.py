@@ -183,6 +183,7 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
         elite_registry=elite_registry,
         tool_registry=l1_tool_registry,
         insider_items=ctx.insider_items,
+        social_items=ctx.social_items,
     )
 
     if should_observe:

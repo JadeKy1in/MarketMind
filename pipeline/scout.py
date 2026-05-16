@@ -6,7 +6,7 @@ import logging
 logger = logging.getLogger("marketmind.pipeline.scout")
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any
 
 import json
@@ -393,6 +393,15 @@ async def _fetch_apewisdom() -> list[NewsItem]:
     return items
 
 
+# ── Phase G Layer 4: Insider sources ─────────────────────────────────────────
+# Extracted to pipeline/insider_sources.py for modular architecture compliance.
+from marketmind.pipeline.insider_sources import (
+    fetch_congress_trades,
+    fetch_form4_insider,
+    fetch_13f_holdings,
+    detect_insider_clusters,
+)
+
 async def _fetch_api_source(source: Source, config: MarketMindConfig) -> list[NewsItem]:
     """Fetch from a JSON API source (NewsAPI, GNews, etc.). Injects API key into URL."""
     items: list[NewsItem] = []
@@ -469,6 +478,25 @@ async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsIte
     """Fetch a single source. Track A (RSS/API) → Track B (HTML) fallback."""
     items: list[NewsItem] = []
     try:
+        # Phase G Layer 4: Insider / Smart Money sources (pipeline/insider_sources.py)
+        if source.feed_type == "congress_api":
+            items = await fetch_congress_trades()
+            if items:
+                source.status = SourceStatus.WORKING
+                source.consecutive_failures = 0
+            return items
+        if source.feed_type == "sec_form4":
+            items = await fetch_form4_insider()
+            if items:
+                source.status = SourceStatus.WORKING
+                source.consecutive_failures = 0
+            return items
+        if source.feed_type == "sec_13f":
+            items = await fetch_13f_holdings()
+            if items:
+                source.status = SourceStatus.WORKING
+                source.consecutive_failures = 0
+            return items
         if source.feed_type == "sec_api":
             items = await _fetch_sec_edgar()
             if items:
@@ -628,17 +656,26 @@ async def fetch_all_sources(config: MarketMindConfig) -> list[NewsItem]:
     # Print monitoring report
     _print_scout_report(sources, source_counts, source_issues, len(deduped))
 
-    # Z1: Compute salience + priority, sort by priority descending (I13 intentional change)
-    now_utc = datetime.now(timezone.utc)
+    # Manual data files: load user-provided Congress/Bluesky data before priority scoring
+    _load_manual_data(deduped)
+
+    # Z1: Compute salience (base) then apply insider cluster boost (multiply, not replace)
     for item in deduped:
         try:
             item.salience_multiplier = _compute_salience_multiplier(item.title, item.summary)
         except Exception:
-            pass  # stays 1.0
+            pass
+
+    # Phase G Layer 4: Insider cluster detection multiplies salience by 1.5x for cluster items
+    detect_insider_clusters(deduped)
+
+    # Z1: Compute priority using boosted salience, sort by priority descending
+    now_utc = datetime.now(timezone.utc)
+    for item in deduped:
         try:
             item.priority_score = _compute_priority(item, now_utc)
         except Exception:
-            pass  # stays 0.0
+            pass
         # Update cache with surviving item
         try:
             if item.content_hash:
@@ -659,16 +696,13 @@ async def fetch_all_sources(config: MarketMindConfig) -> list[NewsItem]:
     except Exception:
         pass
 
-    # Manual data files: load user-provided Congress/Bluesky data if present
-    _load_manual_data(deduped)
-
     return deduped
 
 
 def _record_z0_metrics(sources, counts, issues, rss_count, api_count, rss_health, pre_dedup, post_dedup) -> None:
     """Z0 baseline: append per-run metrics to .claude/metrics/baseline.jsonl (accumulates across days)."""
     import json as _json, os as _os
-    from datetime import datetime, timezone
+    from datetime import datetime, timezone, timedelta
     try:
         metrics_root = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".claude", "metrics")
         _os.makedirs(metrics_root, exist_ok=True)

@@ -355,10 +355,11 @@ async def run_l1_interactive(
 
     # ── Step 1: Deep analysis + concise summary ──────────────────────────
     # Build analysis text from signals if available, otherwise from raw news
-    # CRITICAL-2: insider_items bypass Flash and are formatted directly alongside signals
+    # CRITICAL-2: insider_items + social_items bypass Flash and are formatted alongside signals
     insider_items = kwargs.get("insider_items", []) if kwargs else []
+    social_items = kwargs.get("social_items", []) if kwargs else []
     if signals:
-        signal_text = _format_signals(signals, news_items, insider_items=insider_items)
+        signal_text = _format_signals(signals, news_items, insider_items=insider_items, social_items=social_items)
     elif news_items:
         # Fallback: use raw news headlines when Flash preprocessing produced no signals
         headlines = [f"[{getattr(n, 'source_name', 'news')}] {getattr(n, 'title', '')}"

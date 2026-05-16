@@ -96,12 +96,12 @@ async def analyze_layer1(signals: list[FlashSignal], news_items: list[NewsItem])
 
 
 def _format_signals(signals: list[FlashSignal], news_items: list[NewsItem],
-                    insider_items: list[NewsItem] | None = None) -> str:
+                    insider_items: list[NewsItem] | None = None,
+                    social_items: list[NewsItem] | None = None) -> str:
     """Format signals and news for L1 narrative analysis.
 
-    CRITICAL-2 fix: insider_signal items bypass Flash preprocessing and are
-    appended as structured context data. Social mentions are also included
-    here if present in news_items (they already carry content_type="social_mention").
+    CRITICAL-2 fix: insider_signal and social_mention items bypass Flash preprocessing
+    and are appended as structured context data with appropriate caveats.
     """
     lines = ["## Preprocessed Signals"]
     for s in signals:
@@ -115,6 +115,12 @@ def _format_signals(signals: list[FlashSignal], news_items: list[NewsItem],
         lines.append("\n## Insider Signal Data (Public Disclosures)")
         lines.append("NOTE: These are legally-mandated SEC/Congressional filings — treat as context enrichment, not real-time trading signals.")
         for item in insider_items[:15]:
+            lines.append(f"- [{item.source_name}] {defang_text(item.title)} | {defang_text(item.summary[:200])}")
+    # Social media mentions: retail sentiment, subject to manipulation — contrarian indicator
+    if social_items:
+        lines.append("\n## Social Media Mentions (Retail Sentiment)")
+        lines.append("NOTE: Social media sentiment is a CONTRARIAN INDICATOR. Extreme retail bullishness often precedes pullbacks; extreme panic can signal bottoms. Treat as positioning/crowding context, not directional signal.")
+        for item in social_items[:10]:
             lines.append(f"- [{item.source_name}] {defang_text(item.title)} | {defang_text(item.summary[:200])}")
     return "\n".join(lines)
 
