@@ -84,8 +84,8 @@ SOURCES: list[Source] = [
     Source("Investing.com", SourceTier.BEST_EFFORT, "https://www.investing.com/rss/news_1063.rss", "rss", 0.40, 1.0),
 
     # ── API-based (require keys) ──────────────────────────────────
-    Source("NewsAPI", SourceTier.RELIABLE, "", "api", 0.90, 10.0, True),
-    Source("GNews", SourceTier.RELIABLE, "", "api", 0.85, 10.0, True),
+    Source("NewsAPI", SourceTier.RELIABLE, "https://newsapi.org/v2/top-headlines?country=us&category=business&apiKey={API_KEY}", "api", 0.90, 10.0, True),
+    Source("GNews", SourceTier.RELIABLE, "https://gnews.io/api/v4/top-headlines?category=business&lang=en&country=us&apikey={API_KEY}", "api", 0.85, 10.0, True),
 ]
 
 

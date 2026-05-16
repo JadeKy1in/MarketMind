@@ -1,8 +1,25 @@
-"""MarketMind configuration loaded from environment variables."""
+"""MarketMind configuration loaded from environment variables and .env file."""
 from __future__ import annotations
 import os
 from pathlib import Path
 from dataclasses import dataclass, field
+
+# Load .env file if present (no dependency on python-dotenv)
+def _load_dotenv() -> None:
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if not env_path.exists():
+        return
+    with open(env_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key, val = key.strip(), val.strip()
+            if key and val and key not in os.environ:
+                os.environ[key] = val
+
+_load_dotenv()
 
 
 @dataclass
@@ -91,7 +108,7 @@ class ShadowSettings:
     max_concurrent_tasks: int = 3
 
     # Gemini Flash settings
-    gemini_api_key: str = field(default="", repr=False)
+    gemini_api_key: str = field(default_factory=lambda: os.getenv("GEMINI_API_KEY", ""), repr=False)
     gemini_flash_enabled: bool = False
 
     # Missed paths

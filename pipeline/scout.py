@@ -101,6 +101,43 @@ async def _fetch_sec_edgar() -> list[NewsItem]:
     return items
 
 
+async def _fetch_api_source(source: Source, config: MarketMindConfig) -> list[NewsItem]:
+    """Fetch from a JSON API source (NewsAPI, GNews, etc.). Injects API key into URL."""
+    items: list[NewsItem] = []
+    # Determine which API key to use
+    api_key = None
+    if source.name == "NewsAPI":
+        api_key = config.newsapi_key
+    elif source.name == "GNews":
+        api_key = config.gnews_key
+    if not api_key:
+        return items
+
+    url = source.url.replace("{API_KEY}", api_key)
+    client_kwargs = {"timeout": 30.0, "follow_redirects": True}
+    if config.proxy_url:
+        client_kwargs["proxy"] = config.proxy_url
+    async with httpx.AsyncClient(**client_kwargs) as client:
+        resp = await client.get(url, headers={"User-Agent": "MarketMind/0.1"})
+        resp.raise_for_status()
+        data = resp.json()
+        # NewsAPI format: {"articles": [{...}]}
+        # GNews format: {"articles": [{...}]}
+        articles = data.get("articles", [])
+        for art in articles[:20]:
+            title = (art.get("title") or "Untitled").strip()
+            link = art.get("url", "")
+            desc = (art.get("description") or "").strip()
+            published = art.get("publishedAt", datetime.now().isoformat())
+            item_id = hashlib.sha256(f"{title}{link}".encode()).hexdigest()[:16]
+            items.append(NewsItem(
+                id=item_id, title=title, url=link,
+                source_name=source.name, source_tier=int(source.tier),
+                published_at=published, summary=desc[:500],
+            ))
+    return items
+
+
 async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsItem]:
     """Fetch a single source. Track A (RSS/API) → Track B (HTML) fallback."""
     items: list[NewsItem] = []
@@ -111,7 +148,13 @@ async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsIte
                 source.status = SourceStatus.WORKING
                 source.consecutive_failures = 0
             return items
-        if source.feed_type in ("rss", "api") and source.url:
+        if source.feed_type == "api" and source.url:
+            items = await _fetch_api_source(source, config)
+            if items:
+                source.status = SourceStatus.WORKING
+                source.consecutive_failures = 0
+            return items
+        if source.feed_type == "rss" and source.url:
             client_kwargs = {"timeout": 30.0, "follow_redirects": True}
             if config.proxy_url:
                 client_kwargs["proxy"] = config.proxy_url
