@@ -10,9 +10,15 @@ These constraints are specific to MarketMind and are verified on every restart.
 
 **Law 1 (Output Discipline):** Final Markdown reports must be ASCII-only, no emoji. Code comments and console output are exempt.
 
-**Law 2 (Physical Isolation):** Analysis tools only — never connect to brokerage APIs. Account state is maintained manually, never automated. Verify: `grep -r "brokerage\|api\.trade\|place_order" --include="*.py" .` must return empty.
+**Law 2 (Operational Boundary):** MarketMind is an analysis tool — it may READ public market data but must NEVER execute, modify, or cancel trades. Account state is maintained manually, never automated. Market data feeds must not be used for screening, ranking, or systematic parameter optimization (per Law 3).
 
-**Law 3 (Anti-Overfitting):** Price data is a timing filter, not a signal source. No parameter brute-forcing (no GridSearchCV, no brute_force loops over strategy params). Empty positions are valid outcomes. Verify: `grep -r "grid_search\|brute_force\|GridSearchCV" --include="*.py" .` must return empty.
+- **PROHIBITED**: Any API call that places/modifies/cancels orders; any call accessing account balances, positions, or trading history; any authenticated connection to a brokerage account with trading permissions.
+- **ALLOWED**: Read-only market data APIs (yfinance, Alpha Vantage, FMP, CoinGecko); exchange public endpoints (Binance `/api/v3/ticker/price`, `/api/v3/klines` — unauthenticated only; no Binance API keys, even read-only); APIs requiring read-only keys with zero trading permissions.
+- **Boundary test**: If an API key grants trading capability, it must not be configured. If a platform's only key type grants trading, the platform is off-limits.
+
+Verify: `grep -r "brokerage\|api\.trade\|place_order\|binance.*key\|Binance.*Key" --include="*.py" .` must return empty; `grep -r "yfinance\|finnhub\|alpha_vantage\|fmp\|coingecko" --include="*.py" .` confirms allowed sources.
+
+**Law 3 (Anti-Overfitting):** Price data is a timing filter, not a signal source. Market data (fundamentals, OHLCV, technical indicators) may enrich analysis context but must NOT be fed into screening, ranking, or systematic parameter optimization pipelines. No parameter brute-forcing (no GridSearchCV, no brute_force loops over strategy params). Empty positions are valid outcomes. Verify: `grep -r "grid_search\|brute_force\|GridSearchCV\|Optuna\|hyperopt" --include="*.py" .` must return empty.
 
 ## Quick Start
 
