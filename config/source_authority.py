@@ -50,9 +50,6 @@ SOURCES: list[Source] = [
     Source("SCMP Business", SourceTier.RELIABLE, "https://www.scmp.com/rss/4/feed", "rss", 0.80, 2.0),
     Source("Caixin", SourceTier.PRIMARY, "https://english.caixin.com/rss/topmatter.xml", "rss", 0.82, 2.0),
     Source("Xinhua Finance", SourceTier.RELIABLE, "http://www.xinhuanet.com/english/rss/worldrss.xml", "rss", 0.72, 2.0),
-    # RSSHub-based Chinese sources (requires self-hosted RSSHub instance; public rsshub.app is rate-limited)
-    Source("Sina Finance", SourceTier.RELIABLE, "https://rsshub.app/sina/finance/china", "rss", 0.75, 2.0, status=SourceStatus.DEGRADED),
-    Source("CLS Telegraph", SourceTier.RELIABLE, "https://rsshub.app/cls/telegraph", "rss", 0.78, 2.0, status=SourceStatus.DEGRADED),
 
     # ── Japan / Asia Pacific ───────────────────────────────────────
     Source("Nikkei Asia", SourceTier.RELIABLE, "https://asia.nikkei.com/rss/feed/nar", "rss", 0.80, 2.0),
