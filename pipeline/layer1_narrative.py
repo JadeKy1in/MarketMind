@@ -114,10 +114,44 @@ def _parse_layer1_response(content: str) -> Layer1Result:
         start = content.find("{")
         end = content.rfind("}")
         if start != -1 and end != -1:
-            data = json.loads(content[start:end + 1])
+            try:
+                data = json.loads(content[start:end + 1])
+            except json.JSONDecodeError:
+                data = None
         else:
-            logger.warning("Layer1 response has no JSON block — %d chars, using empty defaults", len(content))
-            return Layer1Result.empty_default()
+            data = None
+    # If JSON parse failed, extract fields from free-form text via regex
+    if data is None:
+        import re
+        logger.warning("Layer1 response has no parseable JSON — %d chars, extracting from text", len(content))
+        # Map free-text keywords to formal quadrant values
+        # core_opportunity | trend_opportunity | arbitrage | observe_skip
+        quadrant = "observe_skip"
+        has_surprise = bool(re.search(r'surprise|shock|unexpected|breaking|crash|surge', content, re.IGNORECASE))
+        has_big = bool(re.search(r'broad|systemic|global|sector.wide|contagion|spillover', content, re.IGNORECASE))
+        if has_surprise and has_big:
+            quadrant = "core_opportunity"
+        elif not has_surprise and has_big:
+            quadrant = "trend_opportunity"
+        elif has_surprise and not has_big:
+            quadrant = "arbitrage"
+        grade = "D"
+        m = re.search(r'event.grade[:\s]*["\']?([A-Ea-e])', content)
+        if m:
+            grade = m.group(1).upper()
+        direction = "neutral"
+        if re.search(r'bullish|看多|做多|long', content):
+            direction = "bullish"
+        elif re.search(r'bearish|看空|做空|short', content):
+            direction = "bearish"
+        data = {
+            "event_grade": grade, "matrix_quadrant": quadrant,
+            "sentiment_direction": direction,
+            "raw_analysis": content,
+        }
+    # Always preserve raw analysis text
+    if "raw_analysis" not in data:
+        data["raw_analysis"] = content
     return Layer1Result(
         event_grade=data.get("event_grade", "E"),
         surprise_level=data.get("surprise_level", "low"),

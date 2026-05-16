@@ -168,7 +168,9 @@ async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsIte
                 )
                 resp.raise_for_status()
                 feed = feedparser.parse(resp.text)
-                for entry in feed.entries[:20]:
+                # Tiered article cap: PRIMARY=20, RELIABLE=10, FRAGILE/BEST_EFFORT=5
+                max_per = 20 if source.tier == SourceTier.PRIMARY else (10 if source.tier == SourceTier.RELIABLE else 5)
+                for entry in feed.entries[:max_per]:
                     try:
                         items.append(NewsItem.from_entry(entry, source))
                     except Exception as e:
@@ -261,7 +263,7 @@ def deduplicate(items: list[NewsItem]) -> list[NewsItem]:
             continue
         is_dup = False
         for existing in result:
-            if _title_similarity(item.title, existing.title) > 0.85:
+            if _title_similarity(item.title, existing.title) > 0.80:
                 is_dup = True
                 break
         if not is_dup:
