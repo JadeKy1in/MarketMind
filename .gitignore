@@ -1,5 +1,6 @@
-# Secrets
+# Secrets & API keys
 .env
+**/config.json
 
 # Python
 __pycache__/
@@ -10,19 +11,37 @@ venv/
 *.egg-info/
 .pytest_cache/
 
+# Node
+node_modules/
+
 # IDE
 .vscode/
 .idea/
 
-# Data & outputs (generated at runtime)
+# Generated reports & data
+output/reports/
+output/logs/
+data/velocity/
+data/methodology/
+data/event_store.jsonl
+projects/command_center/reports/
 data/
 output/
 
-# VCR.py news cassettes (contain copyrighted RSS content)
-tests/fixtures/vcr/*.yml
-
-# Cache
+# Cache & temp
 cache/
 *.log
+error_dump.log
 coverage/
-.env
+
+# Old Cline stuff (keep as reference but don't track changes)
+memory-bank/
+projects/robinhood/memory-bank/
+.clinerules
+projects/robinhood/.clinerules
+.cline/
+
+# Temp & sandbox
+temp_servers/
+sandbox/
+5.2.0

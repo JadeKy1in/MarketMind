@@ -1,0 +1,113 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/BgELEU9+4z94+5JeDJsNOH3k8s8</id>
+  <title>arXiv Query: search_query=cat:cs.LG AND (all:attention OR all:transformer AND (all:attribution OR all:explainability) )&amp;id_list=&amp;start=0&amp;max_results=5</title>
+  <updated>2026-05-07T09:36:37Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=cat:cs.LG+AND+(all:attention+OR+(all:transformer+AND+(all:attribution+OR+all:explainability)))&amp;start=0&amp;max_results=5&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>5</opensearch:itemsPerPage>
+  <opensearch:totalResults>23470</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2601.14112v2</id>
+    <title>Learning to Explain: Supervised Token Attribution from Transformer Attention Patterns</title>
+    <updated>2026-01-21T14:35:20Z</updated>
+    <link href="https://arxiv.org/abs/2601.14112v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2601.14112v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Explainable AI (XAI) has become critical as transformer-based models are deployed in high-stakes applications including healthcare, legal systems, and financial services, where opacity hinders trust and accountability. Transformers self-attention mechanisms have proven valuable for model interpretability, with attention weights successfully used to understand model focus and behavior (Xu et al., 2015); (Wiegreffe and Pinter, 2019). However, existing attention-based explanation methods rely on manually defined aggregation strategies and fixed attribution rules (Abnar and Zuidema, 2020a); (Chefer et al., 2021), while model-agnostic approaches (LIME, SHAP) treat the model as a black box and incur significant computational costs through input perturbation. We introduce Explanation Network (ExpNet), a lightweight neural network that learns an explicit mapping from transformer attention patterns to token-level importance scores. Unlike prior methods, ExpNet discovers optimal attention feature combinations automatically rather than relying on predetermined rules. We evaluate ExpNet in a challenging cross-task setting and benchmark it against a broad spectrum of model-agnostic methods and attention-based techniques spanning four methodological families.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-01-20T16:06:34Z</published>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>George Mihaila</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2604.15371v1</id>
+    <title>Applied Explainability for Large Language Models: A Comparative Study</title>
+    <updated>2026-04-15T13:07:29Z</updated>
+    <link href="https://arxiv.org/abs/2604.15371v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2604.15371v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Large language models (LLMs) achieve strong performance across many natural language processing tasks, yet their decision processes remain difficult to interpret. This lack of transparency creates challenges for trust, debugging, and deployment in real-world systems.
+  This paper presents an applied comparative study of three explainability techniques: Integrated Gradients, Attention Rollout, and SHAP, on a fine-tuned DistilBERT model for SST-2 sentiment classification. Rather than proposing new methods, the focus is on evaluating the practical behavior of existing approaches under a consistent and reproducible setup.
+  The results show that gradient-based attribution provides more stable and intuitive explanations, while attention-based methods are computationally efficient but less aligned with prediction-relevant features. Model-agnostic approaches offer flexibility but introduce higher computational cost and variability.
+  This work highlights key trade-offs between explainability methods and emphasizes their role as diagnostic tools rather than definitive explanations. The findings provide practical insights for researchers and engineers working with transformer-based NLP systems.
+  This is a preprint and has not undergone peer review.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-04-15T13:07:29Z</published>
+    <arxiv:comment>14 pages, 3 figures, comparative study of explainability methods for transformer-based NLP models; also available on Zenodo</arxiv:comment>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Venkata Abhinandan Kancharla</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2502.15765v1</id>
+    <title>Generalized Attention Flow: Feature Attribution for Transformer Models via Maximum Flow</title>
+    <updated>2025-02-14T19:50:58Z</updated>
+    <link href="https://arxiv.org/abs/2502.15765v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2502.15765v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>This paper introduces Generalized Attention Flow (GAF), a novel feature attribution method for Transformer-based models to address the limitations of current approaches. By extending Attention Flow and replacing attention weights with the generalized Information Tensor, GAF integrates attention weights, their gradients, the maximum flow problem, and the barrier method to enhance the performance of feature attributions. The proposed method exhibits key theoretical properties and mitigates the shortcomings of prior techniques that rely solely on simple aggregation of attention weights. Our comprehensive benchmarking on sequence classification tasks demonstrates that a specific variant of GAF consistently outperforms state-of-the-art feature attribution methods in most evaluation settings, providing a more reliable interpretation of Transformer model outputs.</summary>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2025-02-14T19:50:58Z</published>
+    <arxiv:primary_category term="cs.LG"/>
+    <author>
+      <name>Behrooz Azarkhalili</name>
+    </author>
+    <author>
+      <name>Maxwell Libbrecht</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2506.02138v1</id>
+    <title>Revisiting LRP: Positional Attribution as the Missing Ingredient for Transformer Explainability</title>
+    <updated>2025-06-02T18:07:55Z</updated>
+    <link href="https://arxiv.org/abs/2506.02138v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2506.02138v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>The development of effective explainability tools for Transformers is a crucial pursuit in deep learning research. One of the most promising approaches in this domain is Layer-wise Relevance Propagation (LRP), which propagates relevance scores backward through the network to the input space by redistributing activation values based on predefined rules. However, existing LRP-based methods for Transformer explainability entirely overlook a critical component of the Transformer architecture: its positional encoding (PE), resulting in violation of the conservation property, and the loss of an important and unique type of relevance, which is also associated with structural and positional features. To address this limitation, we reformulate the input space for Transformer explainability as a set of position-token pairs. This allows us to propose specialized theoretically-grounded LRP rules designed to propagate attributions across various positional encoding methods, including Rotary, Learnable, and Absolute PE. Extensive experiments with both fine-tuned classifiers and zero-shot foundation models, such as LLaMA 3, demonstrate that our method significantly outperforms the state-of-the-art in both vision and NLP explainability tasks. Our code is publicly available.</summary>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2025-06-02T18:07:55Z</published>
+    <arxiv:primary_category term="cs.LG"/>
+    <author>
+      <name>Yarden Bakish</name>
+    </author>
+    <author>
+      <name>Itamar Zimerman</name>
+    </author>
+    <author>
+      <name>Hila Chefer</name>
+    </author>
+    <author>
+      <name>Lior Wolf</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2207.02390v1</id>
+    <title>Swin Deformable Attention U-Net Transformer (SDAUT) for Explainable Fast MRI</title>
+    <updated>2022-07-05T15:56:46Z</updated>
+    <link href="https://arxiv.org/abs/2207.02390v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2207.02390v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Fast MRI aims to reconstruct a high fidelity image from partially observed measurements. Exuberant development in fast MRI using deep learning has been witnessed recently. Meanwhile, novel deep learning paradigms, e.g., Transformer based models, are fast-growing in natural language processing and promptly developed for computer vision and medical image analysis due to their prominent performance. Nevertheless, due to the complexity of the Transformer, the application of fast MRI may not be straightforward. The main obstacle is the computational cost of the self-attention layer, which is the core part of the Transformer, can be expensive for high resolution MRI inputs. In this study, we propose a new Transformer architecture for solving fast MRI that coupled Shifted Windows Transformer with U-Net to reduce the network complexity. We incorporate deformable attention to construe the explainability of our reconstruction model. We empirically demonstrate that our method achieves consistently superior performance on the fast MRI task. Besides, compared to state-of-the-art Transformer models, our method has fewer network parameters while revealing explainability. The code is publicly available at https://github.com/ayanglab/SDAUT.</summary>
+    <category term="cs.CV" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="eess.IV" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2022-07-05T15:56:46Z</published>
+    <arxiv:comment>MICCAI 2022</arxiv:comment>
+    <arxiv:primary_category term="cs.CV"/>
+    <author>
+      <name>Jiahao Huang</name>
+    </author>
+    <author>
+      <name>Xiaodan Xing</name>
+    </author>
+    <author>
+      <name>Zhifan Gao</name>
+    </author>
+    <author>
+      <name>Guang Yang</name>
+    </author>
+  </entry>
+</feed>

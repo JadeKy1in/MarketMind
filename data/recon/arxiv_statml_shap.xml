@@ -1,0 +1,123 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/lNm7PetFLvX7Il3xdJxb0FiuOR4</id>
+  <title>arXiv Query: search_query=cat:stat.ML AND (all:Shapley OR all:SHAP AND all:hierarchical OR all:attribution)&amp;id_list=&amp;start=0&amp;max_results=5</title>
+  <updated>2026-05-07T09:36:14Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=cat:stat.ML+AND+(all:Shapley+OR+(all:SHAP+AND+(all:hierarchical+OR+all:attribution)))&amp;start=0&amp;max_results=5&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>5</opensearch:itemsPerPage>
+  <opensearch:totalResults>268</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2107.11357v2</id>
+    <title>Joint Shapley values: a measure of joint feature importance</title>
+    <updated>2022-02-10T11:45:29Z</updated>
+    <link href="https://arxiv.org/abs/2107.11357v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2107.11357v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>The Shapley value is one of the most widely used measures of feature importance partly as it measures a feature's average effect on a model's prediction. We introduce joint Shapley values, which directly extend Shapley's axioms and intuitions: joint Shapley values measure a set of features' average contribution to a model's prediction. We prove the uniqueness of joint Shapley values, for any order of explanation. Results for games show that joint Shapley values present different insights from existing interaction indices, which assess the effect of a feature within a set of features. The joint Shapley values provide intuitive results in ML attribution problems. With binary features, we present a presence-adjusted global value that is more consistent with local intuitions than the usual approach.</summary>
+    <category term="stat.ML" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2021-07-23T17:22:37Z</published>
+    <arxiv:comment>Source code available at https://github.com/harris-chris/joint-shapley-values</arxiv:comment>
+    <arxiv:primary_category term="stat.ML"/>
+    <author>
+      <name>Chris Harris</name>
+    </author>
+    <author>
+      <name>Richard Pymar</name>
+    </author>
+    <author>
+      <name>Colin Rowat</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2602.10532v1</id>
+    <title>Statistical Inference and Learning for Shapley Additive Explanations (SHAP)</title>
+    <updated>2026-02-11T05:01:47Z</updated>
+    <link href="https://arxiv.org/abs/2602.10532v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2602.10532v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>The SHAP (short for Shapley additive explanation) framework has become an essential tool for attributing importance to variables in predictive tasks. In model-agnostic settings, SHAP uses the concept of Shapley values from cooperative game theory to fairly allocate credit to the features in a vector $X$ based on their contribution to an outcome $Y$. While the explanations offered by SHAP are local by nature, learners often need global measures of feature importance in order to improve model explainability and perform feature selection. The most common approach for converting these local explanations into global ones is to compute either the mean absolute SHAP or mean squared SHAP. However, despite their ubiquity, there do not exist approaches for performing statistical inference on these quantities.
+  In this paper, we take a semi-parametric approach for calibrating confidence in estimates of the $p$th powers of Shapley additive explanations. We show that, by treating the SHAP curve as a nuisance function that must be estimated from data, one can reliably construct asymptotically normal estimates of the $p$th powers of SHAP. When $p \geq 2$, we show a de-biased estimator that combines U-statistics with Neyman orthogonal scores for functionals of nested regressions is asymptotically normal. When $1 \leq p &lt; 2$ (and the hence target parameter is not twice differentiable), we construct de-biased U-statistics for a smoothed alternative. In particular, we show how to carefully tune the temperature parameter of the smoothing function in order to obtain inference for the true, unsmoothed $p$th power. We complement these results by presenting a Neyman orthogonal loss that can be used to learn the SHAP curve via empirical risk minimization and discussing excess risk guarantees for commonly used function classes.</summary>
+    <category term="stat.ML" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="math.ST" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-02-11T05:01:47Z</published>
+    <arxiv:comment>48 pages, 1 figure</arxiv:comment>
+    <arxiv:primary_category term="stat.ML"/>
+    <author>
+      <name>Justin Whitehouse</name>
+    </author>
+    <author>
+      <name>Ayush Sawarni</name>
+    </author>
+    <author>
+      <name>Vasilis Syrgkanis</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2110.09167v2</id>
+    <title>RKHS-SHAP: Shapley Values for Kernel Methods</title>
+    <updated>2022-05-26T13:43:46Z</updated>
+    <link href="https://arxiv.org/abs/2110.09167v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2110.09167v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Feature attribution for kernel methods is often heuristic and not individualised for each prediction. To address this, we turn to the concept of Shapley values~(SV), a coalition game theoretical framework that has previously been applied to different machine learning model interpretation tasks, such as linear models, tree ensembles and deep networks. By analysing SVs from a functional perspective, we propose \textsc{RKHS-SHAP}, an attribution method for kernel machines that can efficiently compute both \emph{Interventional} and \emph{Observational Shapley values} using kernel mean embeddings of distributions. We show theoretically that our method is robust with respect to local perturbations - a key yet often overlooked desideratum for consistent model interpretation. Further, we propose \emph{Shapley regulariser}, applicable to a general empirical risk minimisation framework, allowing learning while controlling the level of specific feature's contributions to the model. We demonstrate that the Shapley regulariser enables learning which is robust to covariate shift of a given feature and fair learning which controls the SVs of sensitive features.</summary>
+    <category term="stat.ML" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2021-10-18T10:35:36Z</published>
+    <arxiv:primary_category term="stat.ML"/>
+    <author>
+      <name>Siu Lun Chau</name>
+    </author>
+    <author>
+      <name>Robert Hu</name>
+    </author>
+    <author>
+      <name>Javier Gonzalez</name>
+    </author>
+    <author>
+      <name>Dino Sejdinovic</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2106.03820v3</id>
+    <title>Accurate Shapley Values for explaining tree-based models</title>
+    <updated>2023-05-31T17:19:43Z</updated>
+    <link href="https://arxiv.org/abs/2106.03820v3" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2106.03820v3" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Shapley Values (SV) are widely used in explainable AI, but their estimation and interpretation can be challenging, leading to inaccurate inferences and explanations. As a starting point, we remind an invariance principle for SV and derive the correct approach for computing the SV of categorical variables that are particularly sensitive to the encoding used. In the case of tree-based models, we introduce two estimators of Shapley Values that exploit the tree structure efficiently and are more accurate than state-of-the-art methods. Simulations and comparisons are performed with state-of-the-art algorithms and show the practical gain of our approach. Finally, we discuss the limitations of Shapley Values as a local explanation. These methods are available as a Python package.</summary>
+    <category term="stat.ML" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2021-06-07T17:35:54Z</published>
+    <arxiv:comment>Accepted at the 25th International Conference on Artificial Intelligence and Statistics (AISTATS), 2022. V2: The section on Active Shapley Values has been removed in this updated version</arxiv:comment>
+    <arxiv:primary_category term="stat.ML"/>
+    <arxiv:journal_ref>AISTATS 2022</arxiv:journal_ref>
+    <author>
+      <name>Salim I. Amoukou</name>
+    </author>
+    <author>
+      <name>Nicolas J-B. Brunel</name>
+    </author>
+    <author>
+      <name>Tangi Salaün</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2309.02417v1</id>
+    <title>Computing SHAP Efficiently Using Model Structure Information</title>
+    <updated>2023-09-05T17:48:09Z</updated>
+    <link href="https://arxiv.org/abs/2309.02417v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2309.02417v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>SHAP (SHapley Additive exPlanations) has become a popular method to attribute the prediction of a machine learning model on an input to its features. One main challenge of SHAP is the computation time. An exact computation of Shapley values requires exponential time complexity. Therefore, many approximation methods are proposed in the literature. In this paper, we propose methods that can compute SHAP exactly in polynomial time or even faster for SHAP definitions that satisfy our additivity and dummy assumptions (eg, kernal SHAP and baseline SHAP). We develop different strategies for models with different levels of model structure information: known functional decomposition, known order of model (defined as highest order of interaction in the model), or unknown order. For the first case, we demonstrate an additive property and a way to compute SHAP from the lower-order functional components. For the second case, we derive formulas that can compute SHAP in polynomial time. Both methods yield exact SHAP results. Finally, if even the order of model is unknown, we propose an iterative way to approximate Shapley values. The three methods we propose are computationally efficient when the order of model is not high which is typically the case in practice. We compare with sampling approach proposed in Castor &amp; Gomez (2008) using simulation studies to demonstrate the efficacy of our proposed methods.</summary>
+    <category term="stat.ML" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2023-09-05T17:48:09Z</published>
+    <arxiv:comment>15 pages</arxiv:comment>
+    <arxiv:primary_category term="stat.ML"/>
+    <author>
+      <name>Linwei Hu</name>
+    </author>
+    <author>
+      <name>Ke Wang</name>
+    </author>
+  </entry>
+</feed>

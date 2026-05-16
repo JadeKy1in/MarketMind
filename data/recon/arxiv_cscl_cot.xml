@@ -1,0 +1,268 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/bIP1vAlX4VZ3PbUFRnr97UWt5cw</id>
+  <title>arXiv Query: search_query=cat:cs.CL AND (all:chain OR all:of OR all:thought AND all:reasoning AND (all:self-reflection OR all:agent) )&amp;id_list=&amp;start=0&amp;max_results=5</title>
+  <updated>2026-05-07T09:36:24Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=cat:cs.CL+AND+(all:chain+OR+(all:of+OR+(all:thought+AND+(all:reasoning+AND+(all:self-reflection+OR+all:agent)))))&amp;start=0&amp;max_results=5&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>5</opensearch:itemsPerPage>
+  <opensearch:totalResults>4197</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2505.20013v2</id>
+    <title>WebCoT: Enhancing Web Agent Reasoning by Reconstructing Chain-of-Thought in Reflection, Branching, and Rollback</title>
+    <updated>2025-09-18T11:32:15Z</updated>
+    <link href="https://arxiv.org/abs/2505.20013v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2505.20013v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Web agents powered by Large Language Models (LLMs) show promise for next-generation AI, but their limited reasoning in uncertain, dynamic web environments hinders robust deployment. In this paper, we identify key reasoning skills essential for effective web agents, i.e., reflection &amp; lookahead, branching, and rollback, and curate trajectory data that exemplifies these abilities by reconstructing the agent's (inference-time) reasoning algorithms into chain-of-thought rationales. We conduct experiments in the agent self-improving benchmark, OpenWebVoyager, and demonstrate that distilling salient reasoning patterns into the backbone LLM via simple fine-tuning can substantially enhance its performance. Our approach yields significant improvements across multiple benchmarks, including WebVoyager, Mind2web-live, and SimpleQA (web search), highlighting the potential of targeted reasoning skill enhancement for web agents.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2025-05-26T14:03:37Z</published>
+    <arxiv:comment>18 pages</arxiv:comment>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Minda Hu</name>
+    </author>
+    <author>
+      <name>Tianqing Fang</name>
+    </author>
+    <author>
+      <name>Jianshu Zhang</name>
+    </author>
+    <author>
+      <name>Junyu Ma</name>
+    </author>
+    <author>
+      <name>Zhisong Zhang</name>
+    </author>
+    <author>
+      <name>Jingyan Zhou</name>
+    </author>
+    <author>
+      <name>Hongming Zhang</name>
+    </author>
+    <author>
+      <name>Haitao Mi</name>
+    </author>
+    <author>
+      <name>Dong Yu</name>
+    </author>
+    <author>
+      <name>Irwin King</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2501.13117v1</id>
+    <title>MyGO Multiplex CoT: A Method for Self-Reflection in Large Language Models via Double Chain of Thought Thinking</title>
+    <updated>2025-01-20T12:54:57Z</updated>
+    <link href="https://arxiv.org/abs/2501.13117v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2501.13117v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Recent advancements in large language models (LLMs) have demonstrated their impressive abilities in various reasoning and decision-making tasks. However, the quality and coherence of the reasoning process can still benefit from enhanced introspection and self-reflection. In this paper, we introduce Multiplex CoT (Chain of Thought), a method that enables LLMs to simulate a form of self-review while reasoning, by initiating double Chain of Thought (CoT) thinking. Multiplex CoT leverages the power of iterative reasoning, where the model generates an initial chain of thought and subsequently critiques and refines this reasoning with a second round of thought generation. This recursive approach allows for more coherent, logical, and robust answers, improving the overall decision-making process. We demonstrate how this method can be effectively implemented using simple prompt engineering in existing LLM architectures, achieving an effect similar to that of the Learning-Refinement Model (LRM) without the need for additional training. Additionally, we present a practical guide for implementing the method in Google Colab, enabling easy integration into real-world applications.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2025-01-20T12:54:57Z</published>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Shihao Ji</name>
+    </author>
+    <author>
+      <name>Zihui Song</name>
+    </author>
+    <author>
+      <name>Fucheng Zhong</name>
+    </author>
+    <author>
+      <name>Jisen Jia</name>
+    </author>
+    <author>
+      <name>Zhaobo Wu</name>
+    </author>
+    <author>
+      <name>Zheyi Cao</name>
+    </author>
+    <author>
+      <name>Tianhao Xu</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2602.14224v1</id>
+    <title>The Interspeech 2026 Audio Reasoning Challenge: Evaluating Reasoning Process Quality for Audio Reasoning Models and Agents</title>
+    <updated>2026-02-15T16:38:09Z</updated>
+    <link href="https://arxiv.org/abs/2602.14224v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2602.14224v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Recent Large Audio Language Models (LALMs) excel in understanding but often lack transparent reasoning. To address this "black-box" limitation, we organized the Audio Reasoning Challenge at Interspeech 2026, the first shared task dedicated to evaluating Chain-of-Thought (CoT) quality in the audio domain. The challenge introduced MMAR-Rubrics, a novel instance-level protocol assessing the factuality and logic of reasoning chains. Featured Single Model and Agent tracks, the competition attracting 156 teams from 18 countries and regions. Results show agent systems currently lead in reasoning quality, utilizing iterative tool orchestration and cross-modal analysis. Besides, single models are rapidly advancing via reinforcement learning and sophisticated data pipeline. We details the challenge design, methodology, and a comprehensive analysis of state-of-the-art systems, providing new insights for explainable audio intelligence.</summary>
+    <category term="cs.SD" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.MM" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-02-15T16:38:09Z</published>
+    <arxiv:comment>The official website of the Audio Reasoning Challenge: https://audio-reasoning-challenge.github.io</arxiv:comment>
+    <arxiv:primary_category term="cs.SD"/>
+    <author>
+      <name>Ziyang Ma</name>
+    </author>
+    <author>
+      <name>Ruiyang Xu</name>
+    </author>
+    <author>
+      <name>Yinghao Ma</name>
+    </author>
+    <author>
+      <name>Chao-Han Huck Yang</name>
+    </author>
+    <author>
+      <name>Bohan Li</name>
+    </author>
+    <author>
+      <name>Jaeyeon Kim</name>
+    </author>
+    <author>
+      <name>Jin Xu</name>
+    </author>
+    <author>
+      <name>Jinyu Li</name>
+    </author>
+    <author>
+      <name>Carlos Busso</name>
+    </author>
+    <author>
+      <name>Kai Yu</name>
+    </author>
+    <author>
+      <name>Eng Siong Chng</name>
+    </author>
+    <author>
+      <name>Xie Chen</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2601.12538v1</id>
+    <title>Agentic Reasoning for Large Language Models</title>
+    <updated>2026-01-18T18:58:23Z</updated>
+    <link href="https://arxiv.org/abs/2601.12538v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2601.12538v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Reasoning is a fundamental cognitive process underlying inference, problem-solving, and decision-making. While large language models (LLMs) demonstrate strong reasoning capabilities in closed-world settings, they struggle in open-ended and dynamic environments. Agentic reasoning marks a paradigm shift by reframing LLMs as autonomous agents that plan, act, and learn through continual interaction. In this survey, we organize agentic reasoning along three complementary dimensions. First, we characterize environmental dynamics through three layers: foundational agentic reasoning, which establishes core single-agent capabilities including planning, tool use, and search in stable environments; self-evolving agentic reasoning, which studies how agents refine these capabilities through feedback, memory, and adaptation; and collective multi-agent reasoning, which extends intelligence to collaborative settings involving coordination, knowledge sharing, and shared goals. Across these layers, we distinguish in-context reasoning, which scales test-time interaction through structured orchestration, from post-training reasoning, which optimizes behaviors via reinforcement learning and supervised fine-tuning. We further review representative agentic reasoning frameworks across real-world applications and benchmarks, including science, robotics, healthcare, autonomous research, and mathematics. This survey synthesizes agentic reasoning methods into a unified roadmap bridging thought and action, and outlines open challenges and future directions, including personalization, long-horizon interaction, world modeling, scalable multi-agent training, and governance for real-world deployment.</summary>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-01-18T18:58:23Z</published>
+    <arxiv:comment>Project: https://github.com/weitianxin/Awesome-Agentic-Reasoning</arxiv:comment>
+    <arxiv:primary_category term="cs.AI"/>
+    <author>
+      <name>Tianxin Wei</name>
+    </author>
+    <author>
+      <name>Ting-Wei Li</name>
+    </author>
+    <author>
+      <name>Zhining Liu</name>
+    </author>
+    <author>
+      <name>Xuying Ning</name>
+    </author>
+    <author>
+      <name>Ze Yang</name>
+    </author>
+    <author>
+      <name>Jiaru Zou</name>
+    </author>
+    <author>
+      <name>Zhichen Zeng</name>
+    </author>
+    <author>
+      <name>Ruizhong Qiu</name>
+    </author>
+    <author>
+      <name>Xiao Lin</name>
+    </author>
+    <author>
+      <name>Dongqi Fu</name>
+    </author>
+    <author>
+      <name>Zihao Li</name>
+    </author>
+    <author>
+      <name>Mengting Ai</name>
+    </author>
+    <author>
+      <name>Duo Zhou</name>
+    </author>
+    <author>
+      <name>Wenxuan Bao</name>
+    </author>
+    <author>
+      <name>Yunzhe Li</name>
+    </author>
+    <author>
+      <name>Gaotang Li</name>
+    </author>
+    <author>
+      <name>Cheng Qian</name>
+    </author>
+    <author>
+      <name>Yu Wang</name>
+    </author>
+    <author>
+      <name>Xiangru Tang</name>
+    </author>
+    <author>
+      <name>Yin Xiao</name>
+    </author>
+    <author>
+      <name>Liri Fang</name>
+    </author>
+    <author>
+      <name>Hui Liu</name>
+    </author>
+    <author>
+      <name>Xianfeng Tang</name>
+    </author>
+    <author>
+      <name>Yuji Zhang</name>
+    </author>
+    <author>
+      <name>Chi Wang</name>
+    </author>
+    <author>
+      <name>Jiaxuan You</name>
+    </author>
+    <author>
+      <name>Heng Ji</name>
+    </author>
+    <author>
+      <name>Hanghang Tong</name>
+    </author>
+    <author>
+      <name>Jingrui He</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2410.09008v3</id>
+    <title>SuperCorrect: Advancing Small LLM Reasoning with Thought Template Distillation and Self-Correction</title>
+    <updated>2025-02-26T06:32:31Z</updated>
+    <link href="https://arxiv.org/abs/2410.09008v3" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2410.09008v3" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Large language models (LLMs) like GPT-4, DeepSeek-R1, and ReasonFlux have shown significant improvements in various reasoning tasks. However, smaller LLMs still struggle with complex mathematical reasoning because they fail to effectively identify and correct reasoning errors. Recent reflection-based methods aim to address these issues by enabling self-reflection and self-correction, but they still face challenges in independently detecting errors in their reasoning steps. To overcome these limitations, we propose SuperCorrect, a novel two-stage framework that uses a large teacher model to supervise and correct both the reasoning and reflection processes of a smaller student model. In the first stage, we extract hierarchical high-level and detailed thought templates from the teacher model to guide the student model in eliciting more fine-grained reasoning thoughts. In the second stage, we introduce cross-model collaborative direct preference optimization (DPO) to enhance the self-correction abilities of the student model by following the teacher's correction traces during training. This cross-model DPO approach teaches the student model to effectively locate and resolve erroneous thoughts with error-driven insights from the teacher model, breaking the bottleneck of its thoughts and acquiring new skills and knowledge to tackle challenging problems. Extensive experiments consistently demonstrate our superiority over previous methods. Notably, our SuperCorrect-7B model significantly surpasses powerful DeepSeekMath-7B by 7.8%/5.3% and Qwen2.5-Math-7B by 15.1%/6.3% on MATH/GSM8K benchmarks, achieving new SOTA performance among all 7B models. Code: https://github.com/YangLing0818/SuperCorrect-llm</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2024-10-11T17:25:52Z</published>
+    <arxiv:comment>ICLR 2025. Project: https://github.com/YangLing0818/SuperCorrect-llm</arxiv:comment>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Ling Yang</name>
+    </author>
+    <author>
+      <name>Zhaochen Yu</name>
+    </author>
+    <author>
+      <name>Tianjun Zhang</name>
+    </author>
+    <author>
+      <name>Minkai Xu</name>
+    </author>
+    <author>
+      <name>Joseph E. Gonzalez</name>
+    </author>
+    <author>
+      <name>Bin Cui</name>
+    </author>
+    <author>
+      <name>Shuicheng Yan</name>
+    </author>
+  </entry>
+</feed>
