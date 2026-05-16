@@ -135,7 +135,7 @@ After extraction, verify:
 2. **Progress files**: `**Updated**: YYYY-MM-DD HH:MM` must use command output, never LLM-generated.
 3. **Git commits**: Verify date references against `date` output.
 4. **Relative dates** ("next Monday", "tomorrow"): Compute from `date` output, never training data.
-5. **MarketMind runtime**: `datetime.now()` MUST use `datetime.now(timezone.utc)`. All 18 non-UTC calls fixed 2026-05-17.
+5. **MarketMind runtime**: `datetime.now()` MUST use `datetime.now(timezone.utc)`. Verify with `grep -rn "datetime.now()" --include="*.py" projects/marketmind/ | grep -v "timezone.utc" | grep -v tests/` — must return empty. New code must follow this pattern. Do NOT reference the date the audit was done — the requirement is ongoing.
 6. **Dual time anchor**: LLM prompts must include BOTH current date AND knowledge cutoff.
 7. **Memory freshness**: Verify memory entries against current file/code state before recommending.
 
