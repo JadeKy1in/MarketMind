@@ -1,0 +1,23 @@
+{
+  "source": "yfinance",
+  "info": {
+    "symbol": "AAPL",
+    "shortName": "Apple Inc.",
+    "longName": "Apple Inc.",
+    "sector": "Technology",
+    "marketCap": 3000000000000,
+    "trailingPE": 32.1,
+    "forwardPE": 28.5,
+    "priceToBook": 45.0,
+    "returnOnEquity": 1.50,
+    "debtToEquity": 1.8,
+    "beta": 1.2,
+    "dividendYield": 0.005,
+    "revenueGrowth": 0.05,
+    "regularMarketPrice": 195.0,
+    "fiftyTwoWeekHigh": 210.0,
+    "fiftyTwoWeekLow": 140.0,
+    "fiftyDayAverage": 190.0,
+    "twoHundredDayAverage": 180.0
+  }
+}

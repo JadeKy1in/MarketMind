@@ -1,0 +1,23 @@
+{
+  "source": "yfinance",
+  "info": {
+    "symbol": "MSFT",
+    "shortName": "Microsoft Corporation",
+    "longName": "Microsoft Corporation",
+    "sector": "Technology",
+    "marketCap": 2800000000000,
+    "trailingPE": 35.0,
+    "forwardPE": 31.0,
+    "priceToBook": 13.0,
+    "returnOnEquity": 0.38,
+    "debtToEquity": 0.5,
+    "beta": 1.1,
+    "dividendYield": 0.008,
+    "revenueGrowth": 0.12,
+    "regularMarketPrice": 420.0,
+    "fiftyTwoWeekHigh": 450.0,
+    "fiftyTwoWeekLow": 300.0,
+    "fiftyDayAverage": 410.0,
+    "twoHundredDayAverage": 390.0
+  }
+}
