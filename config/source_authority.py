@@ -38,7 +38,7 @@ class Source:
 SOURCES: list[Source] = [
     # ── US / Americas ──────────────────────────────────────────────
     Source("CNBC Top News", SourceTier.PRIMARY, "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114", "rss", 0.88, 2.0),
-    Source("Yahoo Finance", SourceTier.PRIMARY, "https://finance.yahoo.com/news/rssindex", "rss", 0.85, 2.0),
+    Source("Yahoo Finance", SourceTier.PRIMARY, "https://finance.yahoo.com/news/rssindex", "rss", 0.85, 2.0, status=SourceStatus.DEGRADED),
     Source("Bloomberg Markets", SourceTier.PRIMARY, "https://feeds.bloomberg.com/markets/news.rss", "rss", 0.90, 2.0),
     Source("MarketWatch", SourceTier.RELIABLE, "https://feeds.content.dowjones.io/public/rss/mw_topstories", "rss", 0.80, 2.0),
     Source("NYT Business", SourceTier.PRIMARY, "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml", "rss", 0.90, 2.0),
@@ -47,8 +47,8 @@ SOURCES: list[Source] = [
     Source("Reuters (via Google News)", SourceTier.PRIMARY, "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnVHZ0pWVXlnQVAB", "rss", 0.85, 2.0),
 
     # ── China / Greater China ──────────────────────────────────────
-    Source("SCMP Business", SourceTier.RELIABLE, "https://www.scmp.com/rss/4/feed", "rss", 0.80, 2.0),
-    Source("Caixin", SourceTier.PRIMARY, "https://english.caixin.com/rss/topmatter.xml", "rss", 0.82, 2.0),
+    Source("SCMP Business", SourceTier.RELIABLE, "https://www.scmp.com/rss/4/feed/", "rss", 0.80, 2.0),
+    Source("Caixin", SourceTier.PRIMARY, "", "rss", 0.82, 2.0, status=SourceStatus.DEAD),  # RSS discontinued, redirects to HTML
     Source("Xinhua Finance", SourceTier.RELIABLE, "http://www.xinhuanet.com/english/rss/worldrss.xml", "rss", 0.72, 2.0),
 
     # ── Japan / Asia Pacific ───────────────────────────────────────
@@ -74,7 +74,7 @@ SOURCES: list[Source] = [
     Source("MercoPress", SourceTier.BEST_EFFORT, "https://en.mercopress.com/rss/", "rss", 0.45, 1.0),
 
     # ── Crypto / Digital Assets ────────────────────────────────────
-    Source("CoinDesk", SourceTier.RELIABLE, "https://www.coindesk.com/arc/outboundfeeds/rss/", "rss", 0.82, 2.0),
+    Source("CoinDesk", SourceTier.RELIABLE, "https://www.coindesk.com/arc/outboundfeeds/rss", "rss", 0.82, 2.0),
     Source("CoinTelegraph", SourceTier.RELIABLE, "https://cointelegraph.com/rss", "rss", 0.78, 2.0),
 
     # ── Global / Multi-region ─────────────────────────────────────

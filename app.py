@@ -61,18 +61,29 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
     print("  Model: DeepSeek V4 Pro | Reasoning: MAX | L1: Socratic Dialogue")
     print("=" * 60)
 
-    # Market countdown
-    from datetime import datetime, timezone
+    # Market countdown — calculate next trading day (Mon-Fri)
+    from datetime import datetime, timezone, timedelta
     now_utc = datetime.now(timezone.utc)
     market_h, market_m = map(int, config.market_open_utc.split(":"))
     market_open = now_utc.replace(hour=market_h, minute=market_m, second=0, microsecond=0)
     if now_utc > market_open:
-        print("\n美股已开盘")
+        market_open += timedelta(days=1)
+    # Skip weekends
+    while market_open.weekday() >= 5:  # 5=Sat, 6=Sun
+        market_open += timedelta(days=1)
+    # Next trading day label
+    day_labels = {0: "周一", 1: "周二", 2: "周三", 3: "周四", 4: "周五"}
+    day_label = day_labels.get(market_open.weekday(), "")
+    delta = market_open - now_utc
+    total_h = delta.days * 24 + delta.seconds // 3600
+    mins = (delta.seconds % 3600) // 60
+    if total_h < 1:
+        print(f"\n距美股开盘({day_label}): {mins}m")
+    elif total_h < 24:
+        print(f"\n距美股开盘({day_label}): {total_h}h{mins}m")
     else:
-        delta = market_open - now_utc
-        hours = delta.seconds // 3600
-        minutes = (delta.seconds % 3600) // 60
-        print(f"\n距美股开盘: {hours}h{minutes}m")
+        days = total_h // 24
+        print(f"\n距美股开盘({day_label}): {days}天{total_h % 24}h{mins}m")
 
     print("\nThe AI will present its analysis. You can:")
     print("  - Challenge its reasoning (\"Why do you think that?\")")
