@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import sys
+import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -52,14 +53,51 @@ def _shadow_progress_done(task: "asyncio.Task") -> None:
 class _StageTracker:
     def __init__(self, verbose: bool):
         self.verbose = verbose
+        self.total_start: float = time.time()
+        self.start_times: dict[int, float] = {}
+        self._stage_msgs: dict[int, str] = {}
 
-    def advance(self, stage: int, msg: str) -> None:
+    def advance(self, stage: int, msg: str, stage_times: dict[str, float] | None = None) -> None:
+        now = time.time()
+
+        # Record elapsed for the most recent previous stage
+        prev_stages = sorted(self.start_times.keys())
+        if prev_stages and stage_times is not None:
+            prev_stage = prev_stages[-1]
+            prev_elapsed = now - self.start_times[prev_stage]
+            prev_key = self._stage_msgs.get(prev_stage, f"stage_{prev_stage}")
+            stage_times[prev_key] = prev_elapsed
+
+        self.start_times[stage] = now
+        self._stage_msgs[stage] = msg
+
         if self.verbose:
-            print(f"[{stage}/9] {msg}")
+            timing = ""
+            if prev_stages:
+                prev_stage = prev_stages[-1]
+                prev_elapsed = now - self.start_times[prev_stage]
+                total_elapsed = now - self.total_start
+                prev_label = self._stage_msgs.get(prev_stage, "").split(":")[0].strip()
+                timing = f" ({prev_label}: {self._fmt(prev_elapsed)} | total: {self._fmt(total_elapsed)})"
+            print(f"[{stage}/9] {msg}{timing}")
 
     def result(self, msg: str) -> None:
         if self.verbose:
-            print(f"       {msg}")
+            now = time.time()
+            stage_keys = sorted(self.start_times.keys())
+            if stage_keys:
+                elapsed = now - self.start_times[stage_keys[-1]]
+                print(f"       {msg} ({self._fmt(elapsed)})")
+            else:
+                print(f"       {msg}")
+
+    @staticmethod
+    def _fmt(seconds: float) -> str:
+        if seconds < 60:
+            return f"{seconds:.0f}s"
+        m = int(seconds // 60)
+        s = int(seconds % 60)
+        return f"{m}m{s}s"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -82,6 +120,137 @@ async def _archive_session(config, l1_result, l2_result, l3_result, verdict: str
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Shared pipeline step helpers (deduplicated from run_daily / run_daily_legacy)
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def _do_news_collection(config, tracker: _StageTracker) -> list:
+    tracker.advance(1, "Scout: fetching news from all sources...")
+    from marketmind.pipeline.scout import fetch_all_sources
+    items = await fetch_all_sources(config)
+    tracker.result(f"{len(items)} articles collected")
+    return items
+
+
+async def _do_flash_preprocessing(news_items: list, tracker: _StageTracker) -> list:
+    tracker.advance(2, "Flash: preprocessing signals...")
+    from marketmind.pipeline.flash_preprocessor import preprocess_batch
+    signals = await preprocess_batch(news_items[:50])
+    tracker.result(f"{len(signals)} signals extracted")
+    return signals
+
+
+async def _do_l1_analysis(signals: list, news_items: list, tracker: _StageTracker):
+    tracker.advance(3, "Layer 1: narrative analysis...")
+    from marketmind.pipeline.layer1_narrative import analyze_layer1
+    result = await analyze_layer1(signals[:15], news_items)
+    tracker.result(f"grade={result.event_grade}, quadrant={result.matrix_quadrant}")
+    return result
+
+
+async def _do_l2_l3_parallel(l1_result, tracker: _StageTracker):
+    tracker.advance(4, "Layer 2+3: fundamental + technical analysis...")
+    from marketmind.pipeline.layer2_fundamental import analyze_layer2
+    from marketmind.pipeline.layer3_technical import analyze_layer3
+    from marketmind.config.asset_universe import ASSET_UNIVERSE
+    tickers = [a.ticker for a in list(ASSET_UNIVERSE.values())[:10]]
+    l2_task = analyze_layer2(l1_result)
+    l3_task = analyze_layer3(tickers, {})
+    l2, l3 = await asyncio.gather(l2_task, l3_task)
+    tracker.result(f"L2: {len(l2.ticker_candidates)} candidates, "
+                   f"L3: {len(l3.results)} tickers ({len(l3.green_lights)} green)")
+    return l2, l3
+
+
+async def _do_red_team(l1_result, l2_result, selected_tickers: list, tracker: _StageTracker):
+    tracker.advance(6, "Red Team: adversarial challenge...")
+    from marketmind.pipeline.red_team import run_red_team
+    report = await run_red_team(l1_result.raw_analysis, l2_result.raw_analysis, selected_tickers)
+    tracker.result(f"{len(report.challenges)} challenges, A-grade: {report.a_grade_count}")
+    return report
+
+
+async def _do_resonance(l3_result, tracker: _StageTracker):
+    tracker.advance(7, "Resonance: statistical validation...")
+    from marketmind.pipeline.resonance import evaluate_resonance, ResonanceResult
+    signal_returns_data = {}
+    if hasattr(l3_result, 'results'):
+        for r in l3_result.results[:10]:
+            if hasattr(r, 'ticker') and hasattr(r, 'daily_return_pct'):
+                key = f"technical_{r.ticker}"
+                signal_returns_data[key] = [r.daily_return_pct] if r.daily_return_pct else []
+    if not signal_returns_data:
+        signal_returns_data = {"fallback": [0.001, -0.002, 0.003, -0.001, 0.002]}
+    return evaluate_resonance(
+        signal_returns=signal_returns_data,
+        dimensions=["narrative", "fundamental", "technical", "sentiment"],
+        observed_sharpe=_DEFAULT_OBSERVED_SHARPE,
+    )
+
+
+async def _do_decision(l1_result, l2_result, l3_result, red_team, resonance, tracker: _StageTracker):
+    tracker.advance(8, "Decision: synthesis...")
+    from marketmind.pipeline.decision import generate_decision
+    decision = await generate_decision(l1=l1_result, l2=l2_result, l3=l3_result,
+                                        red_team=red_team, resonance=resonance)
+    tracker.result(f"cards={len(decision.decision_cards)}, "
+                   f"no_trade={'present' if decision.no_trade_card else 'none'}")
+    return decision
+
+
+async def _do_daily_archive(config, l1_result, l2_result, resonance, tracker: _StageTracker) -> None:
+    tracker.advance(9, "Archive: saving session...")
+    from datetime import datetime as dt
+    from marketmind.storage.archivist import get_archivist
+    a = get_archivist(config.data_dir)
+    a.init_fts()
+    a.index_document(
+        date=dt.now().isoformat()[:10],
+        category="daily_session",
+        title="MarketMind Daily",
+        content=f"MarketMind daily: {l1_result.event_grade} | {l2_result.macro_quadrant} | "
+                f"resonance={resonance.verdict}",
+    )
+    tracker.result("Session archived")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Shadow ecosystem init (deduplicated from run_daily / run_daily_legacy)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _init_shadow_ecosystem(config, shadow_count: int | None, tracker: _StageTracker):
+    """Init shadow DB + permanent shadows + optional Phase F modules."""
+    if not (config.shadow.shadows_enabled and shadow_count != 0):
+        return None, None
+    tracker.advance(0, "Shadow Mother: scanning events...")
+    from marketmind.shadows.shadow_state import ShadowStateDB
+    from marketmind.shadows.shadow_mother import ShadowMother
+    db = ShadowStateDB(config.shadow.shadows_db_path)
+    db.init_schema()
+    from marketmind.shadows.expert_shadows import create_expert_shadows
+    from marketmind.shadows.daredevil_shadows import create_daredevil_shadows
+    from marketmind.shadows.catfish_agent import create_catfish_agent
+    create_expert_shadows(db, config.shadow)
+    create_daredevil_shadows(db, config.shadow)
+    create_catfish_agent(db, config.shadow)
+    mother = ShadowMother(config.shadow, db)
+    tracker.result(f"Shadow ecosystem initialized with {len(db.get_visible_shadows())} shadows")
+    if getattr(config.shadow, 'scheduler_enabled', False):
+        from marketmind.shadows.background_scheduler import BackgroundScheduler, SchedulerConfig
+        from marketmind.shadows.shadow_memory import ShadowMemoryStore
+        ms = ShadowMemoryStore(db)
+        sc = SchedulerConfig(reflection_interval_minutes=config.shadow.reflection_interval_minutes,
+                             crystallization_interval_hours=config.shadow.crystallization_interval_hours,
+                             max_concurrent_tasks=config.shadow.max_concurrent_tasks, enabled=True)
+        BackgroundScheduler(ms, db, mother, sc).start()
+        tracker.result("Background scheduler started")
+    if getattr(config.shadow, 'gemini_flash_enabled', False):
+        from marketmind.gateway.multimodal_adapter import MultimodalAdapter
+        MultimodalAdapter()
+        tracker.result("Gemini Flash multimodal adapter initialized")
+    return db, mother
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Pipeline execution functions
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -97,159 +266,28 @@ async def run_daily_legacy(config, mock: bool = False, verbose: bool = False,
     init_gateway(config.deepseek_api_key, config.deepseek_base_url)
 
     tracker = _StageTracker(verbose)
+    shadow_db, mother = _init_shadow_ecosystem(config, shadow_count, tracker)
 
-    # 0. Shadow Mother event scan (pre-market)
-    shadow_db = None
-    mother = None
-    orchestration = None
-    if config.shadow.shadows_enabled and shadow_count != 0:
-        tracker.advance(0, "Shadow Mother: scanning events...")
-        from marketmind.shadows.shadow_state import ShadowStateDB
-        from marketmind.shadows.shadow_mother import ShadowMother
-        shadow_db = ShadowStateDB(config.shadow.shadows_db_path)
-        shadow_db.init_schema()
+    # Steps 1-4: Shared pipeline core
+    news_items = await _do_news_collection(config, tracker)
+    signals = await _do_flash_preprocessing(news_items, tracker)
+    l1_result = await _do_l1_analysis(signals, news_items, tracker)
+    l2_result, l3_result = await _do_l2_l3_parallel(l1_result, tracker)
 
-        # Initialize permanent shadows (experts + daredevils + catfish)
-        from marketmind.shadows.expert_shadows import create_expert_shadows
-        from marketmind.shadows.daredevil_shadows import create_daredevil_shadows
-        from marketmind.shadows.catfish_agent import create_catfish_agent
-        create_expert_shadows(shadow_db, config.shadow)
-        create_daredevil_shadows(shadow_db, config.shadow)
-        create_catfish_agent(shadow_db, config.shadow)
-
-        mother = ShadowMother(config.shadow, shadow_db)
-        tracker.result(f"Shadow ecosystem initialized with "
-                       f"{len(shadow_db.get_visible_shadows())} shadows")
-
-        # Phase F: Initialize background scheduler (disabled by default)
-        if getattr(config.shadow, 'scheduler_enabled', False):
-            from marketmind.shadows.background_scheduler import (
-                BackgroundScheduler, SchedulerConfig,
-            )
-            from marketmind.shadows.shadow_memory import ShadowMemoryStore
-            memory_store = ShadowMemoryStore(shadow_db)
-            scheduler_config = SchedulerConfig(
-                reflection_interval_minutes=config.shadow.reflection_interval_minutes,
-                crystallization_interval_hours=config.shadow.crystallization_interval_hours,
-                max_concurrent_tasks=config.shadow.max_concurrent_tasks,
-                enabled=True,
-            )
-            scheduler = BackgroundScheduler(
-                memory_store, shadow_db, mother, scheduler_config,
-            )
-            scheduler.start()
-            tracker.result("Background scheduler started")
-
-        # Phase F: Initialize Gemini Flash multimodal adapter (disabled by default)
-        if getattr(config.shadow, 'gemini_flash_enabled', False):
-            from marketmind.gateway.multimodal_adapter import MultimodalAdapter
-            multimodal = MultimodalAdapter()
-            tracker.result("Gemini Flash multimodal adapter initialized")
-
-    # 1. News collection
-    tracker.advance(1, "Scout: fetching news from all sources...")
-    from marketmind.pipeline.scout import fetch_all_sources
-    news_items = await fetch_all_sources(config)
-    tracker.result(f"{len(news_items)} articles collected")
-
-    # 2. Flash preprocessing
-    tracker.advance(2, "Flash: preprocessing signals...")
-    from marketmind.pipeline.flash_preprocessor import preprocess_batch
-    signals = await preprocess_batch(news_items[:50])
-    tracker.result(f"{len(signals)} signals extracted")
-
-    # 3. Layer 1 Narrative analysis
-    tracker.advance(3, "Layer 1: narrative analysis...")
-    from marketmind.pipeline.layer1_narrative import analyze_layer1
-    l1_result = await analyze_layer1(signals[:15], news_items)
-    tracker.result(f"grade={l1_result.event_grade}, quadrant={l1_result.matrix_quadrant}")
-
-    # 4. Layer 2 + Layer 3 in parallel
-    tracker.advance(4, "Layer 2+3: fundamental + technical analysis...")
-    from marketmind.pipeline.layer2_fundamental import analyze_layer2
-    from marketmind.pipeline.layer3_technical import analyze_layer3
-    from marketmind.config.asset_universe import ASSET_UNIVERSE
-
-    tickers = [a.ticker for a in list(ASSET_UNIVERSE.values())[:10]]
-    l2_task = analyze_layer2(l1_result)
-    l3_task = analyze_layer3(tickers, {})
-
-    l2_result, l3_result = await asyncio.gather(l2_task, l3_task)
-    tracker.result(f"L2: {len(l2_result.ticker_candidates)} candidates, "
-                   f"L3: {len(l3_result.results)} tickers ({len(l3_result.green_lights)} green)")
-
-    # 5. Shadow ecosystem run
+    # Step 5: Shadow ecosystem run (BLOCKING — legacy behavior)
     if config.shadow.shadows_enabled and mother is not None:
         tracker.advance(5, "Shadows: running analysis cycle...")
-        orchestration = await mother.orchestrate_daily_cycle(
-            news_items, {},
-        )
+        orchestration = await mother.orchestrate_daily_cycle(news_items, {})
         tracker.result(f"{orchestration.active_shadows} shadows, "
                        f"{orchestration.temp_shadows_created} temp created")
-
-        # Phase F integration: memory update + crystallization (if enabled)
-        # These are already wired in shadow_mother.orchestrate_daily_cycle()
-        # as step 6.5 (memory update) and step 6.6 (crystallization check)
         if getattr(config.shadow, 'crystallization_enabled', False):
             tracker.result("Memory updated, crystallization check complete")
 
-    # 6. Red Team challenge
-    tracker.advance(6, "Red Team: adversarial challenge...")
-    from marketmind.pipeline.red_team import run_red_team
-    red_team_report = await run_red_team(
-        l1_result.raw_analysis,
-        l2_result.raw_analysis,
-        l2_result.ticker_candidates,
-    )
-    tracker.result(f"{len(red_team_report.challenges)} challenges, "
-                   f"A-grade: {red_team_report.a_grade_count}")
-
-    # 7. Signal Resonance
-    tracker.advance(7, "Resonance: statistical validation...")
-    from marketmind.pipeline.resonance import evaluate_resonance, ResonanceResult
-
-    # Bootstrap signal_returns from available data
-    signal_returns_data = {}
-    # Try to get actual returns from L3 results
-    if hasattr(l3_result, 'results'):
-        for r in l3_result.results[:10]:
-            if hasattr(r, 'ticker') and hasattr(r, 'daily_return_pct'):
-                key = f"technical_{r.ticker}"
-                signal_returns_data[key] = [r.daily_return_pct] if r.daily_return_pct else []
-    # Fallback: if no data, use a placeholder that won't break DSR calculation
-    if not signal_returns_data:
-        signal_returns_data = {"fallback": [0.001, -0.002, 0.003, -0.001, 0.002]}
-
-    resonance = evaluate_resonance(
-        signal_returns=signal_returns_data,
-        dimensions=["narrative", "fundamental", "technical", "sentiment"],
-        observed_sharpe=_DEFAULT_OBSERVED_SHARPE,
-    )
-
-    # 8. Decision with shadow consensus
-    tracker.advance(8, "Decision: synthesis...")
-    from marketmind.pipeline.decision import generate_decision
-    decision = await generate_decision(
-        l1=l1_result, l2=l2_result, l3=l3_result,
-        red_team=red_team_report, resonance=resonance,
-    )
-    tracker.result(f"cards={len(decision.decision_cards)}, "
-                   f"no_trade={'present' if decision.no_trade_card else 'none'}")
-
-    # 9. Archive
-    tracker.advance(9, "Archive: saving session...")
-    from datetime import datetime as dt
-    from marketmind.storage.archivist import get_archivist
-    archivist = get_archivist(config.data_dir)
-    archivist.init_fts()
-    archivist.index_document(
-        date=dt.now().isoformat()[:10],
-        category="daily_session",
-        title="MarketMind Daily",
-        content=f"MarketMind daily: {l1_result.event_grade} | {l2_result.macro_quadrant} | "
-                f"resonance={resonance.verdict}",
-    )
-    tracker.result("Session archived")
+    # Steps 6-9: Shared pipeline core
+    red_team = await _do_red_team(l1_result, l2_result, l2_result.ticker_candidates, tracker)
+    resonance = await _do_resonance(l3_result, tracker)
+    decision = await _do_decision(l1_result, l2_result, l3_result, red_team, resonance, tracker)
+    await _do_daily_archive(config, l1_result, l2_result, resonance, tracker)
 
     print("\nMarketMind daily pipeline complete.")
     return 0
@@ -287,170 +325,38 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
     tracker = _StageTracker(verbose)
     global _shadow_task, _shadow_result
     _shadow_result = None
+    shadow_db, mother = _init_shadow_ecosystem(config, shadow_count, tracker)
 
-    # 0. Shadow Mother event scan (pre-market)
-    shadow_db = None
-    mother = None
-    if config.shadow.shadows_enabled and shadow_count != 0:
-        tracker.advance(0, "Shadow Mother: scanning events...")
-        from marketmind.shadows.shadow_state import ShadowStateDB
-        from marketmind.shadows.shadow_mother import ShadowMother
-        shadow_db = ShadowStateDB(config.shadow.shadows_db_path)
-        shadow_db.init_schema()
+    # Steps 1-4: Shared pipeline core
+    news_items = await _do_news_collection(config, tracker)
+    signals = await _do_flash_preprocessing(news_items, tracker)
+    l1_result = await _do_l1_analysis(signals, news_items, tracker)
+    l2_result, l3_result = await _do_l2_l3_parallel(l1_result, tracker)
 
-        # Initialize permanent shadows (experts + daredevils + catfish)
-        from marketmind.shadows.expert_shadows import create_expert_shadows
-        from marketmind.shadows.daredevil_shadows import create_daredevil_shadows
-        from marketmind.shadows.catfish_agent import create_catfish_agent
-        create_expert_shadows(shadow_db, config.shadow)
-        create_daredevil_shadows(shadow_db, config.shadow)
-        create_catfish_agent(shadow_db, config.shadow)
-
-        mother = ShadowMother(config.shadow, shadow_db)
-        tracker.result(f"Shadow ecosystem initialized with "
-                       f"{len(shadow_db.get_visible_shadows())} shadows")
-
-        # Phase F: Initialize background scheduler (disabled by default)
-        if getattr(config.shadow, 'scheduler_enabled', False):
-            from marketmind.shadows.background_scheduler import (
-                BackgroundScheduler, SchedulerConfig,
-            )
-            from marketmind.shadows.shadow_memory import ShadowMemoryStore
-            memory_store = ShadowMemoryStore(shadow_db)
-            scheduler_config = SchedulerConfig(
-                reflection_interval_minutes=config.shadow.reflection_interval_minutes,
-                crystallization_interval_hours=config.shadow.crystallization_interval_hours,
-                max_concurrent_tasks=config.shadow.max_concurrent_tasks,
-                enabled=True,
-            )
-            scheduler = BackgroundScheduler(
-                memory_store, shadow_db, mother, scheduler_config,
-            )
-            scheduler.start()
-            tracker.result("Background scheduler started")
-
-        # Phase F: Initialize Gemini Flash multimodal adapter (disabled by default)
-        if getattr(config.shadow, 'gemini_flash_enabled', False):
-            from marketmind.gateway.multimodal_adapter import MultimodalAdapter
-            multimodal = MultimodalAdapter()
-            tracker.result("Gemini Flash multimodal adapter initialized")
-
-    # 1. News collection
-    tracker.advance(1, "Scout: fetching news from all sources...")
-    from marketmind.pipeline.scout import fetch_all_sources
-    news_items = await fetch_all_sources(config)
-    tracker.result(f"{len(news_items)} articles collected")
-
-    # 2. Flash preprocessing
-    tracker.advance(2, "Flash: preprocessing signals...")
-    from marketmind.pipeline.flash_preprocessor import preprocess_batch
-    signals = await preprocess_batch(news_items[:50])
-    tracker.result(f"{len(signals)} signals extracted")
-
-    # 3. Layer 1 Narrative analysis
-    tracker.advance(3, "Layer 1: narrative analysis...")
-    from marketmind.pipeline.layer1_narrative import analyze_layer1
-    l1_result = await analyze_layer1(signals[:15], news_items)
-    tracker.result(f"grade={l1_result.event_grade}, quadrant={l1_result.matrix_quadrant}")
-
-    # 4. Layer 2 + Layer 3 in parallel
-    tracker.advance(4, "Layer 2+3: fundamental + technical analysis...")
-    from marketmind.pipeline.layer2_fundamental import analyze_layer2
-    from marketmind.pipeline.layer3_technical import analyze_layer3
-    from marketmind.config.asset_universe import ASSET_UNIVERSE
-
-    tickers = [a.ticker for a in list(ASSET_UNIVERSE.values())[:10]]
-    l2_task = analyze_layer2(l1_result)
-    l3_task = analyze_layer3(tickers, {})
-
-    l2_result, l3_result = await asyncio.gather(l2_task, l3_task)
-    tracker.result(f"L2: {len(l2_result.ticker_candidates)} candidates, "
-                   f"L3: {len(l3_result.results)} tickers ({len(l3_result.green_lights)} green)")
-
-    # 5. Shadow ecosystem run → NON-BLOCKING background launch (H1)
+    # Step 5: Shadow ecosystem → NON-BLOCKING background launch (H1)
     if config.shadow.shadows_enabled and mother is not None:
         tracker.advance(5, "Shadows: launching background analysis...")
-
-        # N-L4: Report token budget state before shadow launch
         try:
             from marketmind.gateway.async_client import get_budget
             budget = await get_budget()
             if budget:
-                budget_report = budget.report()
-                tracker.result(f"Token budget: {budget_report['tokens_pct_used']}% used, "
-                               f"{budget_report['pro_calls_remaining']} Pro calls remaining")
+                br = budget.report()
+                tracker.result(f"Token budget: {br['tokens_pct_used']}% used, "
+                               f"{br['pro_calls_remaining']} Pro calls remaining")
         except Exception:
             pass
-
         _shadow_progress_started()
-        _shadow_task = asyncio.create_task(
-            mother.orchestrate_daily_cycle(news_items, {})
-        )
+        _shadow_task = asyncio.create_task(mother.orchestrate_daily_cycle(news_items, {}))
         _shadow_task.add_done_callback(_shadow_progress_done)
         tracker.result("Shadows launched in background (non-blocking)")
-
-        # Phase F integration note: memory update + crystallization are
-        # run inside the background task via orchestrate_daily_cycle().
         if getattr(config.shadow, 'crystallization_enabled', False):
             tracker.result("Memory update + crystallization will run in background")
 
-    # 6. Red Team challenge
-    tracker.advance(6, "Red Team: adversarial challenge...")
-    from marketmind.pipeline.red_team import run_red_team
-    red_team_report = await run_red_team(
-        l1_result.raw_analysis,
-        l2_result.raw_analysis,
-        l2_result.ticker_candidates,
-    )
-    tracker.result(f"{len(red_team_report.challenges)} challenges, "
-                   f"A-grade: {red_team_report.a_grade_count}")
-
-    # 7. Signal Resonance
-    tracker.advance(7, "Resonance: statistical validation...")
-    from marketmind.pipeline.resonance import evaluate_resonance, ResonanceResult
-
-    # Bootstrap signal_returns from available data
-    signal_returns_data = {}
-    # Try to get actual returns from L3 results
-    if hasattr(l3_result, 'results'):
-        for r in l3_result.results[:10]:
-            if hasattr(r, 'ticker') and hasattr(r, 'daily_return_pct'):
-                key = f"technical_{r.ticker}"
-                signal_returns_data[key] = [r.daily_return_pct] if r.daily_return_pct else []
-    # Fallback: if no data, use a placeholder that won't break DSR calculation
-    if not signal_returns_data:
-        signal_returns_data = {"fallback": [0.001, -0.002, 0.003, -0.001, 0.002]}
-
-    resonance = evaluate_resonance(
-        signal_returns=signal_returns_data,
-        dimensions=["narrative", "fundamental", "technical", "sentiment"],
-        observed_sharpe=_DEFAULT_OBSERVED_SHARPE,
-    )
-
-    # 8. Decision with shadow consensus
-    tracker.advance(8, "Decision: synthesis...")
-    from marketmind.pipeline.decision import generate_decision
-    decision = await generate_decision(
-        l1=l1_result, l2=l2_result, l3=l3_result,
-        red_team=red_team_report, resonance=resonance,
-    )
-    tracker.result(f"cards={len(decision.decision_cards)}, "
-                   f"no_trade={'present' if decision.no_trade_card else 'none'}")
-
-    # 9. Archive
-    tracker.advance(9, "Archive: saving session...")
-    from datetime import datetime as dt
-    from marketmind.storage.archivist import get_archivist
-    archivist = get_archivist(config.data_dir)
-    archivist.init_fts()
-    archivist.index_document(
-        date=dt.now().isoformat()[:10],
-        category="daily_session",
-        title="MarketMind Daily",
-        content=f"MarketMind daily: {l1_result.event_grade} | {l2_result.macro_quadrant} | "
-                f"resonance={resonance.verdict}",
-    )
-    tracker.result("Session archived")
+    # Steps 6-9: Shared pipeline core
+    red_team = await _do_red_team(l1_result, l2_result, l2_result.ticker_candidates, tracker)
+    resonance = await _do_resonance(l3_result, tracker)
+    decision = await _do_decision(l1_result, l2_result, l3_result, red_team, resonance, tracker)
+    await _do_daily_archive(config, l1_result, l2_result, resonance, tracker)
 
     print("\nMarketMind daily pipeline complete.")
     if _shadow_task and not _shadow_task.done():
