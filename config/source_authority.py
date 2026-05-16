@@ -95,12 +95,23 @@ SOURCES: list[Source] = [
     #   third-party RSS aggregator (trumpstruth.org by Defending Democracy Together).
     #   BUT: when it fires on investment-relevant content, it is a LEADING indicator of
     #   market-moving policy — a unique capability no other source provides.
-    Source("ApeWisdom", SourceTier.BEST_EFFORT,
-           "https://apewisdom.io/api/v1/filter/trending", "api", 0.15, 1.0),
+    # Reddit WSB: Reddit's own RSS feed — free, no auth, returns 200
+    Source("Reddit WSB", SourceTier.BEST_EFFORT,
+           "https://www.reddit.com/r/wallstreetbets/.rss", "rss", 0.15, 1.0),
+    # Bluesky: requires BLUESKY_USERNAME + BLUESKY_APP_PASSWORD in .env
     Source("Bluesky Social", SourceTier.BEST_EFFORT,
-           "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q={QUERY}", "api", 0.20, 1.0),
+           "https://bsky.social/xrpc/com.atproto.repo.searchPosts?q={QUERY}", "api", 0.20, 1.0),
     Source("Truth Social (Trump)", SourceTier.BEST_EFFORT,
            "https://trumpstruth.org/feed", "rss", 0.15, 1.0),
+
+    # ── Insider / Smart Money (Phase G Layer 4) ─────────────────────
+    Source("Congress Trades", SourceTier.BEST_EFFORT,
+           "https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json", "congress_api", 0.20, 1.0),
+    Source("SEC Form 4", SourceTier.BEST_EFFORT,
+           "", "sec_form4", 0.20, 1.0),
+    Source("SEC 13F", SourceTier.BEST_EFFORT,
+           "", "sec_13f", 0.15, 1.0),
+
 
     # ── API-based (require keys) ──────────────────────────────────
     Source("NewsAPI", SourceTier.RELIABLE, "https://newsapi.org/v2/top-headlines?country=us&category=business&apiKey={API_KEY}", "api", 0.90, 10.0, True),

@@ -28,6 +28,8 @@ class SessionContext:
     # Inputs (set by glue layer before L1)
     news_items: list = field(default_factory=list)
     signals: list = field(default_factory=list)
+    insider_items: list = field(default_factory=list)   # content_type="insider_signal", bypasses Flash
+    social_items: list = field(default_factory=list)    # content_type="social_mention", bypasses Flash
 
     # Stage outputs (set after each stage completes)
     l1_result: Layer1Result | None = None

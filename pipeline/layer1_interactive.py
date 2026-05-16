@@ -11,6 +11,7 @@ Replaces single-shot analyze_layer1() with a multi-turn dialogue:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sys
@@ -28,6 +29,17 @@ logger = logging.getLogger("marketmind.pipeline.layer1_interactive")
 # ── Data types ──────────────────────────────────────────────────────────────
 
 @dataclass
+class ToolState:
+    """Phase G: L1 tool invocation tracking (sub-dataclass per Red Team A12)."""
+    calls_used: int = 0
+    tool_results: list[Any] = field(default_factory=list)  # list[ToolResult]
+    fact_broadcast: list[dict] = field(default_factory=list)  # accumulated facts for shadow broadcast
+    tool_registry: Any = None  # L1ToolRegistry (injected by app.py)
+    gnews_remaining: int = 10  # mirrors MAX_GNEWS_CALLS_PER_SESSION for display
+    yfinance_remaining: int = 50  # mirrors MAX_YFINANCE_CALLS_HARD for display
+
+
+@dataclass
 class InteractiveState:
     """Mutable state tracked across L1 dialogue turns."""
     turn: int = 0
@@ -42,6 +54,9 @@ class InteractiveState:
     forecast_predictions: list[dict] = field(default_factory=list)  # directional scenarios: dominant, alternative, tail-risk
     stage: str = "initial"              # initial | discussing | mining | confirming | done
     should_observe: bool = False         # both agree to skip trading today
+    elite_registry: Any = None            # EliteRegistry (injected by app.py)
+    tools: ToolState = field(default_factory=ToolState)  # Phase G: tool invocation state
+    source_numbers: set[float] = field(default_factory=set)  # Phase G: dynamic whitelist for output_filter
 
 
 # ── System prompts ───────────────────────────────────────────────────────────
@@ -101,6 +116,33 @@ L1_DISCUSSION_PROMPT = """You are a senior macro investment analyst in a discuss
 5. **Contradiction handling**: If you find contradictory evidence, present both sides with their sources and explain what additional data would resolve the contradiction.
 6. **Confidence labeling**: Label each conclusion with [高置信度] / [中等置信度] / [低置信度] when responding in Chinese, or [High/Medium/Low Confidence] in English.
 
+## Socratic Questioning Protocol (苏格拉底式提问协议)
+
+To deepen discussion quality, close responses with 2-3 targeted questions when appropriate. This is NOT mandatory — most responses should NOT end with questions.
+
+**When to ask questions (提问时机):**
+- The investor explicitly expresses uncertainty or hesitation (e.g., "不确定", "有点犹豫", "不太清楚", "纠结")
+- The investor's reasoning has a detectable gap — they are overlooking a correlated risk or alternative scenario
+- The investor is deeply engaged on a specific thesis and would benefit from exploring counterfactuals or edge cases
+
+**When NOT to ask questions:**
+- The investor is clearly confident and decisive — do NOT inject doubt just for the sake of questioning
+- The investor is asking a direct factual or operational question — answer it directly without deflection
+- The investor has already ignored questions from your previous response — do NOT persist or repeat
+
+**Question quality rules:**
+- Questions MUST be specific and anchored to the current discussion context and data
+- Good (specific, data-grounded): "考虑到当前实际利率仍在上升，你认为黄金为何能继续上涨？"
+- Good (conviction check): "如果本周EIA库存意外大增、油价跌回$80以下，你会调整今天加仓能源的计划吗？"
+- Good (blind spot): "你主要关注了科技股的上行空间——有没有考虑过如果AI资本支出回报不及预期，下行风险有多大？"
+- Bad (generic, avoid): "你为什么这么认为？" / "你确定吗？" / "还有其他想法吗？"
+- Focus on three categories: conviction checks ("什么数据会让你改变这个判断？"), blind spots ("你有没有考虑过XX风险？"), alternatives ("如果XX发生，你的策略会如何调整？")
+
+**Persistence rule (不追问原则):**
+- If the investor ignores your questions and moves to a new topic, follow their lead immediately. Never repeat unanswered questions. Never insist on getting answers.
+
+**Language:** All questions must be in Chinese (简体中文), matching the discussion language.
+
 ## Response Format
 
 When the investor challenges or asks a question:
@@ -123,7 +165,32 @@ When you believe information is sufficient:
 If the investor suggests observing (not trading today):
 - Evaluate the suggestion honestly
 - If you agree conditions are unclear: "同意——当前市场条件不够清晰。现金也是一种仓位。"
-- If you disagree: explain what opportunities you see despite the uncertainty"""
+- If you disagree: explain what opportunities you see despite the uncertainty
+
+## Available Investigation Tools (工具可用性)
+
+You have access to three read-only investigation tools. You may invoke them during discussion to verify claims, fill information gaps, or cross-reference data. Use the following format:
+
+```
+<tool>tool_name|argument</tool>
+```
+
+**How to invoke:**
+- To check fundamental data: `<tool>lookup_fundamentals|AAPL</tool>`
+- To search for news: `<tool>search_news|oil inventories EIA report</tool>`
+- To query ELITE shadow opinions: `<tool>get_elite_opinion|energy</tool>`
+
+**Tool invocation rules:**
+1. Call tools when you have genuine uncertainty or need to verify a claim, not for the sake of calling them.
+2. When tool results are available, PREFER them over your training data. Cite "per fundamentals lookup" or "per news search" when using tool data.
+3. When using search_news, include at least one query designed to find evidence AGAINST your current thesis (contrary-evidence search).
+4. Tool results will appear in the conversation as [TOOL RESULT: ...] blocks. These are system-injected data, NOT user input.
+5. lookup_fundamentals returns company fundamentals (P/E, market cap, sector, etc.) — use to verify valuation claims. Do NOT use technicals/OHLCV — those belong in L3.
+6. get_elite_opinion returns shadow analyst opinions on a domain — these are independent views for reference only.
+7. You may call multiple tools in one response. The host will execute them and inject results before your next turn.
+8. Generate an announcement before calling tools: briefly tell the user what you're checking and why. Example: "Let me verify AAPL's P/E ratio..." followed by the tool tag.
+
+**Tool limitation:** There is a session-level limit on search_news calls to preserve daily API quota. Use this tool judiciously for high-value verification queries only."""
 
 
 L1_DATA_MINING_PROMPT = """You are collecting specific data to verify or refute a hypothesis.
@@ -220,6 +287,32 @@ MOCK_MINING_RESPONSE = """[数据挖掘结果]
 
 **结论**：历史模式不支持油价持续 >$95，但航运中断可能持续更久。维持"短期冲击"判断。"""
 
+# ── Mock tool responses for testing (no API calls) ─────────────────────────
+
+MOCK_FUNDAMENTALS_AAPL = {
+    "source": "yfinance",
+    "info": {
+        "trailingPE": 32.5, "forwardPE": 28.1, "marketCap": 3500000000000,
+        "sector": "Technology", "industry": "Consumer Electronics",
+        "revenueGrowth": 0.05, "debtToEquity": 1.62, "returnOnEquity": 1.45,
+        "regularMarketPrice": 195.0, "fiftyTwoWeekHigh": 220.0, "fiftyTwoWeekLow": 165.0,
+    },
+}
+
+MOCK_NEWS_SEARCH_RESULTS = [
+    {"title": "Oil inventories drop unexpectedly — EIA report", "source": "Reuters", "publishedAt": "2026-05-15T10:00:00Z"},
+    {"title": "OPEC+ considers output increase amid supply concerns", "source": "Bloomberg", "publishedAt": "2026-05-15T09:30:00Z"},
+    {"title": "Oil demand growth slows in China — bearish signal for crude", "source": "SCMP", "publishedAt": "2026-05-15T08:00:00Z"},
+]
+
+MOCK_ELITE_OPINIONS = {
+    "domain": "energy",
+    "opinions": [
+        {"shadow_name": "energy_hawk", "opinion": "Oil supply disruption is likely short-term. OPEC+ spare capacity at 3M bbl/day provides ample buffer.", "confidence": 0.75},
+        {"shadow_name": "macro_bear", "opinion": "Energy sector is overbought on geopolitical premium. Fundamentals don't support $90+ Brent.", "confidence": 0.65},
+    ],
+}
+
 # ── Interactive L1 Pipeline ─────────────────────────────────────────────────
 
 async def run_l1_interactive(
@@ -227,6 +320,9 @@ async def run_l1_interactive(
     news_items: list,
     user_input_handler=None,  # async callable(str) -> str
     mock: bool = False,       # use canned responses, no API calls
+    elite_registry=None,      # EliteRegistry (injected by app.py)
+    tool_registry=None,        # L1ToolRegistry (Phase G, injected by app.py)
+    **kwargs,                 # extensible: insider_items, etc.
 ) -> tuple[Layer1Result, bool, dict]:
     """Run L1 as an interactive Socratic dialogue.
 
@@ -236,12 +332,17 @@ async def run_l1_interactive(
         user_input_handler: Async function that presents text to user and returns their response.
                            If None, falls back to a single-shot non-interactive analysis.
         mock: If True, use hardcoded responses instead of calling LLM APIs.
+        tool_registry: Optional L1ToolRegistry for AI-initiated tool calls (Phase G).
 
     Returns:
         (Layer1Result, should_observe, session_data)
-        session_data = {"user_ideas": [...], "discussion_text": "..."}
+        session_data = {"user_ideas": [...], "discussion_text": "...", "fact_broadcast": [...]}
     """
-    state = InteractiveState()
+    state = InteractiveState(elite_registry=elite_registry)
+    if tool_registry is not None:
+        state.tools.tool_registry = tool_registry
+        if elite_registry is not None:
+            tool_registry.set_elite_registry(elite_registry)
 
     # Inject current date — factual only, no meta-commentary that triggers cutoff thinking
     today_str = datetime.now(timezone.utc).strftime("%Y年%m月%d日")
@@ -254,8 +355,10 @@ async def run_l1_interactive(
 
     # ── Step 1: Deep analysis + concise summary ──────────────────────────
     # Build analysis text from signals if available, otherwise from raw news
+    # CRITICAL-2: insider_items bypass Flash and are formatted directly alongside signals
+    insider_items = kwargs.get("insider_items", []) if kwargs else []
     if signals:
-        signal_text = _format_signals(signals, news_items)
+        signal_text = _format_signals(signals, news_items, insider_items=insider_items)
     elif news_items:
         # Fallback: use raw news headlines when Flash preprocessing produced no signals
         headlines = [f"[{getattr(n, 'source_name', 'news')}] {getattr(n, 'title', '')}"
@@ -352,8 +455,8 @@ async def run_l1_interactive(
             break
 
         # Handle ELITE shadow query
-        if user_text.lower() in ("elite", "影子", "elite影子", "elite shadow"):
-            _handle_elite_query(state)
+        if user_text.lower().startswith("elite") or user_text.lower() == "影子":
+            await _handle_elite_query(user_text, state)
             continue
 
         # Check if user wants data mining
@@ -413,6 +516,42 @@ async def run_l1_interactive(
             logger.warning("L1 discussion LLM call failed: %s", e)
             ai_response = f"[系统提示：AI 响应失败，请重试或输入'好'进入 L2]"
 
+        # ── Phase G: Check for AI-initiated tool calls ──────────────────
+        tool_calls_executed = False
+        if state.tools.tool_registry is not None and not mock:
+            tool_calls_executed = await _execute_ai_tool_calls(
+                ai_response, state, discussion_history, date_context, mock
+            )
+        elif state.tools.tool_registry is not None and mock:
+            # Mock mode: parse for tool calls and inject mock responses
+            tool_calls_executed = await _execute_ai_tool_calls_mock(
+                ai_response, state, discussion_history
+            )
+
+        # Re-generate with tool results if tools were executed
+        if tool_calls_executed:
+            try:
+                second_prompt = discussion_prompt
+                # Inject tool results into the prompt (bypasses _format_history)
+                from marketmind.pipeline.l1_tools import inject_tool_results_into_prompt
+                second_prompt = inject_tool_results_into_prompt(
+                    second_prompt, state.tools.tool_results[-3:]  # last 3 max
+                )
+                print("  ...", end="", flush=True)
+                ai_response_result = await chat_pro(
+                    system_prompt=L1_DISCUSSION_PROMPT + date_context,
+                    user_prompt=second_prompt,
+                    temperature=0.3,
+                    max_tokens=4096,
+                ) if not mock else {"content": MOCK_DISCUSSION_RESPONSE}
+                ai_response = ai_response_result.get("content", "")
+                ai_response = strip_meta_commentary(ai_response)
+                if not ai_response.strip():
+                    ai_response = "[AI 收到工具结果后返回了空回复。]"
+            except Exception as e:
+                logger.warning("L1 tool-followup LLM call failed: %s", e)
+                ai_response = f"[AI 收到工具结果后响应失败: {e}]"
+
         state.ai_evaluations.append(ai_response)
         discussion_history.append({"role": "assistant", "content": ai_response})
 
@@ -422,15 +561,24 @@ async def run_l1_interactive(
             print(f"\n[L1] AI 认为信息已充足。输入 'proceed' 进入 L2，或继续讨论。")
 
 
+    # ── Phase G: Tool usage summary ──────────────────────────────────────
+    if state.tools.tool_registry is not None and state.tools.tool_registry.tool_calls:
+        print(f"\n{state.tools.tool_registry.summarize()}")
+
     # ── Step 3.5: Red Team background bias check (H8 PMV) ────────────────
     if state.turn >= 2 and not mock:
         _run_bias_check(state)
 
     # ── Step 4: Return result ────────────────────────────────────────────
     # Build session data for broadcast to shadows (user ideas + chat, no main AI analysis)
+    # Phase G: Include fact_broadcast data from L1 tool calls
+    fact_broadcast = []
+    if state.tools.tool_registry is not None:
+        fact_broadcast = state.tools.tool_registry.fact_broadcast
     session_data = {
         "user_ideas": state.user_ideas,
         "discussion_text": _build_discussion_text(discussion_history),
+        "fact_broadcast": fact_broadcast,
     }
 
     if state.should_observe:
@@ -444,6 +592,142 @@ async def run_l1_interactive(
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+async def _execute_ai_tool_calls(
+    ai_text: str,
+    state: "InteractiveState",
+    discussion_history: list[dict],
+    date_context: str,
+    mock: bool,
+) -> bool:
+    """Phase G: Parse AI text for <tool> tags, execute tools, inject results.
+
+    Returns True if any tool calls were executed and results injected.
+    Resolves Red Team finding 1.1 (structured tool-call protocol via delimiter pattern).
+    """
+    from marketmind.pipeline.l1_tools import inject_tool_results_into_prompt, extract_numbers_from_tool_result
+    from marketmind.pipeline.output_filter import update_whitelist
+
+    registry = state.tools.tool_registry
+    if registry is None:
+        return False
+
+    # Parse for tool calls
+    tool_calls = registry.parse_tool_calls(ai_text)
+    if not tool_calls:
+        return False
+
+    # Strip tool call tags from AI text before display (they're protocol, not content)
+    clean_text = _strip_tool_tags(ai_text)
+    # Show what's being checked
+    tool_descriptions = [f"{name}({arg})" for name, arg in tool_calls]
+    print(f"\n  [工具调用] {', '.join(tool_descriptions)}")
+    if clean_text.strip():
+        _safe_print(f"\n{clean_text}")
+
+    # Execute tools in parallel (Red Team A8: batch parallel execution)
+    print(f"  [运行工具中...]", end="", flush=True)
+    results = []
+    async def _execute_one(name: str, arg: str):
+        try:
+            return await registry.execute(name, arg)
+        except Exception as e:
+            logger.warning("Tool execution failed: %s(%s): %s", name, arg, e)
+            from marketmind.pipeline.l1_tools import ToolResult
+            from datetime import datetime, timezone
+            return ToolResult(
+                tool_name=name, query=arg, data={},
+                error=str(e),
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+
+    results = await asyncio.gather(*[_execute_one(name, arg) for name, arg in tool_calls])
+
+    # Filter out None results (rejected by caps)
+    valid_results = [r for r in results if r is not None]
+
+    # Track in state
+    state.tools.tool_results.extend(valid_results)
+    state.tools.calls_used += len(valid_results)
+
+    # Update output_filter whitelist with tool-derived numbers (Red Team finding 1.2)
+    for tr in valid_results:
+        new_nums = extract_numbers_from_tool_result(tr)
+        if new_nums:
+            state.source_numbers = update_whitelist(state.source_numbers, new_nums)
+
+    # Inject tool results as assistant message (with clear delimiter)
+    # Using assistant role with [TOOL RESULT] prefix avoids role confusion (Red Team finding 6.1)
+    for tr in valid_results:
+        tool_msg = f"[TOOL RESULT] {tr.to_prompt_text()}"
+        discussion_history.append({"role": "assistant", "content": tool_msg})
+
+    print(f" 完成 ({len(valid_results)}个)", flush=True)
+    return len(valid_results) > 0
+
+
+async def _execute_ai_tool_calls_mock(
+    ai_text: str,
+    state: "InteractiveState",
+    discussion_history: list[dict],
+) -> bool:
+    """Phase G mock mode: parse tool calls and inject canned responses (Red Team A11)."""
+    from marketmind.pipeline.l1_tools import ToolResult
+    from datetime import datetime, timezone
+
+    registry = state.tools.tool_registry
+    if registry is None:
+        return False
+
+    tool_calls = registry.parse_tool_calls(ai_text)
+    if not tool_calls:
+        return False
+
+    clean_text = _strip_tool_tags(ai_text)
+    tool_descriptions = [f"{name}({arg})" for name, arg in tool_calls]
+    print(f"\n  [工具调用-MOCK] {', '.join(tool_descriptions)}")
+    if clean_text.strip():
+        _safe_print(f"\n{clean_text}")
+
+    timestamp = datetime.now(timezone.utc).isoformat()
+    for name, arg in tool_calls:
+        name = name.lower()
+        if name == "lookup_fundamentals":
+            result = ToolResult(
+                tool_name="lookup_fundamentals", query=arg.strip().upper(),
+                data=MOCK_FUNDAMENTALS_AAPL, timestamp=timestamp,
+            )
+        elif name == "search_news":
+            result = ToolResult(
+                tool_name="search_news", query=arg,
+                data=MOCK_NEWS_SEARCH_RESULTS, timestamp=timestamp,
+            )
+        elif name == "get_elite_opinion":
+            result = ToolResult(
+                tool_name="get_elite_opinion", query=arg,
+                data=MOCK_ELITE_OPINIONS, timestamp=timestamp,
+            )
+        else:
+            result = ToolResult(
+                tool_name=name, query=arg, data={},
+                error=f"Unknown tool: '{name}'",
+                timestamp=timestamp,
+            )
+        state.tools.tool_results.append(result)
+        state.tools.calls_used += 1
+        discussion_history.append({"role": "assistant", "content": f"[TOOL RESULT-MOCK] {result.to_prompt_text()}"})
+
+        # Also accumulate in registry for consistency
+        registry.tool_calls.append(result)
+
+    return len(tool_calls) > 0
+
+
+def _strip_tool_tags(text: str) -> str:
+    """Remove <tool>...</tool> tags from text for clean display."""
+    import re
+    return re.sub(r'<tool>[^<]*</tool>', '', text, flags=re.IGNORECASE).strip()
+
 
 def _run_bias_check(state: InteractiveState) -> None:
     """H8 PMV: Quick bias check on L1 interaction — no LLM call, pattern-based."""
@@ -475,33 +759,58 @@ def _run_bias_check(state: InteractiveState) -> None:
             print(f"  {w}")
 
 
-def _handle_elite_query(state: InteractiveState) -> None:
-    """H7/P2: Display ELITE shadow availability during L1 discussion.
+async def _handle_elite_query(user_text: str, state: InteractiveState) -> None:
+    """Query ELITE shadow opinions. Parses 'elite <domain>' or 'elite <name>'."""
+    if state.elite_registry is None:
+        print("\n[ELITE] 影子系统未初始化。请等待影子分析完成后重试。")
+        return
 
-    ELITE shadows run in background — their results may not be ready yet.
-    This shows what's available and lets the user query by domain.
-    """
-    from marketmind.config.ticker_labels import domain_cn
-    print(f"\n[ELITE 影子系统]")
-    print(f"  ELITE 影子正在后台并行分析当日新闻。")
-    print(f"  可用领域: " + " ".join(
-        domain_cn(d) for d in ["energy","tech","crypto","bonds","gold",
-        "macro","metals","financials","healthcare","consumer",
-        "industrials","emerging","real_estate","volatility","fx","short"]
-    ))
-    print(f"  输入影子名称或领域关键词来查询 | 或继续讨论")
+    # Extract domain/name from user text
+    # e.g., "elite energy" -> query energy domain
+    #       "elite" alone -> show available domains
+    query = user_text.replace("elite", "").strip()
+    # Also handle "影子" Chinese variant and mixed forms
+    if not query:
+        query = user_text.replace("影子", "").strip()
 
-    # If user typed "elite energy", try to get shadow opinion
-    # For the MVP, this triggers data mining in that domain
-    domain_map = {
-        "energy": "能源/油气", "tech": "科技/AI/半导体", "crypto": "加密货币",
-        "bonds": "债券/利率", "gold": "黄金/贵金属", "macro": "宏观/指数",
-        "metals": "工业金属/矿业", "financials": "金融/银行",
-        "healthcare": "医疗/制药", "consumer": "消费/零售",
-        "industrials": "工业/制造", "emerging": "新兴市场",
-        "real_estate": "房地产/REIT", "volatility": "波动率/VIX",
-        "fx": "外汇", "short": "做空/看跌",
-    }
+    if not query:
+        # Show available domains with ELITE shadows
+        domains = list(state.elite_registry.DOMAIN_KEYWORDS.keys())
+        print(f"\n[ELITE] 可用领域: {', '.join(domains[:10])}")
+        print("输入 'elite <领域>' 查询影子意见（如 'elite gold'）")
+        return
+
+    # Detect domain from query
+    matched_domains = state.elite_registry.detect_domain_trigger(query)
+    if not matched_domains:
+        domain_list = ", ".join(list(state.elite_registry.DOMAIN_KEYWORDS.keys())[:10])
+        print(f"\n[ELITE] 未识别领域 '{query}'。可用领域: {domain_list}")
+        return
+
+    # Get eligible contributors
+    # Need shadow_db to get achievement_tier — but EliteRegistry already has contributions registered
+    # Check if any contributions exist for matched domains
+    domain = matched_domains[0]
+    contributions = getattr(state.elite_registry, '_contributions', {})
+
+    # Find contributions matching the domain
+    matched = []
+    for sid, contrib in contributions.items():
+        if contrib.domain == domain or domain in contrib.domain:
+            matched.append(contrib)
+
+    if not matched:
+        print(f"\n[ELITE] {domain} 领域影子正在分析中（预计30-60秒）。请稍后再试。")
+        return
+
+    # Display shadow opinions
+    print(f"\n┌─ ELITE 影子 — {domain} 领域 ─────────────────┐")
+    for contrib in matched[:3]:
+        name = getattr(contrib, 'shadow_name', 'unknown')
+        text = getattr(contrib, 'opinion', '')[:300]
+        print(f"│ [{name}] {text}")
+    print(f"└{'─'*46}┘")
+    print("（以上为影子独立分析意见，仅供参考）")
 
 
 def _build_discussion_text(history: list[dict]) -> str:

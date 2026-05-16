@@ -95,7 +95,14 @@ async def analyze_layer1(signals: list[FlashSignal], news_items: list[NewsItem])
         return Layer1Result.empty_default()
 
 
-def _format_signals(signals: list[FlashSignal], news_items: list[NewsItem]) -> str:
+def _format_signals(signals: list[FlashSignal], news_items: list[NewsItem],
+                    insider_items: list[NewsItem] | None = None) -> str:
+    """Format signals and news for L1 narrative analysis.
+
+    CRITICAL-2 fix: insider_signal items bypass Flash preprocessing and are
+    appended as structured context data. Social mentions are also included
+    here if present in news_items (they already carry content_type="social_mention").
+    """
     lines = ["## Preprocessed Signals"]
     for s in signals:
         lines.append(f"- [{s.event_grade}] {s.event_type} | {s.direction} (conf={s.confidence}) | {defang_text(s.source_headline)}")
@@ -103,6 +110,12 @@ def _format_signals(signals: list[FlashSignal], news_items: list[NewsItem]) -> s
         lines.append("\n## Raw Headlines")
         for item in news_items[:20]:
             lines.append(f"- [{item.source_name}] {defang_text(item.title)}")
+    # Insider signals: legally-mandated public disclosures, bypass Flash preprocessing
+    if insider_items:
+        lines.append("\n## Insider Signal Data (Public Disclosures)")
+        lines.append("NOTE: These are legally-mandated SEC/Congressional filings — treat as context enrichment, not real-time trading signals.")
+        for item in insider_items[:15]:
+            lines.append(f"- [{item.source_name}] {defang_text(item.title)} | {defang_text(item.summary[:200])}")
     return "\n".join(lines)
 
 

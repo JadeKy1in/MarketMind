@@ -524,6 +524,59 @@ async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsIte
     return items
 
 
+def _load_manual_data(items: list) -> None:
+    """Load user-provided data from data/manual/ (Congress trades, Bluesky posts)."""
+    import json as _json, os as _os
+    from datetime import datetime as _dt, timezone as _tz
+    manual_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "data", "manual")
+    if not _os.path.isdir(manual_dir):
+        return
+
+    # Congress trades: data/manual/congress_trades.json
+    congress_path = _os.path.join(manual_dir, "congress_trades.json")
+    if _os.path.exists(congress_path):
+        try:
+            with open(congress_path, encoding="utf-8") as f:
+                trades = _json.load(f)
+            for t in trades:
+                ticker = (t.get("ticker") or "").upper()
+                rep = t.get("representative", t.get("name", "Unknown"))
+                if not ticker:
+                    continue
+                items.append(NewsItem(
+                    id=hashlib.sha256(f"manual_congress:{rep}:{ticker}:{t.get('transaction_date','')}".encode()).hexdigest()[:16],
+                    title=f"[Congress] {rep} ({t.get('type','?').upper()} ${ticker})",
+                    url="", source_name="Congress Trades", source_tier=int(SourceTier.BEST_EFFORT),
+                    published_at=t.get("transaction_date", _dt.now(_tz.utc).isoformat()),
+                    summary=f"{rep} reported {t.get('type','?')} of ${ticker}. Amount: {t.get('amount','unknown')}. Manual input — STOCK Act disclosure.",
+                    source_reliability=0.20, content_type="insider_signal",
+                ))
+            logger.info("Loaded %d Congress trades from manual file", len(trades))
+        except Exception as e:
+            logger.warning("Failed to load Congress manual file: %s", e)
+
+    # Bluesky posts: data/manual/bluesky_posts.json
+    bluesky_path = _os.path.join(manual_dir, "bluesky_posts.json")
+    if _os.path.exists(bluesky_path):
+        try:
+            with open(bluesky_path, encoding="utf-8") as f:
+                posts = _json.load(f)
+            for p in posts[:10]:
+                text = p.get("text", "")[:500]
+                if not text:
+                    continue
+                items.append(NewsItem(
+                    id=hashlib.sha256(f"manual_bluesky:{text[:80]}".encode()).hexdigest()[:16],
+                    title=text[:100] + ("..." if len(text) > 100 else ""),
+                    url="", source_name="Bluesky Social", source_tier=int(SourceTier.BEST_EFFORT),
+                    published_at=p.get("timestamp", _dt.now(_tz.utc).isoformat()),
+                    summary=text, source_reliability=0.20, content_type="social_mention",
+                ))
+            logger.info("Loaded %d Bluesky posts from manual file", len(posts[:10]))
+        except Exception as e:
+            logger.warning("Failed to load Bluesky manual file: %s", e)
+
+
 async def fetch_all_sources(config: MarketMindConfig) -> list[NewsItem]:
     """Fetch from all working sources, deduplicate, return sorted by priority_score descending.
 
@@ -605,6 +658,9 @@ async def fetch_all_sources(config: MarketMindConfig) -> list[NewsItem]:
         _save_content_hash_cache(_CACHE_PATH, content_hash_cache)
     except Exception:
         pass
+
+    # Manual data files: load user-provided Congress/Bluesky data if present
+    _load_manual_data(deduped)
 
     return deduped
 

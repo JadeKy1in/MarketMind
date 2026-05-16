@@ -91,7 +91,11 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
     print("  - Suggest a direction to explore")
     print("  - Type 'search: <topic>' to request data mining")
     print("  - Type 'proceed' when ready to move to L2/L3")
-    print("  - Type 'observe' to skip trading today\n")
+    print("  - Type 'observe' to skip trading today")
+    print("\nAI can also actively investigate using tools:")
+    print("  - lookup_fundamentals: verify P/E, market cap, sector")
+    print("  - search_news: search GNews for additional articles")
+    print("  - get_elite_opinion: query ELITE shadow analysts\n")
 
     # 0. Shadow Mother init
     shadow_db = None
@@ -140,18 +144,31 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
     except Exception as e:
         logger.debug("News archive skipped (non-critical): %s", e)
 
-    # 2. Flash preprocessing
+    # 2. Flash preprocessing (CRITICAL-2: route by content_type — only news_article items
+    #    pass through Flash; insider_signal and social_mention items bypass Flash entirely
+    #    and are formatted directly in L1 context alongside FlashSignals)
     tracker.advance(2, "Preprocessing signals...", ctx.stage_times)
     from marketmind.pipeline.flash_preprocessor import preprocess_batch
-    signals = await preprocess_batch(news_items[:50])
+    news_article_items = [n for n in news_items if getattr(n, 'content_type', 'news_article') == 'news_article']
+    non_news_items = [n for n in news_items if getattr(n, 'content_type', 'news_article') != 'news_article']
+    signals = await preprocess_batch(news_article_items[:50])
     ctx.signals = signals
-    tracker.result(f"{len(signals)} signals extracted")
+    ctx.insider_items = [n for n in non_news_items if getattr(n, 'content_type', '') == 'insider_signal']
+    ctx.social_items = [n for n in non_news_items if getattr(n, 'content_type', '') == 'social_mention']
+    tracker.result(f"{len(signals)} signals + {len(ctx.insider_items)} insider + {len(ctx.social_items)} social")
 
     # 3. L1 Interactive Socratic dialogue (shadows launch AFTER L1 to receive broadcast)
     tracker.advance(3, "L1: Starting interactive analysis...", ctx.stage_times)
     from marketmind.pipeline.layer1_interactive import run_l1_interactive
     from marketmind.shadows.elite_participation import EliteRegistry
+    from marketmind.pipeline.l1_tools import L1ToolRegistry
     elite_registry = EliteRegistry()
+
+    # Phase G: Create tool registry for AI-initiated investigation
+    l1_tool_registry = L1ToolRegistry(
+        config=config,
+        gnews_key=config.gnews_key,
+    )
 
     async def _cli_handler(prompt: str) -> str:
         """CLI-based user input handler."""
@@ -163,7 +180,9 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
 
     l1_result, should_observe, l1_session = await run_l1_interactive(
         signals[:15], news_items, user_input_handler=_cli_handler, mock=mock,
-        elite_registry=elite_registry
+        elite_registry=elite_registry,
+        tool_registry=l1_tool_registry,
+        insider_items=ctx.insider_items,
     )
 
     if should_observe:
@@ -189,6 +208,15 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
     ctx.l1_result = l1_result
     ctx.l1_session = l1_session
     tracker.result("L1 interactive analysis complete")
+
+    # Phase G: Flush tool efficacy log for learning mechanism (Red Team Q4.3, Control 3)
+    if l1_tool_registry and l1_tool_registry.tool_calls:
+        try:
+            eff_path = l1_tool_registry.flush_efficacy(str(config.data_dir))
+            if eff_path:
+                logger.info("Tool efficacy log saved: %s", eff_path)
+        except Exception as e:
+            logger.debug("Tool efficacy log skipped (non-critical): %s", e)
 
     # ── R4: Shadow Readiness Dashboard ────────────────────────────────────
     def _show_shadow_readiness():
@@ -229,7 +257,56 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
     except Exception:
         pass
 
-    # 3.5 Broadcast L1 session data to shadows (Resolution 2 + H6)
+    # 3.5A Phase G: Broadcast L1 fact-check data to shadows (before user viewpoints)
+    # Per Red Team B4: facts accumulated during discussion, flushed BEFORE .ready sentinel
+    if l1_session.get("fact_broadcast") and config.shadow.shadows_enabled:
+        try:
+            from marketmind.shadows.broadcast import BroadcastWriter, BroadcastMessage
+            from datetime import datetime as _dt
+            writer = BroadcastWriter(str(config.data_dir))
+            now = _dt.now(timezone.utc)
+            for i, fact in enumerate(l1_session["fact_broadcast"]):
+                # Build query_context from tool+args
+                tool = fact.get("tool", "unknown")
+                if tool == "lookup_fundamentals":
+                    query_ctx = f"Verifying fundamentals for {fact.get('ticker', 'unknown')}"
+                elif tool == "search_news":
+                    query_ctx = f"News search: {fact.get('query', 'unknown')}"
+                elif tool == "get_elite_opinion":
+                    query_ctx = f"ELITE shadow opinion on {fact.get('domain', 'unknown')}"
+                else:
+                    query_ctx = f"Tool call: {tool}"
+
+                # Format extracted text from fact data
+                from marketmind.pipeline.l1_tools import ToolResult
+                temp_tr = ToolResult(
+                    tool_name=tool,
+                    query=fact.get("ticker") or fact.get("query") or fact.get("domain", ""),
+                    data=fact.get("data", {}),
+                    timestamp=now.isoformat(),
+                )
+                broadcast_text = temp_tr.to_broadcast_text(query_context=query_ctx)
+
+                msg = BroadcastMessage(
+                    message_id=f"l1_fact_{now.strftime('%Y%m%d')}_{i}",
+                    source_type="l1_fact_check",
+                    source_path="",
+                    extracted_text=broadcast_text,
+                    metadata={
+                        "tool": tool,
+                        "curated_by": "l1_tool",
+                        "query_context": query_ctx,
+                        "source": fact.get("source", "unknown"),
+                        "timestamp": now.isoformat(),
+                    },
+                    confidence=0.85 if fact.get("source") == "yfinance" else 0.70,
+                )
+                writer.write(msg)
+            logger.info("L1 fact broadcast: %d facts written to shadows", len(l1_session["fact_broadcast"]))
+        except Exception as e:
+            logger.warning("Fact broadcast write failed (non-blocking): %s", e)
+
+    # 3.5B Broadcast L1 session data to shadows (Resolution 2 + H6)
     if l1_session.get("user_ideas") and config.shadow.shadows_enabled:
         try:
             from marketmind.shadows.broadcast import BroadcastWriter
