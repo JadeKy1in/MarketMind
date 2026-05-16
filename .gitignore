@@ -18,6 +18,9 @@ venv/
 data/
 output/
 
+# VCR.py news cassettes (contain copyrighted RSS content)
+tests/fixtures/vcr/*.yml
+
 # Cache
 cache/
 *.log
