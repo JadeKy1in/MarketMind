@@ -120,23 +120,23 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
     try:
         from datetime import datetime as dt
         from marketmind.storage.archivist import get_archivist
-        archivist = get_archivist(config.data_dir)
-        news_save_dir = archivist.today_path()
-        news_save_dir.mkdir(parents=True, exist_ok=True)
-        today_str = dt.now().strftime("%Y%m%d_%H%M%S")
-        news_file = news_save_dir / f"news_{today_str}.json"
-        import json as _json
-        _items = []
-        for n in news_items[:100]:
-            _items.append({
-                "title": getattr(n, "title", ""),
-                "source": getattr(n, "source_name", ""),
-                "url": getattr(n, "url", ""),
-                "published": getattr(n, "published_at", ""),
-                "summary": getattr(n, "summary", "")[:300],
-            })
-        news_file.write_text(_json.dumps(_items, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
-        logger.info("News archive saved: %d articles → %s", len(_items), news_file)
+        with get_archivist(config.data_dir) as archivist:
+            news_save_dir = archivist.today_path()
+            news_save_dir.mkdir(parents=True, exist_ok=True)
+            today_str = dt.now().strftime("%Y%m%d_%H%M%S")
+            news_file = news_save_dir / f"news_{today_str}.json"
+            import json as _json
+            _items = []
+            for n in news_items[:500]:
+                _items.append({
+                    "title": getattr(n, "title", ""),
+                    "source": getattr(n, "source_name", ""),
+                    "url": getattr(n, "url", ""),
+                    "published": getattr(n, "published_at", ""),
+                    "summary": getattr(n, "summary", "")[:300],
+                })
+            news_file.write_text(_json.dumps(_items, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+            logger.info("News archive saved: %d articles → %s", len(_items), news_file)
     except Exception as e:
         logger.debug("News archive skipped (non-critical): %s", e)
 
@@ -175,14 +175,14 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
         # Skip to archive
         from datetime import datetime as dt
         from marketmind.storage.archivist import get_archivist
-        archivist = get_archivist(config.data_dir)
-        archivist.init_fts()
-        archivist.index_document(
-            date=dt.now().isoformat()[:10],
-            category="daily_session",
-            title="MarketMind Interactive — Observe",
-            content="L1 interactive session: chose to observe today.",
-        )
+        with get_archivist(config.data_dir) as archivist:
+            archivist.init_fts()
+            archivist.index_document(
+                date=dt.now().isoformat()[:10],
+                category="daily_session",
+                title="MarketMind Interactive — Observe",
+                content="L1 interactive session: chose to observe today.",
+            )
         print("\nMarketMind interactive session complete — observing today.")
         return 0
 

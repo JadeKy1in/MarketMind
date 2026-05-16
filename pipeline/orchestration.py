@@ -108,15 +108,15 @@ async def _archive_session(config, l1_result, l2_result, l3_result, verdict: str
     """Archive a pipeline session."""
     from datetime import datetime as dt
     from marketmind.storage.archivist import get_archivist
-    archivist = get_archivist(config.data_dir)
-    archivist.init_fts()
-    archivist.index_document(
-        date=dt.now().isoformat()[:10],
-        category="daily_session",
-        title="MarketMind Interactive",
-        content=f"Interactive session: {getattr(l1_result, 'event_grade', 'N/A')} | "
-                f"{getattr(l2_result, 'macro_quadrant', 'N/A')} | resonance={verdict}",
-    )
+    with get_archivist(config.data_dir) as archivist:
+        archivist.init_fts()
+        archivist.index_document(
+            date=dt.now().isoformat()[:10],
+            category="daily_session",
+            title="MarketMind Interactive",
+            content=f"Interactive session: {getattr(l1_result, 'event_grade', 'N/A')} | "
+                    f"{getattr(l2_result, 'macro_quadrant', 'N/A')} | resonance={verdict}",
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -201,15 +201,15 @@ async def _do_daily_archive(config, l1_result, l2_result, resonance, tracker: _S
     tracker.advance(9, "Archive: saving session...")
     from datetime import datetime as dt
     from marketmind.storage.archivist import get_archivist
-    a = get_archivist(config.data_dir)
-    a.init_fts()
-    a.index_document(
-        date=dt.now().isoformat()[:10],
-        category="daily_session",
-        title="MarketMind Daily",
-        content=f"MarketMind daily: {l1_result.event_grade} | {l2_result.macro_quadrant} | "
-                f"resonance={resonance.verdict}",
-    )
+    with get_archivist(config.data_dir) as a:
+        a.init_fts()
+        a.index_document(
+            date=dt.now().isoformat()[:10],
+            category="daily_session",
+            title="MarketMind Daily",
+            content=f"MarketMind daily: {l1_result.event_grade} | {l2_result.macro_quadrant} | "
+                    f"resonance={resonance.verdict}",
+        )
     tracker.result("Session archived")
 
 

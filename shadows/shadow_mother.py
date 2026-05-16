@@ -434,7 +434,7 @@ class ShadowMother:
                         )
                     return sid, output, None
                 except Exception as e:
-                    logger.error("Shadow %s analysis failed: %s", sid, e)
+                    logger.error("Shadow %s analysis failed: %s (type=%s)", sid, e, type(e).__name__)
                     return sid, None, e
 
         # Create initial checkpoint if resuming and not exists
@@ -871,11 +871,11 @@ class ShadowMother:
                 # Archive review
                 try:
                     from marketmind.storage.archivist import get_archivist
-                    archivist = get_archivist()
-                    archivist.save_json(
-                        "review", f"quarterly_{quarter}",
-                        {"quarter": quarter, **review}
-                    )
+                    with get_archivist() as archivist:
+                        archivist.save_json(
+                            "review", f"quarterly_{quarter}",
+                            {"quarter": quarter, **review}
+                        )
                 except Exception:
                     pass
             except Exception as e:

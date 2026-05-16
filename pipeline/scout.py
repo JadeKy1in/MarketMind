@@ -210,10 +210,46 @@ async def fetch_all_sources(config: MarketMindConfig) -> list[NewsItem]:
         elif source_counts[source.name] == 0 and source.status == SourceStatus.WORKING:
             source_issues.append(f"{source.name}: 0 articles (URL may be broken)")
 
-    # Print monitoring report
-    _print_scout_report(sources, source_counts, source_issues, len(all_items))
+    # Z0 instrumentation: count API vs RSS articles before dedup
+    rss_count = sum(c for name, c in source_counts.items() if name not in ("NewsAPI", "GNews"))
+    api_count = sum(c for name, c in source_counts.items() if name in ("NewsAPI", "GNews"))
+    rss_health = sum(1 for s in sources if s.status == SourceStatus.WORKING) / max(len(sources), 1)
 
-    return deduplicate(all_items)
+    deduped = deduplicate(all_items)
+
+    # Z0 instrumentation: record baseline metrics
+    _record_z0_metrics(sources, source_counts, source_issues, rss_count, api_count, rss_health, len(all_items), len(deduped))
+
+    # Print monitoring report
+    _print_scout_report(sources, source_counts, source_issues, len(deduped))
+
+    return deduped
+
+
+def _record_z0_metrics(sources, counts, issues, rss_count, api_count, rss_health, pre_dedup, post_dedup) -> None:
+    """Z0 baseline: record per-run news metrics to data/metrics/YYYY/MM/DD/news_metrics_HHMMSS.json."""
+    import json as _json, os as _os
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    date_dir = now.strftime("%Y/%m/%d")
+    metrics_root = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "data", "metrics")
+    metrics_dir = _os.path.join(metrics_root, date_dir)
+    _os.makedirs(metrics_dir, exist_ok=True)
+    ts = now.strftime("%H%M%S")
+    record = {
+        "timestamp": now.isoformat(),
+        "source_count": len(sources),
+        "rss_article_count": rss_count,
+        "api_article_count": api_count,
+        "rss_health_score": round(rss_health, 3),
+        "pre_dedup_total": pre_dedup,
+        "post_dedup_total": post_dedup,
+        "issues": issues[:10],
+    }
+    fpath = _os.path.join(metrics_dir, f"news_metrics_{ts}.json")
+    with open(fpath, "w", encoding="utf-8") as f:
+        f.write(_json.dumps(record, ensure_ascii=False, indent=2) + "\n")
+    logger.debug("Z0 metrics saved: %s", fpath)
 
 
 def _print_scout_report(sources: list, counts: dict[str, int], issues: list[str], total: int) -> None:
