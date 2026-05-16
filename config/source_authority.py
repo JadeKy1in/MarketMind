@@ -48,7 +48,7 @@ SOURCES: list[Source] = [
 
     # ── China / Greater China ──────────────────────────────────────
     Source("SCMP Business", SourceTier.RELIABLE, "https://www.scmp.com/rss/4/feed/", "rss", 0.80, 2.0),
-    Source("Caixin", SourceTier.PRIMARY, "", "rss", 0.82, 2.0, status=SourceStatus.DEAD),  # RSS discontinued, redirects to HTML
+    Source("Caixin", SourceTier.PRIMARY, "", "rss", 0.82, 2.0, status=SourceStatus.DEAD),  # API endpoint requires unknown Accept header; RSSHub route /caixinglobal/latest available for self-hosted
     Source("Xinhua Finance", SourceTier.RELIABLE, "http://www.xinhuanet.com/english/rss/worldrss.xml", "rss", 0.72, 2.0),
 
     # ── Japan / Asia Pacific ───────────────────────────────────────
@@ -60,8 +60,8 @@ SOURCES: list[Source] = [
     # ── Europe ─────────────────────────────────────────────────────
     Source("FT World News", SourceTier.PRIMARY, "https://www.ft.com/world?format=rss", "rss", 0.90, 2.0),
     Source("ECB Press", SourceTier.PRIMARY, "https://www.ecb.europa.eu/rss/press.html", "rss", 0.95, 2.0),
-    Source("DW Business", SourceTier.RELIABLE, "https://rss.dw.com/rdf/rss-en-business", "rss", 0.80, 2.0),
-    Source("Euronews Economy", SourceTier.RELIABLE, "https://www.euronews.com/rss?format=mrss&page=economy", "rss", 0.75, 1.0),
+    Source("DW Business", SourceTier.RELIABLE, "http://rss.dw.de/rdf/rss-en-bus", "rss", 0.80, 2.0),
+    Source("Euronews Economy", SourceTier.RELIABLE, "https://www.euronews.com/rss?format=mrss&level=theme&name=business", "rss", 0.75, 1.0),
 
     # ── Middle East / Energy ───────────────────────────────────────
     Source("Al Jazeera Economy", SourceTier.RELIABLE, "https://www.aljazeera.com/xml/rss/all.xml", "rss", 0.72, 1.0),
@@ -81,7 +81,7 @@ SOURCES: list[Source] = [
     Source("BBC Business", SourceTier.PRIMARY, "https://feeds.bbci.co.uk/news/business/rss.xml", "rss", 0.88, 2.0),
 
     # ── Commodities / Futures ─────────────────────────────────────
-    Source("Investing.com", SourceTier.BEST_EFFORT, "", "rss", 0.40, 1.0, status=SourceStatus.DEAD),
+    Source("Investing.com", SourceTier.BEST_EFFORT, "https://www.investing.com/rss/news_1063.rss", "rss", 0.40, 1.0),
 
     # ── API-based (require keys) ──────────────────────────────────
     Source("NewsAPI", SourceTier.RELIABLE, "", "api", 0.90, 10.0, True),

@@ -149,22 +149,64 @@ async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsIte
 async def fetch_all_sources(config: MarketMindConfig) -> list[NewsItem]:
     """Fetch from all working sources, deduplicate, return sorted by tier."""
     sources = get_working_sources()
-    # Always include UNTESTED sources alongside working/degraded ones
     untested = [s for s in SOURCES if s.status == SourceStatus.UNTESTED]
-    sources = list({s.name: s for s in (sources + untested)}.values())  # deduplicate by name
+    sources = list({s.name: s for s in (sources + untested)}.values())
     all_items: list[NewsItem] = []
-    fetch_errors: list[str] = []
+    source_counts: dict[str, int] = {}
+    source_issues: list[str] = []
+
     for source in sources:
+        before = len(all_items)
         items = await fetch_source(source, config)
         all_items.extend(items)
+        source_counts[source.name] = len(all_items) - before
         if source.status in (SourceStatus.DEGRADED, SourceStatus.DEAD):
-            fetch_errors.append(f"{source.name}: {source.status.value}")
-    if fetch_errors:
-        logger.warning("Source fetch issues (%d/%d sources): %s",
-                       len(fetch_errors), len(sources), "; ".join(fetch_errors[:5]))
-        if len(fetch_errors) > 5:
-            logger.warning("  (+ %d more)", len(fetch_errors) - 5)
+            source_issues.append(f"{source.name}: {source.status.value}")
+        elif source_counts[source.name] == 0 and source.status == SourceStatus.WORKING:
+            source_issues.append(f"{source.name}: 0 articles (URL may be broken)")
+
+    # Print monitoring report
+    _print_scout_report(sources, source_counts, source_issues, len(all_items))
+
     return deduplicate(all_items)
+
+
+def _print_scout_report(sources: list, counts: dict[str, int], issues: list[str], total: int) -> None:
+    """Print daily source monitoring report after news collection."""
+    from marketmind.config.source_authority import SourceTier, SourceStatus
+    tier_names = {SourceTier.PRIMARY: '核心', SourceTier.RELIABLE: '可靠',
+                  SourceTier.FRAGILE: '脆弱', SourceTier.BEST_EFFORT: '尽力'}
+
+    working = sum(1 for s in sources if s.status == SourceStatus.WORKING and counts.get(s.name, 0) > 0)
+    empty = sum(1 for s in sources if counts.get(s.name, 0) == 0)
+    degraded = sum(1 for s in sources if s.status == SourceStatus.DEGRADED)
+
+    print(f"\n{'='*60}")
+    print(f"  每日新闻源监测报告")
+    print(f"  总文章: {total} | 活跃源: {working} | 空源: {empty} | 降级: {degraded}")
+    print(f"  {'='*60}")
+
+    for s in sources:
+        c = counts.get(s.name, 0)
+        tier = tier_names.get(s.tier, '?')
+        if s.status == SourceStatus.DEAD:
+            flag = '[DEAD]'
+        elif s.status == SourceStatus.DEGRADED:
+            flag = '[DEGRADED]'
+        elif c == 0:
+            flag = '[EMPTY]'
+        else:
+            flag = ''
+        print(f"  [{tier}] {s.name}: {c}篇 {flag}".strip())
+
+    if issues:
+        print(f"\n  [警告] 以下源需要关注:")
+        for issue in issues[:10]:
+            print(f"    - {issue}")
+        if len(issues) > 10:
+            print(f"    - ... 还有 {len(issues) - 10} 个问题")
+
+    print(f"  {'='*60}\n")
 
 
 def deduplicate(items: list[NewsItem]) -> list[NewsItem]:
