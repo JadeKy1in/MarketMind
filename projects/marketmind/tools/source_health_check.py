@@ -161,6 +161,43 @@ async def test_apewisdom() -> tuple[int, str]:
         return 0, str(e)[:100]
 
 
+async def test_bls_api(source: Source) -> tuple[int, str]:
+    """Test BLS Public Data API v2 — fetch latest CPI, unemployment, PPI."""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            from datetime import datetime, timezone
+            current_year = datetime.now(timezone.utc).year
+            req_body = {
+                "seriesid": ["CUUR0000SA0", "LNS14000000"],
+                "startyear": str(current_year - 1),
+                "endyear": str(current_year),
+                "registrationkey": "",
+            }
+            body_str = __import__("json").dumps(req_body)
+            resp = await client.post(
+                source.url,
+                content=body_str,
+                headers={
+                    "Content-Type": "application/json",
+                    "User-Agent": "MarketMind/0.1 (contact@marketmind.dev)",
+                },
+            )
+            if resp.status_code != 200:
+                return 0, f"HTTP {resp.status_code}"
+            data = resp.json()
+            if data.get("status") != "REQUEST_SUCCEEDED":
+                return 0, "; ".join(data.get("message", ["Unknown error"]))
+            results = data.get("Results", {}).get("series", [])
+            if not results:
+                return 0, "No series returned"
+            total_observations = sum(len(s.get("data", [])) for s in results)
+            return total_observations, f"({len(results)} series)"
+    except httpx.TimeoutException:
+        return 0, "Timeout"
+    except Exception as e:
+        return 0, str(e)[:100]
+
+
 async def main():
     print("=" * 72)
     print("  MarketMind Source Health Check")
@@ -189,8 +226,7 @@ async def main():
             count = -1
             error = "SKIPPED (handled by macro_data.py)"
         elif source.feed_type == "bls_api":
-            count = -1
-            error = "SKIPPED (BLS API — implementation TBD)"
+            count, error = await test_bls_api(source)
         elif source.feed_type == "rss":
             count, error = await test_rss(source)
         elif source.feed_type in ("sec_api", "sec_form4", "sec_13f"):
