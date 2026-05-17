@@ -36,18 +36,51 @@ class Source:
 
 
 SOURCES: list[Source] = [
-    Source("FRED", SourceTier.PRIMARY, "https://fred.stlouisfed.org/rss/", "rss", 0.99, 2.0),
-    Source("BLS", SourceTier.PRIMARY, "https://www.bls.gov/feed/", "rss", 0.99, 2.0),
-    Source("SEC EDGAR", SourceTier.PRIMARY, "https://www.sec.gov/cgi-bin/browse-edgar", "rss", 0.99, 1.0),
-    Source("Federal Reserve", SourceTier.PRIMARY, "https://www.federalreserve.gov/feeds/", "rss", 0.99, 2.0),
-    Source("CFTC COT", SourceTier.PRIMARY, "https://www.cftc.gov/dea/newcot/c_disagg.txt", "api", 0.99, 1.0),
+    # === PRIMARY tier — institutional economic/financial data sources ===
+    Source("FRED", SourceTier.PRIMARY,
+           "https://news.research.stlouisfed.org/feed/", "rss", 0.99, 2.0),
+    # ^ FRED economic-data RSS was discontinued; replaced with St. Louis Fed Research blog.
+    #   Raw FRED data is available via macro_data.py (FRED API).
+    Source("BLS", SourceTier.PRIMARY,
+           "https://www.bls.gov/feed/bls_latest.rss", "rss", 0.99, 2.0,
+           status=SourceStatus.DEAD),
+    # ^ BLS RSS is blocked by Cloudflare (403) for automated access.
+    #   Use BLS Public Data API v2 (api.bls.gov) for programmatic data.
+    Source("SEC EDGAR", SourceTier.PRIMARY,
+           "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&output=atom&count=20",
+           "rss", 0.99, 1.0),
+    # ^ Now requires User-Agent: "OrgName/version (email)" per SEC developer policy.
+    Source("Federal Reserve", SourceTier.PRIMARY,
+           "https://www.federalreserve.gov/feeds/press_all.xml", "rss", 0.99, 2.0),
+    # ^ Fixed: was directory listing (feeds/); now points to actual press releases RSS XML.
+    Source("CFTC COT", SourceTier.PRIMARY,
+           "https://www.cftc.gov/dea/newcot/c_disagg.txt", "api", 0.99, 1.0),
+    # ^ feed_type="api" is correct — handled by macro_data.py, not RSS parser.
+
+    # === RELIABLE tier — commercial news aggregators ===
     Source("NewsAPI", SourceTier.RELIABLE, None, "api", 0.90, 10.0, True),
     Source("GNews", SourceTier.RELIABLE, None, "api", 0.85, 10.0, True),
-    Source("MarketWatch", SourceTier.RELIABLE, "https://feeds.marketwatch.com/marketwatch/topstories", "rss", 0.80, 2.0),
-    Source("Investing.com", SourceTier.RELIABLE, "https://www.investing.com/rss/news.rss", "rss", 0.75, 1.0),
-    Source("Nikkei Asia", SourceTier.FRAGILE, "https://asia.nikkei.com/rss/feed/nikkei-asia-news", "rss", 0.70, 1.0),
-    Source("xcancel", SourceTier.BEST_EFFORT, "https://rss.xcancel.com/", "rss", 0.60, 0.5),
-    Source("CapitolTrades", SourceTier.BEST_EFFORT, "https://www.capitoltrades.com/", "html", 0.65, 0.5),
+    Source("MarketWatch", SourceTier.RELIABLE,
+           "https://feeds.marketwatch.com/marketwatch/topstories", "rss", 0.80, 2.0),
+    Source("Investing.com", SourceTier.RELIABLE,
+           "https://www.investing.com/rss/news.rss", "rss", 0.75, 1.0),
+
+    # === FRAGILE tier — regional / specialised feeds ===
+    Source("Nikkei Asia", SourceTier.FRAGILE,
+           None, "rss", 0.70, 1.0, status=SourceStatus.DEAD),
+    # ^ RSS discontinued; Nikkei Asia moved to newsletter-only subscriptions.
+
+    # === BEST_EFFORT tier — community / social / scrape-based ===
+    Source("xcancel", SourceTier.BEST_EFFORT,
+           "https://xcancel.com/FinancialTimes/rss", "rss", 0.60, 0.5),
+    # ^ Fixed URL format: was generic rss.xcancel.com/ (wrong domain).
+    #   Nitter RSS works via xcancel.com/{username}/rss.
+    Source("CapitolTrades", SourceTier.BEST_EFFORT,
+           "https://www.capitoltrades.com/", "html", 0.65, 0.5,
+           status=SourceStatus.DEAD),
+    # ^ HTML scraping not implemented in scout.py.
+    #   Internal API at bff.capitoltrades.com/trades exists but requires custom JSON parser.
+    Source("Bluesky", SourceTier.BEST_EFFORT, None, "bluesky", 0.60, 0.5, True),
 ]
 
 

@@ -26,6 +26,8 @@ class NewsItem:
     published_at: str
     summary: str
     raw_text: str | None = None
+    source_reliability: float = 0.5
+    content_type: str = "news"
     fetched_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     @classmethod
@@ -70,7 +72,7 @@ async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsIte
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.get(
                     source.url,
-                    headers={"User-Agent": "MarketMind/0.1 (Financial Research Bot; +https://github.com/marketmind)"}
+                    headers={"User-Agent": "MarketMind/0.1 (contact@marketmind.dev)"}
                 )
                 resp.raise_for_status()
                 feed = feedparser.parse(resp.text)
@@ -84,6 +86,11 @@ async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsIte
             source.consecutive_failures = 0
         elif source.feed_type == "html":
             source.status = SourceStatus.DEGRADED  # HTML scraping not yet implemented
+        elif source.feed_type == "bluesky":
+            from marketmind.pipeline.social_sources import fetch_bluesky_posts
+            items = await fetch_bluesky_posts(source, config)
+            source.status = SourceStatus.WORKING
+            source.consecutive_failures = 0
     except Exception as e:
         logger.warning("Scout source fetch failed for '%s': %s", source.name, e)
         source.consecutive_failures += 1
