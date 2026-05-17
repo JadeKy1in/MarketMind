@@ -32,10 +32,10 @@ class NewsItem:
 
     @classmethod
     def from_entry(cls, entry: dict, source: Source) -> "NewsItem":
-        title = entry.get("title", "Untitled").strip()
+        title = _truncate(entry.get("title", "Untitled").strip(), MAX_HEADLINE_LENGTH)
         url = entry.get("link", "")
         summary_raw = entry.get("summary", entry.get("description", ""))
-        summary = _strip_html(summary_raw)[:500]
+        summary = _truncate(_strip_html(summary_raw), MAX_SUMMARY_LENGTH)
         published = entry.get("published", entry.get("updated", datetime.now(timezone.utc).isoformat()))
         item_id = hashlib.sha256(f"{title}{url}".encode()).hexdigest()[:16]
         return cls(
@@ -47,6 +47,17 @@ class NewsItem:
             published_at=published,
             summary=summary,
         )
+
+
+MAX_HEADLINE_LENGTH = 300
+MAX_SUMMARY_LENGTH = 1000
+
+
+def _truncate(text: str, max_len: int) -> str:
+    """Truncate text to max_len characters, preserving whole characters."""
+    if not text:
+        return text
+    return text[:max_len]
 
 
 def _strip_html(text: str) -> str:
@@ -102,12 +113,12 @@ async def _fetch_newsapi(config: MarketMindConfig) -> list[NewsItem]:
                 return items
 
             for article in data.get("articles", [])[:20]:
-                title = (article.get("title") or "Untitled").strip()
+                title = _truncate((article.get("title") or "Untitled").strip(), MAX_HEADLINE_LENGTH)
                 url = article.get("url") or ""
                 if not title and not url:
                     continue
                 summary_raw = article.get("description") or ""
-                summary = _strip_html(summary_raw)[:500]
+                summary = _truncate(_strip_html(summary_raw), MAX_SUMMARY_LENGTH)
                 published = article.get("publishedAt") or datetime.now(timezone.utc).isoformat()
                 item_id = hashlib.sha256(f"{title}{url}".encode()).hexdigest()[:16]
                 items.append(NewsItem(
@@ -151,12 +162,12 @@ async def _fetch_gnews(config: MarketMindConfig) -> list[NewsItem]:
             resp.raise_for_status()
             data = resp.json()
             for article in data.get("articles", [])[:20]:
-                title = (article.get("title") or "Untitled").strip()
+                title = _truncate((article.get("title") or "Untitled").strip(), MAX_HEADLINE_LENGTH)
                 url = article.get("url") or ""
                 if not title and not url:
                     continue
                 summary_raw = article.get("description") or ""
-                summary = _strip_html(summary_raw)[:500]
+                summary = _truncate(_strip_html(summary_raw), MAX_SUMMARY_LENGTH)
                 published = article.get("publishedAt") or datetime.now(timezone.utc).isoformat()
                 item_id = hashlib.sha256(f"{title}{url}".encode()).hexdigest()[:16]
                 items.append(NewsItem(

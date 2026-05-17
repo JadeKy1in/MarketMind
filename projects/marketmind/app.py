@@ -107,7 +107,7 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
                    f"L3: {len(l3_result.results)} tickers ({len(l3_result.green_lights)} green)")
 
     # 5. Shadow ecosystem run
-    shadow_votes = None
+    shadow_votes = None  # DESIGN: shadows are internal competition, never vote on decisions
     if config.shadow.shadows_enabled and mother is not None:
         tracker.advance(5, "Shadows: running analysis cycle...")
         orchestration = await mother.orchestrate_daily_cycle(
@@ -142,7 +142,7 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
         observed_sharpe=0.5,
     )
 
-    # 8. Decision with shadow consensus
+    # 8. Decision (shadow_votes always None — shadows are internal competition only)
     tracker.advance(8, "Decision: synthesis...")
     from marketmind.pipeline.decision import generate_decision
     decision = await generate_decision(

@@ -97,6 +97,12 @@ async def generate_decision(
     red_team: RedTeamReport,
     resonance: ResonanceResult,
     shadow_votes: dict[str, list[ShadowVote]] | None = None,
+    # ^^^ DEPRECATED in decision pipeline (2026-05-17).
+    #     shadow_votes is always None at app.py:110 by design.
+    #     Shadows are an internal competition ecosystem for ranking/evolution/
+    #     crystallization — they do NOT vote on investment decisions.
+    #     The parameter is preserved only for backward compatibility with
+    #     any hypothetical manual invocation that might pass votes directly.
 ) -> DecisionOutput:
     """Generate final decision cards and no-trade card."""
     if not resonance.passed and not l3.green_lights:
@@ -132,6 +138,9 @@ def _build_decision_prompt(
     challenges_str = "\n".join(f"- [{c.severity}] {c.challenge}" for c in red_team.challenges[:5])
 
     shadow_consensus_str = ""
+    # NOTE: This block is never reached in the live daily pipeline
+    # because app.py:110 sets shadow_votes = None by design.
+    # Preserved for hypothetical manual invocation or future use.
     if shadow_votes:
         lines = ["## Shadow Ecosystem Consensus"]
         for ticker, votes in shadow_votes.items():

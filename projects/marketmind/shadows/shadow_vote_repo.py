@@ -1,4 +1,10 @@
-"""Vote and ranking persistence for shadow ecosystem.
+"""Vote and ranking persistence for shadow ecosystem (INTERNAL-ONLY).
+
+These functions support the shadow competition ecosystem — ranked analyst shadows
+that compete internally for signal quality. Vote persistence exists for
+BACKTEST validation (backtest_runner.py) and crystallization hypothesis testing.
+It is NOT used as input to the live decision pipeline (app.py:110 sets
+shadow_votes = None by design).
 
 Extracted from shadow_state.py per modular architecture rules (§3.1).
 All functions accept sqlite3.Connection — no dependency on ShadowStateDB.

@@ -556,8 +556,15 @@ class ShadowStateDB:
             conn.close()
 
     # ── Vote / PnL (delegated to shadow_vote_repo) ────────────────────────
+    # NOTE: These methods are for BACKTEST and internal ecosystem use ONLY.
+    # Shadows are an internal competition ecosystem for ranking/evolution/
+    # crystallization. They do NOT vote on investment decisions.
+    # app.py:110 sets shadow_votes = None by design — this is intentional.
+    # Vote persistence exists solely for backtest_runner.py signal-quality
+    # analysis and crystallization validation.
 
     def get_all_active_votes(self, date: str, ticker: str) -> list[dict]:
+        """[INTERNAL-ONLY] Get active shadow metadata. For ecosystem health, NOT decision input."""
         from marketmind.shadows.shadow_vote_repo import get_all_active_votes
         conn = self._connect()
         try:
@@ -574,6 +581,7 @@ class ShadowStateDB:
             conn.close()
 
     def save_votes(self, shadow_id: str, date: str, votes: list) -> None:
+        """[INTERNAL-ONLY] Persist shadow votes for backtest/audit. NOT a decision input."""
         from marketmind.shadows.shadow_vote_repo import save_votes
         if not votes:
             return
@@ -584,6 +592,7 @@ class ShadowStateDB:
             conn.close()
 
     def get_votes_by_date_range(self, start_date: str, end_date: str) -> list[dict]:
+        """[INTERNAL-ONLY] Query votes for BACKTEST signal-quality analysis. NOT a decision input."""
         from marketmind.shadows.shadow_vote_repo import get_votes_by_date_range
         conn = self._connect()
         try:

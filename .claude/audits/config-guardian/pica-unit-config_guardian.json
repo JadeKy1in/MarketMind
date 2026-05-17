@@ -1,0 +1,28 @@
+{
+  "module": "config_guardian",
+  "timestamp": "2026-05-17T11:35:00Z",
+  "result": "PASS",
+  "test_count": 10,
+  "failures": 0,
+  "test_results": {
+    "test_guard1_enabled_plugins_missing": "PASSED",
+    "test_guard1_fallback_to_hardcoded": "PASSED",
+    "test_guard2_statusline_restored": "PASSED",
+    "test_guard2_statusline_intact": "PASSED",
+    "test_guard3_hook_added_when_guardian_absent": "PASSED",
+    "test_guard3_hook_already_exists": "PASSED",
+    "test_guard4_env_keys_restored": "PASSED",
+    "test_guard4_env_keys_intact": "PASSED",
+    "test_atomic_write_preserves_data": "PASSED",
+    "test_atomic_write_overwrites_existing": "PASSED"
+  },
+  "coverage": {
+    "guard1_enabled_plugins": "tested (missing + fallback + fallback_to_hardcoded)",
+    "guard2_statusline": "tested (restored + intact)",
+    "guard3_hooks": "tested (added_when_absent + already_exists)",
+    "guard4_env_and_prefs": "tested (restored + intact)",
+    "atomic_write": "tested (preserves_data + overwrites_existing)"
+  },
+  "syntax_warnings": 0,
+  "command": "python -W error::SyntaxWarning -m pytest tests/test_config_guardian.py -v"
+}

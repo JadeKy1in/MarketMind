@@ -11,18 +11,39 @@ pipeline:
 
   phases:
     - id: stage_0_shadow_init
-      name: "Shadow Mother Event Scan"
+      name: "Shadow Ecosystem Initialization"
       required: false  # only when shadows_enabled=1
       entry_point: "shadows/shadow_mother.py"
       entry_function: "ShadowMother.__init__"
       description: >
-        Initialize shadow ecosystem: create expert/daredevil/catfish shadows,
-        start background scheduler (optional), init multimodal adapter (optional).
+        Initialize the INDEPENDENT shadow competition ecosystem. Shadows are a
+        SELF-CONTAINED parallel system. They do NOT participate in the main
+        investment decision pipeline (shadow_votes is ALWAYS None by DD-001).
+
+        This stage runs BEFORE news collection so shadows are ready to analyze
+        at the same time as the main AI (Stage 4). Shadow analysis occurs in
+        Stage 5, not here.
+
+        Factory functions create permanent shadow configurations in SQLite:
+        - create_expert_shadows() → 15 domain experts (gold, crypto, energy,
+          bonds, vol, EM, tech, financials, healthcare, consumer, industrials,
+          metals, real_estate, fx, macro)
+        - create_daredevil_shadows() → 7+1 contrarian types (scalper, trend,
+          event, fade, rotation, range-bound, panic, crash_hunter)
+        - create_catfish_agent() → 1 minority-opinion enforcer (>80% trigger)
+
+        Optionally starts BackgroundScheduler (crystallization + memory cleanup
+        on configurable intervals) and MultimodalAdapter (Gemini Flash for
+        image/PDF/screenshot ingestion).
+
+        FULL DESIGN: .claude/research/shadow-ecosystem-full-design.md
+        (shadow types, ranking formula, tier system, promotion/elimination,
+        ELITE protocol, broadcast rules, collusion detection)
       dependencies: []
       produces:
         - shadow_db (ShadowStateDB)
         - mother (ShadowMother)
-      tokens_estimate: 0  # no LLM calls in init
+      tokens_estimate: 0  # no LLM calls in init — config creation only
       status: COMPLETE
 
     - id: stage_1_scout
@@ -94,15 +115,33 @@ pipeline:
       entry_point: "shadows/shadow_mother.py"
       entry_function: "ShadowMother.orchestrate_daily_cycle"
       description: >
-        Shadows analyze raw news + market data INDEPENDENTLY (not main AI analysis).
-        Internal 8-step cycle: event scan → temp shadows → analysis → ranking →
-        collusion → challenger → memory update → crystallization.
+        Shadows analyze news independently from the main AI decision pipeline.
+
+        INFORMATION BROADCAST RULES (from phase_b_ideation_notes.md §1):
+        Shadows RECEIVE:
+          - Raw news/facts from all sources (same news_items as main AI)
+          - Market data (prices, fundamentals) via gateway modules
+          - User's raw opinions and submitted materials (Gate 1 output)
+        Shadows DO NOT RECEIVE:
+          - Main AI's pre-discussion analysis/report (prevents anchoring bias)
+          - Other shadows' analysis output (during analysis phase)
+          - Layer 1/2/3 conclusions (shadows must think independently)
+
+        TIMING: Shadows analyze at the SAME TIME as main AI (Stage 4), not after.
+        ELITE shadows that reach the tier threshold pre-compute analyses stored
+        in EliteRegistry for later awakening at Gate 2.
+
+        Internal 8-step cycle:
+        event scan → temp shadows → analysis → ranking → collusion →
+        challenger → memory update → crystallization.
+
         CRITICAL: shadow_votes is ALWAYS None — shadows do NOT vote on decisions.
         Shadow output feeds back into ranking only, not into generate_decision().
+        Vote persistence (save_votes) is for BACKTEST validation only.
       dependencies: [stage_0_shadow_init, stage_1_scout]
       produces:
         - orchestration (ShadowOrchestrationResult)
-        - shadow_votes = None  # INTENTIONAL — design decision
+        - shadow_votes = None  # INTENTIONAL — design decision (DD-001)
       tokens_estimate: 42000  # 21 shadows × ~2000 tokens each
       status: COMPLETE
 
