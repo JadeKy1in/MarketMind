@@ -65,19 +65,25 @@ SOURCES: list[Source] = [
     Source("EC Press Corner", SourceTier.PRIMARY,
            "https://ec.europa.eu/commission/presscorner/api/rss", "rss", 0.95, 1.0),
 
+    # === Emerging Markets official ===
+    Source("Brazil BCB Copom", SourceTier.PRIMARY,
+           "https://www.bcb.gov.br/api/feed/sitebcb/sitefeedsen/copomstatements",
+           "rss", 0.99, 1.0),
+
     # === RELIABLE tier — commercial news aggregators ===
     Source("NewsAPI", SourceTier.RELIABLE, None, "api", 0.90, 10.0, True),
     Source("GNews", SourceTier.RELIABLE, None, "api", 0.85, 10.0, True),
     Source("MarketWatch", SourceTier.RELIABLE,
            "https://feeds.marketwatch.com/marketwatch/topstories", "rss", 0.80, 2.0),
-    Source("Investing.com", SourceTier.RELIABLE,
-           "https://www.investing.com/rss/news.rss", "rss", 0.75, 1.0),
+    # Investing.com removed — RSS returns headlines only (0 summaries), GNews covers same ground
 
     # === China sources ===
     Source("China Daily Bizchina", SourceTier.RELIABLE,
            "http://www.chinadaily.com.cn/rss/bizchina_rss.xml", "rss", 0.75, 2.0),
     Source("CGTN Business", SourceTier.RELIABLE,
            "https://www.cgtn.com/subscribe/rss/section/business.xml", "rss", 0.70, 2.0),
+    Source("SCMP Business", SourceTier.RELIABLE,
+           "https://www.scmp.com/rss/4/feed", "rss", 0.80, 1.0),
 
     # === EU / Global ===
     Source("Financial Times", SourceTier.RELIABLE,
@@ -90,10 +96,52 @@ SOURCES: list[Source] = [
     # ^ Original Nikkei Asia RSS discontinued (newsletter-only).
     #   Replaced with Google News RSS search for "Japan business markets stocks".
 
+    # === China / Asia FRAGILE ===
+    Source("Xinhua English", SourceTier.FRAGILE,
+           "http://www.xinhuanet.com/english/rss/worldrss.xml",
+           "rss", 0.65, 1.0),
+
+    # === EU FRAGILE ===
+    Source("EUobserver", SourceTier.FRAGILE,
+           "https://euobserver.com/feed/", "rss", 0.65, 1.0),
+
     # === Emerging Markets ===
-    Source("Turkey TCMB", SourceTier.FRAGILE,
-           "https://tcmb.gov.tr/wps/wcm/connect/EN/TCMB+EN/Bottom+Menu/Other/RSS/Press+Releases",
-           "rss", 0.70, 1.0),
+    # Turkey TCMB removed — RSS returns headlines only. Google News proxies cover EM.
+
+    # === BEST_EFFORT tier — Google News proxies (aggregated, not first-party) ===
+    # 🇨🇳 China
+    Source("Caixin (via Google News)", SourceTier.BEST_EFFORT,
+           "https://news.google.com/rss/search?q=Caixin+Global+China+economy+financial+news&hl=en-US&gl=US&ceid=US:en",
+           "rss", 0.55, 1.0),
+    Source("PBOC (via Google News)", SourceTier.BEST_EFFORT,
+           "https://news.google.com/rss/search?q=PBOC+People+Bank+China+monetary+policy+interest+rate&hl=en-US&gl=US&ceid=US:en",
+           "rss", 0.55, 1.0),
+    Source("China Economy (via Google News)", SourceTier.BEST_EFFORT,
+           "https://news.google.com/rss/search?q=China+economic+data+GDP+CPI+PMI+trade&hl=en-US&gl=US&ceid=US:en",
+           "rss", 0.55, 1.0),
+    # 🇪🇺 EU
+    Source("Euronews (via Google News)", SourceTier.BEST_EFFORT,
+           "https://news.google.com/rss/search?q=Euronews+EU+business+economy+eurozone&hl=en-US&gl=US&ceid=US:en",
+           "rss", 0.55, 1.0),
+    Source("Eurostat (via Google News)", SourceTier.BEST_EFFORT,
+           "https://news.google.com/rss/search?q=Eurostat+EU+eurozone+GDP+inflation+CPI+economic+data&hl=en-US&gl=US&ceid=US:en",
+           "rss", 0.55, 1.0),
+    # 🌏 Emerging Markets
+    Source("India RBI (via Google News)", SourceTier.BEST_EFFORT,
+           "https://news.google.com/rss/search?q=Reserve+Bank+India+RBI+repo+rate+monetary+policy+MPC&hl=en-US&gl=US&ceid=US:en",
+           "rss", 0.55, 1.0),
+    Source("South Africa SARB (via Google News)", SourceTier.BEST_EFFORT,
+           "https://news.google.com/rss/search?q=South+Africa+Reserve+Bank+SARB+monetary+policy+repo+rate&hl=en-US&gl=US&ceid=US:en",
+           "rss", 0.55, 1.0),
+    Source("World Bank (via Google News)", SourceTier.BEST_EFFORT,
+           "https://news.google.com/rss/search?q=World+Bank+development+emerging+markets+economy&hl=en-US&gl=US&ceid=US:en",
+           "rss", 0.55, 1.0),
+    Source("IMF (via Google News)", SourceTier.BEST_EFFORT,
+           "https://news.google.com/rss/search?q=IMF+International+Monetary+Fund+global+economy+WEO+World+Economic+Outlook&hl=en-US&gl=US&ceid=US:en",
+           "rss", 0.55, 1.0),
+    Source("OPEC Oil (via Google News)", SourceTier.BEST_EFFORT,
+           "https://news.google.com/rss/search?q=OPEC+oil+production+crude+Saudi+monthly+report&hl=en-US&gl=US&ceid=US:en",
+           "rss", 0.55, 1.0),
 
     # === BEST_EFFORT tier — community / social / scrape-based ===
     Source("xcancel", SourceTier.BEST_EFFORT,
