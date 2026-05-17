@@ -62,6 +62,9 @@ SOURCES: list[Source] = [
     # === EU official sources ===
     Source("ECB Press Releases", SourceTier.PRIMARY,
            "https://www.ecb.europa.eu/rss/press.html", "rss", 0.99, 1.0),
+    Source("ECB (via Google News)", SourceTier.BEST_EFFORT,
+           "https://news.google.com/rss/search?q=ECB+European+Central+Bank+monetary+policy+rate+decision+Lagarde&hl=en-US&gl=US&ceid=US:en",
+           "rss", 0.55, 1.5),
     Source("EC Press Corner", SourceTier.PRIMARY,
            "https://ec.europa.eu/commission/presscorner/api/rss", "rss", 0.95, 1.0),
 
