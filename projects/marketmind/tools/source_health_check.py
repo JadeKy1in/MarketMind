@@ -15,7 +15,7 @@ from marketmind.config.source_authority import SOURCES, Source, SourceTier, Sour
 TIER_NAMES = {1: "PRIMARY", 2: "RELIABLE", 3: "FRAGILE", 4: "BEST_EFFORT"}
 
 HEADERS = {
-    "User-Agent": "MarketMind/0.1 (Financial Research Bot; +https://github.com/marketmind)",
+    "User-Agent": "MarketMind/0.1 (contact@marketmind.dev)",
     "Accept": "application/rss+xml, application/xml, text/xml, */*",
 }
 SEC_HEADERS = {"User-Agent": "MarketMind/0.1 (contact@marketmind.dev)"}
@@ -49,7 +49,7 @@ async def test_api(source: Source) -> tuple[int, str]:
         return 0, "No NEWSAPI_KEY configured"
     if source.name == "GNews" and not config.gnews_key:
         return 0, "No GNEWS_KEY configured"
-    if source.name == "Bluesky Social":
+    if source.name in ("Bluesky", "Bluesky Social"):
         # Try OAuth with env credentials (same as production code)
         import os as _os
         username = _os.environ.get("BLUESKY_USERNAME", "")
@@ -185,6 +185,9 @@ async def main():
         if source.status == SourceStatus.DEAD:
             count = 0
             error = "Pre-marked DEAD"
+        elif source.name == "CFTC COT":
+            count = -1
+            error = "SKIPPED (handled by macro_data.py)"
         elif source.feed_type == "rss":
             count, error = await test_rss(source)
         elif source.feed_type in ("sec_api", "sec_form4", "sec_13f"):
@@ -193,7 +196,7 @@ async def main():
             count, error = await test_congress_api(source)
         elif source.name == "ApeWisdom":
             count, error = await test_apewisdom()
-        elif source.feed_type == "api":
+        elif source.feed_type in ("api", "bluesky"):
             count, error = await test_api(source)
         else:
             count = 0
