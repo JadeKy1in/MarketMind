@@ -77,7 +77,7 @@ SOURCES: list[Source] = [
     Source("NewsAPI", SourceTier.RELIABLE, None, "api", 0.90, 10.0, True),
     Source("GNews", SourceTier.RELIABLE, None, "api", 0.85, 10.0, True),
     Source("MarketWatch", SourceTier.RELIABLE,
-           "https://feeds.marketwatch.com/marketwatch/topstories", "rss", 0.80, 2.0),
+           "https://feeds.content.dowjones.io/public/rss/mw_topstories", "rss", 0.80, 2.0),
     # Investing.com removed — RSS returns headlines only (0 summaries), GNews covers same ground
 
     # === China sources ===
@@ -86,7 +86,7 @@ SOURCES: list[Source] = [
     Source("CGTN Business", SourceTier.RELIABLE,
            "https://www.cgtn.com/subscribe/rss/section/business.xml", "rss", 0.70, 2.0),
     Source("SCMP Business", SourceTier.RELIABLE,
-           "https://www.scmp.com/rss/4/feed", "rss", 0.80, 1.0),
+           "https://www.scmp.com/rss/4/feed/", "rss", 0.80, 1.0),
 
     # === EU / Global ===
     Source("Financial Times", SourceTier.RELIABLE,

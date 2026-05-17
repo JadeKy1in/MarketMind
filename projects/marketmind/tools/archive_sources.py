@@ -147,12 +147,15 @@ def main():
     )
     args = parser.parse_args()
 
+    now = datetime.now(timezone.utc)
     if args.golden:
         target = PROJECT_ROOT / "tests" / "fixtures" / "sources_golden"
         print(f"=== GOLDEN ARCHIVE → {target} ===\n")
     else:
-        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        target = PROJECT_ROOT / "data" / "archive" / f"sources_{date_str}"
+        target = (
+            PROJECT_ROOT / "data" / "archive"
+            / f"{now.year:04d}" / f"{now.month:02d}" / f"{now.day:02d}"
+        )
         print(f"=== ARCHIVE → {target} ===\n")
 
     data = asyncio.run(collect_all_sources())
