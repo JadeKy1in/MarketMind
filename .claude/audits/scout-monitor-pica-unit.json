@@ -1,0 +1,29 @@
+{
+  "module": "tools/scout_monitor.py",
+  "pica_level": "Unit",
+  "timestamp": "2026-05-17T15:43:00Z",
+  "test_file": "tests/test_tools/test_scout_monitor.py",
+  "test_count": 6,
+  "passed": 6,
+  "failed": 0,
+  "test_details": [
+    {"test": "test_valid_state_load", "path": "OK — well-formed state file loads correctly"},
+    {"test": "test_corrupted_state_fallback", "path": "OK — corrupted JSON returns default state"},
+    {"test": "test_missing_file_returns_default", "path": "OK — missing file returns default"},
+    {"test": "test_report_with_mock_data", "path": "OK — mixed-status reports contain all sections"},
+    {"test": "test_empty_reports_handled", "path": "OK — empty reports show 'No sources configured'"},
+    {"test": "test_critical_alert_section", "path": "OK — PRIMARY failures trigger CRITICAL section"}
+  ],
+  "fixes_verified": {
+    "H1_corrupted_state": "PASSED — load_state() wraps json.loads in try/except",
+    "M2_load_once": "IMPLICITLY — run_monitor() loads state once, passes prev to fetch_one()",
+    "M5_first_run": "PARTIALLY — _compute_change() handles prev=unknown -> FIRST_RUN"
+  },
+  "red_team_reference": ".claude/audits/scout-monitor-red-team.md",
+  "full_regression": {
+    "total": 689,
+    "passed": 689,
+    "failed": 0,
+    "warnings": 5
+  }
+}
