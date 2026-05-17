@@ -94,10 +94,28 @@ async def analyze_layer1(signals: list[FlashSignal], news_items: list[NewsItem])
         )
 
 
-def _format_signals(signals: list[FlashSignal], news_items: list[NewsItem]) -> str:
+def _format_signals(signals, news_items: list[NewsItem]) -> str:
+    """Format signals for L1 narrative prompt.
+
+    Accepts both FlashSignal (from flash_preprocessor) and TriageResult
+    (from flash_triage). Uses getattr for backward compatibility — TriageResult
+    has classification instead of event_type, scores dict instead of flat
+    confidence, and headline instead of source_headline.
+    """
     lines = ["## Preprocessed Signals"]
     for s in signals:
-        lines.append(f"- [{s.event_grade}] {s.event_type} | {s.direction} (conf={s.confidence}) | {s.source_headline}")
+        event_grade = getattr(s, "event_grade", "E")
+        event_type = getattr(s, "event_type", None) or getattr(s, "classification", "unknown")
+        direction = getattr(s, "direction", "neutral")
+        confidence = getattr(s, "confidence", None)
+        if confidence is None:
+            scores = getattr(s, "scores", {})
+            confidence = scores.get("market_impact", 5) / 10.0
+        source = getattr(s, "source_headline", None) or getattr(s, "headline", "")
+        lines.append(
+            f"- [{event_grade}] {event_type} | {direction} "
+            f"(conf={confidence:.2f}) | {source[:120]}"
+        )
     if news_items:
         lines.append("\n## Raw Headlines")
         for item in news_items[:20]:

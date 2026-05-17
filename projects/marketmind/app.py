@@ -80,20 +80,59 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
     news_items = await fetch_all_sources(config)
     tracker.result(f"{len(news_items)} articles collected")
 
-    # 2. Flash preprocessing
-    tracker.advance(2, "Flash: preprocessing signals...")
-    from marketmind.pipeline.flash_preprocessor import preprocess_batch
-    signals = await preprocess_batch(news_items[:50])
-    tracker.result(f"{len(signals)} signals extracted")
+    # 2. Flash triage — lightweight scoring of ALL headlines
+    tracker.advance(2, "Flash: triaging all headlines...")
+    try:
+        from marketmind.pipeline.flash_triage import triage_batch, filter_for_pro_browse
+        triage_results = await triage_batch(news_items)
+        browse_candidates = filter_for_pro_browse(triage_results)
+        tracker.result(f"{len(triage_results)} scored, {len(browse_candidates)} for Pro browse "
+                       f"({len([t for t in triage_results if t.classification == 'macro'])} macro, "
+                       f"{len([t for t in triage_results if t.classification == 'company'])} company)")
+    except ImportError:
+        # Graceful fallback: use old flash_preprocessor
+        from marketmind.pipeline.flash_preprocessor import preprocess_batch
+        # Alias: old FlashSignal objects used as triage_results for downstream compat
+        triage_results = await preprocess_batch(news_items[:50])
+        browse_candidates = triage_results  # pass all for investigation
+        tracker.result(f"flash_triage unavailable — fell back to preprocessor "
+                       f"({len(triage_results)} signals)")
 
-    # 3. Layer 1 Narrative analysis
-    tracker.advance(3, "Layer 1: narrative analysis...")
+    # 3. Pro HVR investigation loop
+    tracker.advance(3, "Pro: investigating top signals...")
+    hypotheses = []
+    actionable: list = []
+    monitor: list = []
+    priced_in: list = []
+    try:
+        from marketmind.pipeline.investigation_loop import run_investigation_loop, InvestigationConfig
+        inv_config = InvestigationConfig()
+        hypotheses = await run_investigation_loop(browse_candidates[:20], inv_config)
+
+        actionable = [h for h in hypotheses if h.verdict == "ACTIONABLE"]
+        monitor = [h for h in hypotheses if h.verdict == "MONITOR"]
+        priced_in = [h for h in hypotheses if h.verdict == "PRICED_IN"]
+        tracker.result(f"{len(actionable)} actionable, {len(monitor)} monitor, "
+                       f"{len(priced_in)} priced in, {len(hypotheses)} total")
+    except ImportError as e:
+        tracker.result(f"investigation_loop unavailable ({e}) — skipping Pro HVR")
+
+    # 4. Layer 1 Narrative analysis (receives investigation context)
+    tracker.advance(4, "Layer 1: narrative analysis...")
     from marketmind.pipeline.layer1_narrative import analyze_layer1
-    l1_result = await analyze_layer1(signals[:15], news_items)
-    tracker.result(f"grade={l1_result.event_grade}, quadrant={l1_result.matrix_quadrant}")
+    # Feed L1 the original signals from Flash triage for backward compat,
+    # plus investigation hypotheses as enriched context
+    signals = list(triage_results[:15])  # TriageResult ≈ FlashSignal for L1
+    l1_result = await analyze_layer1(signals, news_items)
 
-    # 4. Layer 2 + Layer 3 in parallel
-    tracker.advance(4, "Layer 2+3: fundamental + technical analysis...")
+    if actionable:
+        tracker.result(f"grade={l1_result.event_grade}, quadrant={l1_result.matrix_quadrant}, "
+                       f"top hypothesis: {actionable[0].hypothesis[:100]}")
+    else:
+        tracker.result(f"grade={l1_result.event_grade}, quadrant={l1_result.matrix_quadrant}")
+
+    # 5. Layer 2 + Layer 3 in parallel
+    tracker.advance(5, "Layer 2+3: fundamental + technical analysis...")
     from marketmind.pipeline.layer2_fundamental import analyze_layer2
     from marketmind.pipeline.layer3_technical import analyze_layer3
     from marketmind.config.asset_universe import ASSET_UNIVERSE
@@ -106,10 +145,10 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
     tracker.result(f"L2: {len(l2_result.ticker_candidates)} candidates, "
                    f"L3: {len(l3_result.results)} tickers ({len(l3_result.green_lights)} green)")
 
-    # 5. Shadow ecosystem run
+    # 6. Shadow ecosystem run
     shadow_votes = None  # DESIGN: shadows are internal competition, never vote on decisions
     if config.shadow.shadows_enabled and mother is not None:
-        tracker.advance(5, "Shadows: running analysis cycle...")
+        tracker.advance(6, "Shadows: running analysis cycle...")
         orchestration = await mother.orchestrate_daily_cycle(
             news_items, {},
         )
@@ -122,8 +161,8 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
         if getattr(config.shadow, 'crystallization_enabled', False):
             tracker.result("Memory updated, crystallization check complete")
 
-    # 6. Red Team challenge
-    tracker.advance(6, "Red Team: adversarial challenge...")
+    # 7. Red Team challenge
+    tracker.advance(7, "Red Team: adversarial challenge...")
     from marketmind.pipeline.red_team import run_red_team
     red_team_report = await run_red_team(
         l1_result.raw_analysis,
@@ -133,8 +172,8 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
     tracker.result(f"{len(red_team_report.challenges)} challenges, "
                    f"A-grade: {red_team_report.a_grade_count}")
 
-    # 7. Signal Resonance
-    tracker.advance(7, "Resonance: statistical validation...")
+    # 8. Signal Resonance
+    tracker.advance(8, "Resonance: statistical validation...")
     from marketmind.pipeline.resonance import evaluate_resonance
     resonance = evaluate_resonance(
         signal_returns={},
@@ -142,8 +181,8 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
         observed_sharpe=0.5,
     )
 
-    # 8. Decision (shadow_votes always None — shadows are internal competition only)
-    tracker.advance(8, "Decision: synthesis...")
+    # 9. Decision (shadow_votes always None — shadows are internal competition only)
+    tracker.advance(9, "Decision: synthesis...")
     from marketmind.pipeline.decision import generate_decision
     decision = await generate_decision(
         l1=l1_result, l2=l2_result, l3=l3_result,
@@ -153,8 +192,8 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
     tracker.result(f"cards={len(decision.decision_cards)}, "
                    f"no_trade={'present' if decision.no_trade_card else 'none'}")
 
-    # 9. Archive
-    tracker.advance(9, "Archive: saving session...")
+    # 10. Archive
+    tracker.advance(10, "Archive: saving session...")
     from datetime import datetime as dt
     from marketmind.storage.archivist import get_archivist
     archivist = get_archivist(config.data_dir)
@@ -230,7 +269,7 @@ class _StageTracker:
 
     def advance(self, stage: int, msg: str) -> None:
         if self.verbose:
-            print(f"[{stage}/9] {msg}")
+            print(f"[{stage}/10] {msg}")
 
     def result(self, msg: str) -> None:
         if self.verbose:
