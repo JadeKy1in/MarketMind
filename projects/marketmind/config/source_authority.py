@@ -59,6 +59,12 @@ SOURCES: list[Source] = [
            "https://www.cftc.gov/dea/newcot/c_disagg.txt", "api", 0.99, 1.0),
     # ^ feed_type="api" is correct — handled by macro_data.py, not RSS parser.
 
+    # === EU official sources ===
+    Source("ECB Press Releases", SourceTier.PRIMARY,
+           "https://www.ecb.europa.eu/rss/press.html", "rss", 0.99, 1.0),
+    Source("EC Press Corner", SourceTier.PRIMARY,
+           "https://ec.europa.eu/commission/presscorner/api/rss", "rss", 0.95, 1.0),
+
     # === RELIABLE tier — commercial news aggregators ===
     Source("NewsAPI", SourceTier.RELIABLE, None, "api", 0.90, 10.0, True),
     Source("GNews", SourceTier.RELIABLE, None, "api", 0.85, 10.0, True),
@@ -67,12 +73,27 @@ SOURCES: list[Source] = [
     Source("Investing.com", SourceTier.RELIABLE,
            "https://www.investing.com/rss/news.rss", "rss", 0.75, 1.0),
 
+    # === China sources ===
+    Source("China Daily Bizchina", SourceTier.RELIABLE,
+           "http://www.chinadaily.com.cn/rss/bizchina_rss.xml", "rss", 0.75, 2.0),
+    Source("CGTN Business", SourceTier.RELIABLE,
+           "https://www.cgtn.com/subscribe/rss/section/business.xml", "rss", 0.70, 2.0),
+
+    # === EU / Global ===
+    Source("Financial Times", SourceTier.RELIABLE,
+           "https://www.ft.com/world?format=rss", "rss", 0.90, 2.0),
+
     # === FRAGILE tier — regional / specialised feeds ===
     Source("Nikkei Asia", SourceTier.FRAGILE,
            "https://news.google.com/rss/search?q=Japan+business+markets+stocks&hl=en-US&gl=US&ceid=US:en",
            "rss", 0.70, 1.0, status=SourceStatus.UNTESTED),
     # ^ Original Nikkei Asia RSS discontinued (newsletter-only).
     #   Replaced with Google News RSS search for "Japan business markets stocks".
+
+    # === Emerging Markets ===
+    Source("Turkey TCMB", SourceTier.FRAGILE,
+           "https://tcmb.gov.tr/wps/wcm/connect/EN/TCMB+EN/Bottom+Menu/Other/RSS/Press+Releases",
+           "rss", 0.70, 1.0),
 
     # === BEST_EFFORT tier — community / social / scrape-based ===
     Source("xcancel", SourceTier.BEST_EFFORT,
