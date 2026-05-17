@@ -188,7 +188,7 @@ async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsIte
         elif source.name == "GNews":
             items = await _fetch_gnews(config)
             source.status = SourceStatus.WORKING
-        elif source.feed_type in ("rss", "api") and source.url:
+        elif source.feed_type == "rss" and source.url:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.get(
                     source.url,
@@ -206,6 +206,26 @@ async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsIte
             source.consecutive_failures = 0
         elif source.feed_type == "html":
             source.status = SourceStatus.DEGRADED  # HTML scraping not yet implemented
+        elif source.feed_type == "bls_api":
+            from marketmind.pipeline.bls_fetcher import fetch_bls_indicators
+            indicators = await fetch_bls_indicators()
+            if indicators:
+                for ind in indicators:
+                    title = f"BLS {ind['indicator']}: {ind['value']}% ({ind['date']})"
+                    item_id = hashlib.sha256(title.encode()).hexdigest()[:16]
+                    items.append(NewsItem(
+                        id=item_id,
+                        title=title,
+                        url=source.url or "",
+                        source_name=source.name,
+                        source_tier=int(source.tier),
+                        published_at=datetime.now(timezone.utc).isoformat(),
+                        summary=f"{ind['indicator']} at {ind['value']}{ind['unit']} as of {ind['date']}",
+                        source_reliability=source.reliability,
+                        content_type="macro_indicator",
+                    ))
+            source.status = SourceStatus.WORKING
+            source.consecutive_failures = 0
         elif source.feed_type == "bluesky":
             from marketmind.pipeline.social_sources import fetch_bluesky_posts
             items = await fetch_bluesky_posts(source, config)
