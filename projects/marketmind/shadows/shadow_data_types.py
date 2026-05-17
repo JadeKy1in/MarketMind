@@ -1,7 +1,8 @@
-"""Shadow configuration data types and validation.
+"""Shared data types for the shadow ecosystem.
 
 Extracted from shadow_state.py per modular architecture rules (§3.1).
-All dataclasses are pure data containers with no DB dependencies.
+Pure data containers — no DB dependencies, no behavioral logic.
+All shadow modules import types from here, never from shadow_state.
 """
 from __future__ import annotations
 

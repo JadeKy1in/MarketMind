@@ -1,0 +1,16 @@
+{
+  "module": "pipeline.decision_interactive",
+  "timestamp": "2026-05-17T00:00:00Z",
+  "timestamp_note": "Approximate — date command unavailable (Bash denied).",
+  "auditor": "AI Agent",
+  "risk_tier": "Low",
+  "findings": [],
+  "verdict": "CLEAN",
+  "summary": "Clean integration. Imports only from session_context (shared data type — allowed per PICA §3.1). No behavioral sibling imports. No deferred imports. Single entry point (run_decision_interactive) with clear inputs (SessionContext, cli_handler) and output (bool). No loops, no branching complexity beyond a single return expression. This is the simplest and cleanest of the 5 compatibility adapters.",
+  "import_graph": {
+    "imports_from": ["__future__", "typing", "marketmind.pipeline.session_context"],
+    "back_imports_behavioral": [],
+    "back_imports_data": ["marketmind.pipeline.session_context (allowed)"],
+    "cross_layer_imports": []
+  }
+}

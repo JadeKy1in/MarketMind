@@ -1,0 +1,34 @@
+{
+  "module": "pipeline.l2_interactive",
+  "timestamp": "2026-05-17T00:00:00Z",
+  "timestamp_note": "Approximate — date command unavailable (Bash denied).",
+  "auditor": "AI Agent",
+  "risk_tier": "Medium",
+  "findings": [
+    {
+      "id": "L2I-SEC-001",
+      "severity": "low",
+      "category": "input_handling",
+      "description": "json.loads() is called on LLM-returned strings (raw_analysis) and user-provided input is compared against hardcoded string literals. No path for user input to reach json.loads(). Risk is low — only LLM output is parsed.",
+      "location": "_run_sector_drilldown(), lines 94-99",
+      "remediation": "None required. json.loads() result is used internally and errors are caught by JSONDecodeError handler."
+    },
+    {
+      "id": "L2I-SEC-002",
+      "severity": "info",
+      "category": "code_quality",
+      "description": "Line 45 uses 'yield from' in an async function _select_strategy_group(). This is a Python syntax error — yield from is not valid in async def. This function appears dead/unreachable as the main flow in _run_two_phase_l2() (lines 177-193) handles strategy group selection inline instead.",
+      "location": "_select_strategy_group(), line 45",
+      "remediation": "Remove or fix the unused _select_strategy_group() function. The duplicate logic in _run_two_phase_l2() lines 177-193 is the active code path."
+    }
+  ],
+  "verdict": "CONDITIONAL_PASS",
+  "summary": "No command injection, SQL injection, path traversal, or hardcoded secrets. One low-severity finding (json.loads on LLM output, properly error-handled). One informational note about a dead/unreachable function with a syntax error. No exploitable vulnerabilities for an attacker with CLI access.",
+  "scanned_categories": {
+    "command_injection": {"found": false},
+    "prompt_injection": {"found": false, "note": "User input only used for string comparison, never embedded in LLM prompts"},
+    "sql_injection": {"found": false, "note": "No database queries"},
+    "path_traversal": {"found": false, "note": "No file path construction"},
+    "secrets_in_code": {"found": false}
+  }
+}

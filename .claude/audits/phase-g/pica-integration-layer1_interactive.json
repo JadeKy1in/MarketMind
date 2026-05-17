@@ -1,0 +1,34 @@
+{
+  "module": "pipeline.layer1_interactive",
+  "timestamp": "2026-05-17T00:00:00Z",
+  "timestamp_note": "Approximate — date command unavailable (Bash denied).",
+  "auditor": "AI Agent",
+  "risk_tier": "Medium",
+  "findings": [
+    {
+      "id": "L1I-INT-001",
+      "severity": "medium",
+      "category": "import_boundary",
+      "description": "Back-import from sibling behavioral module: marketmind.pipeline.layer1_narrative (line 10). PICA §3.1 Rule 3 prohibits imports from sibling behavioral modules. Import from config.settings (different layer, line 11) is compliant.",
+      "location": "Lines 10-11",
+      "remediation": "ACCEPTED AS TEMPORARY — this is a compatibility adapter by design. Per docstring: 'New callers should use layer1_narrative directly.'",
+      "acceptance_rationale": "Compatibility adapter wrapping layer1_narrative for the older interactive API."
+    },
+    {
+      "id": "L1I-INT-002",
+      "severity": "info",
+      "category": "unused_imports",
+      "description": "InteractiveState and ToolState dataclasses (lines 14-29) are exported but not used within this module. They are defined for external consumers but represent dead weight in this file.",
+      "location": "Lines 14-29",
+      "remediation": "Consider moving ToolState and InteractiveState to session_context.py or a shared types module if they are consumed elsewhere."
+    }
+  ],
+  "verdict": "CONDITIONAL_PASS",
+  "summary": "One import boundary violation — back-import from layer1_narrative (sibling behavioral module), accepted as intentional for compatibility adapter role. Data flow is well-defined: config → analyze_layer1 → (Layer1Result, bool, extras). Single entry point (run_l1_interactive) with clear inputs (MarketMindConfig, mock flag, verbose flag, shadow_count) and output (tuple[Layer1Result, bool, dict]). No control flow hazards — straight-line code with exception handling.",
+  "import_graph": {
+    "imports_from": ["__future__", "dataclasses", "typing", "marketmind.pipeline.layer1_narrative", "marketmind.config.settings"],
+    "back_imports_behavioral": ["marketmind.pipeline.layer1_narrative"],
+    "back_imports_data": [],
+    "cross_layer_imports": ["marketmind.config.settings (allowed)"]
+  }
+}
