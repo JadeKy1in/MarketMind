@@ -2,33 +2,25 @@
 from __future__ import annotations
 
 import json
-import logging
 import uuid
-from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime, timezone
+from typing import Any, List, Optional
 
 from marketmind.shadows.belief_math import (
     beta_update, gamma_decay, beta_expectation,
     beta_uncertainty, confidence_score,
 )
-from marketmind.shadows.belief_types import (
-    BeliefSource, BeliefStatus,
+from marketmind.shadows.memory_tiers import (
+    apply_decay as _apply_decay_tiers,
+    apply_tier_ttl as _apply_tier_ttl_tiers,
+    promote_to_semantic as _promote_to_semantic_tiers,
+    retire_belief as _retire_belief_tiers,
+    get_memory_stats as _get_memory_stats_tiers,
+    get_belief_node as _get_belief_node_tiers,
 )
 from marketmind.shadows.shadow_state import ShadowStateDB
 
-logger = logging.getLogger(__name__)
-
-_WORKING_TTL_HOURS = 24
-_EPISODIC_TTL_DAYS = 90
 _RETIREMENT_THRESHOLD = 0.1
-
-_SOURCE_TYPE_MAP: Dict[str, BeliefSource] = {
-    "image": BeliefSource.MARKET_DATA,
-    "pdf": BeliefSource.MARKET_DATA,
-    "screenshot": BeliefSource.MARKET_DATA,
-    "text": BeliefSource.SHADOW_PREDICTION,
-    "audio": BeliefSource.MACRO_CALENDAR,
-}
 
 
 def _auto_iso() -> str:
@@ -37,10 +29,6 @@ def _auto_iso() -> str:
 
 def _auto_uuid() -> str:
     return str(uuid.uuid4())
-
-
-def _source_type_to_belief_source(source_type: str) -> BeliefSource:
-    return _SOURCE_TYPE_MAP.get(source_type, BeliefSource.INFERRED)
 
 
 def _derive_proposition(shadow_id: str, observation: Any) -> str:
@@ -331,242 +319,26 @@ class ShadowMemoryStore:
 
     def apply_decay(self, gamma: float = 0.95) -> int:
         """Apply Beta-Bernoulli decay to all active belief nodes."""
-        conn = self._db._connect()
-        try:
-            rows = conn.execute(
-                "SELECT node_id, alpha, beta "
-                "FROM belief_nodes WHERE status = 'active'"
-            ).fetchall()
-            count = 0
-            now = _auto_iso()
-            for row in rows:
-                new_alpha, new_beta = gamma_decay(
-                    row["alpha"], row["beta"], gamma=gamma, steps=1
-                )
-                conn.execute(
-                    "UPDATE belief_nodes "
-                    "SET alpha=?, beta=?, updated_at=?, decayed_at=? "
-                    "WHERE node_id=?",
-                    (new_alpha, new_beta, now, now, row["node_id"]),
-                )
-                score = confidence_score(new_alpha, new_beta)
-                if score < _RETIREMENT_THRESHOLD:
-                    conn.execute(
-                        "UPDATE belief_nodes "
-                        "SET status='retired', retired_at=?, "
-                        "retire_reason=? "
-                        "WHERE node_id=?",
-                        (now,
-                         f"Decayed below threshold: {score:.4f}",
-                         row["node_id"]),
-                    )
-                    conn.execute(
-                        "INSERT INTO belief_retirements "
-                        "(node_id, retired_confidence, threshold, reason, "
-                        " created_at) "
-                        "VALUES (?,?,?,?,?)",
-                        (row["node_id"], score, _RETIREMENT_THRESHOLD,
-                         f"Decayed: {score:.4f}", now),
-                    )
-                count += 1
-            conn.commit()
-            return count
-        finally:
-            conn.close()
+        return _apply_decay_tiers(self._db, gamma)
 
     def apply_tier_decay(self, tier: str) -> int:
         """Apply TTL-based eviction to a specific tier."""
-        if tier not in ("working", "episodic", "semantic"):
-            raise ValueError(
-                f"tier must be working/episodic/semantic; got '{tier}'"
-            )
-        if tier == "semantic":
-            return 0
-        conn = self._db._connect()
-        try:
-            now = datetime.now(timezone.utc)
-            now_iso = now.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
-            if tier == "working":
-                cutoff = now - timedelta(hours=_WORKING_TTL_HOURS)
-            else:
-                cutoff = now - timedelta(days=_EPISODIC_TTL_DAYS)
-            cutoff_iso = cutoff.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
-            rows = conn.execute(
-                "SELECT node_id, alpha, beta, created_at "
-                "FROM belief_nodes "
-                "WHERE tier = ? AND status = 'active' AND created_at < ?",
-                (tier, cutoff_iso),
-            ).fetchall()
-            count = 0
-            for row in rows:
-                score = confidence_score(row["alpha"], row["beta"])
-                reason = (
-                    f"TTL eviction: {tier} memory expired "
-                    f"(created {row['created_at']})"
-                )
-                conn.execute(
-                    "UPDATE belief_nodes "
-                    "SET status='retired', retired_at=?, retire_reason=? "
-                    "WHERE node_id=?",
-                    (now_iso, reason, row["node_id"]),
-                )
-                conn.execute(
-                    "INSERT INTO belief_retirements "
-                    "(node_id, retired_confidence, threshold, reason, "
-                    " created_at) "
-                    "VALUES (?,?,?,?,?)",
-                    (row["node_id"], score, _RETIREMENT_THRESHOLD,
-                     reason, now_iso),
-                )
-                count += 1
-            conn.commit()
-            return count
-        finally:
-            conn.close()
+        return _apply_tier_ttl_tiers(self._db, tier)
 
     # -- Lifecycle --
 
     def promote_to_semantic(self, node_id: str) -> bool:
         """Promote a belief node to semantic memory (no TTL)."""
-        conn = self._db._connect()
-        try:
-            row = conn.execute(
-                "SELECT node_id FROM belief_nodes WHERE node_id = ?",
-                (node_id,),
-            ).fetchone()
-            if row is None:
-                return False
-            now = _auto_iso()
-            conn.execute(
-                "UPDATE belief_nodes "
-                "SET tier='semantic', updated_at=? "
-                "WHERE node_id=?",
-                (now, node_id),
-            )
-            conn.commit()
-            return True
-        finally:
-            conn.close()
+        return _promote_to_semantic_tiers(self._db, node_id)
 
     def retire_belief(self, node_id: str, reason: str) -> bool:
         """Retire a belief node."""
-        conn = self._db._connect()
-        try:
-            row = conn.execute(
-                "SELECT node_id, alpha, beta, status "
-                "FROM belief_nodes WHERE node_id = ?",
-                (node_id,),
-            ).fetchone()
-            if row is None:
-                return False
-            if row["status"] == "retired":
-                return False
-            score = confidence_score(row["alpha"], row["beta"])
-            now = _auto_iso()
-            conn.execute(
-                "UPDATE belief_nodes "
-                "SET status='retired', retired_at=?, retire_reason=? "
-                "WHERE node_id=?",
-                (now, reason, node_id),
-            )
-            conn.execute(
-                "INSERT INTO belief_retirements "
-                "(node_id, retired_confidence, threshold, reason, "
-                " created_at) "
-                "VALUES (?,?,?,?,?)",
-                (node_id, score, _RETIREMENT_THRESHOLD, reason, now),
-            )
-            conn.commit()
-            return True
-        finally:
-            conn.close()
+        return _retire_belief_tiers(self._db, node_id, reason)
 
     def get_memory_stats(self) -> dict:
         """Return counts per tier, total beliefs, active beliefs."""
-        conn = self._db._connect()
-        try:
-            total = conn.execute(
-                "SELECT COUNT(*) AS cnt FROM belief_nodes"
-            ).fetchone()["cnt"]
-            active = conn.execute(
-                "SELECT COUNT(*) AS cnt FROM belief_nodes "
-                "WHERE status='active'"
-            ).fetchone()["cnt"]
-            retired = conn.execute(
-                "SELECT COUNT(*) AS cnt FROM belief_nodes "
-                "WHERE status='retired'"
-            ).fetchone()["cnt"]
-            working = conn.execute(
-                "SELECT COUNT(*) AS cnt FROM belief_nodes "
-                "WHERE tier='working' AND status='active'"
-            ).fetchone()["cnt"]
-            episodic = conn.execute(
-                "SELECT COUNT(*) AS cnt FROM belief_nodes "
-                "WHERE tier='episodic' AND status='active'"
-            ).fetchone()["cnt"]
-            semantic = conn.execute(
-                "SELECT COUNT(*) AS cnt FROM belief_nodes "
-                "WHERE tier='semantic' AND status='active'"
-            ).fetchone()["cnt"]
-            total_obs = conn.execute(
-                "SELECT COUNT(*) AS cnt FROM belief_observations"
-            ).fetchone()["cnt"]
-            # Compute avg_confidence in Python (SQLite doesn't know confidence_score)
-            alpha_beta_rows = conn.execute(
-                "SELECT alpha, beta FROM belief_nodes WHERE status='active'"
-            ).fetchall()
-            if alpha_beta_rows:
-                scores = [confidence_score(r["alpha"], r["beta"]) for r in alpha_beta_rows]
-                avg_conf = sum(scores) / len(scores)
-            else:
-                avg_conf = 0.0
-            return dict(
-                total_nodes=total,
-                active_nodes=active,
-                retired_nodes=retired,
-                working_count=working,
-                episodic_count=episodic,
-                semantic_count=semantic,
-                total_observations=total_obs,
-                avg_confidence=avg_conf or 0.0,
-            )
-        finally:
-            conn.close()
+        return _get_memory_stats_tiers(self._db)
 
     def get_belief_node(self, node_id: str) -> Optional[dict]:
         """Get a single belief node with computed statistics."""
-        conn = self._db._connect()
-        try:
-            row = conn.execute(
-                "SELECT n.*, "
-                "(SELECT COUNT(*) FROM belief_observations o "
-                " WHERE o.node_id=n.node_id) AS observation_count "
-                "FROM belief_nodes n WHERE n.node_id=?",
-                (node_id,),
-            ).fetchone()
-            if row is None:
-                return None
-            alpha = row["alpha"]
-            beta = row["beta"]
-            try:
-                tags_val = json.loads(row["tags"] or "[]")
-            except json.JSONDecodeError:
-                tags_val = []
-            return dict(
-                node_id=row["node_id"],
-                proposition=row["proposition"],
-                alpha=alpha, beta=beta,
-                status=row["status"], tier=row["tier"],
-                source=row["source"], tags=tags_val,
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-                decayed_at=row["decayed_at"],
-                retired_at=row["retired_at"],
-                retire_reason=row["retire_reason"],
-                observation_count=row["observation_count"],
-                expectation=beta_expectation(alpha, beta),
-                uncertainty=beta_uncertainty(alpha, beta),
-                confidence_score=confidence_score(alpha, beta),
-            )
-        finally:
-            conn.close()
+        return _get_belief_node_tiers(self._db, node_id)
