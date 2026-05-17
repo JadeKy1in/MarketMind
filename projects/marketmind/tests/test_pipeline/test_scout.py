@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from marketmind.pipeline.scout import (
     NewsItem, fetch_source, fetch_all_sources, deduplicate,
-    _strip_html, _title_similarity,
+    _strip_html, _title_similarity, _fetch_newsapi, _fetch_gnews,
 )
 from marketmind.config.source_authority import Source, SourceTier, SourceStatus
 
@@ -97,3 +97,296 @@ async def test_fetch_source_rss_returns_items():
         assert len(items) >= 1
         assert items[0].source_name == "TestRSS"
         assert source.status == SourceStatus.WORKING
+
+
+# ── NewsAPI / GNews API fetcher tests ──────────────────────────────────────
+
+NEWSAPI_JSON_RESPONSE = {
+    "status": "ok",
+    "totalResults": 2,
+    "articles": [
+        {
+            "source": {"id": "cnn", "name": "CNN"},
+            "author": "Author One",
+            "title": "Fed Raises Rates by 25bp",
+            "description": "The Federal Reserve raised interest rates today.",
+            "url": "https://cnn.com/fed-rates",
+            "urlToImage": "https://cnn.com/img.jpg",
+            "publishedAt": "2026-05-17T14:00:00Z",
+            "content": "Full article content here..."
+        },
+        {
+            "source": {"id": "reuters", "name": "Reuters"},
+            "author": "Author Two",
+            "title": "Market Rally Continues",
+            "description": "Stocks extended gains in afternoon trading.",
+            "url": "https://reuters.com/rally",
+            "urlToImage": None,
+            "publishedAt": "2026-05-17T13:30:00Z",
+            "content": "Market details..."
+        },
+    ]
+}
+
+GNEWS_JSON_RESPONSE = {
+    "totalArticles": 2,
+    "articles": [
+        {
+            "title": "Oil Prices Surge on Supply Concerns",
+            "description": "Crude oil prices jumped today amid supply fears.",
+            "content": "Full content...",
+            "url": "https://example.com/oil",
+            "image": "https://example.com/img.jpg",
+            "publishedAt": "2026-05-17T12:00:00Z",
+            "source": {"name": "Bloomberg", "url": "https://bloomberg.com"}
+        },
+        {
+            "title": "Tech Earnings Beat Expectations",
+            "description": "Major tech firms reported quarterly results above forecasts.",
+            "content": "Full content...",
+            "url": "https://example.com/tech",
+            "image": "https://example.com/img2.jpg",
+            "publishedAt": "2026-05-17T11:00:00Z",
+            "source": {"name": "CNBC", "url": "https://cnbc.com"}
+        },
+    ]
+}
+
+
+@pytest.mark.asyncio
+async def test_fetch_newsapi_no_api_key_returns_empty():
+    """NewsAPI: missing API key → empty list, no crash."""
+    config = MagicMock()
+    config.newsapi_key = None
+    # Reset cache so we don't get stale results
+    import marketmind.pipeline.scout as scout_mod
+    scout_mod._newsapi_cache = None
+    items = await _fetch_newsapi(config)
+    assert items == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_newsapi_parses_json_response():
+    """NewsAPI: valid JSON response → correctly parsed NewsItems."""
+    config = MagicMock()
+    config.newsapi_key = "test-key-123"
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = NEWSAPI_JSON_RESPONSE
+    mock_resp.raise_for_status = MagicMock()
+
+    mock_client = AsyncMock()
+    mock_client.get.return_value = mock_resp
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    # Reset cache
+    import marketmind.pipeline.scout as scout_mod
+    scout_mod._newsapi_cache = None
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        items = await _fetch_newsapi(config)
+        assert len(items) == 2
+        assert items[0].title == "Fed Raises Rates by 25bp"
+        assert items[0].url == "https://cnn.com/fed-rates"
+        assert items[0].source_name == "NewsAPI"
+        assert items[0].source_tier == 2
+        assert items[0].source_reliability == 0.90
+        assert items[0].content_type == "news"
+        assert items[1].title == "Market Rally Continues"
+
+
+@pytest.mark.asyncio
+async def test_fetch_newsapi_handles_non_ok_status():
+    """NewsAPI: non-ok status → empty list, no crash."""
+    config = MagicMock()
+    config.newsapi_key = "test-key"
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"status": "error", "message": "API key invalid"}
+    mock_resp.raise_for_status = MagicMock()
+
+    mock_client = AsyncMock()
+    mock_client.get.return_value = mock_resp
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    import marketmind.pipeline.scout as scout_mod
+    scout_mod._newsapi_cache = None
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        items = await _fetch_newsapi(config)
+        assert items == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_newsapi_handles_http_error():
+    """NewsAPI: HTTP error → empty list, no crash."""
+    config = MagicMock()
+    config.newsapi_key = "test-key"
+
+    mock_client = AsyncMock()
+    mock_client.get.side_effect = Exception("Connection refused")
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    import marketmind.pipeline.scout as scout_mod
+    scout_mod._newsapi_cache = None
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        items = await _fetch_newsapi(config)
+        assert items == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_gnews_no_api_key_returns_empty():
+    """GNews: missing API key → empty list, no crash."""
+    config = MagicMock()
+    config.gnews_key = None
+    import marketmind.pipeline.scout as scout_mod
+    scout_mod._gnews_cache = None
+    items = await _fetch_gnews(config)
+    assert items == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_gnews_parses_json_response():
+    """GNews: valid JSON response → correctly parsed NewsItems."""
+    config = MagicMock()
+    config.gnews_key = "test-key-456"
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = GNEWS_JSON_RESPONSE
+    mock_resp.raise_for_status = MagicMock()
+
+    mock_client = AsyncMock()
+    mock_client.get.return_value = mock_resp
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    import marketmind.pipeline.scout as scout_mod
+    scout_mod._gnews_cache = None
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        items = await _fetch_gnews(config)
+        assert len(items) == 2
+        assert items[0].title == "Oil Prices Surge on Supply Concerns"
+        assert items[0].url == "https://example.com/oil"
+        assert items[0].source_name == "GNews"
+        assert items[0].source_tier == 2
+        assert items[0].source_reliability == 0.85
+        assert items[0].content_type == "news"
+        assert items[1].title == "Tech Earnings Beat Expectations"
+
+
+@pytest.mark.asyncio
+async def test_fetch_gnews_handles_http_error():
+    """GNews: HTTP error → empty list, no crash."""
+    config = MagicMock()
+    config.gnews_key = "test-key"
+
+    mock_client = AsyncMock()
+    mock_client.get.side_effect = Exception("Timeout")
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    import marketmind.pipeline.scout as scout_mod
+    scout_mod._gnews_cache = None
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        items = await _fetch_gnews(config)
+        assert items == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_source_dispatches_to_newsapi():
+    """fetch_source with NewsAPI source → calls _fetch_newsapi, sets WORKING."""
+    source = Source("NewsAPI", SourceTier.RELIABLE, None, "api", 0.90, 10.0, True)
+    config = MagicMock()
+    config.newsapi_key = None  # no key → empty, but dispatch still works
+
+    import marketmind.pipeline.scout as scout_mod
+    scout_mod._newsapi_cache = None
+
+    items = await fetch_source(source, config)
+    assert items == []
+    assert source.status == SourceStatus.WORKING
+
+
+@pytest.mark.asyncio
+async def test_fetch_source_dispatches_to_gnews():
+    """fetch_source with GNews source → calls _fetch_gnews, sets WORKING."""
+    source = Source("GNews", SourceTier.RELIABLE, None, "api", 0.85, 10.0, True)
+    config = MagicMock()
+    config.gnews_key = None  # no key → empty, but dispatch still works
+
+    import marketmind.pipeline.scout as scout_mod
+    scout_mod._gnews_cache = None
+
+    items = await fetch_source(source, config)
+    assert items == []
+    assert source.status == SourceStatus.WORKING
+
+
+@pytest.mark.asyncio
+async def test_newsapi_cache_used_on_second_call():
+    """NewsAPI: second call within 24h returns cached result without HTTP call."""
+    config = MagicMock()
+    config.newsapi_key = "test-key"
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = NEWSAPI_JSON_RESPONSE
+    mock_resp.raise_for_status = MagicMock()
+
+    mock_client = AsyncMock()
+    mock_client.get.return_value = mock_resp
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    import marketmind.pipeline.scout as scout_mod
+    scout_mod._newsapi_cache = None
+    scout_mod._newsapi_cache_time = 0.0
+
+    with patch("httpx.AsyncClient", return_value=mock_client) as mock_async_client:
+        items1 = await _fetch_newsapi(config)
+        assert len(items1) == 2
+        call_count = mock_async_client.call_count
+
+        items2 = await _fetch_newsapi(config)
+        assert len(items2) == 2
+        # Second call should use cache — no new httpx.AsyncClient constructed
+        assert mock_async_client.call_count == call_count
+
+
+@pytest.mark.asyncio
+async def test_gnews_cache_used_on_second_call():
+    """GNews: second call within 24h returns cached result without HTTP call."""
+    config = MagicMock()
+    config.gnews_key = "test-key"
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = GNEWS_JSON_RESPONSE
+    mock_resp.raise_for_status = MagicMock()
+
+    mock_client = AsyncMock()
+    mock_client.get.return_value = mock_resp
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    import marketmind.pipeline.scout as scout_mod
+    scout_mod._gnews_cache = None
+    scout_mod._gnews_cache_time = 0.0
+
+    with patch("httpx.AsyncClient", return_value=mock_client) as mock_async_client:
+        items1 = await _fetch_gnews(config)
+        assert len(items1) == 2
+        call_count = mock_async_client.call_count
+
+        items2 = await _fetch_gnews(config)
+        assert len(items2) == 2
+        assert mock_async_client.call_count == call_count

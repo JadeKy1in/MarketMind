@@ -64,11 +64,131 @@ def _title_similarity(a: str, b: str) -> float:
     return len(intersection) / min(len(words_a), len(words_b))
 
 
+# Session-level cache for NewsAPI/GNews (1 call per session)
+_newsapi_cache: list[NewsItem] | None = None
+_newsapi_cache_time: float = 0.0
+_gnews_cache: list[NewsItem] | None = None
+_gnews_cache_time: float = 0.0
+
+NEWSAPI_URL = "https://newsapi.org/v2/top-headlines?country=us&category=business&apiKey="
+GNEWS_URL = "https://gnews.io/api/v4/top-headlines?category=business&lang=en&country=us&max=20&apikey="
+
+
+async def _fetch_newsapi(config: MarketMindConfig) -> list[NewsItem]:
+    """Fetch top business headlines from NewsAPI (JSON API, not RSS feed)."""
+    global _newsapi_cache, _newsapi_cache_time
+    # Rate limit: 1 call per session (24h cache)
+    if _newsapi_cache is not None and (time.time() - _newsapi_cache_time) < 86400:
+        return _newsapi_cache
+
+    api_key = config.newsapi_key
+    if not api_key:
+        logger.warning("NEWSAPI_KEY not configured, skipping NewsAPI fetch")
+        return []
+
+    items: list[NewsItem] = []
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{NEWSAPI_URL}{api_key}",
+                headers={"User-Agent": "MarketMind/0.1 (contact@marketmind.dev)"}
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("status") != "ok":
+                logger.warning("NewsAPI returned non-ok status: %s", data.get("status", "unknown"))
+                _newsapi_cache = items
+                _newsapi_cache_time = time.time()
+                return items
+
+            for article in data.get("articles", [])[:20]:
+                title = (article.get("title") or "Untitled").strip()
+                url = article.get("url") or ""
+                if not title and not url:
+                    continue
+                summary_raw = article.get("description") or ""
+                summary = _strip_html(summary_raw)[:500]
+                published = article.get("publishedAt") or datetime.now(timezone.utc).isoformat()
+                item_id = hashlib.sha256(f"{title}{url}".encode()).hexdigest()[:16]
+                items.append(NewsItem(
+                    id=item_id,
+                    title=title,
+                    url=url,
+                    source_name="NewsAPI",
+                    source_tier=2,
+                    published_at=published,
+                    summary=summary,
+                    source_reliability=0.90,
+                    content_type="news",
+                ))
+    except Exception as e:
+        logger.warning("NewsAPI fetch failed: %s", e)
+
+    _newsapi_cache = items
+    _newsapi_cache_time = time.time()
+    return items
+
+
+async def _fetch_gnews(config: MarketMindConfig) -> list[NewsItem]:
+    """Fetch top business headlines from GNews API (JSON API, not RSS feed)."""
+    global _gnews_cache, _gnews_cache_time
+    # Rate limit: 1 call per session (24h cache)
+    if _gnews_cache is not None and (time.time() - _gnews_cache_time) < 86400:
+        return _gnews_cache
+
+    api_key = config.gnews_key
+    if not api_key:
+        logger.warning("GNEWS_API_KEY not configured, skipping GNews fetch")
+        return []
+
+    items: list[NewsItem] = []
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{GNEWS_URL}{api_key}",
+                headers={"User-Agent": "MarketMind/0.1 (contact@marketmind.dev)"}
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            for article in data.get("articles", [])[:20]:
+                title = (article.get("title") or "Untitled").strip()
+                url = article.get("url") or ""
+                if not title and not url:
+                    continue
+                summary_raw = article.get("description") or ""
+                summary = _strip_html(summary_raw)[:500]
+                published = article.get("publishedAt") or datetime.now(timezone.utc).isoformat()
+                item_id = hashlib.sha256(f"{title}{url}".encode()).hexdigest()[:16]
+                items.append(NewsItem(
+                    id=item_id,
+                    title=title,
+                    url=url,
+                    source_name="GNews",
+                    source_tier=2,
+                    published_at=published,
+                    summary=summary,
+                    source_reliability=0.85,
+                    content_type="news",
+                ))
+    except Exception as e:
+        logger.warning("GNews fetch failed: %s", e)
+
+    _gnews_cache = items
+    _gnews_cache_time = time.time()
+    return items
+
+
 async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsItem]:
     """Fetch a single source. Track A (RSS/API) → Track B (HTML) fallback."""
     items: list[NewsItem] = []
     try:
-        if source.feed_type in ("rss", "api") and source.url:
+        if source.name == "NewsAPI":
+            items = await _fetch_newsapi(config)
+            source.status = SourceStatus.WORKING
+        elif source.name == "GNews":
+            items = await _fetch_gnews(config)
+            source.status = SourceStatus.WORKING
+        elif source.feed_type in ("rss", "api") and source.url:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.get(
                     source.url,
