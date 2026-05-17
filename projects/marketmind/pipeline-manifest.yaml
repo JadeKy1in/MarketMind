@@ -1,0 +1,233 @@
+# MarketMind Pipeline Manifest — SINGLE SOURCE OF TRUTH
+# Last reviewed: 2026-05-17
+# DO NOT modify phases without updating the ADR at docs/adr/
+# Verify with: python .claude/scripts/verify_pipeline.py
+
+pipeline:
+  version: "2.0"
+  description: "Daily investment analysis pipeline with optional shadow ecosystem"
+  entry_point: "app.py"
+  entry_function: "run_daily"
+
+  phases:
+    - id: stage_0_shadow_init
+      name: "Shadow Mother Event Scan"
+      required: false  # only when shadows_enabled=1
+      entry_point: "shadows/shadow_mother.py"
+      entry_function: "ShadowMother.__init__"
+      description: >
+        Initialize shadow ecosystem: create expert/daredevil/catfish shadows,
+        start background scheduler (optional), init multimodal adapter (optional).
+      dependencies: []
+      produces:
+        - shadow_db (ShadowStateDB)
+        - mother (ShadowMother)
+      tokens_estimate: 0  # no LLM calls in init
+      status: COMPLETE
+
+    - id: stage_1_scout
+      name: "Scout — News Collection"
+      required: true
+      entry_point: "pipeline/scout.py"
+      entry_function: "fetch_all_sources"
+      description: >
+        Fetch news from all working sources (35 configured, ~33 working).
+        Deduplicate by URL + title similarity. Return sorted by source tier.
+      dependencies: []
+      produces:
+        - news_items (list[NewsItem])
+      tokens_estimate: 0  # HTTP requests only, no LLM
+      status: COMPLETE
+
+    - id: stage_2_flash
+      name: "Flash — Signal Preprocessing"
+      required: true
+      entry_point: "pipeline/flash_preprocessor.py"
+      entry_function: "preprocess_batch"
+      description: >
+        Extract structured signals from top 50 news items using Flash LLM.
+        15 items per batch. Output: FlashSignal objects with event_type,
+        event_grade, direction, confidence, affected_assets, key_facts.
+      dependencies: [stage_1_scout]
+      produces:
+        - signals (list[FlashSignal])
+      tokens_estimate: 8000
+      status: COMPLETE
+      planned_replacement: "stage_2_heuristic"  # see heuristic-workflow plan
+
+    - id: stage_3_layer1
+      name: "Layer 1 — Narrative Analysis"
+      required: true
+      entry_point: "pipeline/layer1_narrative.py"
+      entry_function: "analyze_layer1"
+      description: >
+        Pro LLM analyzes top 15 signals + news items for narrative structure.
+        Output: event_grade, matrix_quadrant, sentiment, cascade tracking.
+      dependencies: [stage_2_flash]
+      produces:
+        - l1_result (Layer1Result)
+      tokens_estimate: 3000
+      status: COMPLETE
+
+    - id: stage_4_layer2_layer3
+      name: "Layer 2 + Layer 3 — Fundamental & Technical"
+      required: true
+      entry_point: "pipeline/layer2_fundamental.py"
+      entry_function: "analyze_layer2"
+      parallel_with:
+        entry_point: "pipeline/layer3_technical.py"
+        entry_function: "analyze_layer3"
+      description: >
+        L2: 5-tier progressive (macro→asset→sector→factor→ticker) using Pro.
+        L3: 3-light technical review (INDEPENDENT — receives only raw data, no L1/L2).
+        Run in parallel via asyncio.gather.
+      dependencies: [stage_3_layer1]
+      produces:
+        - l2_result (Layer2Result)
+        - l3_result (Layer3BatchResult)
+      tokens_estimate: 12000  # L2=4000 + L3=8000
+      status: COMPLETE
+
+    - id: stage_5_shadows
+      name: "Shadow Ecosystem Run"
+      required: false  # only when shadows_enabled=1
+      entry_point: "shadows/shadow_mother.py"
+      entry_function: "ShadowMother.orchestrate_daily_cycle"
+      description: >
+        Shadows analyze raw news + market data INDEPENDENTLY (not main AI analysis).
+        Internal 8-step cycle: event scan → temp shadows → analysis → ranking →
+        collusion → challenger → memory update → crystallization.
+        CRITICAL: shadow_votes is ALWAYS None — shadows do NOT vote on decisions.
+        Shadow output feeds back into ranking only, not into generate_decision().
+      dependencies: [stage_0_shadow_init, stage_1_scout]
+      produces:
+        - orchestration (ShadowOrchestrationResult)
+        - shadow_votes = None  # INTENTIONAL — design decision
+      tokens_estimate: 42000  # 21 shadows × ~2000 tokens each
+      status: COMPLETE
+
+    - id: stage_6_red_team
+      name: "Red Team — Adversarial Challenge"
+      required: true
+      entry_point: "pipeline/red_team.py"
+      entry_function: "run_red_team"
+      description: >
+        Pro LLM produces adversarial challenges on L1 and L2 raw analysis.
+        Challenges graded A-D. Target: find logical flaws, missing evidence,
+        overconfident claims.
+      dependencies: [stage_3_layer1, stage_4_layer2_layer3]
+      produces:
+        - red_team_report (RedTeamReport)
+      tokens_estimate: 4000
+      status: COMPLETE
+
+    - id: stage_7_resonance
+      name: "Resonance — Statistical Validation"
+      required: true
+      entry_point: "pipeline/resonance.py"
+      entry_function: "evaluate_resonance"
+      description: >
+        DSR/CSCV/PBO statistical framework. Pure Python, no LLM.
+        Validates whether the signal portfolio exhibits genuine predictive
+        structure beyond random chance.
+      dependencies: [stage_3_layer1]
+      produces:
+        - resonance (ResonanceResult)
+      tokens_estimate: 0  # pure computation
+      status: COMPLETE
+
+    - id: stage_8_decision
+      name: "Decision — Synthesis"
+      required: true
+      entry_point: "pipeline/decision.py"
+      entry_function: "generate_decision"
+      description: >
+        Pro LLM synthesizes L1+L2+L3+RedTeam+Resonance into structured
+        decision cards. shadow_votes is passed as None (by design — shadows
+        do not vote on the main decision). Produces decision_cards +
+        no_trade_card (equal analytical depth).
+      dependencies: [stage_4_layer2_layer3, stage_6_red_team, stage_7_resonance]
+      produces:
+        - decision (DecisionOutput)
+      tokens_estimate: 5000
+      status: COMPLETE
+
+    - id: stage_9_archive
+      name: "Archive — Session Persistence"
+      required: true
+      entry_point: "storage/archivist.py"
+      entry_function: "get_archivist"
+      description: >
+        Save session summary to JSON + SQLite FTS5 for future retrieval
+        and backtesting.
+      dependencies: [stage_8_decision]
+      produces: []
+      tokens_estimate: 0
+      status: COMPLETE
+
+# ── Design Decisions (locked — change requires ADR) ─────────────────────
+
+design_decisions:
+  - id: DD-001
+    title: "Shadows do NOT vote on investment decisions"
+    rationale: >
+      Shadows are an internal competition ecosystem for ranking, evolution,
+      and crystallization. Their virtual PnL is system-calculated (circular).
+      P2-4 (External Market Anchor) will fix the ranking ground truth.
+      Until then, shadow_votes = None is INTENTIONAL.
+    evidence: "app.py:110 shadows_votes = None, app.py:151 passed as None"
+    status: LOCKED
+
+  - id: DD-002
+    title: "ELITE shadows participate at Gate 2 — advisory only"
+    rationale: >
+      ELITE shadows analyze news at the same time as main AI, store pre-computed
+      opinions in EliteRegistry. During Gate 2, domain-triggered awakening:
+      user mentions domain keyword → matching ELITE shadow contributes opinion.
+      Each shadow max ONCE per session. NO decision authority.
+    evidence: "shadows/elite_participation.py, phase_b_ideation_notes.md §4"
+    status: LOCKED
+
+  - id: DD-003
+    title: "Information broadcast: shadows see raw news, not main AI analysis"
+    rationale: >
+      To preserve shadow independence and prevent anchoring bias, shadows
+      receive raw news/facts + user's raw opinions only. They do NOT receive
+      the main AI's pre-discussion analysis or report.
+    evidence: "phase_b_ideation_notes.md §1, CLAUDE.md Information Broadcast Rules"
+    status: LOCKED
+
+  - id: DD-004
+    title: "Layer 3 is INDEPENDENT of Layer 1 and Layer 2"
+    rationale: >
+      Druckenmiller principle: if fundamentals bullish but technicals bearish
+      → lean toward no buy. Price is the final arbiter. L3 receives only raw
+      market data + ticker list — no L1 or L2 conclusions. This prevents
+      confirmation bias in technical analysis.
+    evidence: "layer3_technical.py LAYER3_SYSTEM_PROMPT, design spec §5.2"
+    status: LOCKED
+
+# ── ELITE Shadow Protocol ──────────────────────────────────────────────
+
+elite_protocol:
+  trigger: "domain keyword match in user text OR user mentions shadow by name"
+  timing: "same daily cycle as main AI (parallel analysis)"
+  max_contributions: 1  # per shadow per Gate 2 session
+  authority: "advisory only — clearly marked SHADOW OPINION"
+  implementation: "shadows/elite_participation.py — EliteRegistry class"
+  domains: 16  # gold, crypto, energy, bonds, volatility, emerging, tech,
+               # financials, healthcare, consumer, industrials, macro,
+               # metals, real_estate, fx, short
+
+# ── Information Broadcast Rules ────────────────────────────────────────
+
+broadcast_rules:
+  shadows_receive:
+    - "raw news/facts from all sources"
+    - "user's raw opinions and submitted materials"
+    - "market data (prices, fundamentals)"
+  shadows_do_NOT_receive:
+    - "main AI's pre-discussion analysis/report"
+    - "main AI's preliminary conclusions"
+    - "other shadows' analysis output (during analysis phase)"
+  rationale: "prevents anchoring bias — shadows must think independently"
