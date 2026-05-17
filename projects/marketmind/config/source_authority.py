@@ -147,10 +147,7 @@ SOURCES: list[Source] = [
            "rss", 0.55, 1.0),
 
     # === BEST_EFFORT tier — community / social / scrape-based ===
-    Source("xcancel", SourceTier.BEST_EFFORT,
-           "https://xcancel.com/FinancialTimes/rss", "rss", 0.60, 0.5),
-    # ^ Fixed URL format: was generic rss.xcancel.com/ (wrong domain).
-    #   Nitter RSS works via xcancel.com/{username}/rss.
+    # xcancel removed — only 1 article, FT direct RSS already covers (Financial Times #24).
     # CapitolTrades removed — HTML scraping not implemented per design spec Track B,
     #   BFF API (bff.capitoltrades.com) returned 503. Fallback: tools/manual_congress.py.
     Source("Bluesky", SourceTier.BEST_EFFORT, None, "bluesky", 0.60, 0.5, True),
