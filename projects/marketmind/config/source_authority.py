@@ -63,7 +63,7 @@ SOURCES: list[Source] = [
     Source("ECB Press Releases", SourceTier.PRIMARY,
            "https://www.ecb.europa.eu/rss/press.html", "rss", 0.99, 1.0),
     Source("ECB (via Google News)", SourceTier.BEST_EFFORT,
-           "https://news.google.com/rss/search?q=ECB+European+Central+Bank+monetary+policy+rate+decision+Lagarde&hl=en-US&gl=US&ceid=US:en",
+           "https://news.google.com/rss/search?q=%22European+Central+Bank%22+ECB&hl=en-US&gl=US&ceid=US:en",
            "rss", 0.55, 1.5),
     Source("EC Press Corner", SourceTier.PRIMARY,
            "https://ec.europa.eu/commission/presscorner/api/rss", "rss", 0.95, 1.0),
@@ -154,6 +154,23 @@ SOURCES: list[Source] = [
     # CapitolTrades removed — HTML scraping not implemented per design spec Track B,
     #   BFF API (bff.capitoltrades.com) returned 503. Fallback: tools/manual_congress.py.
     Source("Bluesky", SourceTier.BEST_EFFORT, None, "bluesky", 0.60, 0.5, True),
+
+    # === BEST_EFFORT tier — asset-specific Google News proxies ===
+    Source("Precious Metals (via Google News)", SourceTier.BEST_EFFORT,
+           "https://news.google.com/rss/search?q=gold+silver+precious+metals+price+forecast&hl=en-US&gl=US&ceid=US:en",
+           "rss", 0.55, 1.5),
+    Source("Agriculture (via Google News)", SourceTier.BEST_EFFORT,
+           "https://news.google.com/rss/search?q=agriculture+commodities+wheat+corn+soybean+prices&hl=en-US&gl=US&ceid=US:en",
+           "rss", 0.55, 1.5),
+    Source("Natural Gas (via Google News)", SourceTier.BEST_EFFORT,
+           "https://news.google.com/rss/search?q=natural+gas+price+EIA+storage+LNG&hl=en-US&gl=US&ceid=US:en",
+           "rss", 0.55, 1.5),
+    Source("Healthcare (via Google News)", SourceTier.BEST_EFFORT,
+           "https://news.google.com/rss/search?q=healthcare+biotech+pharma+FDA+approval&hl=en-US&gl=US&ceid=US:en",
+           "rss", 0.55, 1.5),
+    Source("Crypto (via Google News)", SourceTier.BEST_EFFORT,
+           "https://news.google.com/rss/search?q=Bitcoin+crypto+regulation+ETF+blockchain&hl=en-US&gl=US&ceid=US:en",
+           "rss", 0.55, 1.5),
 ]
 
 
