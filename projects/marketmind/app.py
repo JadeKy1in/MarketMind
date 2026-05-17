@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -25,6 +26,20 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
     init_gateway(config.deepseek_api_key, config.deepseek_base_url)
 
     tracker = _StageTracker(verbose)
+
+    # Initialize archivist for stage-by-stage save
+    from marketmind.storage.archivist import get_archivist
+    archivist = get_archivist(config.data_dir)
+    archivist.ensure_dirs()
+    session_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    def _archive(subdir, filename, data):
+        """Save pipeline stage output to archive. Never crashes pipeline."""
+        try:
+            archivist.save_json(subdir, filename, data)
+        except Exception as e:
+            if tracker.verbose:
+                print(f"       [archive] {filename}: {e}")
 
     # 0. Shadow Mother event scan (pre-market)
     shadow_db = None
@@ -80,6 +95,14 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
     news_items = await fetch_all_sources(config)
     tracker.result(f"{len(news_items)} articles collected")
 
+    _archive("raw", "01_scout_news", {
+        "stage": "scout",
+        "articles": len(news_items),
+        "sources_used": len(set(n.source_name for n in news_items)),
+        "items": [{"title": n.title, "source": n.source_name, "url": n.url,
+                   "published": n.published_at} for n in news_items]
+    })
+
     # 2. Flash triage — lightweight scoring of ALL headlines
     tracker.advance(2, "Flash: triaging all headlines...")
     try:
@@ -97,6 +120,22 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
         browse_candidates = triage_results  # pass all for investigation
         tracker.result(f"flash_triage unavailable — fell back to preprocessor "
                        f"({len(triage_results)} signals)")
+
+    _archive("analysis", "02_flash_triage", {
+        "stage": "flash_triage",
+        "total_scored": len(triage_results),
+        "browse_candidates": len(browse_candidates),
+        "by_classification": {c: sum(1 for t in triage_results
+                                     if getattr(t, 'classification', 'unknown') == c)
+                              for c in set(getattr(t, 'classification', 'unknown')
+                                           for t in triage_results)},
+        "top_scored": [{"headline": getattr(t, 'headline', getattr(t, 'source_headline', '')),
+                        "scores": getattr(t, 'scores', {}),
+                        "classification": getattr(t, 'classification', 'unknown')}
+                       for t in sorted(triage_results,
+                                       key=lambda t: getattr(t, 'scores', {}).get("market_impact", 0),
+                                       reverse=True)[:20]]
+    })
 
     # 3. Pro HVR investigation loop
     tracker.advance(3, "Pro: investigating top signals...")
@@ -117,6 +156,17 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
     except ImportError as e:
         tracker.result(f"investigation_loop unavailable ({e}) — skipping Pro HVR")
 
+    _archive("analysis", "025_investigation", {
+        "stage": "investigation",
+        "actionable": len(actionable),
+        "monitor": len(monitor),
+        "priced_in": len(priced_in),
+        "total_hypotheses": len(hypotheses),
+        "hypotheses": [{"hypothesis": h.hypothesis, "confidence": h.confidence,
+                        "verdict": h.verdict, "bear_case": h.bear_case}
+                       for h in hypotheses[:50]]
+    })
+
     # 4. Layer 1 Narrative analysis (receives investigation context)
     tracker.advance(4, "Layer 1: narrative analysis...")
     from marketmind.pipeline.layer1_narrative import analyze_layer1
@@ -131,6 +181,19 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
     else:
         tracker.result(f"grade={l1_result.event_grade}, quadrant={l1_result.matrix_quadrant}")
 
+    _archive("analysis", "03_layer1_narrative", {
+        "stage": "l1",
+        "event_grade": l1_result.event_grade,
+        "matrix_quadrant": l1_result.matrix_quadrant,
+        "sentiment": l1_result.sentiment_direction,
+        "surprise_level": l1_result.surprise_level,
+        "market_size": l1_result.market_size,
+        "cascade_rank": l1_result.cascade_rank,
+        "price_in_score": l1_result.price_in_score,
+        "tail_risk_flags": l1_result.tail_risk_flags,
+        "raw_analysis": l1_result.raw_analysis[:2000] if l1_result.raw_analysis else ""
+    })
+
     # 5. Layer 2 + Layer 3 in parallel
     tracker.advance(5, "Layer 2+3: fundamental + technical analysis...")
     from marketmind.pipeline.layer2_fundamental import analyze_layer2
@@ -144,6 +207,25 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
     l2_result, l3_result = await asyncio.gather(l2_task, l3_task)
     tracker.result(f"L2: {len(l2_result.ticker_candidates)} candidates, "
                    f"L3: {len(l3_result.results)} tickers ({len(l3_result.green_lights)} green)")
+
+    _archive("analysis", "04_layer2_fundamental", {
+        "stage": "l2",
+        "macro_quadrant": l2_result.macro_quadrant,
+        "macro_direction": l2_result.macro_direction,
+        "ticker_candidates": l2_result.ticker_candidates,
+        "preferred_assets": l2_result.preferred_assets,
+        "sector_shortlist": l2_result.sector_shortlist,
+        "raw_analysis": l2_result.raw_analysis[:2000] if l2_result.raw_analysis else ""
+    })
+    _archive("analysis", "04_layer3_technical", {
+        "stage": "l3",
+        "green_lights": len(l3_result.green_lights),
+        "results": [{"ticker": r.ticker, "light": r.light,
+                     "entry_zone_low": r.entry_zone_low, "entry_zone_high": r.entry_zone_high,
+                     "stop_loss": r.stop_loss, "target_price": r.target_price,
+                     "above_200wma": r.above_200wma}
+                    for r in l3_result.results]
+    })
 
     # 6. Shadow ecosystem run
     shadow_votes = None  # DESIGN: shadows are internal competition, never vote on decisions
@@ -172,6 +254,16 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
     tracker.result(f"{len(red_team_report.challenges)} challenges, "
                    f"A-grade: {red_team_report.a_grade_count}")
 
+    _archive("review", "06_red_team", {
+        "stage": "red_team",
+        "challenges": len(red_team_report.challenges),
+        "a_grade": red_team_report.a_grade_count,
+        "critical": red_team_report.critical_count,
+        "items": [{"id": c.id, "target": c.target, "severity": c.severity,
+                   "challenge": c.challenge, "evidence": c.evidence}
+                  for c in red_team_report.challenges]
+    })
+
     # 8. Signal Resonance
     tracker.advance(8, "Resonance: statistical validation...")
     from marketmind.pipeline.resonance import evaluate_resonance
@@ -180,6 +272,15 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
         dimensions=["narrative", "fundamental", "technical", "sentiment"],
         observed_sharpe=0.5,
     )
+
+    _archive("review", "07_resonance", {
+        "stage": "resonance",
+        "passed": resonance.passed,
+        "dsr": resonance.dsr,
+        "pbo": resonance.pbo,
+        "verdict": resonance.verdict,
+        "dimensions_active": resonance.dimensions_active
+    })
 
     # 9. Decision (shadow_votes always None — shadows are internal competition only)
     tracker.advance(9, "Decision: synthesis...")
@@ -192,14 +293,23 @@ async def run_daily(config: MarketMindConfig, mock: bool = False, verbose: bool 
     tracker.result(f"cards={len(decision.decision_cards)}, "
                    f"no_trade={'present' if decision.no_trade_card else 'none'}")
 
-    # 10. Archive
-    tracker.advance(10, "Archive: saving session...")
-    from datetime import datetime as dt
-    from marketmind.storage.archivist import get_archivist
-    archivist = get_archivist(config.data_dir)
+    _archive("decisions", "08_decision", {
+        "stage": "decision",
+        "cards": len(decision.decision_cards),
+        "no_trade": decision.no_trade_card is not None,
+        "decision_cards": [{"ticker": c.ticker, "direction": c.direction,
+                            "entry_low": c.entry_low, "entry_high": c.entry_high,
+                            "stop": c.stop_loss, "target": c.target_price,
+                            "thesis": c.thesis, "risk_statement": c.risk_statement,
+                            "reward_risk": c.reward_risk_ratio}
+                           for c in decision.decision_cards]
+    })
+
+    # 10. Archive (FTS5 index)
+    tracker.advance(10, "Archive: indexing session...")
     archivist.init_fts()
     archivist.index_document(
-        date=dt.now().isoformat()[:10],
+        date=session_date,
         category="daily_session",
         title="MarketMind Daily",
         content=f"MarketMind daily: {l1_result.event_grade} | {l2_result.macro_quadrant} | "
