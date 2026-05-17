@@ -4,6 +4,33 @@
 
 Multi-agent shadow ecosystem for investment signal validation and decision support. Built on DeepSeek Flash/Pro for production, developed with Claude (Cowork) for engineering.
 
+## Development Order (LOCKED — do NOT reorder)
+
+**CRITICAL: Main AI analysis pipeline comes FIRST. Shadow ecosystem SECOND. This order is written into this file to prevent development chaos. Every restart MUST follow this sequence.**
+
+```
+Phase 1: Main AI Analysis Pipeline (current)
+  ├── Scout news collection ✅
+  ├── Flash triage (Stage 2 replacement) ✅
+  ├── Event clustering 🔄 Red Team audit
+  ├── Pro HVR investigation loop ✅
+  ├── Expectation gap analysis ✅
+  ├── Adversarial self-check ✅
+  ├── L2 + L3 (fundamental + technical) ✅
+  ├── Red Team + Resonance ✅
+  ├── Decision + Archive ✅
+  └── End-to-end integration (NOT YET WIRED)
+
+Phase 2: Shadow Ecosystem (build AFTER Phase 1 is complete)
+  ├── Shadow initialization + parallel analysis
+  ├── ELITE participation + domain-triggered awakening
+  ├── Broadcast mechanism + 7-day isolation period
+  ├── Ranking + Crystallization + Memory
+  └── Cross-shadow interaction (collusion, challenger)
+```
+
+**Rule**: If you find yourself working on shadow code while the main AI pipeline is broken or incomplete, STOP. Fix the main pipeline first. Shadows are an ENHANCEMENT, not a replacement for the core analysis.
+
 ## Quick Start
 
 ```bash
