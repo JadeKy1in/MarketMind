@@ -494,83 +494,40 @@ class ShadowStateDB:
             created_at=row["created_at"],
         )
 
-    # ── Virtual trades ────────────────────────────────────────────────────
+    # ── Virtual trades (delegated to shadow_trade_repo) ───────────────────
 
     def record_trade_open(self, shadow_id: str, trade: VirtualTradeOpen) -> int:
+        from marketmind.shadows.shadow_trade_repo import record_trade_open
         conn = self._connect()
         try:
-            cur = conn.execute(
-                """INSERT INTO virtual_trades (shadow_id, ticker, direction,
-                   entry_price, position_size_pct, entry_date)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (shadow_id, trade.ticker, trade.direction,
-                 trade.entry_price, trade.position_size_pct, trade.entry_date)
-            )
-            conn.commit()
-            return cur.lastrowid
+            return record_trade_open(conn, shadow_id, trade)
         finally:
             conn.close()
 
     def record_trade_close(self, trade_id: int, exit_price: float,
                            exit_reason: str, pnl_pct: float) -> None:
+        from marketmind.shadows.shadow_trade_repo import record_trade_close
         conn = self._connect()
         try:
-            now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            conn.execute(
-                """UPDATE virtual_trades SET exit_price = ?, exit_date = ?,
-                   exit_reason = ?, pnl_pct = ? WHERE id = ?""",
-                (exit_price, now, exit_reason, pnl_pct, trade_id)
-            )
-            conn.commit()
+            record_trade_close(conn, trade_id, exit_price, exit_reason, pnl_pct)
         finally:
             conn.close()
 
     def get_open_trades(self, shadow_id: str) -> list[VirtualTrade]:
+        from marketmind.shadows.shadow_trade_repo import get_open_trades
         conn = self._connect()
         try:
-            rows = conn.execute(
-                "SELECT * FROM virtual_trades WHERE shadow_id = ? AND exit_price IS NULL",
-                (shadow_id,)
-            ).fetchall()
-            return [self._row_to_trade(r) for r in rows]
+            return get_open_trades(conn, shadow_id)
         finally:
             conn.close()
 
     def get_trade_history(self, shadow_id: str, limit: int = 90) -> list[VirtualTrade]:
+        from marketmind.shadows.shadow_trade_repo import get_trade_history
         conn = self._connect()
         try:
-            rows = conn.execute(
-                """SELECT * FROM virtual_trades
-                   WHERE shadow_id = ? AND exit_price IS NOT NULL
-                   ORDER BY exit_date DESC
-                   LIMIT ?""",
-                (shadow_id, limit)
-            ).fetchall()
-            return [self._row_to_trade(r) for r in rows]
+            return get_trade_history(conn, shadow_id, limit)
         finally:
             conn.close()
-
-    @staticmethod
-    def _row_to_trade(row: sqlite3.Row) -> VirtualTrade:
-        return VirtualTrade(
-            trade_id=row["id"],
-            shadow_id=row["shadow_id"],
-            ticker=row["ticker"],
-            direction=row["direction"],
-            entry_price=row["entry_price"],
-            exit_price=row["exit_price"],
-            position_size_pct=row["position_size_pct"],
-            entry_date=row["entry_date"],
-            exit_date=row["exit_date"],
-            exit_reason=row["exit_reason"],
-            pnl_pct=row["pnl_pct"],
-            virtual_slippage_applied=row["virtual_slippage_applied"]
-            if row["virtual_slippage_applied"] is not None else 0.0,
-            confidence_discount_applied=row["confidence_discount_applied"]
-            if row["confidence_discount_applied"] is not None else 0.0,
-            paper_live_gap_ratio=row["paper_live_gap_ratio"]
-            if row["paper_live_gap_ratio"] is not None else 0.0,
-        )
 
     # ── Daily snapshots ───────────────────────────────────────────────────
 
@@ -809,245 +766,120 @@ class ShadowStateDB:
             if "discount_rate" in row.keys() and row["discount_rate"] is not None else None,
         )
 
-    # ── Rankings ──────────────────────────────────────────────────────────
+    # ── Rankings (delegated to shadow_vote_repo) ──────────────────────────
 
     def save_rankings(self, date: str, rankings: list[tuple[str, float, float, dict]]) -> None:
+        from marketmind.shadows.shadow_vote_repo import save_rankings
         conn = self._connect()
         try:
-            for rank, (shadow_id, composite, deflated, components) in enumerate(rankings, 1):
-                conn.execute(
-                    """INSERT OR REPLACE INTO ranking_history
-                       (date, shadow_id, rank, composite_score, deflated_score, component_scores)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
-                    (date, shadow_id, rank, composite, deflated,
-                     json.dumps(components))
-                )
-            conn.commit()
+            save_rankings(conn, date, rankings)
         finally:
             conn.close()
 
     def get_ranking_history(self, shadow_id: str, days: int = 90) -> list[dict]:
+        from marketmind.shadows.shadow_vote_repo import get_ranking_history
         conn = self._connect()
         try:
-            rows = conn.execute(
-                """SELECT * FROM ranking_history
-                   WHERE shadow_id = ?
-                   ORDER BY date DESC
-                   LIMIT ?""",
-                (shadow_id, days)
-            ).fetchall()
-            results = []
-            for r in rows:
-                try:
-                    comp = json.loads(r["component_scores"])
-                except json.JSONDecodeError:
-                    logger.warning("Corrupted component_scores for shadow=%s on %s",
-                                   r["shadow_id"], r["date"])
-                    comp = {}
-                results.append({
-                    "date": r["date"], "shadow_id": r["shadow_id"],
-                    "rank": r["rank"], "composite_score": r["composite_score"],
-                    "deflated_score": r["deflated_score"],
-                    "component_scores": comp,
-                })
-            return results
+            return get_ranking_history(conn, shadow_id, days)
         finally:
             conn.close()
 
-    # ── Integrity ─────────────────────────────────────────────────────────
+    # ── Integrity / Emergency / Collusion (delegated to shadow_integrity_repo) ─
 
     def record_integrity_event(self, shadow_id: str, event: IntegrityEvent) -> bool:
+        from marketmind.shadows.shadow_integrity_repo import record_integrity_event
         conn = self._connect()
         try:
-            cur = conn.execute(
-                """INSERT OR IGNORE INTO integrity_events
-                   (shadow_id, date, event_type, claim_detail, score_change, new_score)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (shadow_id, event.date, event.event_type, event.claim_detail,
-                 event.score_change, event.new_score)
-            )
-            recorded = cur.rowcount > 0
-            if not recorded:
-                logger.debug("Duplicate integrity event ignored: shadow=%s date=%s type=%s",
-                             shadow_id, event.date, event.event_type)
-            conn.commit()
-            return recorded
+            return record_integrity_event(conn, shadow_id, event)
         finally:
             conn.close()
 
     def get_integrity_score(self, shadow_id: str) -> int:
+        from marketmind.shadows.shadow_integrity_repo import get_integrity_score
         conn = self._connect()
         try:
-            row = conn.execute(
-                """SELECT new_score FROM integrity_events
-                   WHERE shadow_id = ?
-                   ORDER BY date DESC LIMIT 1""",
-                (shadow_id,)
-            ).fetchone()
-            return row["new_score"] if row else 100
+            return get_integrity_score(conn, shadow_id)
         finally:
             conn.close()
 
     def get_integrity_history(self, shadow_id: str, days: int = 90) -> list[IntegrityEvent]:
+        from marketmind.shadows.shadow_integrity_repo import get_integrity_history
         conn = self._connect()
         try:
-            rows = conn.execute(
-                """SELECT * FROM integrity_events
-                   WHERE shadow_id = ?
-                   ORDER BY date DESC
-                   LIMIT ?""",
-                (shadow_id, days)
-            ).fetchall()
-            return [IntegrityEvent(
-                shadow_id=r["shadow_id"], date=r["date"],
-                event_type=r["event_type"], claim_detail=r["claim_detail"],
-                score_change=r["score_change"], new_score=r["new_score"],
-            ) for r in rows]
+            return get_integrity_history(conn, shadow_id, days)
         finally:
             conn.close()
 
-    # ── Emergency quotas ──────────────────────────────────────────────────
-
     def record_emergency_quota(self, shadow_id: str, quota: EmergencyQuotaRequest) -> int:
+        from marketmind.shadows.shadow_integrity_repo import record_emergency_quota
         conn = self._connect()
         try:
-            cur = conn.execute(
-                """INSERT INTO emergency_quotas
-                   (shadow_id, requested_at, confidence_self_report, opportunity_description)
-                   VALUES (?, ?, ?, ?)""",
-                (shadow_id, quota.requested_at, quota.confidence_self_report,
-                 quota.opportunity_description)
-            )
-            conn.commit()
-            return cur.lastrowid
+            return record_emergency_quota(conn, shadow_id, quota)
         finally:
             conn.close()
 
     def update_emergency_result(self, quota_id: int, result: str,
                                 pnl_impact: float, penalty: str) -> None:
+        from marketmind.shadows.shadow_integrity_repo import update_emergency_result
         conn = self._connect()
         try:
-            conn.execute(
-                """UPDATE emergency_quotas
-                   SET result = ?, pnl_impact_pct = ?, quota_penalty_applied = ?
-                   WHERE id = ?""",
-                (result, pnl_impact, penalty, quota_id)
-            )
-            conn.commit()
+            update_emergency_result(conn, quota_id, result, pnl_impact, penalty)
         finally:
             conn.close()
 
     def get_pending_emergency_audits(self) -> list[EmergencyQuotaRequest]:
+        from marketmind.shadows.shadow_integrity_repo import get_pending_emergency_audits
         conn = self._connect()
         try:
-            rows = conn.execute(
-                "SELECT * FROM emergency_quotas WHERE result = 'pending'"
-            ).fetchall()
-            return [EmergencyQuotaRequest(
-                id=r["id"],
-                shadow_id=r["shadow_id"],
-                requested_at=r["requested_at"],
-                confidence_self_report=r["confidence_self_report"],
-                opportunity_description=r["opportunity_description"],
-                result=r["result"],
-                pnl_impact_pct=r["pnl_impact_pct"],
-                quota_penalty_applied=r["quota_penalty_applied"],
-            ) for r in rows]
+            return get_pending_emergency_audits(conn)
         finally:
             conn.close()
 
-    # ── Collusion ─────────────────────────────────────────────────────────
-
     def record_collusion_flag(self, flag: CollusionFlag) -> None:
+        from marketmind.shadows.shadow_integrity_repo import record_collusion_flag
         conn = self._connect()
         try:
-            conn.execute(
-                """INSERT INTO collusion_flags
-                   (date, agreement_pct, consecutive_days, market_signal_strength,
-                    verdict, user_action)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (flag.date, flag.agreement_pct, flag.consecutive_days,
-                 flag.market_signal_strength, flag.verdict, flag.user_action)
-            )
-            conn.commit()
+            record_collusion_flag(conn, flag)
         finally:
             conn.close()
 
     def get_recent_collusion_flags(self, days: int = 30) -> list[CollusionFlag]:
+        from marketmind.shadows.shadow_integrity_repo import get_recent_collusion_flags
         conn = self._connect()
         try:
-            rows = conn.execute(
-                """SELECT * FROM collusion_flags
-                   ORDER BY date DESC
-                   LIMIT ?""",
-                (days,)
-            ).fetchall()
-            return [CollusionFlag(
-                date=r["date"],
-                agreement_pct=r["agreement_pct"],
-                consecutive_days=r["consecutive_days"],
-                market_signal_strength=r["market_signal_strength"],
-                verdict=r["verdict"],
-                user_action=r["user_action"],
-            ) for r in rows]
+            return get_recent_collusion_flags(conn, days)
         finally:
             conn.close()
 
-    # ── Emergency quota runtime state ──────────────────────────────────────
-
     def save_emergency_quota_state(self, shadow_id: str, state_json: str) -> None:
-        """Save emergency quota state for a shadow (dedicated table, no read-merge-write)."""
+        from marketmind.shadows.shadow_integrity_repo import save_emergency_quota_state
         conn = self._connect()
         try:
-            now = datetime.now(timezone.utc).isoformat()
-            conn.execute(
-                """INSERT OR REPLACE INTO emergency_quota_state
-                   (shadow_id, state_json, updated_at)
-                   VALUES (?, ?, ?)""",
-                (shadow_id, state_json, now)
-            )
-            conn.commit()
+            save_emergency_quota_state(conn, shadow_id, state_json)
         finally:
             conn.close()
 
     def load_emergency_quota_state(self, shadow_id: str) -> str | None:
-        """Load emergency quota state JSON for a shadow, or None if no state exists."""
+        from marketmind.shadows.shadow_integrity_repo import load_emergency_quota_state
         conn = self._connect()
         try:
-            row = conn.execute(
-                "SELECT state_json FROM emergency_quota_state WHERE shadow_id = ?",
-                (shadow_id,)
-            ).fetchone()
-            return row["state_json"] if row else None
+            return load_emergency_quota_state(conn, shadow_id)
         finally:
             conn.close()
 
-    # ── Paper/live gap runtime state ───────────────────────────────────────
-
     def save_paper_live_gap_state(self, shadow_id: str, state_json: str) -> None:
-        """Save paper/live gap state for a shadow (dedicated table, no read-merge-write)."""
+        from marketmind.shadows.shadow_integrity_repo import save_paper_live_gap_state
         conn = self._connect()
         try:
-            now = datetime.now(timezone.utc).isoformat()
-            conn.execute(
-                """INSERT OR REPLACE INTO paper_live_gap_state
-                   (shadow_id, state_json, updated_at)
-                   VALUES (?, ?, ?)""",
-                (shadow_id, state_json, now)
-            )
-            conn.commit()
+            save_paper_live_gap_state(conn, shadow_id, state_json)
         finally:
             conn.close()
 
     def load_paper_live_gap_state(self, shadow_id: str) -> str | None:
-        """Load paper/live gap state JSON for a shadow, or None if no state exists."""
+        from marketmind.shadows.shadow_integrity_repo import load_paper_live_gap_state
         conn = self._connect()
         try:
-            row = conn.execute(
-                "SELECT state_json FROM paper_live_gap_state WHERE shadow_id = ?",
-                (shadow_id,)
-            ).fetchone()
-            return row["state_json"] if row else None
+            return load_paper_live_gap_state(conn, shadow_id)
         finally:
             conn.close()
 
@@ -1064,104 +896,49 @@ class ShadowStateDB:
         finally:
             conn.close()
 
+    # ── Vote / PnL (delegated to shadow_vote_repo) ────────────────────────
+
     def get_all_active_votes(self, date: str, ticker: str) -> list[dict]:
+        from marketmind.shadows.shadow_vote_repo import get_all_active_votes
         conn = self._connect()
         try:
-            rows = conn.execute(
-                """SELECT s.id, s.shadow_type, s.display_name
-                   FROM shadows s
-                   WHERE s.status != 'eliminated' AND s.shadow_type != 'challenger'
-                   ORDER BY s.id"""
-            ).fetchall()
-            return [{"shadow_id": r["id"], "shadow_type": r["shadow_type"],
-                     "display_name": r["display_name"],
-                     "date": date, "ticker": ticker} for r in rows]
+            return get_all_active_votes(conn, date, ticker)
         finally:
             conn.close()
-
-    # ── Next-day return lookup ─────────────────────────────────────────────
 
     def get_next_day_return_sign(self, ticker_or_shadow: str, date: str) -> int | None:
-        """Get return sign for a ticker/shadow on a given date. 1=positive, -1=negative, None=no data."""
+        from marketmind.shadows.shadow_vote_repo import get_next_day_return_sign
         conn = self._connect()
         try:
-            row = conn.execute(
-                """SELECT pnl_pct FROM virtual_trades
-                   WHERE ticker = ? AND exit_date = ? AND pnl_pct IS NOT NULL
-                   LIMIT 1""",
-                (ticker_or_shadow, date)
-            ).fetchone()
-            if row and row["pnl_pct"] is not None:
-                return 1 if row["pnl_pct"] > 0 else -1
-            snap_row = conn.execute(
-                """SELECT daily_return_pct FROM daily_snapshots
-                   WHERE shadow_id = ? AND date = ? AND daily_return_pct IS NOT NULL
-                   LIMIT 1""",
-                (ticker_or_shadow, date)
-            ).fetchone()
-            if snap_row and snap_row["daily_return_pct"] is not None:
-                return 1 if snap_row["daily_return_pct"] > 0 else -1
-            return None
+            return get_next_day_return_sign(conn, ticker_or_shadow, date)
         finally:
             conn.close()
 
-    # ── Vote persistence ───────────────────────────────────────────────────
-
     def save_votes(self, shadow_id: str, date: str, votes: list) -> None:
-        """Persist shadow votes for backtest/audit. Uses executemany for batch insert."""
+        from marketmind.shadows.shadow_vote_repo import save_votes
         if not votes:
             return
         conn = self._connect()
         try:
-            now = datetime.now(timezone.utc).isoformat()
-            rows = [
-                (shadow_id, date, v.ticker, v.direction, v.confidence,
-                 getattr(v, 'thesis', '') or '', getattr(v, 'risk_note', '') or '', now)
-                for v in votes
-            ]
-            conn.executemany(
-                """INSERT INTO shadow_votes (shadow_id, date, ticker, direction,
-                   confidence, thesis, risk_note, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                rows
-            )
-            conn.commit()
+            save_votes(conn, shadow_id, date, votes)
         finally:
             conn.close()
 
     def get_votes_by_date_range(self, start_date: str, end_date: str) -> list[dict]:
-        """Get all votes within a date range, ordered by date DESC."""
+        from marketmind.shadows.shadow_vote_repo import get_votes_by_date_range
         conn = self._connect()
         try:
-            rows = conn.execute(
-                """SELECT * FROM shadow_votes
-                   WHERE date >= ? AND date <= ?
-                   ORDER BY date DESC""",
-                (start_date, end_date)
-            ).fetchall()
-            return [dict(r) for r in rows]
+            return get_votes_by_date_range(conn, start_date, end_date)
         finally:
             conn.close()
 
-    # ── PnL by domain ──────────────────────────────────────────────────────
-
     def get_pnl_by_domain(self, domain: str) -> list[float]:
-        """Get PnL values from virtual_trades for shadows in a given domain.
-        Domain is extracted from config_json JSON field."""
+        from marketmind.shadows.shadow_vote_repo import get_pnl_by_domain
         conn = self._connect()
         try:
-            rows = conn.execute(
-                """SELECT vt.pnl_pct FROM virtual_trades vt
-                   JOIN shadows s ON vt.shadow_id = s.id
-                   WHERE vt.pnl_pct IS NOT NULL
-                     AND s.status != 'eliminated'
-                     AND json_extract(s.config_json, '$.domain') = ?""",
-                (domain,)
-            ).fetchall()
-            return [r["pnl_pct"] for r in rows]
-        except Exception:
-            logger.warning("json_extract failed for domain=%s — SQLite JSON1 may be missing", domain)
-            return []
+            return get_pnl_by_domain(conn, domain)
+        finally:
+            conn.close()
 
 
 # ── Migration registry (module-level, after class definition) ───────────────
