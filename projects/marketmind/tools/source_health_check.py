@@ -188,6 +188,9 @@ async def main():
         elif source.name == "CFTC COT":
             count = -1
             error = "SKIPPED (handled by macro_data.py)"
+        elif source.feed_type == "bls_api":
+            count = -1
+            error = "SKIPPED (BLS API — implementation TBD)"
         elif source.feed_type == "rss":
             count, error = await test_rss(source)
         elif source.feed_type in ("sec_api", "sec_form4", "sec_13f"):
