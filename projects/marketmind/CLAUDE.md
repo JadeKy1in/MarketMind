@@ -101,18 +101,83 @@ All LLM calls route through `gateway/async_client.py` — no module should call 
 
 M1 Data Integrity Protocol is injected at the gateway level for all shadow calls.
 
-## Shadow Ecosystem
+## Pipeline (AUTHORITATIVE — do NOT modify without user approval)
 
-21+ independent shadow analysts across 7 types:
-- **Expert** (15): gold, crypto, energy, bonds, volatility, emerging, tech, financials, healthcare, consumer, industrials, metals, real_estate, macro
-- **Daredevil** (5): scalper, trend_rider, news_hound, fade_master, rotation_engine
-- **Catfish** (1): minority-opinion enforcer, activates at >=80% consensus
-- **Temp events** (dynamic): created/destroyed based on market events
-- **Missed path** (dynamic): counterfactual tracking for rejected directions
-- **Challenger** (dynamic): 3-stage elimination trials
-- **Beta** (configurable): experimental shadows
+The pipeline defined here is the SINGLE SOURCE OF TRUTH. `app.py:run_daily()` is the reference implementation. All other documents that describe a different pipeline are WRONG.
 
-Daily cycle: event scan → temp shadow lifecycle → parallel vote collection → ranking → collusion detection → challenger checks → emergency quota audit → memory update → crystallization.
+### Main Pipeline (runs every session)
+
+```
+Step 0: Shadow Mother event scan (optional, shadows_enabled=1)
+        Initialize expert/daredevil/catfish shadows, background scheduler
+
+Step 1: Scout — fetch_all_sources()
+        33 sources → news_items (587 articles avg)
+
+Step 2: Flash Preprocessor — preprocess_batch(news_items[:50])
+        Flash LLM extracts FlashSignal per batch of 15 headlines
+
+Step 3: L1 Narrative — analyze_layer1(signals[:15], news_items)
+        Pro LLM produces Layer1Result: event_grade, matrix_quadrant, sentiment
+
+Step 4: L2 + L3 (parallel)
+        L2: analyze_layer2(l1_result) — 5-tier fundamental
+        L3: analyze_layer3(tickers, {}) — 3-light technical (INDEPENDENT of L1-L2)
+
+Step 5: Shadow Ecosystem (optional, runs in parallel with main AI)
+        Shadows analyze raw news+market_data independently.
+        Output: ranked shadows, memory updates, crystallization.
+        shadow_votes is ALWAYS None — shadows do NOT vote on decisions.
+
+Step 6: Red Team — run_red_team()
+        Adversarial challenge on L1+L2 raw analysis
+
+Step 7: Resonance — evaluate_resonance()
+        Statistical validation (DSR/PBO), pure Python, no LLM
+
+Step 8: Decision — generate_decision()
+        shadow_votes=None (design decision: shadows don't vote)
+        Produces decision_cards + no_trade_card
+
+Step 9: Archive — archivist.index_document()
+        FTS5 full-text search index
+```
+
+### CRITICAL: Shadows Do NOT Vote
+
+`app.py:110`: `shadow_votes = None` — initialized to None, never assigned, passed as None to `generate_decision()`. This is INTENTIONAL. Shadows are an internal competition ecosystem for ranking/evolution/crystallization. They are NOT a voting mechanism for investment decisions. Any document claiming "shadows vote on decisions" is stale/wrong.
+
+### Shadow Ecosystem (independent from main decision)
+
+21+ shadows across 7 types compete internally:
+- **Expert** (15): domain-specific analysts (gold, crypto, energy, bonds, etc.)
+- **Daredevil** (5): contrarian strategies
+- **Catfish** (1): minority-opinion enforcer at >=80% consensus
+- **Temp/MissedPath/Challenger/Beta**: dynamic lifecycle
+
+Internal cycle: event scan → temp shadow lifecycle → analysis → ranking → collusion → challenger → memory update → crystallization. Output feeds back into shadow ranking only.
+
+### ELITE Shadow Participation (Gate 2)
+
+Documented in `shadows/elite_participation.py` and `.claude/phase_b_ideation_notes.md` §4:
+
+1. ELITE shadows analyze news at the SAME TIME as main AI (same daily cycle)
+2. They wait passively — pre-computed analysis stored in EliteRegistry
+3. During Gate 2 (信号确认), when user discusses a topic matching a shadow's domain keyword → shadow awakens
+4. User can also mention a shadow by name to summon it
+5. Each ELITE shadow contributes at most ONCE per session
+6. Contributions are clearly marked "SHADOW OPINION"
+7. ELITE shadows have NO decision authority — advisory only
+8. Domain keywords defined in `EliteRegistry.DOMAIN_KEYWORDS`
+
+### Information Broadcast Rules
+
+From `.claude/phase_b_ideation_notes.md` §1:
+
+- Shadows receive: raw news/facts + user's raw opinions + submitted materials
+- Shadows do NOT receive: main AI's pre-discussion analysis/report
+- This prevents anchoring bias — shadows must think independently
+- Shadows can use their Flash quota to request additional data (iterative)
 
 ## Testing
 
