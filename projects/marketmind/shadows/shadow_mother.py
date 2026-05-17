@@ -674,6 +674,7 @@ class ShadowMother:
             logger.error("Challenger check failed: %s", e)
 
         # 7.5 Method breeding — weekly population maintenance (P1-4)
+        today_day = datetime.now(timezone.utc).day
         if today_day % 7 == 1:  # run every 7 days (day 1, 8, 15, 22, 29)
             try:
                 from marketmind.shadows.methodology_evolver import MethodologyEvolver

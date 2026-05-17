@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger("marketmind.shadows.ranking_engine")
 
@@ -457,7 +457,7 @@ class RankingEngine:
         # Insight drought
         if insight_dates:
             latest_insight = max(insight_dates)
-            days_since = (datetime.now().date() -
+            days_since = (datetime.now(timezone.utc).date() -
                           datetime.strptime(latest_insight, "%Y-%m-%d").date()).days
             drought = min(days_since / cfg.plateau_no_insight_days, 1.0)
         else:
@@ -657,7 +657,7 @@ class RankingEngine:
         from datetime import datetime, timedelta
 
         cfg = self.config
-        today = datetime.now().date()
+        today = datetime.now(timezone.utc).date()
         months_ago_6 = today - timedelta(days=cfg.reset_no_excellent_months * 30)
         months_ago_3 = today - timedelta(days=cfg.reset_flat_wr_months * 30)
         insight_cutoff = today - timedelta(days=cfg.reset_no_insight_months * 30)

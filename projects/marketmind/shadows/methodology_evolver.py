@@ -533,6 +533,26 @@ class MethodologyEvolver:
             "Methodology change recorded: %s — %s", method_id, change_description[:80]
         )
 
+    def get_audit_trail(
+        self, method_id: str | None = None, limit: int = 50
+    ) -> list[dict]:
+        """Get the methodology audit trail, optionally filtered by method_id."""
+        if not _AUDIT_FILE.exists():
+            return []
+        entries = []
+        with open(_AUDIT_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    if method_id is None or entry.get("method_id") == method_id:
+                        entries.append(entry)
+                except json.JSONDecodeError:
+                    continue
+        return sorted(entries, key=lambda e: e.get("timestamp", ""), reverse=True)[:limit]
+
 
 # ── MethodologyInjector (P1-1: Write improvement signals back to shadow prompts) ─
 

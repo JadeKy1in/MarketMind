@@ -164,7 +164,7 @@ class MultimodalAdapter:
     """
 
     def __init__(self, gemini_api_key: str | None = None) -> None:
-        self._api_key = gemini_api_key or os.environ.get("GEMINI_API_KEY", "")
+        self._api_key = gemini_api_key if gemini_api_key is not None else os.environ.get("GEMINI_API_KEY", "")
         self._gemini: GeminiFlashGateway | None = None
 
     async def _get_gemini(self) -> GeminiFlashGateway | None:

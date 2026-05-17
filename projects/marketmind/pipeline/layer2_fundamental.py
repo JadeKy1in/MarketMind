@@ -14,13 +14,14 @@ from marketmind.pipeline.layer1_narrative import Layer1Result
 class Layer2Result:
     macro_quadrant: str             # expansion | slowdown | contraction | recovery
     macro_direction: str            # risk_on | risk_off
-    preferred_assets: list[str]     # ["equities", "bonds", "gold", "commodities"]
-    sector_shortlist: list[str]     # 3-5 sector names
-    factor_scores: dict[str, float] # {ticker: macro_match_score}
-    ticker_candidates: list[str]    # 5-10 ticker candidates
-    ticker_weights: dict[str, float]  # {ticker: allocation_weight}
-    sector_momentum: dict[str, str]   # {sector: accelerating|decelerating|stable}
-    red_team_notes: list[str]      # challenges raised at each tier
+    preferred_assets: list[str] = field(default_factory=list)
+    sector_shortlist: list[str] = field(default_factory=list)
+    factor_scores: dict[str, float] = field(default_factory=dict)
+    ticker_candidates: list[str] = field(default_factory=list)
+    ticker_weights: dict[str, float] = field(default_factory=dict)
+    sector_momentum: dict[str, str] = field(default_factory=dict)
+    sector_directions: list[dict] = field(default_factory=list)  # [{"sector","direction","momentum","rationale"}]
+    red_team_notes: list[str] = field(default_factory=list)
     raw_analysis: str = ""
 
 

@@ -6,7 +6,7 @@ import logging
 logger = logging.getLogger("marketmind.pipeline.scout")
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import feedparser
@@ -26,7 +26,7 @@ class NewsItem:
     published_at: str
     summary: str
     raw_text: str | None = None
-    fetched_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    fetched_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     @classmethod
     def from_entry(cls, entry: dict, source: Source) -> "NewsItem":
@@ -34,7 +34,7 @@ class NewsItem:
         url = entry.get("link", "")
         summary_raw = entry.get("summary", entry.get("description", ""))
         summary = _strip_html(summary_raw)[:500]
-        published = entry.get("published", entry.get("updated", datetime.now().isoformat()))
+        published = entry.get("published", entry.get("updated", datetime.now(timezone.utc).isoformat()))
         item_id = hashlib.sha256(f"{title}{url}".encode()).hexdigest()[:16]
         return cls(
             id=item_id,
@@ -91,7 +91,7 @@ async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsIte
             source.status = SourceStatus.DEAD
         else:
             source.status = SourceStatus.DEGRADED
-    source.last_checked = datetime.now().isoformat()
+    source.last_checked = datetime.now(timezone.utc).isoformat()
     return items
 
 

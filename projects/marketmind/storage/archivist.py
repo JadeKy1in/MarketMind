@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -36,7 +36,7 @@ class MarketMindArchive:
             pass
 
     def today_path(self) -> Path:
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         return self.base_dir / str(now.year) / f"{now.month:02d}" / f"{now.day:02d}"
 
     def ensure_dirs(self) -> Path:

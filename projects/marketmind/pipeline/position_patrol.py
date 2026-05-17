@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from marketmind.gateway.async_client import chat_pro
@@ -133,7 +133,7 @@ def _parse_patrol_response(content: str, positions: list[dict], config: MarketMi
         entry_date = input_pos.get("entry_date", "")
         if entry_date:
             try:
-                days_held = (datetime.now().date() - datetime.fromisoformat(entry_date).date()).days
+                days_held = (datetime.now(timezone.utc).date() - datetime.fromisoformat(entry_date).date()).days
             except (ValueError, TypeError):
                 days_held = 0
         else:

@@ -481,6 +481,29 @@ def _extract_field(block: str, field: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+def defang_text(text: str) -> str:
+    """Insert zero-width spaces into known prompt-injection patterns.
+
+    Breaks dangerous patterns like "SYSTEM OVERRIDE" by inserting \\u200B
+    between keywords, preventing LLM prompt injection while preserving
+    human readability.
+    """
+    patterns = [
+        ("SYSTEM OVERRIDE", "SYSTEM​ OVERRIDE"),
+        ("SYSTEM_OVERRIDE", "SYSTEM​_OVERRIDE"),
+        ("VOTE_START", "VOTE​_START"),
+        ("VOTE_END", "VOTE​_END"),
+        ("IGNORE PREVIOUS", "IGNORE​ PREVIOUS"),
+        ("IGNORE ALL PREVIOUS", "IGNORE​ ALL PREVIOUS"),
+        ("BYPASS FILTER", "BYPASS​ FILTER"),
+        ("OVERRIDE SYSTEM", "OVERRIDE​ SYSTEM"),
+    ]
+    result = text
+    for pat, repl in patterns:
+        result = result.replace(pat, repl)
+    return result
+
+
 def create_shadow_agent(config: ShadowConfig, state_db: ShadowStateDB,
                         settings: ShadowSettings) -> ShadowAgent:
     """Factory: instantiate the correct shadow subclass for a given config."""

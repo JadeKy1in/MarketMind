@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +12,7 @@ from typing import Any
 class GateCheckpoint:
     gate_number: int              # 1, 2, or 3
     completed: bool
-    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     data: dict[str, Any] = field(default_factory=dict)
 
 
@@ -24,8 +24,8 @@ class SessionState:
     gate1: GateCheckpoint | None = None
     gate2: GateCheckpoint | None = None
     gate3: GateCheckpoint | None = None
-    started_at: str = field(default_factory=lambda: datetime.now().isoformat())
-    last_activity: str = field(default_factory=lambda: datetime.now().isoformat())
+    started_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    last_activity: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     @property
     def is_complete(self) -> bool:
