@@ -35,23 +35,21 @@ def _make_vote_response(ticker, direction, confidence, thesis="test thesis", ris
 
 @pytest.mark.asyncio
 async def test_full_daily_cycle_with_mock_llm(temp_shadow_db):
-    """Complete daily orchestration cycle with mock LLM for all 21 shadows."""
+    """Complete daily orchestration cycle with mock LLM for all 23 shadows."""
     from marketmind.shadows.shadow_mother import ShadowMother
     from marketmind.shadows.expert_shadows import create_expert_shadows
     from marketmind.shadows.daredevil_shadows import create_daredevil_shadows
-    from marketmind.shadows.catfish_agent import create_catfish_agent
 
     settings = ShadowSettings()
     settings.max_concurrent_shadows = 5
 
-    # Initialize all permanent shadows in the DB
+    # Initialize all permanent shadows in the DB (15 experts + 8 daredevils)
     create_expert_shadows(temp_shadow_db, settings)
     create_daredevil_shadows(temp_shadow_db, settings)
-    create_catfish_agent(temp_shadow_db, settings)
 
-    # Verify 21 shadows registered
+    # Verify 23 shadows registered (catfish is no longer a shadow)
     visible = temp_shadow_db.get_visible_shadows()
-    assert len(visible) == 25  # Phase 0-6: 16 experts + 8 daredevils + 1 catfish
+    assert len(visible) == 23  # Phase 0: 15 experts + 8 daredevils
 
     mother = ShadowMother(settings, temp_shadow_db)
 
@@ -111,12 +109,12 @@ async def test_full_daily_cycle_with_mock_llm(temp_shadow_db):
         result = await mother.orchestrate_daily_cycle(news, {})
 
     # Verify orchestration results
-    assert result.active_shadows == 25  # Phase 0-6: 16 experts + 8 daredevils + 1 catfish
+    assert result.active_shadows == 23  # Phase 0: 15 experts + 8 daredevils (catfish is no longer a shadow)
     assert result.votes_collected > 0
-    assert len(result.shadow_analyses) == 25
+    assert len(result.shadow_analyses) == 23
 
-    # Catfish deprecated; all shadows produce votes
-    assert result.votes_collected >= 24
+    # All shadows produce votes
+    assert result.votes_collected >= 23
 
     # Rankings should be computed (even if empty for insufficient data)
     assert result.rankings is not None
@@ -189,7 +187,7 @@ async def test_run_daily_pipeline_mocked(temp_shadow_db):
                 )
 
                 assert result.active_shadows > 0
-                assert result.active_shadows == 16  # Phase 5: +Bear Tracker
+                assert result.active_shadows == 15  # Phase 0: 15 canonical experts (no Bear Tracker)
                 assert result.votes_collected > 0
                 assert result.votes_collected >= 15  # one vote per expert
 

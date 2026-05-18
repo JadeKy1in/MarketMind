@@ -1,0 +1,41 @@
+{
+  "module": "source_authority",
+  "file": "config/source_authority.py",
+  "level": "PICA-Security",
+  "timestamp": "2026-05-18T12:02:34Z",
+  "risk_tier": "Medium",
+  "findings": [
+    {
+      "check": "url_safety_review",
+      "result": "PASS",
+      "detail": "All 35 sources reviewed. URLs fall into approved categories: (1) Government/institutional: .gov (FRED, BLS, SEC, Fed, CFTC), .europa.eu (ECB, EC Press Corner), .bcb.gov.br (Brazil BCB) — all legitimate. (2) Established media: .wsj.com (MarketWatch/Dow Jones), .ft.com (Financial Times), .scmp.com (SCMP), .chinadaily.com.cn (China Daily), .cgtn.com (CGTN) — all legitimate. (3) Google News RSS proxies: 15 sources use news.google.com/rss/search — Google's legacy RSS endpoint, not user-controllable. Query parameters are hardcoded search terms for institutional coverage. (4) API sources: NewsAPI, GNews, Bluesky — require API keys; key handling in scout.py, not here. No shortened URLs, no IP addresses, no suspicious domains.",
+      "severity": "info"
+    },
+    {
+      "check": "http_vs_https",
+      "result": "PASS",
+      "detail": "Two HTTP sources identified: China Daily Bizchina (http://www.chinadaily.com.cn/rss/bizchina_rss.xml) and Xinhua English (http://www.xinhuanet.com/english/rss/worldrss.xml). Both are Chinese state media. China Daily is marked RELIABLE/WORKING. Xinhua is marked FRAGILE/UNTESTED with comment documenting the risk and suggesting Google News proxy as fallback. No downgrade risk — these are read-only RSS feeds.",
+      "severity": "info"
+    },
+    {
+      "check": "google_news_query_sanitization",
+      "result": "PASS",
+      "detail": "All 15 Google News RSS URLs use hardcoded search queries with standard parameters (hl=en-US, gl=US, ceid=US:en). Query strings use URL-encoded characters (%27 for apostrophe, %2B for +). No user-supplied query parameters. Google News RSS is a read-only feed — no injection surface.",
+      "severity": "info"
+    },
+    {
+      "check": "source_health_tracking",
+      "result": "PASS",
+      "detail": "Each source has: tier (PRIMARY/RELIABLE/FRAGILE/BEST_EFFORT), status (WORKING/DEGRADED/DEAD/UNTESTED), last_checked (ISO date), consecutive_failures counter, reliability score (0-1), rate_limit_rps. Health tracked via is_available property. Degraded sources remain partially usable.",
+      "severity": "info"
+    },
+    {
+      "check": "no_credentials_exposure",
+      "result": "PASS",
+      "detail": "requires_auth=True for NewsAPI, GNews, Bluesky — but no API keys stored here. Keys handled separately via environment variables in scout.py and social_sources.py. This module is a pure data catalog.",
+      "severity": "info"
+    }
+  ],
+  "verdict": "PASS",
+  "recommendations": []
+}

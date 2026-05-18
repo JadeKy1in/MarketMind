@@ -1,40 +1,54 @@
 {
-  "module": "pipeline/post_gate1.py",
-  "timestamp": "2026-05-18T08:22:38Z",
-  "auditor": "PICA-Security-PhaseH-Extraction",
+  "module": "post_gate1",
+  "file": "pipeline/post_gate1.py",
+  "level": "PICA-Security",
+  "timestamp": "2026-05-18T12:02:34Z",
+  "auditor": "PICA-Security-PhaseH",
   "risk_tier": "High",
   "findings": [
     {
-      "severity": "INFO",
-      "description": "decision.py call — generate_decision() receives validated pipeline outputs (l1_result, l2_result, l3_result, red_team_report, resonance_result, shadow_votes=None, hypotheses). All inputs come from upstream stages that run their own integrity checks. shadow_votes is hardcoded None (design constraint: shadows don't vote). No injection surface in decision inputs.",
-      "location": "post_gate1.py:159-166"
+      "severity": "CRITICAL",
+      "check": "shadow_votes_removal",
+      "result": "PASS",
+      "detail": "CONFIRMED: shadow_votes is GONE from the entire file. (1) run_post_gate1() signature: (config, state, mock=False, verbose=False, gate1_decision=None) — no shadow_votes parameter. (2) generate_decision() call at line 239: no shadow_votes keyword argument. (3) grep verified: zero occurrences of 'shadow_votes' in file. The hardcoded None has been completely removed rather than just set to None.",
+      "location": "post_gate1.py:17-19, 239-245"
     },
     {
       "severity": "INFO",
-      "description": "Archive path safety — uses archivist from state dict, initialized in pre_gate1 with config.data_dir (validated config path). Archivist is separately audited (pica-security-archivist.json). Archive operations wrapped in try/except that logs and continues (line 39-45) — never crashes pipeline. Archive filenames are hardcoded strings (e.g., '03_layer1_narrative', '04_layer2_fundamental') — no path traversal via filename injection.",
+      "check": "archive_safety",
+      "result": "PASS",
+      "detail": "Archive helper _archive() wraps archivist.save_json() in try/except — never crashes pipeline. Archive filenames are hardcoded strings (e.g., '03_layer1_narrative', '04_layer2_fundamental') — no path traversal. Raw analysis truncated to 2000 chars before archiving.",
       "location": "post_gate1.py:39-45"
     },
     {
       "severity": "INFO",
-      "description": "No credential exposure — no API keys or secrets in this module. Gateway was initialized in pre_gate1. All LLM calls delegated to separately audited pipeline modules (layer1, layer2, layer3, red_team, resonance, decision).",
+      "check": "no_credential_exposure",
+      "result": "PASS",
+      "detail": "No API keys, secrets, or credentials in this module. All LLM calls delegated to separately audited pipeline modules (layer1, layer2, layer3, red_team, resonance, decision). Gateway initialized upstream in pre_gate1.",
       "location": "post_gate1.py (entire file)"
     },
     {
       "severity": "INFO",
-      "description": "Shadow ecosystem access — mother.orchestrate_daily_cycle() called only when config.shadow.shadows_enabled=True AND mother is not None (line 107). Phase F crystallization gated behind config.shadow.crystallization_enabled (line 116). Safe guards against None dereference.",
-      "location": "post_gate1.py:107-117"
+      "check": "shadow_ecosystem_access",
+      "result": "PASS",
+      "detail": "mother.orchestrate_daily_cycle() called only when config.shadow.shadows_enabled=True AND mother is not None (line 125-131). Phase F crystallization gated behind config.shadow.crystallization_enabled. Safe None-guards prevent dereference errors.",
+      "location": "post_gate1.py:125-135"
     },
     {
       "severity": "INFO",
-      "description": "FTS5 archive — archivist.init_fts() and index_document() at Stage 10. Content string constructed from pipeline outputs (event_grade, macro_quadrant, resonance.verdict) — no user-controlled strings injected into FTS index.",
-      "location": "post_gate1.py:184-193"
+      "check": "error_recovery",
+      "result": "PASS",
+      "detail": "Phase H enhancements (regime_mapper, scenario_forecaster, fragility_scanner, cross_border_analyzer) each wrapped in try/except with logger.warning. Pipeline continues on failure — these are enhancements, not critical path.",
+      "location": "post_gate1.py:77-89, 177-234"
     },
     {
       "severity": "INFO",
-      "description": "File at 196 lines — under the 250-line Python module soft threshold. Clean single-responsibility: runs pipeline stages 4-10 only. No extraction needed.",
-      "location": "post_gate1.py (size check)"
+      "check": "fts5_index_safety",
+      "result": "PASS",
+      "detail": "archivist.index_document() at Stage 10: content constructed from pipeline outputs (event_grade, macro_quadrant, resonance.verdict) — no user-controlled strings.",
+      "location": "post_gate1.py:262-270"
     }
   ],
   "verdict": "PASS",
-  "notes": "Extracted post-Gate 1 module with no credential exposure, safe archive paths using validated config directory, and hardcoded archive filenames preventing path traversal. Decision inputs all come from validated upstream pipeline stages. Shadows gated behind enabled+not-None check. FTS5 content constructed from pipeline outputs only, no user injection surface."
+  "notes": "DEFINITIVE AUDIT for shadow_votes removal. Parameter is GONE from signature and generate_decision() call — no trace remaining. Module is clean: no credentials exposed, safe archive paths with validated config directory, Phase H modules wrapped in error recovery, shadow ecosystem properly gated."
 }

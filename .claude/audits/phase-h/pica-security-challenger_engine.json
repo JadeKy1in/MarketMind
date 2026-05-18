@@ -1,0 +1,41 @@
+{
+  "module": "challenger_engine",
+  "file": "shadows/challenger_engine.py",
+  "level": "PICA-Security",
+  "timestamp": "2026-05-18T12:02:34Z",
+  "risk_tier": "Medium",
+  "findings": [
+    {
+      "check": "statistical_safety",
+      "result": "PASS",
+      "detail": "Uses Wilcoxon signed-rank test (non-parametric) via custom implementation — handles fat-tailed return distributions correctly. Falls back to scipy.stats.ttest_rel in _compute_paired_ttest (not used in primary flow; Wilcoxon is the active test). Paired data: same trading days for both shadows, minimum 5 pairs required, TRIAL_DAYS minimum 21 trading days for statistical power.",
+      "severity": "info"
+    },
+    {
+      "check": "challenger_opacity",
+      "result": "PASS",
+      "detail": "Challenger shadows created as shadow_type='challenger' with parent_shadow_id linking to target. get_visible_shadows() excludes challengers (verified in B.0 tests). Opaque to rankings until trial completes. Target shadow cannot see its challenger's analysis — prevents gaming.",
+      "severity": "info"
+    },
+    {
+      "check": "comparison_gates",
+      "result": "PASS",
+      "detail": "3-gate verdict: (1) Wilcoxon p-value < trial_alpha (one-sided, default from settings), (2) Challenger Calmar > calmar_gate (default from settings), (3) Challenger mean > target mean. All three must pass for REPLACE_TARGET. Missing any → RESTORE_TARGET or INCONCLUSIVE. Prevents premature replacement.",
+      "severity": "info"
+    },
+    {
+      "check": "brier_validation",
+      "result": "PASS",
+      "detail": "get_challenge_validity() uses logistic function on Brier score difference. Well-calibrated challenger vs poorly-calibrated target → validity near 1.0. Poorly-calibrated challenger vs well-calibrated target → validity near 0.0. This prevents miscalibrated shadows from successfully challenging well-calibrated ones.",
+      "severity": "info"
+    },
+    {
+      "check": "timezone_correctness",
+      "result": "PASS",
+      "detail": "datetime.now(timezone.utc) used in create_challenger() for timestamp-based ID generation. No bare datetime.now() calls.",
+      "severity": "info"
+    }
+  ],
+  "verdict": "PASS",
+  "recommendations": []
+}

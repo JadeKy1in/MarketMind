@@ -9,8 +9,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from statistics import mean, stdev
-
 from marketmind.gateway.cross_border import (
     TICFlowData,
     BISBankingFlow,
@@ -24,7 +22,6 @@ logger = logging.getLogger("marketmind.pipeline.cross_border_analyzer")
 
 # Heuristic thresholds
 _CAYMAN_FLOW_THRESHOLD_USD_BN = 10.0       # Large single-month Cayman flow (absolute)
-_BASIS_2SIGMA_MULTIPLIER = 2.0             # Basis widening beyond 2σ triggers alert
 _TREASURY_SUDDEN_STOP_THRESHOLD = -20.0    # Month-over-month drop > $20B in official purchases
 
 # Countries commonly associated with hedge fund domicile flows

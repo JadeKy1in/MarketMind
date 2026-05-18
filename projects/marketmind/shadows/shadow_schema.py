@@ -13,7 +13,7 @@ logger = logging.getLogger("marketmind.shadows.shadow_schema")
 
 # ── SQLite database ──────────────────────────────────────────────────────────
 
-CODE_VERSION = 8  # Increment on any schema change; add migration to _MIGRATIONS
+CODE_VERSION = 10  # Increment on any schema change; add migration to _MIGRATIONS
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS metadata (
@@ -158,7 +158,7 @@ CREATE TABLE IF NOT EXISTS paper_live_gap_state (
     FOREIGN KEY (shadow_id) REFERENCES shadows(id)
 );
 
-CREATE TABLE IF NOT EXISTS shadow_votes (
+CREATE TABLE IF NOT EXISTS shadow_analyses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     shadow_id TEXT NOT NULL,
     date TEXT NOT NULL,
@@ -170,8 +170,8 @@ CREATE TABLE IF NOT EXISTS shadow_votes (
     created_at TEXT NOT NULL,
     FOREIGN KEY (shadow_id) REFERENCES shadows(id)
 );
-CREATE INDEX IF NOT EXISTS idx_shadow_votes_date ON shadow_votes(date);
-CREATE INDEX IF NOT EXISTS idx_shadow_votes_shadow_date ON shadow_votes(shadow_id, date);
+CREATE INDEX IF NOT EXISTS idx_shadow_analyses_date ON shadow_analyses(date);
+CREATE INDEX IF NOT EXISTS idx_shadow_analyses_shadow_date ON shadow_analyses(shadow_id, date);
 
 CREATE TABLE IF NOT EXISTS belief_nodes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -318,11 +318,11 @@ def _migration_4_add_cycle_checkpoints(conn: sqlite3.Connection) -> None:
 
 
 def _migration_5_add_signal_quality(conn: sqlite3.Connection) -> None:
-    """Phase B audit: add outcome_label + outcome_return_pct to shadow_votes."""
+    """Phase B audit: add outcome_label + outcome_return_pct to shadow_analyses."""
     for col, col_type in [("outcome_label", "TEXT DEFAULT NULL"),
                            ("outcome_return_pct", "REAL DEFAULT NULL")]:
         try:
-            conn.execute(f"ALTER TABLE shadow_votes ADD COLUMN {col} {col_type}")
+            conn.execute(f"ALTER TABLE shadow_analyses ADD COLUMN {col} {col_type}")
         except sqlite3.OperationalError:
             pass
 
@@ -410,6 +410,41 @@ def _migration_8_add_quarantine_column(conn: sqlite3.Connection) -> None:
         pass
 
 
+def _migration_9_add_beta_and_retired(conn: sqlite3.Connection) -> None:
+    """Shadow Phase 2: add retired_at/retirement_reason columns + beta_analyses table."""
+    for col, col_type in [("retired_at", "TEXT DEFAULT NULL"),
+                           ("retirement_reason", "TEXT DEFAULT NULL")]:
+        try:
+            conn.execute(f"ALTER TABLE shadows ADD COLUMN {col} {col_type}")
+        except sqlite3.OperationalError:
+            pass
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS beta_analyses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            shadow_id TEXT NOT NULL,
+            date TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            direction TEXT NOT NULL CHECK(direction IN ('long','short','abstain')),
+            confidence REAL NOT NULL,
+            thesis TEXT,
+            risk_note TEXT,
+            methodology_variant TEXT DEFAULT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (shadow_id) REFERENCES shadows(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_beta_analyses_date ON beta_analyses(date);
+        CREATE INDEX IF NOT EXISTS idx_beta_analyses_shadow_date ON beta_analyses(shadow_id, date);
+    """)
+
+
+def _migration_10_rename_shadow_votes_to_shadow_analyses(conn: sqlite3.Connection) -> None:
+    """2026-05-18: rename shadow_votes table → shadow_analyses (no voting, internal only)."""
+    try:
+        conn.execute("ALTER TABLE shadow_votes RENAME TO shadow_analyses")
+    except sqlite3.OperationalError:
+        pass  # Table already renamed or fresh DB (shadow_analyses created directly)
+
+
 _MIGRATIONS: list[tuple[int, callable]] = [
     (1, _migration_1_add_discount_rate),
     (2, _migration_2_add_belief_tables),
@@ -419,4 +454,6 @@ _MIGRATIONS: list[tuple[int, callable]] = [
     (6, _migration_6_add_access_audit_log),
     (7, _migration_7_add_phase_c_tables),
     (8, _migration_8_add_quarantine_column),
+    (9, _migration_9_add_beta_and_retired),
+    (10, _migration_10_rename_shadow_votes_to_shadow_analyses),
 ]

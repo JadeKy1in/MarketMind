@@ -31,71 +31,51 @@ Phase 2: Shadow Ecosystem (build AFTER Phase 1 is complete)
 
 **Rule**: If you find yourself working on shadow code while the main AI pipeline is broken or incomplete, STOP. Fix the main pipeline first. Shadows are an ENHANCEMENT, not a replacement for the core analysis.
 
-## Phase Status (2026-05-18)
+## Phase Status (2026-05-18 EOD)
 
-### Phase H: Deep Analysis Enhancement — COMPLETE
+### Pipeline: 10 stages + 3 gates
+| Stage | Status |
+|-------|--------|
+| Stage 0 (Shadow Init) | COMPLETE |
+| Stage 1 (Scout) | COMPLETE — 35 sources audited, statuses verified |
+| Stage 2 (Flash Triage) | COMPLETE — event clustering integrated |
+| Stage 2b (HVR Investigation) | COMPLETE — Phase H enhanced (causal+flow decomposition) |
+| Gate 1 (Direction) | COMPLETE — cards, archiver, interaction loop, event clustering, CLI wiring |
+| Stage 3 (L1 Narrative) | COMPLETE |
+| Stage 4 (L2+L3) | COMPLETE |
+| Stage 5 (Shadows) | COMPLETE |
+| Stage 6 (Red Team) | COMPLETE |
+| Stage 7 (Resonance) | COMPLETE |
+| Stage 7b (Fragility) | COMPLETE — Phase H module |
+| Stage 8 (Decision) | COMPLETE — signal conflict detection |
+| Stage 9 (Archive) | COMPLETE |
+| Gate 2 (Confirmation) | COMPLETE — gate2_interaction, position sizing, pre-trade checklist |
+| Gate 3 (Position) | COMPLETE — gate3_interaction, final position validation |
 
-Phase H upgraded the pipeline from surface-level sentiment analysis to deep structural macro analysis.
+### Phase H: Deep Analysis — COMPLETE
+6 modules enhance existing stages with deeper analysis. All modules have full PICA audit coverage (75 artifacts).
 
-**Modules built (11 new)**:
-- `pipeline/causal_decomposition.py` (243 lines) — Asset-class-aware causal factor decomposition (9 lenses: balance_sheet, earnings_discount_rate, supply_demand_inventory, dual_central_bank_carry, onchain_offchain + 4 equity sub-types)
-- `pipeline/flow_decomposition.py` — Entity-level capital flow attribution with asset-class-keyed entity types
-- `pipeline/regime_mapper.py` — Historical regime comparison (8 regimes, 7-variable Euclidean distance, pre-1985 qualitative data)
-- `pipeline/scenario_forecaster.py` — Branching scenario trees with tail-risk sampling
-- `pipeline/fragility_scanner.py` — 12 systemic fragility thresholds with staleness detection
-- `pipeline/cross_border_analyzer.py` — Cross-border capital flow analysis
-- `gateway/cross_border.py` — TIC/BIS/cross-currency basis data gateway
-- `config/asset_class_routing.py` — 9-class asset taxonomy with keyword router (data module)
-- `config/mechanism_glossary.py` — 25+ institutional mechanism definitions (data module)
-- `config/regime_library.py` — 8 historical macro regimes (data module)
-- `config/fragility_thresholds.py` — 12 fragility thresholds with versioning (data module)
-- `pipeline/backtest_entry.py` — Backtest runner (extracted from app.py)
-- `pipeline/orchestration.py` — Pipeline orchestration with run_daily + run_full + run_interactive
-- `pipeline/investigation_types.py` — Shared data types (extracted from investigation_loop)
-- `pipeline/investigation_prompts.py` — HVR prompt constants (data module)
-- `pipeline/investigation_direction.py` — Direction extraction heuristics
+### Phase I: Learning Layer — COMPLETE
+6-layer self-evolving system observes pipeline output, scores predictions, runs post-mortems, accumulates entity memories. Operates as independent batch system — does not modify pipeline.
 
-**Gate 1 built (6 modules)**:
-- `integrity/input_guard.py` — Shared input sanitization
-- `pipeline/hypothesis_card.py` — 3-card progressive disclosure with frequency framing
-- `pipeline/gate1_interaction.py` — Conversation state machine with user-agenda-first opening
-- `pipeline/kill_monitor.py` — Downstream kill-criteria tracking
-- `storage/gate_archiver.py` — JSONL+MD dual-format conversation archive
-- `storage/session.py` — Atomic writes + graceful corruption recovery
+### Event Clustering: COMPLETE
+3-tier pipeline (regex entity extraction → TF-IDF clustering → Flash topic synthesis). Reduces 587 headlines to 10-15 named themes with cross-cluster causal chains. Integrated into Gate 1 direction assessment.
 
-**Architecture improvements**:
-- app.py: 971→76 lines (under 150-line CLI entry point ceiling)
-- investigation_loop.py: 918→486 lines (under 500-line module ceiling)
-- Pipeline manifest: stage_2b_investigation added
-- HypothesisResult: +11 fields, wired to generate_decision()
-- input_guard: wired into all gateway LLM paths
-- API cost ceiling: MAX_PRO_CALLS_PER_SESSION=30
-- All LLM prompts: mechanism terminology awareness injected
+### Shadow Phase 2: COMPLETE
+Ranking enhancement (MPPM/Calmar/Omega composite), new shadow types (Temp/MissedPath/Challenger/Beta lifecycle), collusion detector upgrade (agreement stats → convergence vs herding), shadow_analyses table replaces shadow_votes. Shadow voting removed from main pipeline — shadows produce independent analyses for internal ranking only.
 
-**Quality**:
-- Tests: 913 pass (up from 689, +224)
-- PICA artifacts: 57 (Security + Integration + Regression)
-- Red Team audits: 9 (3 Gate 1 + 3 Phase H v1 + 3 Phase H v2)
+### Shadow Ecosystem Rules (PERMANENT)
+1. Shadows produce independent ANALYSES for internal ranking — they NEVER vote on investment decisions.
+2. Shadow analyses stored in `shadow_analyses` table (renamed from shadow_votes on 2026-05-18).
+3. generate_decision() does NOT accept shadow data — no shadow output path exists to main decisions.
+4. Beta shadows are ISOLATED — excluded from ranking, collusion, challenger.
 
-### Phase I: Self-Evolving Learning Layer — PLAN COMPLETE (awaiting approval)
+### Source Audit: COMPLETE
+35 sources audited, statuses verified. Source authority tiers updated in `config/source_authority.py`.
 
-Six-layer learning architecture for AI self-improvement through verified feedback loops:
-- Layer 1: Time-anchored predictions → verifiable outcomes
-- Layer 2: Brier score calibration tracking
-- Layer 3: Structured post-mortem reflection with root cause taxonomy
-- Layer 4: Entity memory accumulation (per-asset, per-sector)
-- Layer 5: Platt scaling confidence calibration
-- Layer 6: Cross-shadow methodology distillation
-
-**Architecture plan**: `.claude/plans/phase-i-self-evolving-architecture.md`
-**Research**: 3 files in `.claude/research/` (self-evolving AI, KG temporal learning, multi-agent learning)
-
-Phase I is auxiliary — it observes the main pipeline and shadow ecosystem without modifying them. Shadow ecosystem Phase 2 upgrades proceed independently; learning layer adapts by tracking new entity IDs.
-
-### Architecture key distinction
-- **Shadow Ecosystem**: 21+ shadows independently analyze markets. Phase 2 adds ELITE protocol, domain-triggered awakening, more complex shadow types.
-- **Phase I Learning Layer**: Observes ALL analyses (main AI + shadows), scores predictions, runs post-mortems, accumulates entity memories, distills methodology. Does NOT modify how shadows analyze — only feeds lessons back via prompt injection.
-- **Integration**: Minimal. Learning layer reads shadow output for scoring; writes lessons to SQLite for retrieval at next analysis time. No changes to shadow_agent.py required.
+### Test count: 1272 (up from 689)
+### PICA artifacts: 75
+### Red Team audits: 13
 
 ## Quick Start
 
@@ -128,9 +108,10 @@ marketmind/
 │   ├── shadow_state.py         # SQLite persistence + ShadowConfig
 │   ├── shadow_mother.py        # Daily orchestration + event detection + temp shadows
 │   ├── shadow_memory.py        # Layered memory (working/episodic/semantic)
-│   ├── expert_shadows.py       # 15 domain-specific analyst shadows
-│   ├── daredevil_shadows.py    # 5 contrarian/high-risk shadows
-│   ├── catfish_agent.py        # Minority-opinion enforcer (>=80% consensus trigger)
+│   ├── expert_shadows.py       # 16 domain-specific analyst shadows
+│   ├── daredevil_shadows.py    # 5 active + 2 env-locked + 1 short-biased = 8 daredevils
+│   ├── ecosystem_auditor.py    # Ecosystem auditor mechanism (NOT a shadow — blind-spot scan)
+│   ├── catfish_agent.py        # DEPRECATED — backward-compat wrapper for ecosystem_auditor
 │   ├── ranking_engine.py       # MPPM/Calmar/Omega composite ranking
 │   ├── challenger_engine.py    # 3-stage elimination buffer + paired t-test
 │   ├── collusion_detector.py   # Agreement stats → convergence vs herding
@@ -157,6 +138,10 @@ marketmind/
 │   ├── hypothesis_card.py      # Gate 1 hypothesis card generation (3-card, frequency framing, progressive disclosure)
 │   ├── kill_monitor.py         # Downstream kill-criteria monitoring
 │   ├── gate1_interaction.py    # Gate 1 conversation loop + state machine
+│   ├── gate2_interaction.py    # Gate 2 confirmation interaction loop
+│   ├── gate3_interaction.py    # Gate 3 position sizing interaction loop
+│   ├── position_sizing.py      # Position sizing engine (Kelly, risk parity)
+│   ├── pre_trade_checklist.py  # Pre-trade validation checklist
 │   ├── hvr_cycle.py            # HVR investigation cycle (extracted from investigation_loop)
 │   ├── investigation_prompts.py  # HVR system prompt constants (data module)
 │   ├── investigation_types.py    # HVR data types (data module)
@@ -168,6 +153,17 @@ marketmind/
 │   ├── scenario_forecaster.py  # Branching scenario tree generation
 │   ├── fragility_scanner.py    # Systemic fragility threshold monitoring
 │   ├── cross_border_analyzer.py # Cross-border capital flow analysis
+│   ├── entity_extractor.py      # Regex entity extraction from headlines
+│   ├── event_clusterer.py       # TF-IDF clustering + theme naming
+│   ├── flash_triage.py          # Stage 2 replacement — flash signal triage
+│   ├── pre_gate1.py             # Pre-Gate 1 preparation
+│   ├── post_gate1.py            # Post-Gate 1 processing
+│   ├── entity_memory.py         # Phase I — per-entity memory accumulation
+│   ├── expertise_discovery.py   # Phase I — cross-shadow methodology discovery
+│   ├── platt_scaling.py         # Phase I — Platt scaling confidence calibration
+│   ├── calibration_tracker.py   # Phase I — Brier score calibration tracking
+│   ├── prediction_extractor.py  # Phase I — time-anchored prediction extraction
+│   ├── reflection_agent.py      # Phase I — structured post-mortem reflection
 │   ├── backtest_entry.py       # Backtest runner entry point (extracted from app.py)
 │   ├── orchestration.py        # Pipeline orchestration (run_interactive extracted from app.py)
 │   └── cache.py                # Response caching
@@ -199,7 +195,7 @@ marketmind/
 │   ├── mechanism_glossary.py   # 25+ institutional mechanism definitions (data module)
 │   ├── regime_library.py       # 8+ historical macro regimes (data module)
 │   └── fragility_thresholds.py # 12 systemic fragility thresholds (data module)
-└── tests/                      # Test suite (913 tests)
+└── tests/                      # Test suite (1044 tests)
     ├── test_gateway/           # Gateway + token budget tests
     │   ├── test_async_client.py
     │   ├── test_token_budget.py
@@ -214,7 +210,7 @@ marketmind/
     │   ├── test_shadow_mother.py
     │   ├── test_expert_shadows.py
     │   ├── test_daredevil_shadows.py
-    │   ├── test_catfish_agent.py
+    │   ├── test_catfish_agent.py       # Tests EcosystemAuditor + backward-compat CatfishAgent
     │   ├── test_ranking_engine.py
     │   ├── test_challenger_engine.py
     │   ├── test_collusion_detector.py
@@ -245,6 +241,15 @@ marketmind/
     │   ├── test_hypothesis_card.py
     │   ├── test_kill_monitor.py
     │   ├── test_gate1_interaction.py
+    │   ├── test_entity_extractor.py
+    │   ├── test_event_clusterer.py
+    │   ├── test_flash_triage.py
+    │   ├── test_entity_memory.py
+    │   ├── test_expertise_discovery.py
+    │   ├── test_platt_scaling.py
+    │   ├── test_calibration_tracker.py
+    │   ├── test_prediction_extractor.py
+    │   ├── test_reflection_agent.py
     │   ├── test_cache.py
     │   └── test_verification_chain.py
     ├── test_ui/                # UI component tests
@@ -299,7 +304,6 @@ Step 4: L2 + L3 (parallel)
 Step 5: Shadow Ecosystem (optional, runs in parallel with main AI)
         Shadows analyze raw news+market_data independently.
         Output: ranked shadows, memory updates, crystallization.
-        shadow_votes is ALWAYS None — shadows do NOT vote on decisions.
 
 Step 6: Red Team — run_red_team()
         Adversarial challenge on L1+L2 raw analysis
@@ -308,26 +312,22 @@ Step 7: Resonance — evaluate_resonance()
         Statistical validation (DSR/PBO), pure Python, no LLM
 
 Step 8: Decision — generate_decision()
-        shadow_votes=None (design decision: shadows don't vote)
         Produces decision_cards + no_trade_card
 
 Step 9: Archive — archivist.index_document()
         FTS5 full-text search index
 ```
 
-### CRITICAL: Shadows Do NOT Vote
-
-`app.py:110`: `shadow_votes = None` — initialized to None, never assigned, passed as None to `generate_decision()`. This is INTENTIONAL. Shadows are an internal competition ecosystem for ranking/evolution/crystallization. They are NOT a voting mechanism for investment decisions. Any document claiming "shadows vote on decisions" is stale/wrong.
-
 ### Shadow Ecosystem (independent from main decision)
 
-21+ shadows across 7 types compete internally:
-- **Expert** (15): domain-specific analysts (gold, crypto, energy, bonds, etc.)
-- **Daredevil** (5): contrarian strategies
-- **Catfish** (1): minority-opinion enforcer at >=80% consensus
+23+ shadows across 7 types compete internally (canonical design: shadow-ecosystem-full-design.md §1):
+- **Expert** (16): domain-specific analysts with indicator confirmation thresholds
+- **Daredevil** (8): 5 active (must decide daily) + 2 env-locked + 1 short-biased (Crash Hunter)
+- **Ecosystem Auditor**: post-analysis mechanism — NOT a shadow. Reads shadow output, produces <=5 blind-spot alerts
 - **Temp/MissedPath/Challenger/Beta**: dynamic lifecycle
+- **Catfish**: DEPRECATED — replaced by EcosystemAuditor (backward-compat wrapper only)
 
-Internal cycle: event scan → temp shadow lifecycle → analysis → ranking → collusion → challenger → memory update → crystallization. Output feeds back into shadow ranking only.
+Internal cycle: event scan → temp shadow lifecycle → analysis → ranking → collusion → challenger → ecosystem audit → memory update → crystallization. Output feeds back into shadow ranking only.
 
 ### ELITE Shadow Participation (Gate 2)
 

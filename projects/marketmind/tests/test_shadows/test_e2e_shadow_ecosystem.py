@@ -26,21 +26,19 @@ def e2e_db():
 
 @pytest.fixture
 def mother_with_shadows(e2e_db, settings):
-    """Create 15 expert + 5 daredevil + 1 catfish shadows."""
+    """Create 15 expert + 8 daredevil shadows (no catfish — it's now an ecosystem auditor)."""
     from marketmind.shadows.expert_shadows import create_expert_shadows
     from marketmind.shadows.daredevil_shadows import create_daredevil_shadows
-    from marketmind.shadows.catfish_agent import create_catfish_agent
 
     create_expert_shadows(e2e_db, settings)
     create_daredevil_shadows(e2e_db, settings)
-    create_catfish_agent(e2e_db, settings)
     return ShadowMother(settings, e2e_db)
 
 
-def test_full_shadow_setup_21_shadows(mother_with_shadows, e2e_db):
-    """Verify 16 experts + 8 daredevils + 1 catfish = 25 shadows registered."""
+def test_full_shadow_setup_23_shadows(mother_with_shadows, e2e_db):
+    """Verify 15 experts + 8 daredevils = 23 shadows registered (catfish is no longer a shadow)."""
     visible = e2e_db.get_visible_shadows()
-    assert len(visible) == 25
+    assert len(visible) == 23
 
 
 @pytest.mark.asyncio

@@ -12,8 +12,12 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from marketmind.pipeline.event_clusterer import ClusteringResult
 
 from marketmind.config.flash_output_schema import validate_flash_output
 from marketmind.config.investigation_config import (
@@ -61,6 +65,12 @@ class TriageResult:
     classification: str        # macro | company | geopolitical | sentiment | technical
     affected_assets: list[str]  # ticker hints only (not full analysis)
     cluster_hints: list[str]    # keywords for later clustering (country, sector, event type)
+
+    # Event clustering context (NEW — Phase G)
+    cluster_id: int | None = None
+    cluster_title: str = ""
+    causal_links: list[str] = field(default_factory=list)
+    # causal_links example: ["ECB decision (cluster 3) → EUR/USD movement (cluster 7)"]
 
 
 def _build_triage_prompt(items: list[NewsItem]) -> str:
@@ -151,21 +161,25 @@ async def triage_batch(
             continue
 
         content = flash_result.get("content", "")
+        logger.debug("Flash raw response (first 300 chars): %s", content[:300] if content else "EMPTY")
         if not content or flash_result.get("error"):
             logger.warning(
-                "Flash triage returned empty/error for batch %d-%d: %s",
+                "Flash triage returned empty/error for batch %d-%d: %s. Prompt was %d chars. System prompt: %s",
                 batch_start,
                 batch_start + len(batch),
                 flash_result.get("error", "empty content"),
+                len(user_prompt),
+                FLASH_TRIAGE_SYSTEM_PROMPT[:100],
             )
             continue
 
         raw_items = _parse_json_response(content)
         if not raw_items:
             logger.warning(
-                "Flash triage JSON parse returned no items for batch %d-%d",
+                "Flash triage JSON parse returned no items for batch %d-%d. Content (first 200): %s",
                 batch_start,
                 batch_start + len(batch),
+                (content or "None")[:200],
             )
             continue
 
@@ -277,3 +291,49 @@ def count_by_classification(results: list[TriageResult]) -> dict[str, int]:
     for r in results:
         counts[r.classification] = counts.get(r.classification, 0) + 1
     return counts
+
+
+def inject_cluster_context(
+    triage_results: list[TriageResult],
+    clustering_result: ClusteringResult | None,
+) -> list[TriageResult]:
+    """Enrich triage results with event cluster membership.
+
+    Maps each triage result's headline to its cluster (by headline text match).
+    Adds cross-cluster causal links where applicable. Results without a matching
+    cluster keep their defaults (cluster_id=None, cluster_title="", causal_links=[]).
+
+    Args:
+        triage_results: List of TriageResult from triage_batch().
+        clustering_result: ClusteringResult from event_clusterer pipeline,
+            or None if clustering hasn't run.
+
+    Returns:
+        Same list of TriageResult, enriched in-place with cluster context.
+    """
+    if clustering_result is None or not clustering_result.clusters:
+        return triage_results
+
+    # Build headline → cluster lookup
+    headline_to_cluster: dict[str, object] = {}
+    for cluster in clustering_result.clusters:
+        for headline in cluster.headlines:
+            headline_to_cluster[headline] = cluster
+
+    # Build causal link descriptions for each cluster
+    cluster_links: dict[int, list[str]] = {}
+    for src, dst, reason in clustering_result.cross_cluster_causal_chains:
+        desc = f"{src.title} (cluster {src.cluster_id}) → {dst.title} (cluster {dst.cluster_id}): {reason}"
+        if src.cluster_id not in cluster_links:
+            cluster_links[src.cluster_id] = []
+        cluster_links[src.cluster_id].append(desc)
+
+    # Enrich each result
+    for result in triage_results:
+        cluster = headline_to_cluster.get(result.headline)
+        if cluster:
+            result.cluster_id = cluster.cluster_id
+            result.cluster_title = cluster.title
+            result.causal_links = cluster_links.get(cluster.cluster_id, [])
+
+    return triage_results

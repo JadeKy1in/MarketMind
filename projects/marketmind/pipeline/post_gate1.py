@@ -5,7 +5,10 @@ Exports:
 """
 from __future__ import annotations
 import asyncio
+import logging
 from typing import TYPE_CHECKING
+
+logger = logging.getLogger("marketmind.pipeline.post_gate1")
 
 if TYPE_CHECKING:
     from marketmind.config.settings import MarketMindConfig
@@ -69,6 +72,22 @@ async def run_post_gate1(config: "MarketMindConfig", state: dict,
         "raw_analysis": l1_result.raw_analysis[:2000] if l1_result.raw_analysis else ""
     })
 
+    # Phase H: regime mapping (after L1 narrative analysis)
+    regime_mapping = None
+    try:
+        from marketmind.pipeline.regime_mapper import map_regime, RegimeMapping
+        l1_text = l1_result.raw_analysis or ""
+        if actionable:
+            l1_text = actionable[0].hypothesis + "\n" + l1_text
+        regime_mapping = await map_regime(l1_text)
+        if isinstance(regime_mapping, RegimeMapping):
+            tracker.result(f"Regime: {regime_mapping.regime_consensus[:100]}")
+            logger.info("Regime mapping: quadrant=%s, top=%s",
+                        regime_mapping.current_quadrant,
+                        getattr(regime_mapping.top_analogues[0], 'regime_name', 'N/A') if regime_mapping.top_analogues else 'N/A')
+    except Exception as e:
+        logger.warning("Regime mapping failed: %s", e)
+
     # 5. Layer 2 + Layer 3 in parallel
     tracker.advance(5, "Layer 2+3: fundamental + technical analysis...")
     from marketmind.pipeline.layer2_fundamental import analyze_layer2
@@ -103,7 +122,6 @@ async def run_post_gate1(config: "MarketMindConfig", state: dict,
     })
 
     # 6. Shadow ecosystem run
-    shadow_votes = None  # DESIGN: shadows are internal competition, never vote on decisions
     if config.shadow.shadows_enabled and mother is not None:
         tracker.advance(6, "Shadows: running analysis cycle...")
         orchestration = await mother.orchestrate_daily_cycle(
@@ -155,14 +173,75 @@ async def run_post_gate1(config: "MarketMindConfig", state: dict,
         "dimensions_active": resonance.dimensions_active
     })
 
-    # 9. Decision (shadow_votes always None — shadows are internal competition only)
+    # Phase H: scenario forecasting for ACTIONABLE hypotheses
+    if hypotheses:
+        from marketmind.pipeline.scenario_forecaster import forecast_scenarios, ScenarioTree
+        forecast_count = 0
+        for h in hypotheses:
+            try:
+                if h.verdict == "ACTIONABLE":
+                    tree = await forecast_scenarios(h)
+                    if isinstance(tree, ScenarioTree):
+                        h.scenario_tree = tree
+                        forecast_count += 1
+                        logger.info("Scenario forecast: %s -> %d branches",
+                                    h.hypothesis[:60],
+                                    3 + (1 if tree.tail_risk_case else 0))
+                elif h.verdict == "MONITOR" and h.bear_case_confidence > 0.6:
+                    tree = await forecast_scenarios(h, include_tail_risk=True)
+                    if isinstance(tree, ScenarioTree):
+                        h.scenario_tree = tree
+                        forecast_count += 1
+                        logger.info("Scenario forecast (tail risk): %s", h.hypothesis[:60])
+            except Exception as e:
+                logger.warning("Scenario forecast failed for hypothesis: %s", e)
+        if forecast_count > 0:
+            tracker.result(f"Scenario trees: {forecast_count} generated")
+
+    # Phase H: systemic fragility scan (once per session)
+    fragility_report = None
+    try:
+        from marketmind.pipeline.fragility_scanner import scan_fragility, FragilityReport
+        # Future: replace empty dict with live macro data feed
+        fragility_report = await scan_fragility({})
+        if isinstance(fragility_report, FragilityReport):
+            tracker.result(f"Fragility: score={fragility_report.overall_fragility_score:.2f}, "
+                           f"{len(fragility_report.crossed)} crossed, "
+                           f"{len(fragility_report.warnings)} warnings")
+    except Exception as e:
+        logger.warning("Fragility scan failed: %s", e)
+
+    # Phase H: cross-border flow analysis
+    cross_border_report = None
+    try:
+        from marketmind.pipeline.cross_border_analyzer import analyze_cross_border_flows, CrossBorderFlowReport
+        from marketmind.config.asset_class_routing import route_asset_class
+        # Analyze hypotheses with international/cross-border implications
+        intl_texts = []
+        for h in hypotheses:
+            config, conf = route_asset_class(h.hypothesis)
+            if config and config.class_id in ("fx", "commodity", "crypto", "global_macro"):
+                intl_texts.append(h.hypothesis)
+        if intl_texts:
+            combined = " | ".join(intl_texts[:3])
+            cross_border_report = await analyze_cross_border_flows(combined)
+            if isinstance(cross_border_report, CrossBorderFlowReport):
+                tracker.result(f"Cross-border: quality={cross_border_report.data_quality}, "
+                               f"{len(cross_border_report.unusual_patterns)} patterns")
+        else:
+            logger.debug("Cross-border analysis skipped: no internationally-relevant hypotheses")
+    except Exception as e:
+        logger.warning("Cross-border analysis failed: %s", e)
+
+    # 9. Decision
     tracker.advance(9, "Decision: synthesis...")
     from marketmind.pipeline.decision import generate_decision
     decision = await generate_decision(
         l1=l1_result, l2=l2_result, l3=l3_result,
         red_team=red_team_report, resonance=resonance,
-        shadow_votes=shadow_votes,
         hypotheses=hypotheses,
+        fragility_report=fragility_report,
+        cross_border_report=cross_border_report,
     )
     tracker.result(f"cards={len(decision.decision_cards)}, "
                    f"no_trade={'present' if decision.no_trade_card else 'none'}")
@@ -190,6 +269,11 @@ async def run_post_gate1(config: "MarketMindConfig", state: dict,
                 f"resonance={resonance.verdict}",
     )
     tracker.result("Session archived")
+
+    # Stash Phase H results into state for Gate 2/3 integration
+    state["fragility_report"] = fragility_report
+    state["regime_mapping"] = regime_mapping
+    state["decision"] = decision
 
     print("\nMarketMind daily pipeline complete.")
     return 0

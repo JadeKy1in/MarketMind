@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git *)",
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Bash(pip *)",
+      "Bash(pytest *)",
+      "Bash(mkdir *)",
+      "Bash(cp *)",
+      "Bash(mv *)",
+      "Bash(rm *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(echo *)",
+      "Bash(npm *)",
+      "Bash(node *)",
+      "Bash(gh *)",
+      "Bash(curl *)",
+      "Bash(wc *)",
+      "Bash(head *)",
+      "Bash(find *)",
+      "Bash(grep *)",
+      "WebSearch",
+      "WebFetch(domain:*)",
+      "Skill(*)",
+      "Agent(*)",
+      "TaskCreate",
+      "TaskUpdate",
+      "TaskList",
+      "TaskGet",
+      "TaskOutput",
+      "TaskStop",
+      "SendMessage",
+      "EnterPlanMode",
+      "ExitPlanMode",
+      "Bash(git add *)",
+      "Bash(git rm *)"
+    ]
+  }
+}

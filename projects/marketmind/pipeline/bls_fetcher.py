@@ -22,7 +22,7 @@ BLS_SERIES: dict[str, str] = {
     "CUUR0000SA0": "CPI",
     "CUUR0000SA0L1E": "Core CPI",
     "LNS14000000": "Unemployment Rate",
-    "PCUOMFGOMFG": "PPI",
+    "WPUFD4": "PPI",
 }
 
 # Series ID → unit label
@@ -30,7 +30,7 @@ BLS_UNITS: dict[str, str] = {
     "CUUR0000SA0": "pct",
     "CUUR0000SA0L1E": "pct",
     "LNS14000000": "pct",
-    "PCUOMFGOMFG": "pct",
+    "WPUFD4": "pct",
 }
 
 
@@ -85,7 +85,10 @@ async def fetch_bls_indicators() -> list[dict]:
 
             observations: list[dict] = series.get("data", [])
             if not observations:
-                logger.warning("BLS API: no observations for %s (%s)", indicator_name, series_id)
+                if series_id == "WPUFD4":
+                    logger.warning("PPI data unavailable — series may be deprecated or data delayed")
+                else:
+                    logger.warning("BLS API: no observations for %s (%s)", indicator_name, series_id)
                 continue
 
             # Observations are sorted newest-first by BLS API

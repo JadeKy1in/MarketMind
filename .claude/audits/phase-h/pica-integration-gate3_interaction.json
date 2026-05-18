@@ -1,0 +1,41 @@
+{
+  "module": "gate3_interaction",
+  "file": "pipeline/gate3_interaction.py",
+  "level": "PICA-Integration",
+  "timestamp": "2026-05-18T12:02:34Z",
+  "risk_tier": "High",
+  "findings": [
+    {
+      "check": "import_boundaries",
+      "result": "PASS",
+      "detail": "Runtime imports: pipeline.position_sizing (compute_position_size, PositionSizeResult), pipeline.pre_trade_checklist (run_pre_trade_checklist, PreTradeReport), pipeline.investigation_loop (HypothesisResult), integrity.input_guard, storage.gate_archiver, storage.archivist, storage.session. Does NOT import gate2 orchestration (run_gate2). Imports Gate2Session from gate2_interaction via try/except with local fallback — this is a DATA TYPE import, not orchestration. No shadow/ imports.",
+      "severity": "info"
+    },
+    {
+      "check": "gate2_data_type_dependency",
+      "result": "PASS",
+      "detail": "Gate2Session imported via try/except with complete local fallback dataclass. If gate2_interaction.py is broken or missing, gate3 still operates with the fallback — no hard dependency. The fallback duplicates the Gate2Session interface but this is intentional for resilience.",
+      "severity": "info"
+    },
+    {
+      "check": "data_flow",
+      "result": "PASS",
+      "detail": "Inputs: Gate2Session (conviction record), hypotheses (HVR results). Outputs: Gate3Session with DecisionTicket and EXECUTED/DEFERRED/CANCELLED outcome. Position sizing computed via compute_position_size(). Pre-trade validation via run_pre_trade_checklist(). Session checkpoint saved. Archive logged. No data flows to shadows.",
+      "severity": "info"
+    },
+    {
+      "check": "single_entry_point",
+      "result": "PASS",
+      "detail": "Single public function: async run_gate3(). Helper functions (_format_*, _parse_*) are module-private.",
+      "severity": "info"
+    },
+    {
+      "check": "turn_limit_safety",
+      "result": "PASS",
+      "detail": "Hard turn limit of 40 with warning at 30. Deferred state saved if limit reached. No infinite loop.",
+      "severity": "info"
+    }
+  ],
+  "verdict": "PASS",
+  "recommendations": []
+}

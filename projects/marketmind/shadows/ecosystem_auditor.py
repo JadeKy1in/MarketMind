@@ -1,11 +1,17 @@
 """Ecosystem Auditor — blind-spot detection across the shadow ecosystem (Phase 0).
 
+# ECOSYSTEM AUDITOR — NOT A SHADOW. Reads shadow output, does not produce votes.
+
 Replaces CatfishAgent. This is a MECHANISM, not a shadow. It scans all shadow
 votes daily for structural blind spots: direction concentration, asset class
 neglect, methodology convergence, uncovered tickers. Pure Python compute with
 Pro interpretation only when thresholds are breached.
 
+Input: all shadow votes + positions
 Output: <=5 blind-spot alerts surfaced in Gate 2.
+Detection categories: direction concentration, asset class neglect,
+  methodology convergence, uncovered tickers
+Python computes metrics -> Pro interprets ONLY when threshold triggered.
 """
 from __future__ import annotations
 

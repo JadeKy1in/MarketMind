@@ -113,8 +113,11 @@ ASSET_CLASSES: dict[str, AssetClassConfig] = {
                   "copper", "soybean", "natgas", "commodity", "大宗", "OPEC", "页岩",
                   "shale", "供应", "需求", "库存", "inventory", "backwardation",
                   "contango", "WTI", "Brent", "布伦特", "贵金属", "precious metal",
-                  "铁矿石", "iron ore"],
-        tickers=["GLD", "USO", "UNG", "DBA", "CPER", "SLV", "PPLT"],
+                  "铁矿石", "iron ore", "agriculture", "农产品", "小麦", "wheat",
+                  "玉米", "corn", "grain", "粮食", "咖啡", "coffee", "糖", "sugar",
+                  "棉花", "cotton", "农业", "livestock", "fertilizer", "cocoa"],
+        tickers=["GLD", "USO", "UNG", "DBA", "CPER", "SLV", "PPLT",
+                 "CORN", "WEAT", "SOYB"],
         key_data_sources=["EIA:inventory", "CFTC:COT", "FRED:CPILFESL",
                           "market_data:GLD"]
     ),

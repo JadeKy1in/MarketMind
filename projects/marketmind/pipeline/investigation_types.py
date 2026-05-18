@@ -7,6 +7,12 @@ are shared between investigation_loop.py (glue) and hvr_cycle.py (behavioral).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from marketmind.pipeline.causal_decomposition import CausalDecomposition
+    from marketmind.pipeline.flow_decomposition import FlowAttribution
+    from marketmind.pipeline.scenario_forecaster import ScenarioTree
 
 from marketmind.config.investigation_config import (
     ADVERSARIAL_BEAR_CASE_REQUIRED,
@@ -79,3 +85,7 @@ class HypothesisResult:
     layer_3_narrative: str = ""  # human-readable Layer 3 multisource narrative
     layer_4_narrative: str = ""  # human-readable Layer 4 historical narrative
     core_logic: str = ""         # concise one-line thesis summary
+    # Phase H: deep analysis enrichments (populated by pipeline post-processing)
+    causal: "CausalDecomposition | None" = None
+    flow: "FlowAttribution | None" = None
+    scenario_tree: "ScenarioTree | None" = None

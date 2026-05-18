@@ -14,6 +14,7 @@ investigation engine that browses, challenges, and refines financial claims.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -471,6 +472,36 @@ async def run_investigation_loop(
     # Rank by confidence (highest first), but ACTIONABLE before MONITOR before DISCARD/PRICED_IN
     _verdict_rank = {"ACTIONABLE": 0, "MONITOR": 1, "HIGH_CONTENTION": 2, "DISCARD": 3, "PRICED_IN": 4}
     results.sort(key=lambda r: (_verdict_rank.get(r.verdict, 5), -r.confidence))
+
+    # Phase H: enrich hypotheses with causal and flow decomposition
+    enrichable = [r for r in results if r.verdict in ("ACTIONABLE", "HIGH_CONTENTION")]
+    if enrichable:
+        from marketmind.pipeline.causal_decomposition import decompose_hypothesis, CausalDecomposition
+        from marketmind.pipeline.flow_decomposition import attribute_flows, FlowAttribution
+
+        async def _enrich_one(result: HypothesisResult) -> None:
+            """Run causal + flow decomposition for one hypothesis. Never raises."""
+            try:
+                causal_task = decompose_hypothesis(result)
+                flow_task = attribute_flows(result)
+                causal, flow = await asyncio.gather(causal_task, flow_task, return_exceptions=True)
+                if isinstance(causal, CausalDecomposition):
+                    result.causal = causal
+                    logger.info("Causal decomposition: %s -> %s (force=%.3f)",
+                                result.hypothesis[:60], causal.asset_class, causal.net_directional_force)
+                elif isinstance(causal, Exception):
+                    logger.warning("Causal decomposition failed: %s", causal)
+                if isinstance(flow, FlowAttribution):
+                    result.flow = flow
+                    logger.info("Flow attribution: %s -> %d entities (dominant=%s/%s)",
+                                result.hypothesis[:60], len(flow.entities),
+                                flow.dominant_buyer, flow.dominant_seller)
+                elif isinstance(flow, Exception):
+                    logger.warning("Flow decomposition failed: %s", flow)
+            except Exception as e:
+                logger.warning("Phase H enrichment failed for hypothesis: %s", e)
+
+        await asyncio.gather(*[_enrich_one(r) for r in enrichable])
 
     elapsed = (datetime.now(timezone.utc) - t_start).total_seconds()
     actionable = sum(1 for r in results if r.verdict == "ACTIONABLE")

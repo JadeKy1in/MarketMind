@@ -18,6 +18,10 @@ from marketmind.shadows.shadow_agent import ShadowVote
 
 logger = logging.getLogger("marketmind.shadows.collusion_detector")
 
+# Lowered from 0.80: Phase I knowledge distillation may cause shadows to converge.
+# Earlier intervention preserves ecosystem diversity.
+CATFISH_CONSENSUS_THRESHOLD = 0.60
+
 
 class CollusionDetector:
     """Detects collusion (lockstep movement) among shadow agents.
@@ -256,3 +260,94 @@ class CollusionDetector:
         # Return two-tailed for conservatism (multiply by 2)
         two_tailed = min(1.0, p_value * 2.0)
         return two_tailed
+
+
+# ── Methodology convergence detection ────────────────────────────────────
+
+def detect_methodology_convergence(
+    shadow_states: list[dict],
+    agreement_threshold: float = 0.80,
+    days_threshold: int = 5,
+    methodology_similarity_threshold: float = 0.5,
+) -> list[str]:
+    """Flag when shadows with shared methodology lineage produce correlated outputs.
+
+    This is qualitatively different from independent agreement — two shadows
+    with shared Phase I methodology provenance arriving at the same conclusion
+    does not constitute independent validation.
+
+    Args:
+        shadow_states: List of dicts, each with:
+            - shadow_id: str
+            - methodology_provenance: list[str] (ancestor methodology IDs)
+            - positions: list[set[str]] (daily position ticker sets, most recent first)
+        agreement_threshold: Position agreement rate that triggers a flag.
+        days_threshold: Minimum number of overlapping days required.
+        methodology_similarity_threshold: Jaccard similarity to consider
+            two shadows as sharing methodology lineage.
+
+    Returns:
+        List of warning message strings.
+    """
+    warnings: list[str] = []
+    n = len(shadow_states)
+    if n < 2:
+        return warnings
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            a = shadow_states[i]
+            b = shadow_states[j]
+
+            # Compute methodology similarity (Jaccard of ancestor sets)
+            prov_a = set(a.get("methodology_provenance", []))
+            prov_b = set(b.get("methodology_provenance", []))
+            if prov_a and prov_b:
+                intersection = prov_a & prov_b
+                union = prov_a | prov_b
+                jaccard = len(intersection) / len(union) if union else 0.0
+            else:
+                jaccard = 0.0
+
+            if jaccard < methodology_similarity_threshold:
+                continue
+
+            # Compute position agreement over overlapping days
+            pos_a = a.get("positions", [])
+            pos_b = b.get("positions", [])
+            min_days = min(len(pos_a), len(pos_b))
+            if min_days < days_threshold:
+                continue
+
+            agreement_days = 0
+            for day in range(min_days):
+                set_a = pos_a[day] if isinstance(pos_a[day], set) else set(pos_a[day])
+                set_b = pos_b[day] if isinstance(pos_b[day], set) else set(pos_b[day])
+                union_positions = set_a | set_b
+                if not union_positions:
+                    continue
+                overlap = len(set_a & set_b) / len(union_positions)
+                if overlap >= agreement_threshold:
+                    agreement_days += 1
+
+            if agreement_days >= days_threshold:
+                if jaccard > 0.8:
+                    severity = "methodology_collusion"
+                    msg = (
+                        f"ESCALATED: Shadows '{a['shadow_id']}' and '{b['shadow_id']}' "
+                        f"share {jaccard:.0%} methodology lineage and agree on "
+                        f">{agreement_threshold:.0%} of positions for {agreement_days}+ "
+                        f"days. This is methodology collusion, not independent validation."
+                    )
+                else:
+                    severity = "methodology_clone_risk"
+                    msg = (
+                        f"WARNING: Shadows '{a['shadow_id']}' and '{b['shadow_id']}' "
+                        f"share {jaccard:.0%} methodology lineage and agree on "
+                        f">{agreement_threshold:.0%} of positions for {agreement_days}+ "
+                        f"days. Potential methodology convergence."
+                    )
+                logger.warning("%s: %s", severity, msg)
+                warnings.append(msg)
+
+    return warnings

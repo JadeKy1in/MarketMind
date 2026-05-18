@@ -86,7 +86,7 @@ class KnowledgeManager:
         """Run knowledge crystallization for shadows with sufficient vote history.
 
         Queries episodic memory for insights with high belief but low confidence,
-        backtest validates against shadow_votes, and promotes or retires insights.
+        backtest validates against shadow_analyses, and promotes or retires insights.
         """
         from marketmind.shadows.shadow_memory import ShadowMemoryStore
         from marketmind.shadows.methodology_evolver import MethodologyEvolver

@@ -239,8 +239,10 @@ class ShadowAgent:
         for match in pattern.finditer(text):
             block = match.group(1)
             ticker = _extract_field(block, "ticker")
-            direction = _extract_field(block, "direction")
-            confidence = float(_extract_field(block, "confidence") or 0.5)
+            raw_direction = (_extract_field(block, "direction") or "").lower().strip()
+            direction = DIRECTION_NORMALIZE.get(raw_direction, "abstain")
+            raw_confidence = _extract_field(block, "confidence") or "0.5"
+            confidence = _safe_parse_float(raw_confidence)
             thesis = _extract_field(block, "thesis") or ""
             risk = _extract_field(block, "risk_note") or ""
             if ticker and direction:
@@ -474,6 +476,24 @@ class ShadowAgent:
             elif name == "win_rate":
                 snap.win_rate_pct = score
         self.state_db.save_snapshot(self.shadow_id, snap)
+
+
+DIRECTION_NORMALIZE = {
+    "bullish": "long", "bearish": "short", "neutral": "abstain",
+    "buy": "long", "sell": "short", "hold": "abstain",
+    "long": "long", "short": "short", "abstain": "abstain",
+}
+
+
+def _safe_parse_float(value: str) -> float:
+    """Parse float from potentially malformed vote output."""
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        match = re.search(r'(\d+\.?\d*)', str(value))
+        if match:
+            return float(match.group(1))
+        return 0.5
 
 
 def _extract_field(block: str, field: str) -> str | None:

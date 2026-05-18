@@ -1,0 +1,35 @@
+{
+  "module": "collusion_detector",
+  "file": "shadows/collusion_detector.py",
+  "level": "PICA-Integration",
+  "timestamp": "2026-05-18T12:02:34Z",
+  "risk_tier": "Medium",
+  "findings": [
+    {
+      "check": "import_boundaries",
+      "result": "PASS",
+      "detail": "Imports from: shadow_state (CollusionFlag), config.settings (ShadowSettings), shadow_agent (ShadowVote). All shadow ecosystem imports — no pipeline/ or gateway/ imports.",
+      "severity": "info"
+    },
+    {
+      "check": "beta_shadow_exclusion",
+      "result": "PASS",
+      "detail": "Collusion detector receives votes from the caller, not directly from DB. Beta exclusion is enforced upstream — shadow_mother controls which shadows contribute votes, and get_ranking_eligible_shadows() excludes betas. The detector itself operates on whatever votes it receives. Correct separation.",
+      "severity": "info"
+    },
+    {
+      "check": "data_flow",
+      "result": "PASS",
+      "detail": "run_daily_check(date, votes, market_data) → list[CollusionFlag]. Pure function with no side effects beyond internal _consecutive_days tracker. Flags include severity classification (convergence vs herding) and user_action for escalation.",
+      "severity": "info"
+    },
+    {
+      "check": "single_entry_point",
+      "result": "PASS",
+      "detail": "Primary entry: run_daily_check() — full daily collusion scan. Supporting: compute_agreement_rate(), check_consecutive_flag(), compute_market_signal_strength(), discriminate_convergence_vs_herding(). Standalone function: detect_methodology_convergence() for Phase I knowledge distillation oversight.",
+      "severity": "info"
+    }
+  ],
+  "verdict": "PASS",
+  "recommendations": []
+}

@@ -15,6 +15,9 @@ from marketmind.storage.archivist import MarketMindArchive
 
 logger = logging.getLogger("marketmind.storage.gate_archiver")
 
+ALLOWED_SPEAKERS = {"AI", "USER"}
+ALLOWED_CONTENT_TYPES = {"user_free_text", "system_decision", "ai_response", "structured_data"}
+
 
 @dataclass
 class GateTurn:
@@ -82,6 +85,14 @@ class GateArchiver:
         """Append one turn to both JSONL (as a line) and MD (as a section)."""
         if not self._jsonl_path or not self._md_path:
             raise RuntimeError("Session not started. Call start_session() first.")
+
+        # Validate fields
+        if not isinstance(turn.turn, int) or turn.turn < 1:
+            logger.warning("Invalid turn number %r; expected positive integer", turn.turn)
+        if turn.speaker not in ALLOWED_SPEAKERS:
+            logger.warning("Invalid speaker %r; expected one of %s", turn.speaker, ALLOWED_SPEAKERS)
+        if turn.content_type not in ALLOWED_CONTENT_TYPES:
+            logger.warning("Invalid content_type %r; expected one of %s", turn.content_type, ALLOWED_CONTENT_TYPES)
 
         # Timestamp auto-fill
         if not turn.timestamp:
@@ -206,7 +217,8 @@ class GateArchiver:
             # C1 mitigation: ALL user-originated content is wrapped
             lines.append("<!-- USER_TEXT_START -->\n")
             if turn.text:
-                lines.append(f"> {turn.text}\n")
+                safe_text = self._sanitize_user_text(turn.text)
+                lines.append(f"> {safe_text}\n")
             if turn.data:
                 lines.append(self._render_data_fields(turn.data))
             lines.append("<!-- USER_TEXT_END -->\n")
@@ -229,13 +241,22 @@ class GateArchiver:
 
     @staticmethod
     def _render_data_fields(data: dict) -> str:
-        """Render structured data fields as bold key-value pairs."""
+        """Render structured data fields as bold key-value pairs.
+
+        Values are sanitized to prevent HTML comment closure via --> injection.
+        """
         parts = []
         for key, value in data.items():
-            parts.append(f"**{key}**: {value}\n")
+            safe_value = str(value).replace("-->", "-- >")
+            parts.append(f"**{key}**: {safe_value}\n")
         return "".join(parts)
 
     @staticmethod
+    def _sanitize_user_text(text: str) -> str:
+        """Prevent HTML comment closure via --> injection."""
+        return text.replace("-->", "-- >")
+
+    @staticmethod
     def _hash_file(path: Path) -> str:
-        """SHA-256 hex digest (first 16 chars) of file content."""
-        return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+        """Full SHA-256 hex digest (64 chars) of file content."""
+        return hashlib.sha256(path.read_bytes()).hexdigest()

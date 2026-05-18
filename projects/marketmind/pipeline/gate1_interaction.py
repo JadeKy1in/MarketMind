@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from marketmind.pipeline.hypothesis_card import HypothesisCard, generate_cards
-from marketmind.pipeline.investigation_loop import HypothesisResult
+from marketmind.pipeline.investigation_types import HypothesisResult
 from marketmind.integrity.input_guard import sanitize_for_llm_prompt
 from marketmind.storage.gate_archiver import GateArchiver, GateTurn
 from marketmind.storage.archivist import MarketMindArchive

@@ -1,0 +1,53 @@
+{
+  "module": "gate2_interaction",
+  "file": "pipeline/gate2_interaction.py",
+  "level": "PICA-Security",
+  "timestamp": "2026-05-18T12:02:34Z",
+  "risk_tier": "High",
+  "findings": [
+    {
+      "check": "input_sanitization",
+      "result": "PASS",
+      "detail": "All user input (conviction text, confirmation responses) sanitized via sanitize_for_llm_prompt() before archiving. Input also runs through regex parsers (_parse_conviction, _parse_outcome) that constrain extraction to expected patterns.",
+      "severity": "info"
+    },
+    {
+      "check": "debiasing_mechanisms",
+      "result": "PASS",
+      "detail": "_DEBIASING_NOTICE communicates AI overconfidence bias (systematic ~15% in 0.75-0.85 confidence range) to user BEFORE showing AI analysis. Conviction-first design: user states independent conviction before seeing any AI results (CONVICTION_FIRST → ANALYSE → CONFIRMING). This prevents anchoring.",
+      "severity": "info"
+    },
+    {
+      "check": "conviction_data_logging",
+      "result": "PASS",
+      "detail": "All conversation turns logged via archiver.log_turn() with sanitized text. No raw user input stored unsanitized. Decision data (direction, conviction values, outcome) archived as structured dict — no PII present.",
+      "severity": "info"
+    },
+    {
+      "check": "pii_risk",
+      "result": "PASS",
+      "detail": "Session data contains only session_id (generated identifier), direction, conviction numbers (1-10), and outcome (CONTINUE/MODIFY/PAUSE). No personal identifiers, account numbers, or credentials.",
+      "severity": "info"
+    },
+    {
+      "check": "timezone_correctness",
+      "result": "PASS",
+      "detail": "datetime.now(timezone.utc) used at line 71 (Gate2Session.started_at). No bare datetime.now() calls.",
+      "severity": "info"
+    },
+    {
+      "check": "command_injection",
+      "result": "PASS",
+      "detail": "No subprocess calls, no shell execution, no eval/exec. All string operations are pure Python regex matching and formatting.",
+      "severity": "info"
+    },
+    {
+      "check": "red_team_handling",
+      "result": "PASS",
+      "detail": "Red Team survivors displayed with severity-filtered presentation (critical/major only). Challenge text truncated to 200 chars. No raw red team data exposed unsanitized.",
+      "severity": "info"
+    }
+  ],
+  "verdict": "PASS",
+  "recommendations": []
+}

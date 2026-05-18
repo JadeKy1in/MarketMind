@@ -2,6 +2,7 @@
 from __future__ import annotations
 import hashlib
 import logging
+import re
 
 logger = logging.getLogger("marketmind.pipeline.scout")
 import time
@@ -61,8 +62,43 @@ def _truncate(text: str, max_len: int) -> str:
 
 
 def _strip_html(text: str) -> str:
-    import re
     return re.sub(r"<[^>]+>", "", text).strip()
+
+
+async def _fetch_ecb_press_content(url: str) -> str:
+    """Fetch and extract text content from an ECB press release HTML page."""
+    try:
+        async with httpx.AsyncClient(timeout=15.0, verify=True) as client:
+            resp = await client.get(url, headers={
+                "User-Agent": "MarketMind/1.0 (investment research; contact@marketmind.dev)",
+                "Accept": "text/html",
+            })
+            resp.raise_for_status()
+            html = resp.text
+
+            html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL)
+            html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL)
+            html = re.sub(r'<nav[^>]*>.*?</nav>', '', html, flags=re.DOTALL)
+
+            main_match = re.search(r'<main[^>]*>(.*?)</main>', html, re.DOTALL)
+            if not main_match:
+                main_match = re.search(r'<article[^>]*>(.*?)</article>', html, re.DOTALL)
+
+            content_html = main_match.group(1) if main_match else html
+
+            text = re.sub(r'<[^>]+>', ' ', content_html)
+            text = re.sub(r'\s+', ' ', text).strip()
+
+            if len(text) > 1000:
+                cutoff = text.rfind('. ', 500, 1000)
+                if cutoff > 500:
+                    text = text[:cutoff + 1]
+                else:
+                    text = text[:1000]
+
+            return text if len(text) > 50 else ""
+    except Exception:
+        return ""
 
 
 def _title_similarity(a: str, b: str) -> float:
@@ -209,6 +245,12 @@ async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsIte
                 feed = feedparser.parse(resp.text)
                 for entry in feed.entries[:20]:
                     try:
+                        if source.name.startswith("ECB"):
+                            desc = entry.get("summary", entry.get("description", ""))
+                            if (not desc or len(desc.strip()) < 50) and entry.get("link"):
+                                html_text = await _fetch_ecb_press_content(entry["link"])
+                                if html_text:
+                                    entry["description"] = html_text
                         items.append(NewsItem.from_entry(entry, source))
                     except Exception as e:
                         logger.warning("Scout source fetch degraded: %s — %s", source.name, e)
@@ -240,8 +282,11 @@ async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsIte
         elif source.feed_type == "bluesky":
             from marketmind.pipeline.social_sources import fetch_bluesky_posts
             items = await fetch_bluesky_posts(source, config)
-            source.status = SourceStatus.WORKING
-            source.consecutive_failures = 0
+            if items:
+                source.status = SourceStatus.WORKING
+                source.consecutive_failures = 0
+            else:
+                source.status = SourceStatus.DEGRADED
     except Exception as e:
         logger.warning("Scout source fetch failed for '%s': %s", source.name, e)
         source.consecutive_failures += 1

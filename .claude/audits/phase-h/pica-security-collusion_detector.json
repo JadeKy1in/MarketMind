@@ -1,0 +1,41 @@
+{
+  "module": "collusion_detector",
+  "file": "shadows/collusion_detector.py",
+  "level": "PICA-Security",
+  "timestamp": "2026-05-18T12:02:34Z",
+  "risk_tier": "Medium",
+  "findings": [
+    {
+      "check": "no_external_calls",
+      "result": "PASS",
+      "detail": "Pure Python statistical computation. No LLM calls, no network I/O, no file I/O (logging only). All computation is deterministic.",
+      "severity": "info"
+    },
+    {
+      "check": "methodology_convergence_detection",
+      "result": "PASS",
+      "detail": "detect_methodology_convergence() identifies when shadows with shared Phase I methodology lineage produce correlated outputs. Uses Jaccard similarity on ancestor sets. This is a safety feature — prevents methodology collusion from being mistaken for independent validation. Hardcoded thresholds (0.80 agreement, 5 days, 0.5 Jaccard).",
+      "severity": "info"
+    },
+    {
+      "check": "binomial_test_numerics",
+      "result": "PASS",
+      "detail": "_binomial_test() uses log-gamma formulation (math.lgamma) for combinatorial stability at large N. Returns two-tailed p-value for conservatism. No floating-point overflow risk.",
+      "severity": "info"
+    },
+    {
+      "check": "escalation_threshold",
+      "result": "PASS",
+      "detail": "10+ consecutive days of high agreement triggers ESCALATE_TO_INSTITUTIONAL_ANALYSIS — a human-in-the-loop safety valve. Logged at WARNING level for monitoring visibility.",
+      "severity": "info"
+    },
+    {
+      "check": "catfish_threshold_documentation",
+      "result": "PASS",
+      "detail": "CATFISH_CONSENSUS_THRESHOLD lowered from 0.80 to 0.60 with documented rationale: Phase I knowledge distillation may cause shadows to converge. Earlier intervention preserves ecosystem diversity.",
+      "severity": "info"
+    }
+  ],
+  "verdict": "PASS",
+  "recommendations": []
+}

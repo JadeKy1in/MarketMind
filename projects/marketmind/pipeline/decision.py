@@ -2,10 +2,14 @@
 from __future__ import annotations
 import json
 import logging
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from marketmind.pipeline.fragility_scanner import FragilityReport
+    from marketmind.pipeline.cross_border_analyzer import CrossBorderFlowReport
 
 logger = logging.getLogger("marketmind.pipeline.decision")
-from dataclasses import dataclass, field
-from typing import Any
 
 from marketmind.gateway.async_client import chat_pro
 from marketmind.pipeline.layer1_narrative import Layer1Result
@@ -13,7 +17,6 @@ from marketmind.pipeline.layer2_fundamental import Layer2Result
 from marketmind.pipeline.layer3_technical import Layer3BatchResult
 from marketmind.pipeline.red_team import RedTeamReport
 from marketmind.pipeline.resonance import ResonanceResult
-from marketmind.shadows.shadow_agent import ShadowVote
 
 
 @dataclass
@@ -105,14 +108,9 @@ async def generate_decision(
     l3: Layer3BatchResult,
     red_team: RedTeamReport,
     resonance: ResonanceResult,
-    shadow_votes: dict[str, list[ShadowVote]] | None = None,
-    # ^^^ DEPRECATED in decision pipeline (2026-05-17).
-    #     shadow_votes is always None at app.py:110 by design.
-    #     Shadows are an internal competition ecosystem for ranking/evolution/
-    #     crystallization — they do NOT vote on investment decisions.
-    #     The parameter is preserved only for backward compatibility with
-    #     any hypothetical manual invocation that might pass votes directly.
     hypotheses: list | None = None,
+    fragility_report: "FragilityReport | None" = None,
+    cross_border_report: "CrossBorderFlowReport | None" = None,
 ) -> DecisionOutput:
     """Generate final decision cards and no-trade card."""
     if not resonance.passed and not l3.green_lights:
@@ -125,7 +123,7 @@ async def generate_decision(
             ),
             summary="No actionable signal today. Cash is a valid position."
         )
-    user_prompt = _build_decision_prompt(l1, l2, l3, red_team, resonance, shadow_votes, hypotheses)
+    user_prompt = _build_decision_prompt(l1, l2, l3, red_team, resonance, hypotheses, fragility_report, cross_border_report)
     try:
         result = await chat_pro(
             system_prompt=DECISION_SYSTEM_PROMPT,
@@ -142,33 +140,12 @@ async def generate_decision(
 def _build_decision_prompt(
     l1: Layer1Result, l2: Layer2Result, l3: Layer3BatchResult,
     red_team: RedTeamReport, resonance: ResonanceResult,
-    shadow_votes: dict | None = None,
     hypotheses: list | None = None,
+    fragility_report=None,
+    cross_border_report=None,
 ) -> str:
     green = [r.ticker for r in l3.green_lights]
     challenges_str = "\n".join(f"- [{c.severity}] {c.challenge}" for c in red_team.challenges[:5])
-
-    shadow_consensus_str = ""
-    # NOTE: This block is never reached in the live daily pipeline
-    # because app.py:110 sets shadow_votes = None by design.
-    # Preserved for hypothetical manual invocation or future use.
-    if shadow_votes:
-        lines = ["## Shadow Ecosystem Consensus"]
-        for ticker, votes in shadow_votes.items():
-            if not votes:
-                continue
-            directions = {}
-            for v in votes:
-                if v.direction != "abstain":
-                    directions[v.direction] = directions.get(v.direction, 0) + 1
-            total = sum(directions.values())
-            if total > 0:
-                parts = [f"{d}: {c}/{total}" for d, c in
-                         sorted(directions.items(), key=lambda x: -x[1])]
-                lines.append(f"{ticker}: {', '.join(parts)}")
-        if len(lines) > 1:
-            lines.append("Note: Shadows are independent agents. Consensus is informational, not directive.")
-            shadow_consensus_str = "\n".join(lines) + "\n\n"
 
     hypothesis_summary = _build_hypothesis_summary(hypotheses) if hypotheses else ""
 
@@ -182,7 +159,33 @@ def _build_decision_prompt(
                 f"请在你的决策中处理这些冲突——不要忽略或平均化，作出判断。\n"
             )
 
-    return f"""{shadow_consensus_str}{hypothesis_summary}{conflict_summary}## Signal Resonance
+    fragility_section = ""
+    if fragility_report is not None:
+        fscore = getattr(fragility_report, 'overall_fragility_score', 0.0)
+        fsummary = getattr(fragility_report, 'summary', '')
+        crossed = getattr(fragility_report, 'crossed', [])
+        fragility_section = f"\n## Systemic Fragility Scan\nScore: {fscore:.2f} | {fsummary}\n"
+        if crossed:
+            fragility_section += "CRITICAL CROSSED THRESHOLDS:\n"
+            for a in crossed[:5]:
+                t = getattr(a, 'threshold', None)
+                name = getattr(t, 'name_zh', 'unknown') if t else 'unknown'
+                cur = getattr(a, 'current_value', 'N/A')
+                fragility_section += f"- [{getattr(a, 'severity', 'WARN')}] {name}: current={cur}\n"
+
+    cross_border_section = ""
+    if cross_border_report is not None:
+        quality = getattr(cross_border_report, 'data_quality', 'UNAVAILABLE')
+        summary = getattr(cross_border_report, 'summary', '')
+        cross_border_section = f"\n## Cross-Border Flow Analysis (Quality: {quality})\n{summary}\n"
+        ccb_alerts = getattr(cross_border_report, 'ccb_alerts', [])
+        if ccb_alerts:
+            cross_border_section += "CCB Alerts: " + "; ".join(str(a) for a in ccb_alerts[:3]) + "\n"
+        unusual = getattr(cross_border_report, 'unusual_patterns', [])
+        if unusual:
+            cross_border_section += "Unusual Patterns: " + "; ".join(str(p) for p in unusual[:3]) + "\n"
+
+    return f"""{hypothesis_summary}{conflict_summary}{fragility_section}{cross_border_section}## Signal Resonance
 Verdict: {resonance.verdict} | DSR: {resonance.dsr} | PBO: {resonance.pbo}
 
 ## Layer 1 Narrative

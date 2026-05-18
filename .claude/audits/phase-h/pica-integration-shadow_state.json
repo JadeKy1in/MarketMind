@@ -1,0 +1,41 @@
+{
+  "module": "shadow_state",
+  "file": "shadows/shadow_state.py",
+  "level": "PICA-Integration",
+  "timestamp": "2026-05-18T12:02:34Z",
+  "risk_tier": "High",
+  "findings": [
+    {
+      "check": "import_boundaries",
+      "result": "PASS",
+      "detail": "Imports from sibling shadow data modules: shadow_data_types (types), shadow_schema (DDL), shadow_trade_repo, shadow_snapshot_repo, shadow_analysis_repo, shadow_integrity_repo. These are all data-layer modules — no circular dependencies. No imports from pipeline/. No imports from gateway/.",
+      "severity": "info"
+    },
+    {
+      "check": "data_flow",
+      "result": "PASS",
+      "detail": "ShadowStateDB is the single persistence layer for all shadow data. Methods delegate to specialized repos (trade, snapshot, analysis, integrity) but present a unified API. Connection management: each method opens/closes its own connection — no connection pooling, no stale connections.",
+      "severity": "info"
+    },
+    {
+      "check": "beta_shadow_boundary",
+      "result": "PASS",
+      "detail": "get_ranking_eligible_shadows() is the canonical filter for ranking/collusion/challenger pipelines. Excludes: beta (experimental, unranked), retired (frozen benchmarks), eliminated (removed), challenger (opaque trial). This filter ensures Phase 2 shadow lifecycle boundaries are enforced at the data layer.",
+      "severity": "info"
+    },
+    {
+      "check": "methodology_change_tracking",
+      "result": "PASS",
+      "detail": "update_methodology_prompt() logs all changes to methodology_changes table with old/new prompt (truncated to 500 chars), reason, and timestamp. get_methodology_history() and get_original_methodology() support audit trail. This is P1-1 compliance.",
+      "severity": "info"
+    },
+    {
+      "check": "single_entry_point",
+      "result": "PASS",
+      "detail": "ShadowStateDB class is the single interface. Complete CRUD for shadows, trades, snapshots, rankings, integrity events, emergency quotas, collusion flags. Beta analyses isolated in separate table/methods.",
+      "severity": "info"
+    }
+  ],
+  "verdict": "PASS",
+  "recommendations": []
+}

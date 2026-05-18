@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger("marketmind.shadows.ranking_engine")
@@ -31,6 +31,10 @@ class ShadowPerformance:
     domain: str | None = None
     shadow_type: str = "beta"
     career_days: int = 0
+    brier_score: float = 1.0
+    calibration_score: float = 0.0
+    token_efficiency: float = 0.0
+    domain_scores: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -100,6 +104,10 @@ class RankingEngine:
     _PROFIT_LOSS_PENALTY = 0.40   # Multiplicative penalty when cumulative return < 0
     _PROFIT_LOSS_FLOOR = 0.02     # Minimum composite after penalty (prevent zero-division)
 
+    # V2 composite weights (Phase 2b: learning-enhanced ranking)
+    _V2_WEIGHTS = {"mppm": 0.30, "calmar": 0.20, "omega": 0.15, "win_rate": 0.15}
+    _V2_CALIBRATION_WEIGHT = 0.20
+
     def compute_composite_score(
         self, perf: ShadowPerformance, career_days: int | None = None
     ) -> tuple[float, dict[str, float], dict[str, float]]:
@@ -107,14 +115,31 @@ class RankingEngine:
 
         Modifiers track the dynamic WR line adjustments and profitability
         penalties for transparency in ranking display.
+
+        V2 formula (Phase 2b): when calibration data is available,
+        C_v2 = 0.30*MPPM + 0.20*Calmar + 0.15*Omega + 0.15*WR + 0.20*Calibration_Score.
+        If no Brier/calibration data, the 0.20 calibration weight redistributes
+        across the 4 existing components (backward compatible with v1).
         """
-        w = dict(self.config.composite_weights)  # mutable copy
+        has_calibration = perf.brier_score < 1.0 or perf.calibration_score > 0.0
+
+        if has_calibration:
+            w = dict(self._V2_WEIGHTS)
+            calibration_weight = self._V2_CALIBRATION_WEIGHT
+        else:
+            w = dict(self.config.composite_weights)
+            calibration_weight = 0.0
+
+        perf_pool = 1.0 - calibration_weight  # 0.80 in v2, 1.0 in v1
+
         modifiers = {
             "wr_weight_raw": w["win_rate"],
             "wr_weight_adjusted": w["win_rate"],
             "wr_line_value": 0.0,
             "profitability_penalty": 0.0,
             "career_days": career_days or 0,
+            "calibration_weight": calibration_weight,
+            "has_calibration": has_calibration,
         }
 
         omega = self.compute_omega(perf.daily_returns)
@@ -138,11 +163,12 @@ class RankingEngine:
 
         if career_days is not None and career_days < self._WR_EARLY_DAYS:
             # Early career: boost WR weight to incentivize direction accuracy
-            w["win_rate"] = min(w["win_rate"] + self._WR_EARLY_WEIGHT_BOOST, 0.50)
-            # Slightly reduce other weights to keep sum ~1.0
-            ratio = (1.0 - w["win_rate"]) / (1.0 - (w["win_rate"] - self._WR_EARLY_WEIGHT_BOOST))
-            for key in ("mppm", "calmar", "omega"):
-                w[key] *= ratio
+            boosted = min(w["win_rate"] + self._WR_EARLY_WEIGHT_BOOST, 0.50)
+            if perf_pool > boosted:
+                ratio = (perf_pool - boosted) / (perf_pool - w["win_rate"])
+                for key in ("mppm", "calmar", "omega"):
+                    w[key] *= ratio
+            w["win_rate"] = boosted
 
         elif career_days is not None and career_days >= self._WR_MATURE_DAYS:
             # Mature: allow WR weight to decrease if profitability is strong
@@ -167,6 +193,25 @@ class RankingEngine:
             w["omega"] * omega_norm +
             w["win_rate"] * wr_norm
         )
+
+        # —— Calibration score (Phase 2b v2 formula) ——
+        if has_calibration:
+            if perf.calibration_score > 0.0:
+                cal_score = perf.calibration_score
+            else:
+                brier_component = 1.0 - perf.brier_score
+                if perf.domain_scores:
+                    scores = list(perf.domain_scores.values())
+                    mean_score = sum(scores) / len(scores)
+                    resolution = sum((s - mean_score) ** 2 for s in scores) / len(scores)
+                else:
+                    resolution = 0.0
+                cal_score = 0.5 * brier_component + 0.5 * resolution
+                cal_score = max(0.0, min(1.0, cal_score))
+
+            composite += calibration_weight * cal_score
+            components["calibration"] = cal_score
+            modifiers["calibration_score"] = cal_score
 
         # —— Profitability penalty ——
         if perf.cumulative_return < 0:
@@ -701,3 +746,17 @@ class RankingEngine:
             )
 
         return False, ""
+
+
+# ── Token efficiency (standalone) ────────────────────────────────────────
+
+def compute_token_efficiency(shadow_id: str, cumulative_return: float,
+                             total_tokens: int) -> float:
+    """Pod-shop pattern: return per token consumed.
+
+    Shadows that burn tokens without returns face tier downgrade.
+    Returns 0.0 if no tokens consumed.
+    """
+    if total_tokens == 0:
+        return 0.0
+    return cumulative_return / total_tokens

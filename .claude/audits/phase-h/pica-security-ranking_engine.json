@@ -1,0 +1,41 @@
+{
+  "module": "ranking_engine",
+  "file": "shadows/ranking_engine.py",
+  "level": "PICA-Security",
+  "timestamp": "2026-05-18T12:02:34Z",
+  "risk_tier": "Medium",
+  "findings": [
+    {
+      "check": "no_external_calls",
+      "result": "PASS",
+      "detail": "Pure Python mathematical computations. Zero LLM calls, zero network I/O, zero file I/O. All formulas are deterministic and auditable.",
+      "severity": "info"
+    },
+    {
+      "check": "division_by_zero",
+      "result": "PASS",
+      "detail": "MPPM: guards against gamma==1.0 and avg<=0. Calmar: mdd_floor = max(max_drawdown, 0.001). Omega: losses==0 returns 10.0. CAGR: days<=0 returns 0.0. Sharpe: variance<=0 returns 0.0. Correlation: std_i>0 and std_j>0 checks. All protected.",
+      "severity": "info"
+    },
+    {
+      "check": "nan_and_inf_protection",
+      "result": "PASS",
+      "detail": "_normalize_mppm() handles float('-inf') → 0.0 and math.isnan() → 0.0. Calmar capped at 100.0. Omega capped at 10.0. Composite deflated scores clamped at 0.0. No NaN propagation risk.",
+      "severity": "info"
+    },
+    {
+      "check": "numerical_stability",
+      "result": "PASS",
+      "detail": "MPPM uses log-exp formulation — safe for typical return ranges. Binomial test in collusion_detector uses log-gamma for combinatorial stability. Holm-Bonferroni uses step-down correction — safe for multiple comparisons.",
+      "severity": "info"
+    },
+    {
+      "check": "timezone_correctness",
+      "result": "PASS",
+      "detail": "datetime.now(timezone.utc) used in detect_plateau() (insight drought calculation) and check_reset_eligibility() (rolling window calculations). No bare datetime.now() calls.",
+      "severity": "info"
+    }
+  ],
+  "verdict": "PASS",
+  "recommendations": []
+}

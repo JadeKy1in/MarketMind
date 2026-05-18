@@ -60,13 +60,15 @@ async def run_pre_gate1(config: "MarketMindConfig", mock: bool = False,
         shadow_db = ShadowStateDB(config.shadow.shadows_db_path)
         shadow_db.init_schema()
 
-        # Initialize permanent shadows (experts + daredevils + catfish)
+        # Initialize permanent shadows (15 experts + 8 daredevils)
         from marketmind.shadows.expert_shadows import create_expert_shadows
         from marketmind.shadows.daredevil_shadows import create_daredevil_shadows
-        from marketmind.shadows.catfish_agent import create_catfish_agent
         create_expert_shadows(shadow_db, config.shadow)
         create_daredevil_shadows(shadow_db, config.shadow)
-        create_catfish_agent(shadow_db, config.shadow)
+
+        # Initialize ecosystem auditor mechanism (NOT a shadow — post-analysis blind-spot scan)
+        from marketmind.shadows.ecosystem_auditor import EcosystemAuditor
+        ecosystem_auditor = EcosystemAuditor()
 
         mother = ShadowMother(config.shadow, shadow_db)
         tracker.result(f"Shadow ecosystem initialized with "
@@ -111,6 +113,30 @@ async def run_pre_gate1(config: "MarketMindConfig", mock: bool = False,
                    "published": n.published_at} for n in news_items]
     })
 
+    # 1b. Event clustering — group headlines into named themes with cross-cluster links
+    clustering_result = None
+    try:
+        from marketmind.pipeline.entity_extractor import extract_entities
+        from marketmind.pipeline.event_clusterer import cluster_events
+
+        headlines = []
+        entities = []
+        source_tiers = {}
+        for item in news_items:
+            if item.title:
+                source_tiers[len(headlines)] = item.source_tier
+                headlines.append(item.title)
+                entities.append(extract_entities(item.title))
+
+        clustering_result = await cluster_events(headlines, entities, source_tiers=source_tiers)
+        tracker.result(
+            f"{clustering_result.clusters_formed} event clusters, "
+            f"{clustering_result.noise_count} noise — "
+            f"reduced {len(headlines)} headlines to {clustering_result.clusters_formed} themes"
+        )
+    except Exception as e:
+        tracker.result(f"event clustering skipped ({e}) — continuing without clustering")
+
     # 2. Flash triage — lightweight scoring of ALL headlines
     tracker.advance(2, "Flash: triaging all headlines...")
     try:
@@ -127,6 +153,13 @@ async def run_pre_gate1(config: "MarketMindConfig", mock: bool = False,
         browse_candidates = triage_results  # pass all for investigation
         tracker.result(f"flash_triage unavailable — fell back to preprocessor "
                        f"({len(triage_results)} signals)")
+
+    # Enrich triage results with event cluster context
+    try:
+        from marketmind.pipeline.flash_triage import inject_cluster_context
+        triage_results = inject_cluster_context(triage_results, clustering_result)
+    except Exception as e:
+        tracker.result(f"cluster context injection skipped ({e})")
 
     _archive("analysis", "02_flash_triage", {
         "stage": "flash_triage",

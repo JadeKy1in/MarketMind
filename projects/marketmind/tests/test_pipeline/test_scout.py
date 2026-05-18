@@ -4,6 +4,7 @@ import pytest
 from marketmind.pipeline.scout import (
     NewsItem, fetch_source, fetch_all_sources, deduplicate,
     _strip_html, _title_similarity, _fetch_newsapi, _fetch_gnews,
+    _fetch_ecb_press_content,
 )
 from marketmind.config.source_authority import Source, SourceTier, SourceStatus
 
@@ -390,3 +391,150 @@ async def test_gnews_cache_used_on_second_call():
         items2 = await _fetch_gnews(config)
         assert len(items2) == 2
         assert mock_async_client.call_count == call_count
+
+
+# ── ECB HTML content extraction tests ────────────────────────────────────
+
+VALID_ECB_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head><title>ECB Press Release</title></head>
+<body>
+<nav><a href="/">Home</a></nav>
+<script>console.log('tracking');</script>
+<main class="ecb-publications">
+  <h1>Monetary policy decisions</h1>
+  <p>The Governing Council today decided to lower the three key ECB interest rates by 25 basis points.</p>
+  <p>In particular, the decision to lower the deposit facility rate is based on an updated assessment of the inflation outlook.</p>
+  <p>The disinflation process is well on track. Inflation has developed broadly as staff previously projected.</p>
+</main>
+<footer>© ECB 2026</footer>
+</body>
+</html>"""
+
+ECB_HTML_WITH_ARTICLE = """<!DOCTYPE html>
+<html><body>
+<article>
+<p>Statistical Data for May 2026 show continued economic expansion across the euro area.</p>
+<p>GDP growth estimates revised upward by 0.3 percentage points reflecting stronger-than-expected consumer spending.</p>
+</article>
+</body></html>"""
+
+ECB_HTML_NO_MAIN = """<!DOCTYPE html>
+<html><body>
+<p>Some loose paragraph without semantic structure.</p>
+<p>Another paragraph that falls back to body extraction.</p>
+</body></html>"""
+
+ECB_HTML_LONG = """<!DOCTYPE html>
+<html><body>
+<main><p>""" + (". ".join(["Sentence number %d with meaningful content about monetary policy and economic outlook" % i for i in range(50)]) + ".") + """</p></main>
+</body></html>"""
+
+
+@pytest.mark.asyncio
+async def test_ecb_html_extraction_article_tag():
+    """ECB HTML with <article> content → extracts paragraph text correctly."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = ECB_HTML_WITH_ARTICLE
+    mock_resp.raise_for_status = MagicMock()
+    mock_client = AsyncMock()
+    mock_client.get.return_value = mock_resp
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        result = await _fetch_ecb_press_content("https://ecb.europa.eu/press/1.html")
+        assert "Statistical Data for May 2026" in result
+        assert "GDP growth estimates revised upward" in result
+        assert "console" not in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_ecb_fallback_on_empty_page():
+    """Empty HTML → returns empty string, doesn't crash."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = "<html><body></body></html>"
+    mock_resp.raise_for_status = MagicMock()
+    mock_client = AsyncMock()
+    mock_client.get.return_value = mock_resp
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        result = await _fetch_ecb_press_content("https://ecb.europa.eu/press/empty.html")
+        assert result == ""
+
+
+@pytest.mark.asyncio
+async def test_ecb_script_tags_stripped():
+    """JavaScript in HTML → removed from output."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = VALID_ECB_HTML
+    mock_resp.raise_for_status = MagicMock()
+    mock_client = AsyncMock()
+    mock_client.get.return_value = mock_resp
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        result = await _fetch_ecb_press_content("https://ecb.europa.eu/press/2.html")
+        assert "The Governing Council today decided" in result
+        # script content must be stripped
+        assert "console.log" not in result
+        assert "tracking" not in result
+        # nav content must be stripped
+        assert "Home" not in result
+
+
+@pytest.mark.asyncio
+async def test_ecb_length_truncation():
+    """Very long press release → truncated at sentence boundary under 1000 chars."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = ECB_HTML_LONG
+    mock_resp.raise_for_status = MagicMock()
+    mock_client = AsyncMock()
+    mock_client.get.return_value = mock_resp
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        result = await _fetch_ecb_press_content("https://ecb.europa.eu/press/long.html")
+        assert len(result) <= 1000
+        assert len(result) > 50
+        # ends with period (sentence boundary)
+        assert result.rstrip().endswith(".")
+
+
+@pytest.mark.asyncio
+async def test_ecb_no_main_or_article_falls_back_to_body():
+    """HTML without <main> or <article> → falls back to full body extraction."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = ECB_HTML_NO_MAIN
+    mock_resp.raise_for_status = MagicMock()
+    mock_client = AsyncMock()
+    mock_client.get.return_value = mock_resp
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        result = await _fetch_ecb_press_content("https://ecb.europa.eu/press/nomain.html")
+        assert "Some loose paragraph" in result
+        assert "falls back to body extraction" in result
+
+
+@pytest.mark.asyncio
+async def test_ecb_http_error_returns_empty():
+    """HTTP error → returns empty string, graceful degradation."""
+    mock_client = AsyncMock()
+    mock_client.get.side_effect = Exception("Connection refused")
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        result = await _fetch_ecb_press_content("https://ecb.europa.eu/press/error.html")
+        assert result == ""

@@ -62,27 +62,27 @@ class EcosystemHealthMonitor:
     def __init__(self):
         self._daily_entropies: dict[str, list[float]] = {}
 
-    # ── Vote entropy ─────────────────────────────────────────────────────
+    # ── Analysis entropy ─────────────────────────────────────────────────
 
-    def compute_vote_entropy(self, votes: list) -> dict[str, float]:
-        """Compute per-shadow vote direction entropy for today.
+    def compute_analysis_entropy(self, analyses: list) -> dict[str, float]:
+        """Compute per-shadow analysis direction entropy for today.
 
         Returns {shadow_id: entropy_bits}.
         """
         from collections import defaultdict
-        shadow_votes: dict[str, list[str]] = defaultdict(list)
-        for v in votes:
-            if hasattr(v, 'direction') and v.direction != "abstain":
-                shadow_votes[v.shadow_id].append(v.direction)
+        shadow_analyses: dict[str, list[str]] = defaultdict(list)
+        for a in analyses:
+            if hasattr(a, 'direction') and a.direction != "abstain":
+                shadow_analyses[a.shadow_id].append(a.direction)
 
         entropies = {}
-        for sid, directions in shadow_votes.items():
+        for sid, directions in shadow_analyses.items():
             entropies[sid] = self._entropy(directions)
         return entropies
 
     @staticmethod
     def _entropy(directions: list[str]) -> float:
-        """Shannon entropy of vote directions. Range [0, log2(3)] ≈ [0, 1.58]."""
+        """Shannon entropy of analysis directions. Range [0, log2(3)] ≈ [0, 1.58]."""
         if not directions:
             return 0.0
         n = len(directions)
@@ -151,13 +151,13 @@ class EcosystemHealthMonitor:
     # ── Full daily check ─────────────────────────────────────────────────
 
     def run_daily_check(
-        self, votes: list, token_data: dict[str, list[int]], date: str | None = None
+        self, analyses: list, token_data: dict[str, list[int]], date: str | None = None
     ) -> EcosystemHealthSnapshot:
         """Run all ecosystem-level checks and produce a health snapshot."""
         if date is None:
             date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-        entropies = self.compute_vote_entropy(votes)
+        entropies = self.compute_analysis_entropy(analyses)
         profiles = self.compute_ecosystem_profile(entropies)
 
         snapshot = EcosystemHealthSnapshot(

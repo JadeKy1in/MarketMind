@@ -18,7 +18,7 @@ pipeline:
       description: >
         Initialize the INDEPENDENT shadow competition ecosystem. Shadows are a
         SELF-CONTAINED parallel system. They do NOT participate in the main
-        investment decision pipeline (shadow_votes is ALWAYS None by DD-001).
+        investment decision pipeline (shadows are advisory only — see DD-001).
 
         This stage runs BEFORE news collection so shadows are ready to analyze
         at the same time as the main AI (Stage 4). Shadow analysis occurs in
@@ -155,13 +155,12 @@ pipeline:
         event scan → temp shadows → analysis → ranking → collusion →
         challenger → memory update → crystallization.
 
-        CRITICAL: shadow_votes is ALWAYS None — shadows do NOT vote on decisions.
-        Shadow output feeds back into ranking only, not into generate_decision().
-        Vote persistence (save_votes) is for BACKTEST validation only.
+        Shadows do NOT vote on decisions. Shadow output feeds back into ranking
+        only, not into generate_decision(). Vote persistence (save_votes) is for
+        BACKTEST validation only.
       dependencies: [stage_0_shadow_init, stage_1_scout]
       produces:
         - orchestration (ShadowOrchestrationResult)
-        - shadow_votes = None  # INTENTIONAL — design decision (DD-001)
       tokens_estimate: 42000  # 21 shadows × ~2000 tokens each
       status: COMPLETE
 
@@ -202,9 +201,8 @@ pipeline:
       entry_function: "generate_decision"
       description: >
         Pro LLM synthesizes L1+L2+L3+RedTeam+Resonance into structured
-        decision cards. shadow_votes is passed as None (by design — shadows
-        do not vote on the main decision). Produces decision_cards +
-        no_trade_card (equal analytical depth).
+        decision cards. Shadows do not vote on the main decision.
+        Produces decision_cards + no_trade_card (equal analytical depth).
       dependencies: [stage_4_layer2_layer3, stage_6_red_team, stage_7_resonance]
       produces:
         - decision (DecisionOutput)
@@ -233,8 +231,7 @@ design_decisions:
       Shadows are an internal competition ecosystem for ranking, evolution,
       and crystallization. Their virtual PnL is system-calculated (circular).
       P2-4 (External Market Anchor) will fix the ranking ground truth.
-      Until then, shadow_votes = None is INTENTIONAL.
-    evidence: "app.py:110 shadows_votes = None, app.py:151 passed as None"
+    evidence: "app.py:110 shadows initialised independently, decision.py receives no shadow input"
     status: LOCKED
 
   - id: DD-002

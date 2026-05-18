@@ -1,49 +1,52 @@
 {
-  "module": "pipeline/decision.py",
-  "timestamp": "2026-05-18T06:28:49Z",
-  "auditor": "PICA-Integration-PhaseI-Gate1",
+  "module": "decision",
+  "file": "pipeline/decision.py",
+  "level": "PICA-Integration",
+  "timestamp": "2026-05-18T12:02:34Z",
+  "auditor": "PICA-Integration-PhaseH",
   "type": "static",
+  "risk_tier": "Critical",
   "findings": [
     {
-      "severity": "info",
+      "severity": "CRITICAL",
+      "check": "shadow_votes_removal_integration",
+      "result": "PASS",
+      "detail": "All callers verified — none pass shadow_votes. post_gate1.py:239 calls generate_decision() without shadow_votes keyword. No other callers found (grep verified across entire codebase). The parameter removal is complete: signature cleaned, all integration points updated, dead code removed. Zero backward compatibility risk — this was always hardcoded to None.",
+      "status": "PASS"
+    },
+    {
+      "severity": "INFO",
       "check": "import_boundary",
-      "detail": "Imports: json, logging, dataclasses, typing (stdlib), gateway/async_client (chat_pro), pipeline stages (L1/L2/L3/red_team/resonance), shadows/shadow_agent (ShadowVote type). Correct glue → module direction. Does NOT import from app.py or orchestration.py. No back-imports.",
+      "result": "PASS",
+      "detail": "Imports from gateway/async_client (chat_pro), pipeline stages (L1/L2/L3/red_team/resonance), TYPE_CHECKING from fragility_scanner and cross_border_analyzer. Zero imports from shadows/. Zero imports from gate* modules. Clean dependency DAG: gateway + pipeline stages → decision.",
       "status": "PASS"
     },
     {
-      "severity": "info",
+      "severity": "INFO",
       "check": "data_flow",
-      "detail": "Input: Layer1Result, Layer2Result, Layer3BatchResult, RedTeamReport, ResonanceResult, optional shadow_votes (None by design), optional hypotheses list. Processing: build prompt → chat_pro() → parse JSON → DecisionOutput. Output: DecisionOutput with decision_cards + no_trade_card + summary. Clean single-direction flow.",
+      "result": "PASS",
+      "detail": "Input: pipeline analysis results (L1, L2, L3, Red Team, Resonance) + optional Phase H enhancements (hypotheses, fragility_report, cross_border_report). Processing: build prompt → chat_pro() → parse JSON → DecisionOutput. Output: DecisionOutput with decision_cards + no_trade_card + summary. Shadow data fully decoupled — shadow ecosystem is internal competition only.",
       "status": "PASS"
     },
     {
-      "severity": "info",
+      "severity": "INFO",
       "check": "backward_compatible_hypotheses",
-      "detail": "hypotheses parameter added as optional (default=None) at line 115. _build_decision_prompt receives it at line 128 and passes to _build_hypothesis_summary at line 173. _build_hypothesis_summary handles None (line 213: 'if hypotheses else \"\"') and empty list (line 263-264: returns \"\"). All existing callers from orchestration.py:349 pass hypotheses=hypotheses — compatible with both populated and empty lists.",
+      "result": "PASS",
+      "detail": "hypotheses parameter defaults to None. _build_hypothesis_summary handles None and empty list — returns empty string. All HypothesisResult field accesses in _detect_signal_conflicts use getattr() with safe defaults — compatible with older hypothesis objects lacking causal/flow/scenario_tree/fragility_score fields.",
       "status": "PASS"
     },
     {
-      "severity": "info",
-      "check": "backward_compatible_shadow_votes",
-      "detail": "shadow_votes=None by design (app.py line 110, orchestration.py line 290). The shadow consensus block in _build_decision_prompt (lines 155-171) only executes when shadow_votes is truthy — dead code in the live pipeline, preserved for hypothetical manual invocation. No behavior change.",
-      "status": "PASS"
-    },
-    {
-      "severity": "info",
+      "severity": "INFO",
       "check": "signal_conflict_integration",
-      "detail": "_detect_signal_conflicts() at lines 269-314 checks 5 conflict conditions: (1) causal.net_directional_force vs flow.flow_imbalance divergence > 0.4, (2) scenario_tree.base_case.confidence vs (1 - fragility_score) divergence > 0.4. All field accesses use getattr() with None defaults — safe against missing attributes from older HypothesisResult objects. Conflicts are additive to the prompt — no mutation of existing prompt structure.",
+      "result": "PASS",
+      "detail": "_detect_signal_conflicts() at lines 269-314: checks causal vs flow divergence and scenario confidence vs fragility divergence. All field accesses use getattr() with None defaults. Conflicts are additive section in prompt — no mutation of existing structure.",
       "status": "PASS"
     },
     {
-      "severity": "info",
-      "check": "prompt_structure_preserved",
-      "detail": "Prompt sections in _build_decision_prompt() (lines 142-200): [optional shadow_consensus] → [optional hypothesis_summary] → [optional conflict_summary] → Signal Resonance → Layer 1 → Layer 2 → Layer 3 → Red Team → Instructions. All sections are independent f-string blocks. Adding new sections does not affect parsing of other sections.",
-      "status": "PASS"
-    },
-    {
-      "severity": "info",
-      "check": "json_parse_safety",
-      "detail": "_parse_decision_response() (lines 317-363): strips markdown fences, tries direct json.loads, falls back to finding {} boundaries. On failure returns DecisionOutput with error message — never crashes. All field accessors use .get() with defaults.",
+      "severity": "INFO",
+      "check": "single_entry_point",
+      "result": "PASS",
+      "detail": "Single public function: async generate_decision(). Helpers (_build_decision_prompt, _build_hypothesis_summary, _detect_signal_conflicts, _parse_decision_response) are module-private with underscore prefix.",
       "status": "PASS"
     }
   ],
@@ -51,5 +54,5 @@
   "import_boundary_clean": true,
   "data_flow_intact": true,
   "backward_compatible": true,
-  "notes": "Decision module with clean integration properties. The new signal conflict detection is additive — it inserts a new section between hypothesis summary and Signal Resonance without modifying existing prompt structure. All HypothesisResult field accesses use getattr() with safe defaults, so backward compatibility with older hypothesis objects (lacking causal/flow/scenario_tree/fragility_score fields) is maintained. The shadow_votes dead-code path is preserved for backward compatibility with any hypothetical manual invocations."
+  "notes": "DEFINITIVE INTEGRATION AUDIT: shadow_votes parameter fully removed from signature and all callers. Decision module is cleanly isolated — no shadow imports, no gate module imports. Signal conflict detection is additive with safe getattr() access on hypothesis fields. Backward compatible through None defaults and empty-list handling."
 }

@@ -1,0 +1,41 @@
+{
+  "module": "position_sizing",
+  "file": "pipeline/position_sizing.py",
+  "level": "PICA-Security",
+  "timestamp": "2026-05-18T12:02:34Z",
+  "risk_tier": "Medium",
+  "findings": [
+    {
+      "check": "input_validation",
+      "result": "PASS",
+      "detail": "All 7 inputs validated before computation: win_probability [0,1], win_loss_ratio > 0, user_conviction_discount [0,1], volatility_percentile [0,1], correlation_to_portfolio [-1,1], portfolio_pct_limit (0,1]. Each raises ValueError with descriptive message on invalid input.",
+      "severity": "info"
+    },
+    {
+      "check": "division_by_zero",
+      "result": "PASS",
+      "detail": "Kelly formula: (1-W)/R — win_loss_ratio validated > 0 before use. No other divisions by dynamic values. Correlation discount: std_i > 0 and std_j > 0 checks before division (but those are in ranking_engine, not here).",
+      "severity": "info"
+    },
+    {
+      "check": "negative_value_safety",
+      "result": "PASS",
+      "detail": "All inputs validated for valid ranges. User conviction can only DISCOUNT win probability (multiplied, never added). Raw Kelly clamped to [0, 1] after computation. Volatility adjustment clamped to [0.3, 1.2]. Correlation discount clamped to [0.2, 1.0]. Hard cap enforced.",
+      "severity": "info"
+    },
+    {
+      "check": "no_external_calls",
+      "result": "PASS",
+      "detail": "Pure mathematical function. No LLM calls, no network I/O, no file I/O, no datetime calls. Zero side effects.",
+      "severity": "info"
+    },
+    {
+      "check": "design_safety",
+      "result": "PASS",
+      "detail": "User conviction can only REDUCE win probability (adjusted_prob = win_probability * user_conviction_discount with discount in [0,1]). This is a critical safety constraint — prevents users from inflating their confidence to justify larger positions.",
+      "severity": "info"
+    }
+  ],
+  "verdict": "PASS",
+  "recommendations": []
+}

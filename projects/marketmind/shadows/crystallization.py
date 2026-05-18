@@ -1,7 +1,7 @@
 """Crystallization Engine -- Knowledge crystallization: insight → hypothesis → validate → promote/retire.
 
 Inner loop: Collect insights from shadow memory → formalize hypothesis →
-            tweak methodology → backtest validate against shadow_votes
+            tweak methodology → backtest validate against shadow_analyses
 Outer loop: Track methodology performance → significance gate →
             promote to semantic memory or retire
 """
@@ -32,7 +32,7 @@ class CrystallizationEngine:
     """Knowledge crystallization engine for the shadow ecosystem.
 
     Inner loop: Collect insights from episodic memory → formalize hypothesis →
-                tweak methodology → backtest validate against shadow_votes.
+                tweak methodology → backtest validate against shadow_analyses.
 
     Outer loop: Track methodology performance → significance gate →
                 promote to semantic memory or retire.
@@ -118,7 +118,7 @@ class CrystallizationEngine:
         # Formalize hypothesis from the belief
         hypothesis = self._formalize_hypothesis(proposition, expectation, uncertainty)
 
-        # Backtest validate against shadow_votes
+        # Backtest validate against shadow_analyses
         validation_score, sample_count, evidence_lines = self._backtest_validate(
             shadow_id, ticker, expectation
         )
@@ -287,10 +287,10 @@ class CrystallizationEngine:
     def _backtest_validate(
         self, shadow_id: str, ticker: str, expectation: float
     ) -> tuple[float, int, list[str]]:
-        """Backtest validate a hypothesis against historical shadow_votes.
+        """Backtest validate a hypothesis against historical shadow_analyses.
 
-        Queries the shadow_votes table for this shadow on this ticker,
-        compares vote direction against actual outcomes (from virtual_trades PnL).
+        Queries the shadow_analyses table for this shadow on this ticker,
+        compares analysis direction against actual outcomes (from virtual_trades PnL).
 
         Args:
             shadow_id: The shadow that generated the insight.
@@ -302,53 +302,53 @@ class CrystallizationEngine:
         """
         conn = self._db._connect()
         try:
-            # Get all votes for this shadow on this ticker
-            votes = conn.execute(
-                """SELECT sv.date, sv.direction, sv.confidence
-                   FROM shadow_votes sv
-                   WHERE sv.shadow_id = ? AND sv.ticker = ?
-                   ORDER BY sv.date ASC""",
+            # Get all analyses for this shadow on this ticker
+            analyses = conn.execute(
+                """SELECT sa.date, sa.direction, sa.confidence
+                   FROM shadow_analyses sa
+                   WHERE sa.shadow_id = ? AND sa.ticker = ?
+                   ORDER BY sa.date ASC""",
                 (shadow_id, ticker),
             ).fetchall()
 
             from marketmind.shadows.belief_math import confidence_score
 
-            sample_count = len(votes)
+            sample_count = len(analyses)
             if sample_count == 0:
-                return 0.0, 0, ["No vote data available for backtest"]
+                return 0.0, 0, ["No analysis data available for backtest"]
 
             hits = 0
             evidence_lines: list[str] = []
 
-            for vote in votes:
-                vote_date = vote["date"]
-                direction = vote["direction"]
-                vote_confidence = vote["confidence"]
+            for analysis in analyses:
+                analysis_date = analysis["date"]
+                direction = analysis["direction"]
+                analysis_confidence = analysis["confidence"]
 
                 if direction == "abstain":
                     continue
 
                 # Get actual next-day return sign for this ticker
-                actual_sign = self._db.get_next_day_return_sign(ticker, vote_date)
+                actual_sign = self._db.get_next_day_return_sign(ticker, analysis_date)
 
                 if actual_sign is None:
                     continue
 
-                # A vote is correct if:
-                # - long vote + positive return → hit
-                # - short vote + negative return → hit
-                vote_correct = (
+                # An analysis is correct if:
+                # - long analysis + positive return → hit
+                # - short analysis + negative return → hit
+                analysis_correct = (
                     (direction == "long" and actual_sign == 1) or
                     (direction == "short" and actual_sign == -1)
                 )
-                if vote_correct:
+                if analysis_correct:
                     hits += 1
                 evidence_lines.append(
-                    f"{vote_date}: {direction} vote (conf={vote_confidence:.2f}) "
-                    f"→ {'CORRECT' if vote_correct else 'wrong'} (actual={'up' if actual_sign == 1 else 'down'})"
+                    f"{analysis_date}: {direction} analysis (conf={analysis_confidence:.2f}) "
+                    f"→ {'CORRECT' if analysis_correct else 'wrong'} (actual={'up' if actual_sign == 1 else 'down'})"
                 )
 
-            valid_samples = sum(1 for v in votes if v["direction"] != "abstain")
+            valid_samples = sum(1 for a in analyses if a["direction"] != "abstain")
             hit_rate = hits / valid_samples if valid_samples > 0 else 0.0
 
             return hit_rate, valid_samples, evidence_lines
@@ -409,7 +409,7 @@ class CrystallizationEngine:
         return (
             f"Hypothesis: Assets linked to '{proposition}' will {direction} "
             f"the market (E[belief]={expectation:.2f}, uncertainty={uncertainty:.2f}, "
-            f"confidence={confidence_label}). Testable via shadow_votes backtest."
+            f"confidence={confidence_label}). Testable via shadow_analyses backtest."
         )
 
     @staticmethod

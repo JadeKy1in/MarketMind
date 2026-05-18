@@ -274,7 +274,7 @@ class BackgroundScheduler:
 
         NEVER calls orchestrate_daily_cycle() — reflection is read-only.
         The old code called it with empty news/market data, producing garbage
-        votes that polluted shadow_votes and corrupted rankings.
+        analyses that polluted shadow_analyses and corrupted rankings.
         """
         self._memory_store.apply_decay()
         for shadow in self._state_db.get_visible_shadows():
@@ -289,7 +289,7 @@ class BackgroundScheduler:
     async def _run_crystallization(self, task: TaskNode) -> dict:
         """Run knowledge crystallization for shadows with vote history (P0-3 fix).
 
-        Queries existing shadow_votes (no new LLM calls), runs the
+        Queries existing shadow_analyses (no new LLM calls), runs the
         crystallization engine to promote/retire insights.
         """
         from marketmind.shadows.crystallization import CrystallizationEngine

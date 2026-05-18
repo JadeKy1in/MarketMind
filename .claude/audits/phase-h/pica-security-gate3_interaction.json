@@ -1,0 +1,47 @@
+{
+  "module": "gate3_interaction",
+  "file": "pipeline/gate3_interaction.py",
+  "level": "PICA-Security",
+  "timestamp": "2026-05-18T12:02:34Z",
+  "risk_tier": "High",
+  "findings": [
+    {
+      "check": "pii_risk",
+      "result": "PASS",
+      "detail": "DecisionTicket fields: direction, instrument, position_size_pct, entry_level, stop_loss, take_profit, risk_budget_consumed_bps, conviction_score, correlation_overlay, catalyst_timeline, max_hold_days. All are investment parameters — no PII, no personal identifiers, no account numbers.",
+      "severity": "info"
+    },
+    {
+      "check": "position_data_storage",
+      "result": "PASS",
+      "detail": "Position data stored via archiver.log_decision() as structured dict and via session_mgr.save(SessionState). No raw user input stored unsanitized. Conversation text sanitized via sanitize_for_llm_prompt() before archiving.",
+      "severity": "info"
+    },
+    {
+      "check": "field_update_parsing",
+      "result": "PASS",
+      "detail": "_parse_field_update() uses regex with predefined field_map — only recognized keys (入场/止损/止盈/标的/仓位/风险/催化剂/最大持有/信心) are parsed. Numeric values converted via float()/int() with ValueError catch. No eval/exec. Percentages adjusted safely (max 1.0 clamp).",
+      "severity": "info"
+    },
+    {
+      "check": "ticket_validation",
+      "result": "PASS",
+      "detail": "Before proceeding to execution, validates stop_loss > 0 and instrument non-empty. Pre-trade checklist runs BEFORE confirmation — all blockers must pass. '强制确认' override exists but is explicit opt-in.",
+      "severity": "info"
+    },
+    {
+      "check": "timezone_correctness",
+      "result": "PASS",
+      "detail": "datetime.now(timezone.utc) used at lines 228 (Gate3Session.started_at), 303 (DecisionTicket.created_at), 375 (market_data timestamp). No bare datetime.now() calls.",
+      "severity": "info"
+    },
+    {
+      "check": "command_injection",
+      "result": "PASS",
+      "detail": "No subprocess calls, no shell execution, no eval/exec. All operations are pure Python string/regex matching.",
+      "severity": "info"
+    }
+  ],
+  "verdict": "PASS",
+  "recommendations": []
+}

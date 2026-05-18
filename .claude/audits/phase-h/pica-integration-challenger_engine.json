@@ -1,0 +1,41 @@
+{
+  "module": "challenger_engine",
+  "file": "shadows/challenger_engine.py",
+  "level": "PICA-Integration",
+  "timestamp": "2026-05-18T12:02:34Z",
+  "risk_tier": "Medium",
+  "findings": [
+    {
+      "check": "import_boundaries",
+      "result": "PASS",
+      "detail": "Imports from: shadow_state (ShadowStateDB, ShadowConfig, DailySnapshot), config.settings (ShadowSettings), scipy.stats (statistical tests). No imports from pipeline/. No imports from sibling shadow orchestration modules (only data types from shadow_state).",
+      "severity": "info"
+    },
+    {
+      "check": "beta_shadow_exclusion",
+      "result": "PASS",
+      "detail": "check_elimination_stage() reads snapshot history from DB. Beta shadows are excluded from ranking (get_ranking_eligible_shadows excludes beta), so they never enter the bottom-20% elimination pipeline. Challenger engine operates downstream of ranking — by the time shadows reach this engine, betas are already filtered out.",
+      "severity": "info"
+    },
+    {
+      "check": "three_stage_pipeline",
+      "result": "PASS",
+      "detail": "Stage 1 (WARNING): 2 consecutive bottom-20% periods. Stage 2 (CHALLENGER): 3 periods → secret challenger created. Stage 3 (COMPARISON): 2-week paired trial with statistical gates. Configurable via ShadowSettings (challenger_stage1_periods, challenger_stage2_periods, challenger_stage3_weeks). TRIAL_DAYS = max(21, STAGE3_WEEKS * 5).",
+      "severity": "info"
+    },
+    {
+      "check": "data_flow",
+      "result": "PASS",
+      "detail": "check_elimination_stage(shadow_id) → EliminationStage (reads snapshot history from DB). run_comparison_trial(challenger_id, target_id) → ChallengerTrialResult (reads paired snapshots, returns verdict). Both are deterministic based on persisted data. No external state.",
+      "severity": "info"
+    },
+    {
+      "check": "challenger_lifecycle",
+      "result": "PASS",
+      "detail": "Challenger inherits target's methodology with higher temperature (+0.05) for exploration. Child generation = parent_generation + 1. Created as shadow_type='challenger' invisible to rankings. If trial succeeds → REPLACE_TARGET (challenger replaces target). If fails → RESTORE_TARGET. Inconclusive → trial extends.",
+      "severity": "info"
+    }
+  ],
+  "verdict": "PASS",
+  "recommendations": []
+}

@@ -1,49 +1,52 @@
 {
-  "module": "pipeline/post_gate1.py",
-  "timestamp": "2026-05-18T08:22:38Z",
-  "auditor": "PICA-Integration-PhaseH-Extraction",
+  "module": "post_gate1",
+  "file": "pipeline/post_gate1.py",
+  "level": "PICA-Integration",
+  "timestamp": "2026-05-18T12:02:34Z",
+  "auditor": "PICA-Integration-PhaseH",
   "type": "static",
+  "risk_tier": "High",
   "findings": [
     {
-      "severity": "info",
+      "severity": "CRITICAL",
+      "check": "shadow_votes_removal_integration",
+      "result": "PASS",
+      "detail": "DEFINITIVE: shadow_votes is NOT passed to generate_decision(). The call at line 239-245 passes: l1, l2, l3, red_team, resonance, hypotheses, fragility_report, cross_border_report. No shadow_votes keyword. The previous integration audit (2026-05-18T08:22:38Z) documented shadow_votes=None — this is now fully removed, not just None. Decision module signature matches: no shadow_votes parameter.",
+      "status": "PASS"
+    },
+    {
+      "severity": "INFO",
       "check": "import_boundary",
-      "detail": "Does NOT import from orchestration (glue layer) — confirmed via grep. Imports under TYPE_CHECKING: MarketMindConfig. Lazy imports inside function body: pipeline/layer1_narrative, pipeline/layer2_fundamental, pipeline/layer3_technical, pipeline/red_team, pipeline/resonance, pipeline/decision, config/asset_universe. All imports follow glue → module direction. No back-imports or sibling imports (does not import from pre_gate1).",
+      "result": "PASS",
+      "detail": "Zero module-level imports of pipeline stages. All stage imports are lazy (inside run_post_gate1()): layer1_narrative, layer2_fundamental, layer3_technical, red_team, resonance, decision, regime_mapper, scenario_forecaster, fragility_scanner, cross_border_analyzer, asset_universe. Zero imports from shadows/. Zero back-imports from glue layer.",
       "status": "PASS"
     },
     {
-      "severity": "info",
+      "severity": "INFO",
       "check": "data_flow_state_consumption",
-      "detail": "Receives state dict from run_pre_gate1(), extracts 9 keys on lines 29-37: tracker, archivist, session_date, shadow_db, mother, news_items, triage_results, hypotheses, actionable. Each used in corresponding stages: tracker for status output, archivist for file saving, session_date for FTS index, shadow_db/mother for shadow ecosystem, news_items for L1, triage_results for L1 signals, hypotheses/actionable for decision. Clean consumption — no unused keys, no missing key errors when pre_gate1 returns all keys.",
+      "result": "PASS",
+      "detail": "Receives state dict from run_pre_gate1(), extracts 9 keys on lines 29-37: tracker, archivist, session_date, shadow_db, mother, news_items, triage_results, hypotheses, actionable. Each used in corresponding stages. Clean consumption — no unused keys. pre_gate1 guarantees all keys exist even on error paths.",
       "status": "PASS"
     },
     {
-      "severity": "info",
-      "check": "data_flow_stage_ordering",
-      "detail": "Stages 4→5→6→7→8→9→10 sequential: L1 narrative → L2+L3 parallel → Shadows → Red Team → Resonance → Decision → Archive. L2 and L3 run in parallel via asyncio.gather (line 81) — only dependency is L1 result (correct). Each subsequent stage consumes prior stage outputs. No circular dependencies.",
+      "severity": "INFO",
+      "check": "pipeline_stage_ordering",
+      "result": "PASS",
+      "detail": "Stages 4-10 in correct order: L1 (4) → L2+L3 parallel via asyncio.gather (5) → Shadows (6) → Red Team (7) → Resonance (8) → Decision (9) → Archive (10). Phase H modules interleaved: regime_mapper after L1, scenario_forecaster/fragility_scanner/cross_border_analyzer before Decision. No circular dependencies.",
       "status": "PASS"
     },
     {
-      "severity": "info",
-      "check": "cross_module_data_contract",
-      "detail": "State dict contract verified across pre_gate1 ↔ post_gate1 boundary: all 9 keys produced by pre_gate1 are consumed by post_gate1. pre_gate1 always produces all 9 keys (even on error: empty lists for hypotheses/actionable on ImportError). post_gate1 accesses all 9 keys unconditionally on lines 29-37 — safe because pre_gate1 guarantees all keys exist.",
-      "status": "PASS"
-    },
-    {
-      "severity": "info",
-      "check": "backward_compatible_api",
-      "detail": "Function signature: async def run_post_gate1(config, state, mock=False, verbose=False, gate1_decision=None) → int. The state dict parameter replaces the old _run_stages_4_10's direct parameter list. The gate1_decision parameter is reserved for Phase I integration (currently unused). Returns int exit code — same convention as all orchestration entry points.",
-      "status": "PASS"
-    },
-    {
-      "severity": "info",
+      "severity": "INFO",
       "check": "dead_loop_check",
-      "detail": "Sequential pipeline with no while loops or recursion. asyncio.gather on line 81 runs L2+L3 in parallel with fixed fanout (2 tasks). Shadow stage gated behind enabled+not-None check. No infinite loop or unbounded concurrency risk.",
+      "result": "PASS",
+      "detail": "Sequential pipeline with no while loops or recursion. asyncio.gather runs L2+L3 with fixed fanout (2 tasks). Shadow stage gated behind enabled+not-None check. No infinite loop or unbounded concurrency risk.",
       "status": "PASS"
     },
     {
-      "severity": "info",
-      "check": "shadow_votes_contract",
-      "detail": "shadow_votes is hardcoded to None (line 106), passed to generate_decision() as None. This enforces the design constraint that shadows do not vote on investment decisions. Consistent with the clause in project CLAUDE.md stating 'shadows are internal competition only'.",
+      "severity": "INFO",
+      "check": "archive_integration",
+      "result": "PASS",
+      "detail": "Archive subdirectories: analysis/ (L1, L2, L3), review/ (Red Team, Resonance), decisions/ (Decision). Each try/except wrapped — pipeline never fails on IO errors. FTS5 index at Stage 10.",
       "status": "PASS"
     }
   ],
@@ -51,5 +54,5 @@
   "import_boundary_clean": true,
   "data_flow_intact": true,
   "backward_compatible": true,
-  "notes": "Clean extraction from orchestration.py with well-defined state dict consumption. Cross-module contract with pre_gate1 verified — all 9 keys produced are consumed, and pre_gate1 guarantees all keys exist even on error paths. L2+L3 parallel via asyncio.gather with correct dependency (only L1). shadow_votes=None enforced per design constraint."
+  "notes": "DEFINITIVE INTEGRATION AUDIT: shadow_votes fully removed from post_gate1. generate_decision() called without shadow_votes — matches updated decision.py signature. All 9 state dict keys consumed. L2+L3 parallel via asyncio.gather. Phase H modules integrated with error recovery. Clean single-direction data flow from pre_gate1 through stages 4-10 to archive."
 }

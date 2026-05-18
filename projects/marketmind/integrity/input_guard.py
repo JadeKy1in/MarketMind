@@ -109,11 +109,23 @@ _CONTENT_TYPE_PATTERN = re.compile(r'content[_-]?type\s*:', re.IGNORECASE)
 # Markdown control character escaping
 # ---------------------------------------------------------------------------
 
+def _escape_inline_pairs(text: str) -> str:
+    """Escape paired inline Markdown formatting that could inject emphasis/code blocks."""
+    # Inline code: single backtick pairs, not triple fences
+    text = re.sub(r'(?<!`)`(?!`)', r'\\`', text)
+    # Bold with exactly two asterisks, not part of *** (bold+italic)
+    text = re.sub(r'(?<!\*)\*\*(?!\*)', r'\\*\\*', text)
+    # Bold with exactly two underscores, not part of ___ (bold+italic)
+    text = re.sub(r'(?<!_)__(?!_)', r'\\_\\_', text)
+    return text
+
+
 def _escape_markdown(text: str) -> str:
-    """Escape structural Markdown characters at the beginning of lines.
+    """Escape structural and inline Markdown characters in user-provided text.
 
     Prevents user text from injecting fake headings, blockquotes, bold,
-    or underline markers when rendered inside a Markdown template.
+    code fences, horizontal rules, or inline emphasis when rendered inside
+    a Markdown template.
     """
     lines = text.split('\n')
     escaped_lines: list[str] = []
@@ -128,16 +140,44 @@ def _escape_markdown(text: str) -> str:
         if stripped.startswith('\\'):
             # Already escaped -- do not double-escape.
             escaped_lines.append(line)
-        elif stripped.startswith('#'):
-            escaped_lines.append(indent + '\\' + stripped)
-        elif stripped.startswith('>'):
-            escaped_lines.append(indent + '\\' + stripped)
-        elif stripped.startswith('**'):
-            escaped_lines.append(indent + '\\*\\*' + stripped[2:])
-        elif stripped.startswith('__'):
-            escaped_lines.append(indent + '\\_\\_' + stripped[2:])
-        else:
-            escaped_lines.append(line)
+            continue
+
+        # MEDIUM-1: Escape ALL leading # characters (### → \#\#\#)
+        if stripped.startswith('#'):
+            match = re.match(r'^(#+)', stripped)
+            hashes = match.group(1)
+            rest = stripped[len(hashes):]
+            escaped_hashes = ''.join('\\' + c for c in hashes)
+            escaped_lines.append(indent + escaped_hashes + _escape_inline_pairs(rest))
+            continue
+
+        if stripped.startswith('>'):
+            escaped_lines.append(indent + '\\>' + _escape_inline_pairs(stripped[1:]))
+            continue
+
+        # MEDIUM-2: Code fence — escape all three backticks
+        if stripped.startswith('```'):
+            escaped_lines.append(indent + '\\`\\`\\`' + _escape_inline_pairs(stripped[3:]))
+            continue
+
+        # MEDIUM-2: Horizontal rule — line consists ONLY of --- or ***
+        if stripped.rstrip() == '---':
+            escaped_lines.append(indent + '\\---')
+            continue
+        if stripped.rstrip() == '***':
+            escaped_lines.append(indent + '\\*\\*\\*')
+            continue
+
+        # Line-start bold/underline: escape opening, then escape inline pairs in remainder
+        if stripped.startswith('**'):
+            escaped_lines.append(indent + '\\*\\*' + _escape_inline_pairs(stripped[2:]))
+            continue
+        if stripped.startswith('__'):
+            escaped_lines.append(indent + '\\_\\_' + _escape_inline_pairs(stripped[2:]))
+            continue
+
+        # MEDIUM-3: No line-start pattern — apply inline escaping
+        escaped_lines.append(_escape_inline_pairs(line))
 
     return '\n'.join(escaped_lines)
 

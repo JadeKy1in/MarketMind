@@ -1,0 +1,41 @@
+{
+  "module": "ranking_engine",
+  "file": "shadows/ranking_engine.py",
+  "level": "PICA-Integration",
+  "timestamp": "2026-05-18T12:02:34Z",
+  "risk_tier": "Medium",
+  "findings": [
+    {
+      "check": "import_boundaries",
+      "result": "PASS",
+      "detail": "Only imports: config.settings (ShadowSettings) — configuration dependency. No imports from pipeline/. No imports from sibling shadow modules beyond config. Clean isolation.",
+      "severity": "info"
+    },
+    {
+      "check": "beta_shadow_exclusion",
+      "result": "PASS",
+      "detail": "Ranking engine operates on ShadowPerformance objects provided by caller. Beta exclusion is enforced upstream in shadow_state.get_ranking_eligible_shadows(). The engine itself is shadow-type-agnostic and computes mathematically on whatever performances it receives. This is correct separation of concerns — data filtering at DB layer, computation at engine layer.",
+      "severity": "info"
+    },
+    {
+      "check": "v2_formula_integration",
+      "result": "PASS",
+      "detail": "V2 composite weights (0.30 MPPM + 0.20 Calmar + 0.15 Omega + 0.15 WR + 0.20 Calibration) correctly fall back to v1 config weights when no calibration data. Career-day-aware dynamic WR line (early boost, mature relaxation) with domain/type adjustments. Profitability penalty, abstention penalty, quota efficiency bonus — all composited transparently with modifiers dict.",
+      "severity": "info"
+    },
+    {
+      "check": "holm_bonferroni_correction",
+      "result": "PASS",
+      "detail": "_apply_holm_bonferroni() corrects for multiple comparisons in achievement tier assignment. With 22 shadows, uncorrected probability of at least one false ELITE is ~97%. Step-down correction with alpha=0.05 family-wise error rate. Only downgrades, never upgrades.",
+      "severity": "info"
+    },
+    {
+      "check": "single_entry_point",
+      "result": "PASS",
+      "detail": "Primary entry: rank_shadows() — full pipeline from metrics to ranked results. Supporting: compute_composite_score(), compute_haircut(), determine_achievement_tier(), detect_plateau(), check_reset_eligibility(). Each has clear single responsibility.",
+      "severity": "info"
+    }
+  ],
+  "verdict": "PASS",
+  "recommendations": []
+}

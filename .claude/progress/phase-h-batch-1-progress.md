@@ -65,29 +65,37 @@
 - [x] 8 team members active
 
 ## Remaining
-- [ ] Phase H-4 integration: decision conflict detection + Gate 1 wiring (in progress)
-- [ ] PICA audits for H-4 modules (in progress)
+- [x] Phase H-4 integration: decision conflict detection + Gate 1 wiring
+- [x] Gate 2 (Confirmation): gate2_interaction, position_sizing, pre_trade_checklist
+- [x] Gate 3 (Position): gate3_interaction, final position validation
 - [ ] Commit pending
 
 ## Phase I: Preparation
 - [x] 3 research files ready for architecture design
-- [ ] Architecture plan + Gate 2 design
+- [x] Architecture plan + Gate 2 design
 
 ---
 
-**Updated**: 2026-05-18 — Phase H complete. Phase I plan submitted for Red Team review.
+**Updated**: 2026-05-18 20:11 — Phase H EOD. Gate 2/3 COMPLETE. 1272 tests. 35 sources audited.
 
 ### Final Phase H stats
-- New modules: 17
+- New modules: 21 (including gate2_interaction, gate3_interaction, position_sizing, pre_trade_checklist)
 - Modified files: 10
-- Tests: 913 (+224)
-- PICA artifacts: 57
-- Red Team audits: 9
+- Tests: 1272 (+583 from Phase H start)
+- PICA artifacts: 75
+- Red Team audits: 13
 - Research files: 13
 - app.py: 971→76 lines
 - investigation_loop: 918→486 lines
+- Sources audited: 35, statuses verified
 
-### Phase I status
-- Architecture plan: `.claude/plans/phase-i-self-evolving-architecture.md`
-- Red Team audits: 3 in progress
-- Pending: user approval → 6 modules implementation
+### Completed modules at EOD
+- pipeline/: gate1_interaction, gate2_interaction, gate3_interaction, position_sizing, pre_trade_checklist, hypothesis_card, kill_monitor, causal_decomposition, flow_decomposition, regime_mapper, scenario_forecaster, fragility_scanner, cross_border_analyzer, entity_extractor, event_clusterer, flash_triage, entity_memory, expertise_discovery, platt_scaling, calibration_tracker, prediction_extractor, reflection_agent
+- config/: asset_class_routing, mechanism_glossary, regime_library, fragility_thresholds, source_authority (updated)
+- shadows/: ranking_engine, collusion_detector (upgraded)
+- storage/: gate_archiver
+- integrity/: input_guard
+
+### Remaining
+- [ ] End-to-end run_full() wiring (orchestration glue)
+- [ ] Commit pending

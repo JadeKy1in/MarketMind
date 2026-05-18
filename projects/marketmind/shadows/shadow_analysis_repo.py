@@ -1,10 +1,10 @@
-"""Vote and ranking persistence for shadow ecosystem (INTERNAL-ONLY).
+"""Analysis and ranking persistence for shadow ecosystem (INTERNAL-ONLY).
 
 These functions support the shadow competition ecosystem — ranked analyst shadows
-that compete internally for signal quality. Vote persistence exists for
+that compete internally for signal quality. Analysis persistence exists for
 BACKTEST validation (backtest_runner.py) and crystallization hypothesis testing.
 It is NOT used as input to the live decision pipeline (app.py:110 sets
-shadow_votes = None by design).
+shadow_analyses = None by design).
 
 Extracted from shadow_state.py per modular architecture rules (§3.1).
 All functions accept sqlite3.Connection — no dependency on ShadowStateDB.
@@ -16,7 +16,7 @@ import logging
 import sqlite3
 from datetime import datetime, timezone
 
-logger = logging.getLogger("marketmind.shadows.shadow_vote_repo")
+logger = logging.getLogger("marketmind.shadows.shadow_analysis_repo")
 
 
 # ── Rankings ────────────────────────────────────────────────────────────────
@@ -65,12 +65,12 @@ def get_ranking_history(
     return results
 
 
-# ── Vote lookup / persistence ──────────────────────────────────────────────
+# ── Analysis lookup / persistence ──────────────────────────────────────────
 
-def get_all_active_votes(
+def get_all_active_analyses(
     conn: sqlite3.Connection, date: str, ticker: str
 ) -> list[dict]:
-    """Get a list of active non-eliminated, non-challenger shadows with vote metadata."""
+    """Get a list of active non-eliminated, non-challenger shadows with analysis metadata."""
     rows = conn.execute(
         """SELECT s.id, s.shadow_type, s.display_name
            FROM shadows s
@@ -105,20 +105,20 @@ def get_next_day_return_sign(
     return None
 
 
-def save_votes(
-    conn: sqlite3.Connection, shadow_id: str, date: str, votes: list
+def save_analyses(
+    conn: sqlite3.Connection, shadow_id: str, date: str, analyses: list
 ) -> None:
-    """Persist shadow votes for backtest/audit. Uses executemany for batch insert."""
-    if not votes:
+    """Persist shadow analyses for backtest/audit. Uses executemany for batch insert."""
+    if not analyses:
         return
     now = datetime.now(timezone.utc).isoformat()
     rows = [
-        (shadow_id, date, v.ticker, v.direction, v.confidence,
-         getattr(v, 'thesis', '') or '', getattr(v, 'risk_note', '') or '', now)
-        for v in votes
+        (shadow_id, date, a.ticker, a.direction, a.confidence,
+         getattr(a, 'thesis', '') or '', getattr(a, 'risk_note', '') or '', now)
+        for a in analyses
     ]
     conn.executemany(
-        """INSERT INTO shadow_votes (shadow_id, date, ticker, direction,
+        """INSERT INTO shadow_analyses (shadow_id, date, ticker, direction,
            confidence, thesis, risk_note, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         rows
@@ -126,12 +126,12 @@ def save_votes(
     conn.commit()
 
 
-def get_votes_by_date_range(
+def get_analyses_by_date_range(
     conn: sqlite3.Connection, start_date: str, end_date: str
 ) -> list[dict]:
-    """Get all votes within a date range, ordered by date DESC."""
+    """Get all analyses within a date range, ordered by date DESC."""
     rows = conn.execute(
-        """SELECT * FROM shadow_votes
+        """SELECT * FROM shadow_analyses
            WHERE date >= ? AND date <= ?
            ORDER BY date DESC""",
         (start_date, end_date)

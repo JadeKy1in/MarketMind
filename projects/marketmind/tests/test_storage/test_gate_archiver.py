@@ -302,3 +302,100 @@ async def test_timestamps_use_utc():
         assert decision_ts.endswith("Z") or decision_ts.endswith("+00:00")
 
         archive.close()
+
+
+@pytest.mark.asyncio
+async def test_user_text_with_arrow_comment_escaped():
+    """--> in user text must be escaped to prevent HTML comment closure."""
+    with tempfile.TemporaryDirectory() as td:
+        archive = MarketMindArchive(Path(td))
+        archiver = GateArchiver(archive)
+
+        jsonl_path = await archiver.start_session(1, "test-session-008")
+
+        turn = GateTurn(
+            turn=1,
+            speaker="USER",
+            type="question",
+            content_type="user_free_text",
+            text="test --> injected comment",
+            timestamp="2026-05-18T14:30:00Z",
+        )
+        await archiver.log_turn(turn)
+
+        md_path = jsonl_path.with_suffix(".md")
+        md_content = md_path.read_text(encoding="utf-8")
+
+        assert "<!-- USER_TEXT_START -->" in md_content
+        assert "<!-- USER_TEXT_END -->" in md_content
+        # The raw --> must NOT appear in user content between the comment markers
+        start_marker = "<!-- USER_TEXT_START -->"
+        end_marker = "<!-- USER_TEXT_END -->"
+        start_idx = md_content.index(start_marker) + len(start_marker)
+        end_idx = md_content.index(end_marker)
+        between = md_content[start_idx:end_idx]
+        assert "-->" not in between, (
+            f"Unescaped --> found between comment markers:\n{between}"
+        )
+        # The escaped form should be present
+        assert "-- >" in between
+
+        archive.close()
+
+
+@pytest.mark.asyncio
+async def test_full_sha256_hash_length():
+    """Integrity footer SHA-256 hash must be full 64 hex characters."""
+    with tempfile.TemporaryDirectory() as td:
+        archive = MarketMindArchive(Path(td))
+        archiver = GateArchiver(archive)
+
+        jsonl_path = await archiver.start_session(1, "test-session-009")
+
+        await archiver.log_turn(GateTurn(
+            turn=1, speaker="AI", type="hypothesis_card",
+            content_type="structured_data",
+            data={"direction": "tech"}, timestamp="2026-05-18T14:30:00Z",
+        ))
+
+        result = await archiver.close_session()
+        hash_val = result["jsonl_hash"]
+        assert len(hash_val) == 64, (
+            f"Expected 64-char SHA-256 hash, got {len(hash_val)}: {hash_val}"
+        )
+        # Must be lowercase hex only
+        assert all(c in "0123456789abcdef" for c in hash_val)
+
+        archive.close()
+
+
+@pytest.mark.asyncio
+async def test_invalid_speaker_rejected(caplog):
+    """Invalid speaker should log a warning but not crash."""
+    with tempfile.TemporaryDirectory() as td:
+        archive = MarketMindArchive(Path(td))
+        archiver = GateArchiver(archive)
+
+        jsonl_path = await archiver.start_session(1, "test-session-010")
+
+        import logging
+        with caplog.at_level(logging.WARNING, logger="marketmind.storage.gate_archiver"):
+            turn = GateTurn(
+                turn=1,
+                speaker="HACKER",
+                type="question",
+                content_type="user_free_text",
+                text="malicious input",
+                timestamp="2026-05-18T14:30:00Z",
+            )
+            await archiver.log_turn(turn)
+
+        # Should have logged a warning about invalid speaker
+        assert "Invalid speaker" in caplog.text
+        assert "HACKER" in caplog.text
+
+        # Should still have written the turn (no crash)
+        lines = jsonl_path.read_text(encoding="utf-8").strip().split("\n")
+        assert len(lines) == 1
+
+        archive.close()

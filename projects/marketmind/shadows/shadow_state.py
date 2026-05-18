@@ -140,12 +140,12 @@ class ShadowStateDB:
         try:
             if shadow_type:
                 rows = conn.execute(
-                    "SELECT * FROM shadows WHERE status != 'eliminated' AND shadow_type = ?",
+                    "SELECT * FROM shadows WHERE status NOT IN ('eliminated','retired') AND shadow_type = ?",
                     (shadow_type,)
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT * FROM shadows WHERE status != 'eliminated'"
+                    "SELECT * FROM shadows WHERE status NOT IN ('eliminated','retired')"
                 ).fetchall()
             return [self._row_to_config(r) for r in rows]
         finally:
@@ -155,7 +155,21 @@ class ShadowStateDB:
         conn = self._connect()
         try:
             rows = conn.execute(
-                "SELECT * FROM shadows WHERE status != 'eliminated' AND shadow_type != 'challenger'"
+                "SELECT * FROM shadows WHERE status NOT IN ('eliminated','retired')"
+                " AND shadow_type != 'challenger'"
+            ).fetchall()
+            return [self._row_to_config(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_ranking_eligible_shadows(self) -> list[ShadowConfig]:
+        """Shadows eligible for ranking, collusion detection, and challenger engine.
+        Excludes beta, retired, eliminated, and challenger shadows."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM shadows WHERE status NOT IN ('eliminated','retired','beta')"
+                " AND shadow_type != 'challenger'"
             ).fetchall()
             return [self._row_to_config(r) for r in rows]
         finally:
@@ -167,6 +181,25 @@ class ShadowStateDB:
             conn.execute(
                 "UPDATE shadows SET status = ? WHERE id = ?",
                 (status, shadow_id)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def retire_shadow(self, shadow_id: str, reason: str) -> None:
+        """Mark shadow as retired. Preserves methodology and history as frozen benchmark."""
+        conn = self._connect()
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            conn.execute(
+                "UPDATE shadows SET status = 'retired', retired_at = ?, "
+                "retirement_reason = ? WHERE id = ?",
+                (now, reason, shadow_id)
+            )
+            conn.execute(
+                """UPDATE virtual_trades SET exit_reason = 'shadow_retired',
+                   exit_date = ? WHERE shadow_id = ? AND exit_price IS NULL""",
+                (now[:10], shadow_id)
             )
             conn.commit()
         finally:
@@ -287,6 +320,8 @@ class ShadowStateDB:
             generation=config_json.get("generation", 0),
             status=row["status"],
             eliminated_at=row["eliminated_at"],
+            retired_at=row["retired_at"],
+            retirement_reason=row["retirement_reason"],
             created_at=row["created_at"],
         )
 
@@ -425,10 +460,10 @@ class ShadowStateDB:
         finally:
             conn.close()
 
-    # ── Rankings (delegated to shadow_vote_repo) ──────────────────────────
+    # ── Rankings (delegated to shadow_analysis_repo) ───────────────────────
 
     def save_rankings(self, date: str, rankings: list[tuple[str, float, float, dict]]) -> None:
-        from marketmind.shadows.shadow_vote_repo import save_rankings
+        from marketmind.shadows.shadow_analysis_repo import save_rankings
         conn = self._connect()
         try:
             save_rankings(conn, date, rankings)
@@ -436,7 +471,7 @@ class ShadowStateDB:
             conn.close()
 
     def get_ranking_history(self, shadow_id: str, days: int = 90) -> list[dict]:
-        from marketmind.shadows.shadow_vote_repo import get_ranking_history
+        from marketmind.shadows.shadow_analysis_repo import get_ranking_history
         conn = self._connect()
         try:
             return get_ranking_history(conn, shadow_id, days)
@@ -555,53 +590,75 @@ class ShadowStateDB:
         finally:
             conn.close()
 
-    # ── Vote / PnL (delegated to shadow_vote_repo) ────────────────────────
+    # ── Analysis / PnL (delegated to shadow_analysis_repo) ─────────────────
     # NOTE: These methods are for BACKTEST and internal ecosystem use ONLY.
     # Shadows are an internal competition ecosystem for ranking/evolution/
     # crystallization. They do NOT vote on investment decisions.
-    # app.py:110 sets shadow_votes = None by design — this is intentional.
-    # Vote persistence exists solely for backtest_runner.py signal-quality
+    # app.py:110 sets shadow_analyses = None by design — this is intentional.
+    # Analysis persistence exists solely for backtest_runner.py signal-quality
     # analysis and crystallization validation.
 
-    def get_all_active_votes(self, date: str, ticker: str) -> list[dict]:
+    def get_all_active_analyses(self, date: str, ticker: str) -> list[dict]:
         """[INTERNAL-ONLY] Get active shadow metadata. For ecosystem health, NOT decision input."""
-        from marketmind.shadows.shadow_vote_repo import get_all_active_votes
+        from marketmind.shadows.shadow_analysis_repo import get_all_active_analyses
         conn = self._connect()
         try:
-            return get_all_active_votes(conn, date, ticker)
+            return get_all_active_analyses(conn, date, ticker)
         finally:
             conn.close()
 
     def get_next_day_return_sign(self, ticker_or_shadow: str, date: str) -> int | None:
-        from marketmind.shadows.shadow_vote_repo import get_next_day_return_sign
+        from marketmind.shadows.shadow_analysis_repo import get_next_day_return_sign
         conn = self._connect()
         try:
             return get_next_day_return_sign(conn, ticker_or_shadow, date)
         finally:
             conn.close()
 
-    def save_votes(self, shadow_id: str, date: str, votes: list) -> None:
-        """[INTERNAL-ONLY] Persist shadow votes for backtest/audit. NOT a decision input."""
-        from marketmind.shadows.shadow_vote_repo import save_votes
-        if not votes:
+    def save_analyses(self, shadow_id: str, date: str, analyses: list) -> None:
+        """[INTERNAL-ONLY] Persist shadow analyses for backtest/audit. NOT a decision input."""
+        from marketmind.shadows.shadow_analysis_repo import save_analyses
+        if not analyses:
             return
         conn = self._connect()
         try:
-            save_votes(conn, shadow_id, date, votes)
+            save_analyses(conn, shadow_id, date, analyses)
         finally:
             conn.close()
 
-    def get_votes_by_date_range(self, start_date: str, end_date: str) -> list[dict]:
-        """[INTERNAL-ONLY] Query votes for BACKTEST signal-quality analysis. NOT a decision input."""
-        from marketmind.shadows.shadow_vote_repo import get_votes_by_date_range
+    def save_beta_analyses(self, shadow_id: str, date: str, analyses: list,
+                           methodology_variant: str | None = None) -> None:
+        """Persist beta shadow analyses to isolated beta_analyses table."""
+        if not analyses:
+            return
+        conn = self._connect()
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            for a in analyses:
+                conn.execute(
+                    """INSERT INTO beta_analyses (shadow_id, date, ticker, direction,
+                       confidence, thesis, risk_note, methodology_variant, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (shadow_id, date,
+                     a.get("ticker", ""), a.get("direction", "abstain"),
+                     a.get("confidence", 0.0), a.get("thesis", ""),
+                     a.get("risk_note", ""), methodology_variant, now)
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_analyses_by_date_range(self, start_date: str, end_date: str) -> list[dict]:
+        """[INTERNAL-ONLY] Query analyses for BACKTEST signal-quality analysis. NOT a decision input."""
+        from marketmind.shadows.shadow_analysis_repo import get_analyses_by_date_range
         conn = self._connect()
         try:
-            return get_votes_by_date_range(conn, start_date, end_date)
+            return get_analyses_by_date_range(conn, start_date, end_date)
         finally:
             conn.close()
 
     def get_pnl_by_domain(self, domain: str) -> list[float]:
-        from marketmind.shadows.shadow_vote_repo import get_pnl_by_domain
+        from marketmind.shadows.shadow_analysis_repo import get_pnl_by_domain
         conn = self._connect()
         try:
             return get_pnl_by_domain(conn, domain)

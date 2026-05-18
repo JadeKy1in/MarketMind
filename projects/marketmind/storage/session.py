@@ -55,15 +55,24 @@ class SessionManager:
         data = _serialize_state(state)
         # Atomic write: temp file → rename, prevents corruption on crash
         tmp = filepath.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
-        tmp.replace(filepath)
+        try:
+            tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+            tmp.replace(filepath)
+            logger.info("Session saved: %s", state.session_id)
+        except Exception as e:
+            logger.error("Session save failed: %s", e)
+            raise
         return filepath
 
     def load(self, session_id: str) -> SessionState | None:
         filepath = self.checkpoint_dir / f"{session_id}.json"
         if not filepath.exists():
             return None
-        data = json.loads(filepath.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(filepath.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            logger.error("Corrupted session file %s: %s", filepath.name, e)
+            return None
         return _deserialize_state(data)
 
     def list_sessions(self) -> list[dict]:
@@ -77,7 +86,7 @@ class SessionManager:
                     "started_at": data.get("started_at", ""),
                     "complete": (data.get("gate3") or {}).get("completed", False),
                 })
-            except (json.JSONDecodeError, OSError, ValueError) as e:
+            except (json.JSONDecodeError, OSError) as e:
                 logger.warning("Corrupted session file %s: %s", f.name, e)
         return sessions
 

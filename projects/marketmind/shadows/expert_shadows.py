@@ -1,4 +1,8 @@
-﻿"""Expert shadows — domain-specific methodologies, structured vote output, factory."""
+﻿"""Expert shadows — 16 domain-specific analysts with structured vote output + factory.
+
+Each expert uses indicator confirmation thresholds from the canonical design.
+See .claude/research/shadow-ecosystem-full-design.md §1.1 for the source of truth.
+"""
 from __future__ import annotations
 
 import json
@@ -59,6 +63,10 @@ class ExpertShadow(ShadowAgent):
             "metals": ["steel", "copper", "iron", "LME", "mining", "DBB", "XME"],
             "real_estate": ["REIT", "real estate", "housing", "mortgage", "VNQ"],
             "fx": ["forex", "FX", "dollar", "euro", "yen", "carry", "UUP", "FXE"],
+            "agriculture": ["agriculture", "grain", "wheat", "corn", "soybean",
+                          "livestock", "fertilizer", "harvest", "DBA", "CORN",
+                          "WEAT", "SOYB", "USDA", "crop", "coffee", "sugar",
+                          "cotton", "cocoa", "农产品", "粮食", "农业"],
             "macro": [],  # Macro sees everything
         }
         keywords = domain_keywords.get(self.config.domain or "macro", [])
@@ -140,6 +148,9 @@ EXPERT_SHADOW_CONFIGS: list[ShadowConfig] = [
     ShadowConfig(shadow_id="expert:metals:steel_trader", shadow_type="expert",
                  display_name="Steel Trader", methodology_prompt=_EXPERT_PROMPTS["metals"],
                  virtual_capital=42000.0, domain="metals", temperature=0.35),
+    ShadowConfig(shadow_id="expert:agriculture:harvest_seer", shadow_type="expert",
+                 display_name="Harvest Seer", methodology_prompt=_EXPERT_PROMPTS["agriculture"],
+                 virtual_capital=42000.0, domain="agriculture", temperature=0.35),
     ShadowConfig(shadow_id="expert:realestate:reit_analyst", shadow_type="expert",
                  display_name="REIT Analyst", methodology_prompt=_EXPERT_PROMPTS["real_estate"],
                  virtual_capital=48000.0, domain="real_estate", temperature=0.3),
@@ -149,29 +160,12 @@ EXPERT_SHADOW_CONFIGS: list[ShadowConfig] = [
     ShadowConfig(shadow_id="expert:macro:cycle_reader", shadow_type="expert",
                  display_name="Cycle Reader", methodology_prompt=_EXPERT_PROMPTS["macro"],
                  virtual_capital=60000.0, domain="macro", temperature=0.3),
-    # Phase 5: Short Specialist — dedicated short-biased expert (Item 16)
-    ShadowConfig(shadow_id="expert:short:bear_tracker", shadow_type="expert",
-                 display_name="Bear Tracker",
-                 methodology_prompt=(
-                     "You are the Bear Tracker, a dedicated short-selling specialist. "
-                     "Your expertise: identifying overvalued assets, deteriorating "
-                     "fundamentals, accounting irregularities, peaked momentum, and "
-                     "crowded consensus ripe for reversal. You scan across ALL domains "
-                     "for short targets. Core skills: forensic financial analysis, "
-                     "short-interest tracking, put/call ratio interpretation, insider "
-                     "selling pattern detection, and technical breakdown confirmation. "
-                     "You are BIASED toward finding short opportunities. Your default "
-                     "vote direction is 'short'. Analyze: news → fundamentals → "
-                     "technicals → sentiment → insider activity. "
-                     "Output VOTE_START/VOTE_END blocks."
-                 ),
-                 virtual_capital=40000.0, domain="short", temperature=0.35),
 ]
 
 
 def create_expert_shadows(state_db: ShadowStateDB,
                            settings: ShadowSettings) -> list[ExpertShadow]:
-    """Instantiate all 15 expert shadows from configs."""
+    """Instantiate all 16 expert shadows from configs."""
     shadows = []
     for config in EXPERT_SHADOW_CONFIGS:
         # Register in DB if not exists

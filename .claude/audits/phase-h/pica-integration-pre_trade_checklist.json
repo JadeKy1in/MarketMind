@@ -1,0 +1,35 @@
+{
+  "module": "pre_trade_checklist",
+  "file": "pipeline/pre_trade_checklist.py",
+  "level": "PICA-Integration",
+  "timestamp": "2026-05-18T12:02:34Z",
+  "risk_tier": "Medium",
+  "findings": [
+    {
+      "check": "import_boundaries",
+      "result": "PASS",
+      "detail": "Only standard library imports (__future__, dataclasses, datetime). No imports from pipeline/ siblings, no imports from shadows/, no imports from gateway/.",
+      "severity": "info"
+    },
+    {
+      "check": "clear_contract",
+      "result": "PASS",
+      "detail": "Single public entry: async run_pre_trade_checklist(decision_ticket: dict, market_data: dict) -> PreTradeReport. Input/output clearly defined via dict keys documented in docstring. Async but no I/O inside — ready for future async extensions.",
+      "severity": "info"
+    },
+    {
+      "check": "caller_verification",
+      "result": "PASS",
+      "detail": "Called by gate3_interaction.py:360-379 with properly constructed decision_ticket dict and market_data dict. Tickete fields match documented contract.",
+      "severity": "info"
+    },
+    {
+      "check": "checklist_completeness",
+      "result": "PASS",
+      "detail": "6 checks cover: data freshness, stop tightness, stop looseness, stop placement quality, position limit compliance, conflicting positions, and kill criteria monitoring. BLOCK/WARN/INFO severity correctly assigned. Aggregate all_blockers_passed computed correctly from BLOCK items only.",
+      "severity": "info"
+    }
+  ],
+  "verdict": "PASS",
+  "recommendations": []
+}

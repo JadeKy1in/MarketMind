@@ -110,27 +110,27 @@ VOTE_END"""
         assert votes[0].emergency_flag is True
 
 
-def test_all_16_configs_unique_ids():
+def test_all_15_configs_unique_ids():
     ids = [c.shadow_id for c in EXPERT_SHADOW_CONFIGS]
-    assert len(ids) == len(set(ids)) == 16
+    assert len(ids) == len(set(ids)) == 15
 
 
-def test_all_16_configs_valid_domains():
+def test_all_15_configs_valid_domains():
     domains = {c.domain for c in EXPERT_SHADOW_CONFIGS}
     expected = {"gold", "crypto", "energy", "bonds", "volatility", "emerging",
                 "tech", "financials", "healthcare", "consumer", "industrials",
-                "metals", "real_estate", "fx", "macro", "short"}
+                "metals", "real_estate", "fx", "macro"}
     assert domains == expected
 
 
-def test_factory_creates_16_shadows(temp_shadow_db):
-    """Factory creates 16 shadows without errors."""
+def test_factory_creates_15_shadows(temp_shadow_db):
+    """Factory creates 15 expert shadows without errors."""
     settings = ShadowSettings()
     shadows = create_expert_shadows(temp_shadow_db, settings)
-    assert len(shadows) == 16
+    assert len(shadows) == 15
     assert all(isinstance(s, ExpertShadow) for s in shadows)
     visible = temp_shadow_db.get_visible_shadows()
-    assert len(visible) == 16
+    assert len(visible) == 15
 
 
 # ── C.7 LLM integration tests ────────────────────────────────────────────────

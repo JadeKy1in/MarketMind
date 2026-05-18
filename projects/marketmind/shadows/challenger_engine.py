@@ -491,3 +491,26 @@ class ChallengerEngine:
             True if Calmar > gate.
         """
         return calmar > gate
+
+
+# ── Brier-aware challenge validity ───────────────────────────────────────
+
+def get_challenge_validity(challenger_brier: float, target_brier: float) -> float:
+    """A challenge from a well-calibrated shadow against a poorly-calibrated
+    shadow is more valid.
+
+    Uses a logistic function centered at equal Brier scores. When the
+    challenger has a lower (better) Brier score, validity approaches 1.0.
+    When the challenger has a higher (worse) Brier score, validity
+    approaches 0.0. Equal scores yield 0.5.
+
+    Args:
+        challenger_brier: Brier score of the challenging shadow (0=perfect, 1=worst).
+        target_brier: Brier score of the target/incumbent shadow.
+
+    Returns:
+        Validity score in [0.0, 1.0]. Higher means the challenge is more valid.
+    """
+    import math
+    diff = target_brier - challenger_brier  # positive = challenger better calibrated
+    return 1.0 / (1.0 + math.exp(-5.0 * diff))

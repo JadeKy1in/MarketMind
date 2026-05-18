@@ -65,7 +65,7 @@ def test_markdown_heading_escaped():
         "## Fake Decision\n\nRegular text here.",
         source="gate1_chat",
     )
-    assert result.sanitized.startswith("\\## Fake Decision")
+    assert result.sanitized.startswith("\\#\\# Fake Decision")
     assert "Regular text" in result.sanitized
 
 
@@ -145,6 +145,64 @@ def test_source_specific_rules():
 
     # --- gate1_chat: markdown escaping IS applied (control group) ---
     result_gate1 = sanitize_for_llm_prompt(heading_text, source="gate1_chat")
-    assert result_gate1.sanitized.startswith("\\##"), (
+    assert result_gate1.sanitized.startswith("\\#\\#"), (
         f"gate1_chat should escape headings, but got: {repr(result_gate1.sanitized)}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 9-12: PICA MEDIUM-1/2/3 fixes
+# ---------------------------------------------------------------------------
+
+def test_multiple_hash_marks_escaped():
+    """MEDIUM-1: ALL leading # characters are escaped, not just the first."""
+    result = sanitize_for_llm_prompt("### H3 heading", source="gate1_chat")
+    assert result.sanitized.startswith("\\#\\#\\# H3 heading"), (
+        f"Expected \\#\\#\\# H3 heading, got: {repr(result.sanitized)}"
+    )
+
+
+def test_code_fence_escaped():
+    """MEDIUM-2: Triple-backtick code fences are escaped."""
+    text = "```python\nprint('hello')\n```"
+    result = sanitize_for_llm_prompt(text, source="gate1_chat")
+    # Each ``` line should have its backticks escaped
+    assert "\\`\\`\\`python" in result.sanitized, (
+        f"Expected escaped opening fence, got: {repr(result.sanitized)}"
+    )
+    assert "\\`\\`\\`" in result.sanitized.split('\n')[-1] or \
+           result.sanitized.endswith("\\`\\`\\`"), (
+        f"Expected escaped closing fence, got: {repr(result.sanitized)}"
+    )
+
+
+def test_horizontal_rule_escaped():
+    """MEDIUM-2: Horizontal rule markers are escaped."""
+    result = sanitize_for_llm_prompt("---", source="gate1_chat")
+    assert result.sanitized.startswith("\\---"), (
+        f"Expected \\---, got: {repr(result.sanitized)}"
+    )
+
+    result2 = sanitize_for_llm_prompt("***", source="gate1_chat")
+    assert result2.sanitized.startswith("\\*\\*\\*"), (
+        f"Expected \\*\\*\\*, got: {repr(result2.sanitized)}"
+    )
+
+
+def test_inline_bold_escaped():
+    """MEDIUM-3: Inline bold **bold** is escaped."""
+    result = sanitize_for_llm_prompt("This is **bold text** here", source="gate1_chat")
+    assert "\\*\\*bold text\\*\\*" in result.sanitized, (
+        f"Expected escaped inline bold, got: {repr(result.sanitized)}"
+    )
+
+    # Also test inline code and underline
+    result2 = sanitize_for_llm_prompt("Use `print()` function", source="gate1_chat")
+    assert "\\`print()\\`" in result2.sanitized, (
+        f"Expected escaped inline code, got: {repr(result2.sanitized)}"
+    )
+
+    result3 = sanitize_for_llm_prompt("This is __underlined text__ here", source="gate1_chat")
+    assert "\\_\\_underlined text\\_\\_" in result3.sanitized, (
+        f"Expected escaped inline underline, got: {repr(result3.sanitized)}"
     )

@@ -4,7 +4,7 @@
 MAX_TOKENS_PER_SESSION = 150_000      # Hard ceiling
 WARNING_THRESHOLD = 0.80              # 80% = 120K tokens → start pruning low-score headlines
 MAX_PRO_CALLS_PER_SESSION = 30        # per Red Team H-SEC-2: cap Pro LLM calls per session
-FLASH_TRIAGE_BATCH_SIZE = 100         # Headlines per Flash triage call (100 tokens/headline)
+FLASH_TRIAGE_BATCH_SIZE = 25          # Headlines per Flash triage call (was 100 — 100×response exceeded max_tokens=4096, JSON truncated)
 PRO_BROWSE_HEADLINES_MAX = 20         # Max headlines Pro selects for deeper review
 PRO_BROWSE_TOKENS_PER_HEADLINE = 500  # Estimated tokens per headline during browse phase
 
