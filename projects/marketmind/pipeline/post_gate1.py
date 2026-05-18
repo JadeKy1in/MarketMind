@@ -88,6 +88,16 @@ async def run_post_gate1(config: "MarketMindConfig", state: dict,
     except Exception as e:
         logger.warning("Regime mapping failed: %s", e)
 
+    if regime_mapping:
+        _archive("analysis", "03b_regime", {
+            "stage": "regime_mapping",
+            "quadrant": regime_mapping.current_quadrant,
+            "top_analogues": [{"name": a.regime_name, "similarity": a.similarity,
+                              "forward_3m": a.forward_3m_equity, "forward_12m": a.forward_12m_equity}
+                             for a in regime_mapping.top_analogues[:3]],
+            "bias_warning": regime_mapping.bias_warning,
+        })
+
     # 5. Layer 2 + Layer 3 in parallel
     tracker.advance(5, "Layer 2+3: fundamental + technical analysis...")
     from marketmind.pipeline.layer2_fundamental import analyze_layer2
@@ -210,6 +220,19 @@ async def run_post_gate1(config: "MarketMindConfig", state: dict,
                            f"{len(fragility_report.warnings)} warnings")
     except Exception as e:
         logger.warning("Fragility scan failed: %s", e)
+
+    if fragility_report:
+        _archive("review", "07b_fragility", {
+            "stage": "fragility",
+            "overall_score": fragility_report.overall_fragility_score,
+            "crossed": [{"metric": a.threshold.metric, "value": a.current_value,
+                        "threshold": a.threshold.threshold_value, "severity": a.severity}
+                       for a in fragility_report.crossed],
+            "warnings": [{"metric": a.threshold.metric, "distance_pct": a.distance_pct}
+                        for a in fragility_report.warnings],
+            "staleness": fragility_report.staleness_warnings,
+            "summary": fragility_report.summary,
+        })
 
     # Phase H: cross-border flow analysis
     cross_border_report = None

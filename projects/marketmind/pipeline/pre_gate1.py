@@ -137,6 +137,21 @@ async def run_pre_gate1(config: "MarketMindConfig", mock: bool = False,
     except Exception as e:
         tracker.result(f"event clustering skipped ({e}) — continuing without clustering")
 
+    if clustering_result:
+        _archive("analysis", "01b_event_clusters", {
+            "stage": "event_clustering",
+            "clusters_formed": clustering_result.clusters_formed,
+            "noise_count": clustering_result.noise_count,
+            "clusters": [{"id": c.cluster_id, "title": c.title, "narrative": c.narrative,
+                          "headlines": c.headlines, "size": c.size,
+                          "cross_cluster_links": [{"target_id": target, "relationship": rel}
+                                                 for target, rel in c.cross_cluster_links]}
+                         for c in clustering_result.clusters],
+            "causal_chains": [{"source_id": src.cluster_id, "target_id": dst.cluster_id,
+                              "reason": reason}
+                             for src, dst, reason in clustering_result.cross_cluster_causal_chains]
+        })
+
     # 2. Flash triage — lightweight scoring of ALL headlines
     tracker.advance(2, "Flash: triaging all headlines...")
     try:
@@ -202,10 +217,62 @@ async def run_pre_gate1(config: "MarketMindConfig", mock: bool = False,
         "monitor": len(monitor),
         "priced_in": len(priced_in),
         "total_hypotheses": len(hypotheses),
-        "hypotheses": [{"hypothesis": h.hypothesis, "confidence": h.confidence,
-                        "verdict": h.verdict, "bear_case": h.bear_case}
-                       for h in hypotheses[:50]]
+        "hypotheses": [{
+            "hypothesis": h.hypothesis,
+            "refined_hypothesis": h.refined_hypothesis,
+            "confidence": h.confidence,
+            "verdict": h.verdict,
+            "expectation_gap": h.expectation_gap,
+            "direction": getattr(h, 'direction', ''),
+            "core_logic": getattr(h, 'core_logic', ''),
+            "risk_level": getattr(h, 'risk_level', ''),
+            "time_window": getattr(h, 'time_window', ''),
+            "bear_case": h.bear_case,
+            "bear_case_confidence": h.bear_case_confidence,
+            "logic_chain": h.logic_chain,
+            "layer_1_narrative": getattr(h, 'layer_1_narrative', ''),
+            "layer_2_narrative": getattr(h, 'layer_2_narrative', ''),
+            "layer_3_narrative": getattr(h, 'layer_3_narrative', ''),
+            "layer_4_narrative": getattr(h, 'layer_4_narrative', ''),
+            "verification_scores": {
+                "layer_1_market": h.verification.layer_1_market,
+                "layer_2_fundamental": h.verification.layer_2_fundamental,
+                "layer_3_multisource": h.verification.layer_3_multisource,
+                "layer_4_historical": h.verification.layer_4_historical,
+                "weighted_confidence": h.verification.weighted_confidence,
+                "verdict": h.verification.verdict,
+            },
+            "causal": {
+                "asset_class": h.causal.asset_class if h.causal else None,
+                "net_directional_force": h.causal.net_directional_force if h.causal else None,
+                "mechanism_chain": h.causal.mechanism_chain if h.causal else [],
+            } if h.causal else None,
+            "flow": {
+                "dominant_buyer": h.flow.dominant_buyer if h.flow else None,
+                "dominant_seller": h.flow.dominant_seller if h.flow else None,
+                "flow_imbalance": h.flow.flow_imbalance if h.flow else None,
+            } if h.flow else None,
+        } for h in hypotheses[:50]]
     })
+
+    # Phase I: Extract verifiable predictions from hypotheses
+    try:
+        from marketmind.pipeline.prediction_extractor import extract_predictions
+        from marketmind.storage.learning_store import LearningStore
+        learning_store = LearningStore()
+        predictions = extract_predictions(hypotheses)
+        for p in predictions:
+            learning_store.save_prediction(p)
+        _archive("analysis", "026_predictions", {
+            "stage": "prediction_extraction",
+            "total_predictions": len(predictions),
+            "predictions": [{"prediction": p.prediction, "confidence": p.confidence,
+                            "direction": p.direction, "success_value": p.success_value,
+                            "expiry_date": p.expiry_date, "status": p.status}
+                           for p in predictions]
+        })
+    except Exception as e:
+        tracker.result(f"prediction extraction skipped ({e})")
 
     return {
         "tracker": tracker,
