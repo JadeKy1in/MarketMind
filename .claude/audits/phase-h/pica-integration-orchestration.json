@@ -1,34 +1,61 @@
 {
-  "module": "orchestration.py",
-  "timestamp": "2026-05-18T02:48:24Z",
-  "auditor": "PICA-Integration-Agent",
+  "module": "pipeline/orchestration.py",
+  "timestamp": "2026-05-18T08:22:38Z",
+  "auditor": "PICA-Integration-PhaseH-Extraction",
   "type": "static",
   "findings": [
     {
       "severity": "info",
       "check": "import_boundary",
-      "detail": "Only TYPE_CHECKING import for MarketMindConfig (avoids runtime circular import). All real imports are lazy (inside function body). Does NOT import from app.py. Clean.",
+      "detail": "Top-level imports: TYPE_CHECKING for MarketMindConfig, plus init_gateway from gateway, run_pre_gate1 from pipeline.pre_gate1, run_post_gate1 from pipeline.post_gate1. Lazy imports inside function bodies: gate1_interaction, session (SessionManager, SessionState, GateCheckpoint), session_context, layer1-3_interactive, decision_interactive. All imports follow glue → module direction. pre_gate1 and post_gate1 do NOT back-import from orchestration (confirmed via grep). Clean DAG.",
       "status": "PASS"
     },
     {
       "severity": "info",
-      "check": "run_interactive_signature_compat",
-      "detail": "Signature: async def run_interactive(config, mock=False, verbose=False, shadow_count=None) -> int. Test file test_run_interactive_smoke.py:149 calls with (config, mock=True, verbose=False, shadow_count=None). Matches exactly.",
+      "check": "data_flow_pre_to_post",
+      "detail": "run_daily() (line 32-36): state = await run_pre_gate1(...) → return await run_post_gate1(config, state, ...). Clean data handoff — the state dict produced by pre_gate1 is passed directly to post_gate1 with no transformation or key modification. run_full() (line 39-81): same pattern with Gate 1 insertion between pre and post. Both pre_gate1 and post_gate1 use the same 9-key contract.",
       "status": "PASS"
     },
     {
       "severity": "info",
-      "check": "test_import_resolution",
-      "detail": "test_run_interactive_smoke.py imports via 'from marketmind.pipeline.orchestration import run_interactive'. Resolves correctly. All dependency imports (gateway, session_context, layer1-3_interactive, decision_interactive) exist.",
+      "check": "entry_point_signatures",
+      "detail": "run_daily(config, mock=False, verbose=False, shadow_count=None) → int. run_full(config, mock=False, verbose=False, shadow_count=None, session_mode='full') → int. run_gate1_mode(config, mock=False, verbose=False, shadow_count=None) → int. run_interactive(config, mock=False, verbose=False, shadow_count=None) → int. All return int for exit code. All accept same first 4 params. run_full adds optional session_mode. Signature compatibility maintained with pre-extraction versions.",
+      "status": "PASS"
+    },
+    {
+      "severity": "info",
+      "check": "backward_compatible_daily",
+      "detail": "run_daily() unchanged in behavior — calls run_pre_gate1 (was _run_stages_0_3) + run_post_gate1 (was _run_stages_4_10). Same sequential flow: Stages 0-3 → Stages 4-10. 4 smoke tests pass: test_run_daily_still_importable, test_run_full_function_exists, test_run_gate1_mode_function_exists, test_interactive_full_flow_confirm. app.py imports unchanged (line 70-71).",
+      "status": "PASS"
+    },
+    {
+      "severity": "info",
+      "check": "gate1_integration",
+      "detail": "run_full() (lines 39-81): Inserts Gate 1 between pre_gate1 and post_gate1. run_gate1_mode() (lines 84-132): Runs pre_gate1 + Gate 1 only, no post_gate1. Both save GateCheckpoint via SessionManager with same data format (selected_direction, rejected_directions). Both handle empty hypotheses gracefully (skip Gate 1, proceed to post or exit). Clean additive pattern — Gate 1 is inserted, not mutated into, the pipeline.",
+      "status": "PASS"
+    },
+    {
+      "severity": "info",
+      "check": "run_interactive_independence",
+      "detail": "run_interactive() (lines 135-172) uses a separate interactive path (SessionContext + layer1-3_interactive + decision_interactive). Does NOT use pre_gate1 or post_gate1 modules. This is intentional — the interactive path has its own stage-by-stage CLI prompt flow. No conflict with the batch pipeline path.",
       "status": "PASS"
     },
     {
       "severity": "info",
       "check": "dead_loop_check",
-      "detail": "Sequential stage execution with explicit return-early (skip → return 0, not confirmed → return 0). No recursion, no while loops. No dead loop risk.",
+      "detail": "All 4 run modes have explicit return statements. run_daily: sequential call → return. run_full: conditional Gate 1 → call → return. run_gate1_mode: conditional Gate 1 → return. run_interactive: sequential interactive stages with early-return on skip (returns 0). No while loops, no recursion, no unbounded concurrency.",
+      "status": "PASS"
+    },
+    {
+      "severity": "info",
+      "check": "size_check",
+      "detail": "File at 173 lines (was 516 before extraction). Well under the 200-line glue soft threshold and the 300-line hard ceiling. The extraction successfully moved ~340 lines of business logic into pre_gate1.py and post_gate1.py. Remaining content is purely coordination: imports, CLI IO helpers, 4 run-mode functions.",
       "status": "PASS"
     }
   ],
   "verdict": "PASS",
-  "notes": "All checks pass. Clean orchestration module with lazy imports, TYPE_CHECKING guard, and clear sequential flow."
+  "import_boundary_clean": true,
+  "data_flow_intact": true,
+  "backward_compatible": true,
+  "notes": "Successful extraction from 516-line monolith to 173-line coordinator + two focused modules. The DAG is clean: orchestration → pre_gate1, orchestration → post_gate1, with no back-imports. Data flow through the state dict is consistent across boundaries. All 4 entry points preserved with compatible signatures. Smoke tests pass. run_interactive uses its own interactive path (not pre/post modules) — this is intentional and documented."
 }

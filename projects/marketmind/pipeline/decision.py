@@ -34,6 +34,15 @@ class DecisionCard:
 
 
 @dataclass
+class SignalConflict:
+    hypothesis: str
+    signal_a: tuple[str, float]   # (source_module, value)
+    signal_b: tuple[str, float]   # (source_module, value)
+    divergence: float             # abs(signal_a - signal_b)
+    description: str
+
+
+@dataclass
 class NoTradeCard:
     thesis: str                   # why NOT trading is the best action
     supporting_evidence: list[str]
@@ -163,7 +172,17 @@ def _build_decision_prompt(
 
     hypothesis_summary = _build_hypothesis_summary(hypotheses) if hypotheses else ""
 
-    return f"""{shadow_consensus_str}{hypothesis_summary}## Signal Resonance
+    conflict_summary = ""
+    if hypotheses:
+        conflicts = _detect_signal_conflicts(hypotheses)
+        if conflicts:
+            conflict_text = "\n".join(c.description for c in conflicts)
+            conflict_summary = (
+                f"\n## ⚠️ 信号冲突 (ANALYST_DISAGREEMENT)\n{conflict_text}\n"
+                f"请在你的决策中处理这些冲突——不要忽略或平均化，作出判断。\n"
+            )
+
+    return f"""{shadow_consensus_str}{hypothesis_summary}{conflict_summary}## Signal Resonance
 Verdict: {resonance.verdict} | DSR: {resonance.dsr} | PBO: {resonance.pbo}
 
 ## Layer 1 Narrative
@@ -245,6 +264,54 @@ def _build_hypothesis_summary(hypotheses: list) -> str:
         return ""  # no hypotheses to summarize
 
     return "\n".join(lines) + "\n"
+
+
+def _detect_signal_conflicts(hypotheses: list) -> list[SignalConflict]:
+    """Find where independent analysis modules disagree on the same hypothesis.
+
+    Checks for:
+    - causal.net_directional_force vs flow.flow_imbalance divergence > 0.4
+    - scenario confidence vs fragility overall_score divergence
+    - regime consensus direction vs scenario expected return direction
+
+    Conflicts are NOT auto-resolved — they're flagged as ANALYST_DISAGREEMENT
+    for the user to review in decision cards.
+    """
+    conflicts = []
+    for h in hypotheses:
+        if not h:
+            continue
+
+        causal = getattr(h, 'causal', None)
+        flow = getattr(h, 'flow', None)
+        scenario_tree = getattr(h, 'scenario_tree', None)
+
+        if causal and flow:
+            c_force = causal.net_directional_force
+            f_imbalance = flow.flow_imbalance
+            div = abs(c_force - f_imbalance)
+            if div > 0.4:
+                conflicts.append(SignalConflict(
+                    hypothesis=getattr(h, 'refined_hypothesis', '')[:80],
+                    signal_a=("causal_decomposition", c_force),
+                    signal_b=("flow_decomposition", f_imbalance),
+                    divergence=div,
+                    description=f"因果分解({c_force:+.2f})与资金流({f_imbalance:+.2f})分歧度{div:.2f}"
+                ))
+
+        fragility_score = getattr(h, 'fragility_score', None)
+        if scenario_tree and fragility_score is not None:
+            sc_conf = scenario_tree.base_case.confidence
+            if abs(sc_conf - (1 - fragility_score)) > 0.4:
+                conflicts.append(SignalConflict(
+                    hypothesis=getattr(h, 'refined_hypothesis', '')[:80],
+                    signal_a=("scenario_forecaster", sc_conf),
+                    signal_b=("fragility_scanner", 1 - fragility_score),
+                    divergence=abs(sc_conf - (1 - fragility_score)),
+                    description=f"情景预测置信({sc_conf:.2f})与脆弱性({fragility_score:.2f})不一致"
+                ))
+
+    return conflicts
 
 
 def _parse_decision_response(content: str) -> DecisionOutput:

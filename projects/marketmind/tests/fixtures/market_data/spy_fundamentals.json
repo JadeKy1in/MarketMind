@@ -1,0 +1,22 @@
+{
+  "source": "yfinance",
+  "info": {
+    "symbol": "SPY",
+    "shortName": "SPDR S&P 500 ETF Trust",
+    "longName": "SPDR S&P 500 ETF Trust",
+    "sector": "Financial Services",
+    "marketCap": 500000000000,
+    "trailingPE": 22.5,
+    "forwardPE": 20.1,
+    "priceToBook": 4.2,
+    "returnOnEquity": 0.25,
+    "debtToEquity": 0.0,
+    "beta": 1.0,
+    "dividendYield": 0.013,
+    "regularMarketPrice": 550.0,
+    "fiftyTwoWeekHigh": 580.0,
+    "fiftyTwoWeekLow": 410.0,
+    "fiftyDayAverage": 540.0,
+    "twoHundredDayAverage": 520.0
+  }
+}

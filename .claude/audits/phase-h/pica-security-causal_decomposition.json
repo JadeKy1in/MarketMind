@@ -1,0 +1,22 @@
+{
+  "module": "causal_decomposition",
+  "timestamp": "2026-05-18T05:30:02Z",
+  "auditor": "PICA-Security-PhaseH",
+  "risk_tier": "Medium",
+  "findings": [
+    {
+      "severity": "LOW",
+      "category": "prompt_injection",
+      "detail": "Hypothesis text is inserted into Pro system/user prompts via f-strings. This is internal pipeline flow (LLM output → LLM input) and passes through input_guard before reaching the gateway. No user-facing injection surface.",
+      "mitigation": "Existing input_guard sanitization is adequate."
+    },
+    {
+      "severity": "LOW",
+      "category": "data_source_trust",
+      "detail": "JSON parsing trusts Pro LLM output. _parse_decomposition_json handles markdown wrapping and JSON-within-text, but malformed JSON returns None (graceful degradation). factor names/impacts are clamped before use.",
+      "mitigation": "Clamping + factor count check (>=2 minimum) prevents garbage data propagation."
+    }
+  ],
+  "verdict": "PASS",
+  "notes": "Budget check via get_budget() with RuntimeError catch. datetime.now(timezone.utc) used throughout. No file writes, no API key exposure. All LLM calls routed through gateway/async_client."
+}

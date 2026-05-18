@@ -1,0 +1,28 @@
+{
+  "module": "cross_border",
+  "timestamp": "2026-05-18T05:30:02Z",
+  "auditor": "PICA-Security-PhaseH",
+  "risk_tier": "Medium",
+  "findings": [
+    {
+      "severity": "LOW",
+      "category": "api_key_handling",
+      "detail": "FRED API key retrieved via _get_fred_key(): tries MarketMindConfig.fred_key first, then os.environ.get('FRED_KEY', ''). No hardcoded secrets. Returns empty string if unconfigured → graceful skip.",
+      "mitigation": "Adequate. Key never logged or exposed in responses."
+    },
+    {
+      "severity": "LOW",
+      "category": "data_source_trust",
+      "detail": "CSV parsing from Treasury.gov and JSON parsing from BIS API trust external data. _parse_float returns 0.0 on any parse failure (graceful). TIC CSV uses DictReader with flexible field name matching (Country/country, Net_Flow_USD_Bn/net_flow).",
+      "mitigation": "Empty-list returns on HTTP/parse errors. Graceful degradation built in."
+    },
+    {
+      "severity": "LOW",
+      "category": "error_handling",
+      "detail": "_parse_bis_json has complex nested structure parsing that could fail on unexpected API schema changes. Try/except returns empty list on any error.",
+      "mitigation": "Graceful degradation is adequate. Schema changes would manifest as empty results (logged at WARNING) rather than crashes."
+    }
+  ],
+  "verdict": "PASS",
+  "notes": "All HTTP calls use verify=True (TLS enforcement — audit finding fix). httpx.AsyncClient properly aclose()d in finally blocks. In-memory cache with per-key asyncio.Lock for thread safety. Graceful degradation: empty lists/None on failure, logged at WARNING. No path traversal, no file writes."
+}

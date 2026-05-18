@@ -1,0 +1,43 @@
+{
+  "module": "storage/learning_store.py",
+  "timestamp": "2026-05-18T06:28:49Z",
+  "auditor": "PICA-Integration-PhaseI-Gate1",
+  "type": "static",
+  "findings": [
+    {
+      "severity": "info",
+      "check": "import_boundary",
+      "detail": "All imports from stdlib only (hashlib, json, sqlite3, datetime, pathlib). No imports from marketmind modules — zero back-import risk.",
+      "status": "PASS"
+    },
+    {
+      "severity": "info",
+      "check": "single_entry_point",
+      "detail": "Single public class LearningStore with 4-table schema (predictions, lessons, entity_memories, calibration_data). Context manager support (__enter__/__exit__). Clean lifecycle management via close().",
+      "status": "PASS"
+    },
+    {
+      "severity": "info",
+      "check": "data_flow",
+      "detail": "Predictions: PredictableHypothesis objects → INSERT OR REPLACE → dict on SELECT. Lessons: dict → INSERT OR REPLACE → list[dict] on SELECT. Entity memories: entity_id + dict → INSERT OR REPLACE. Calibration: tracker_id + dict → INSERT OR REPLACE. Consistent pattern — all writes are idempotent (INSERT OR REPLACE).",
+      "status": "PASS"
+    },
+    {
+      "severity": "info",
+      "check": "backward_compatible",
+      "detail": "Standalone module — no existing callers. Designed to be consumed by prediction_extractor output and calibration_tracker. Schema uses IF NOT EXISTS for all CREATE TABLE statements.",
+      "status": "PASS"
+    },
+    {
+      "severity": "info",
+      "check": "schema_design",
+      "detail": "Four tables with appropriate indexes: predictions (status, expiry_date, entity), lessons (entity, root_cause), entity_memories (entity_type), calibration_data (no secondary index — tracker_id is PK). Indexes support the query patterns in the module methods.",
+      "status": "PASS"
+    }
+  ],
+  "verdict": "PASS",
+  "import_boundary_clean": true,
+  "data_flow_intact": true,
+  "backward_compatible": true,
+  "notes": "Clean storage module with consistent CRUD patterns. All writes use INSERT OR REPLACE for idempotency. Schema initialization is safe (IF NOT EXISTS). The module is designed as a leaf node in the dependency DAG — it imports nothing from marketmind and is imported by calibration_tracker and pipeline orchestration."
+}

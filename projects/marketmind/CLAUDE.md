@@ -31,26 +31,71 @@ Phase 2: Shadow Ecosystem (build AFTER Phase 1 is complete)
 
 **Rule**: If you find yourself working on shadow code while the main AI pipeline is broken or incomplete, STOP. Fix the main pipeline first. Shadows are an ENHANCEMENT, not a replacement for the core analysis.
 
-## Phase H Status (2026-05-18)
+## Phase Status (2026-05-18)
 
-Phase H upgrades the pipeline from surface-level sentiment analysis to deep structural macro analysis.
+### Phase H: Deep Analysis Enhancement — COMPLETE
 
-### Completed
-- Security fixes: session.py atomic writes, archivist.py atomic writes, graceful KeyError handling
-- Module extraction: investigation_loop.py 918→486 lines (hvr_cycle, prompts, types, direction)
-- New modules: input_guard.py, gate_archiver.py, hypothesis_card.py, kill_monitor.py
-- Gate 1 interaction loop (in progress)
-- Data model: HypothesisResult +11 fields (direction, core_logic, risk_level, time_window, layer narratives)
-- HypothesisResult wired into generate_decision()
-- input_guard wired into gateway (async_client, macro_data)
-- API cost ceiling added (MAX_PRO_CALLS_PER_SESSION=30)
-- PICA audit artifacts: 12 Security + 7 Integration + 1 Regression (732/732 pass)
-- Research: 7 files in .claude/research/
+Phase H upgraded the pipeline from surface-level sentiment analysis to deep structural macro analysis.
 
-### Pending
-- Gate 1 interaction loop completion
-- Phase H comprehensive architecture plan revision (asset-class routing, 6 new modules)
-- app.py further extraction (currently 392 lines, target 150)
+**Modules built (11 new)**:
+- `pipeline/causal_decomposition.py` (243 lines) — Asset-class-aware causal factor decomposition (9 lenses: balance_sheet, earnings_discount_rate, supply_demand_inventory, dual_central_bank_carry, onchain_offchain + 4 equity sub-types)
+- `pipeline/flow_decomposition.py` — Entity-level capital flow attribution with asset-class-keyed entity types
+- `pipeline/regime_mapper.py` — Historical regime comparison (8 regimes, 7-variable Euclidean distance, pre-1985 qualitative data)
+- `pipeline/scenario_forecaster.py` — Branching scenario trees with tail-risk sampling
+- `pipeline/fragility_scanner.py` — 12 systemic fragility thresholds with staleness detection
+- `pipeline/cross_border_analyzer.py` — Cross-border capital flow analysis
+- `gateway/cross_border.py` — TIC/BIS/cross-currency basis data gateway
+- `config/asset_class_routing.py` — 9-class asset taxonomy with keyword router (data module)
+- `config/mechanism_glossary.py` — 25+ institutional mechanism definitions (data module)
+- `config/regime_library.py` — 8 historical macro regimes (data module)
+- `config/fragility_thresholds.py` — 12 fragility thresholds with versioning (data module)
+- `pipeline/backtest_entry.py` — Backtest runner (extracted from app.py)
+- `pipeline/orchestration.py` — Pipeline orchestration with run_daily + run_full + run_interactive
+- `pipeline/investigation_types.py` — Shared data types (extracted from investigation_loop)
+- `pipeline/investigation_prompts.py` — HVR prompt constants (data module)
+- `pipeline/investigation_direction.py` — Direction extraction heuristics
+
+**Gate 1 built (6 modules)**:
+- `integrity/input_guard.py` — Shared input sanitization
+- `pipeline/hypothesis_card.py` — 3-card progressive disclosure with frequency framing
+- `pipeline/gate1_interaction.py` — Conversation state machine with user-agenda-first opening
+- `pipeline/kill_monitor.py` — Downstream kill-criteria tracking
+- `storage/gate_archiver.py` — JSONL+MD dual-format conversation archive
+- `storage/session.py` — Atomic writes + graceful corruption recovery
+
+**Architecture improvements**:
+- app.py: 971→76 lines (under 150-line CLI entry point ceiling)
+- investigation_loop.py: 918→486 lines (under 500-line module ceiling)
+- Pipeline manifest: stage_2b_investigation added
+- HypothesisResult: +11 fields, wired to generate_decision()
+- input_guard: wired into all gateway LLM paths
+- API cost ceiling: MAX_PRO_CALLS_PER_SESSION=30
+- All LLM prompts: mechanism terminology awareness injected
+
+**Quality**:
+- Tests: 913 pass (up from 689, +224)
+- PICA artifacts: 57 (Security + Integration + Regression)
+- Red Team audits: 9 (3 Gate 1 + 3 Phase H v1 + 3 Phase H v2)
+
+### Phase I: Self-Evolving Learning Layer — PLAN COMPLETE (awaiting approval)
+
+Six-layer learning architecture for AI self-improvement through verified feedback loops:
+- Layer 1: Time-anchored predictions → verifiable outcomes
+- Layer 2: Brier score calibration tracking
+- Layer 3: Structured post-mortem reflection with root cause taxonomy
+- Layer 4: Entity memory accumulation (per-asset, per-sector)
+- Layer 5: Platt scaling confidence calibration
+- Layer 6: Cross-shadow methodology distillation
+
+**Architecture plan**: `.claude/plans/phase-i-self-evolving-architecture.md`
+**Research**: 3 files in `.claude/research/` (self-evolving AI, KG temporal learning, multi-agent learning)
+
+Phase I is auxiliary — it observes the main pipeline and shadow ecosystem without modifying them. Shadow ecosystem Phase 2 upgrades proceed independently; learning layer adapts by tracking new entity IDs.
+
+### Architecture key distinction
+- **Shadow Ecosystem**: 21+ shadows independently analyze markets. Phase 2 adds ELITE protocol, domain-triggered awakening, more complex shadow types.
+- **Phase I Learning Layer**: Observes ALL analyses (main AI + shadows), scores predictions, runs post-mortems, accumulates entity memories, distills methodology. Does NOT modify how shadows analyze — only feeds lessons back via prompt injection.
+- **Integration**: Minimal. Learning layer reads shadow output for scoring; writes lessons to SQLite for retrieval at next analysis time. No changes to shadow_agent.py required.
 
 ## Quick Start
 
@@ -76,7 +121,8 @@ marketmind/
 │   ├── async_client.py         # Flash/Pro routing + M1 integrity injection
 │   ├── token_budget.py         # Priority-based token budget
 │   ├── response_parser.py      # Structured output parsing
-│   └── multimodal_adapter.py   # Image/PDF/screenshot ingestion
+│   ├── multimodal_adapter.py   # Image/PDF/screenshot ingestion
+│   └── cross_border.py         # TIC/BIS/cross-currency basis data gateway
 ├── shadows/                    # Shadow ecosystem (Phase B-F)
 │   ├── shadow_agent.py         # Base ShadowAgent class
 │   ├── shadow_state.py         # SQLite persistence + ShadowConfig
@@ -116,6 +162,12 @@ marketmind/
 │   ├── investigation_types.py    # HVR data types (data module)
 │   ├── investigation_direction.py  # HVR direction extraction (data module)
 │   ├── investigation_loop.py   # Investigation orchestration (glue layer)
+│   ├── causal_decomposition.py # Asset-class-aware causal factor decomposition
+│   ├── flow_decomposition.py   # Entity-level capital flow attribution
+│   ├── regime_mapper.py        # Historical regime comparison (replaces Layer 4 heuristic)
+│   ├── scenario_forecaster.py  # Branching scenario tree generation
+│   ├── fragility_scanner.py    # Systemic fragility threshold monitoring
+│   ├── cross_border_analyzer.py # Cross-border capital flow analysis
 │   ├── backtest_entry.py       # Backtest runner entry point (extracted from app.py)
 │   ├── orchestration.py        # Pipeline orchestration (run_interactive extracted from app.py)
 │   └── cache.py                # Response caching
@@ -142,14 +194,70 @@ marketmind/
 ├── config/                     # Configuration
 │   ├── settings.py             # MarketMindConfig + ShadowSettings
 │   ├── asset_universe.py       # Tradable asset matrix
-│   └── source_authority.py     # Source authority tiers
-└── tests/                      # Test suite
+│   ├── source_authority.py     # Source authority tiers
+│   ├── asset_class_routing.py  # 9-class asset taxonomy + router (data module)
+│   ├── mechanism_glossary.py   # 25+ institutional mechanism definitions (data module)
+│   ├── regime_library.py       # 8+ historical macro regimes (data module)
+│   └── fragility_thresholds.py # 12 systemic fragility thresholds (data module)
+└── tests/                      # Test suite (913 tests)
     ├── test_gateway/           # Gateway + token budget tests
+    │   ├── test_async_client.py
+    │   ├── test_token_budget.py
+    │   ├── test_response_parser.py
+    │   ├── test_market_data.py
+    │   ├── test_macro_data.py
+    │   ├── test_options_flow.py
+    │   └── test_cross_border.py
     ├── test_shadows/           # Shadow ecosystem tests (147+ tests)
+    │   ├── test_shadow_agent.py
+    │   ├── test_shadow_state.py
+    │   ├── test_shadow_mother.py
+    │   ├── test_expert_shadows.py
+    │   ├── test_daredevil_shadows.py
+    │   ├── test_catfish_agent.py
+    │   ├── test_ranking_engine.py
+    │   ├── test_challenger_engine.py
+    │   ├── test_collusion_detector.py
+    │   ├── test_emergency_quota.py
+    │   ├── test_cash_reframing.py
+    │   ├── test_paper_live_gap.py
+    │   ├── test_knowledge_filter.py
+    │   ├── test_missed_path.py
+    │   ├── test_llm_integration.py
+    │   └── test_e2e_shadow_ecosystem.py
     ├── test_pipeline/          # Pipeline stage tests
+    │   ├── test_scout.py
+    │   ├── test_flash_preprocessor.py
+    │   ├── test_layer1.py
+    │   ├── test_layer2.py
+    │   ├── test_layer3.py
+    │   ├── test_decision.py
+    │   ├── test_resonance.py
+    │   ├── test_red_team.py
+    │   ├── test_position_patrol.py
+    │   ├── test_investigation_loop.py
+    │   ├── test_causal_decomposition.py
+    │   ├── test_flow_decomposition.py
+    │   ├── test_regime_mapper.py
+    │   ├── test_scenario_forecaster.py
+    │   ├── test_fragility_scanner.py
+    │   ├── test_cross_border_analyzer.py
+    │   ├── test_hypothesis_card.py
+    │   ├── test_kill_monitor.py
+    │   ├── test_gate1_interaction.py
+    │   ├── test_cache.py
+    │   └── test_verification_chain.py
     ├── test_ui/                # UI component tests
+    │   ├── test_async_bridge.py
+    │   └── test_progress.py
     ├── test_integrity/         # Integrity watchdog tests
+    │   ├── test_input_guard.py
+    │   ├── test_watchdog.py
+    │   └── test_fact_checker.py
     └── test_storage/           # Storage layer tests
+        ├── test_session.py
+        ├── test_archivist.py
+        └── test_gate_archiver.py
 ```
 
 ## Model Routing (Flash vs Pro)

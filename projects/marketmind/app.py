@@ -30,8 +30,9 @@ def run_gui(config: MarketMindConfig) -> int:
 
 def main():
     parser = argparse.ArgumentParser(description="MarketMind — AI Investment Analysis Workstation")
-    parser.add_argument("--mode", choices=["daily", "gui"], default="gui",
-                        help="Run mode: daily CLI report or GUI (default: gui)")
+    parser.add_argument("--mode", choices=["daily", "interactive", "backtest", "gui", "gate1", "full"],
+                        default="gui",
+                        help="Run mode: daily, interactive, backtest, gui, gate1, or full pipeline")
     parser.add_argument("--mock", action="store_true",
                         help="Use mock LLM responses (no API calls)")
     parser.add_argument("--verbose", "-v", action="store_true",
@@ -59,15 +60,31 @@ def main():
             print(f"[ERROR] {e}")
         return 1
 
-    if args.backtest:
+    if args.backtest or args.mode == "backtest":
         from marketmind.pipeline.backtest_entry import run_backtest
         return run_backtest(config, args)
 
     if args.mode == "gui":
         return run_gui(config)
+
+    from marketmind.pipeline.orchestration import (
+        run_daily, run_interactive, run_full, run_gate1_mode,
+    )
+    shadow_n = 0 if args.no_shadows else args.shadows
+
+    if args.mode == "daily":
+        return asyncio.run(run_daily(config, mock=args.mock, verbose=args.verbose,
+                                      shadow_count=shadow_n))
+    elif args.mode == "interactive":
+        return asyncio.run(run_interactive(config, mock=args.mock, verbose=args.verbose,
+                                            shadow_count=shadow_n))
+    elif args.mode == "gate1":
+        return asyncio.run(run_gate1_mode(config, mock=args.mock, verbose=args.verbose,
+                                           shadow_count=shadow_n))
+    elif args.mode == "full":
+        return asyncio.run(run_full(config, mock=args.mock, verbose=args.verbose,
+                                     shadow_count=shadow_n))
     else:
-        from marketmind.pipeline.orchestration import run_daily
-        shadow_n = 0 if args.no_shadows else args.shadows
         return asyncio.run(run_daily(config, mock=args.mock, verbose=args.verbose,
                                       shadow_count=shadow_n))
 

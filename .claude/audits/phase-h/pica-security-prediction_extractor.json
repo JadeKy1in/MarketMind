@@ -1,0 +1,30 @@
+{
+  "module": "pipeline/prediction_extractor.py",
+  "timestamp": "2026-05-18T06:28:49Z",
+  "auditor": "PICA-Security-PhaseI-Gate1",
+  "risk_tier": "Medium",
+  "findings": [
+    {
+      "severity": "INFO",
+      "description": "Regex-only extraction — no LLM calls, no SQL, no file I/O, no eval/exec. Inherently safe from injection and data exfiltration vectors.",
+      "location": "prediction_extractor.py:123-220 (extract_predictions)"
+    },
+    {
+      "severity": "INFO",
+      "description": "Data source: hypothesis text originates from HVR investigation loop LLM output (HypothesisResult objects). This is internal pipeline data, not external user input. The regex patterns extract only numeric values — the text itself is never executed or eval'd.",
+      "location": "prediction_extractor.py:149-186 (regex matching loops)"
+    },
+    {
+      "severity": "LOW",
+      "description": "Hypothesis ID generation uses SHA-256 of text+timestamp — deterministic and collision-resistant for the 16-char hex truncation given expected volume (<10K predictions).",
+      "location": "prediction_extractor.py:117-120 (_generate_hypothesis_id)"
+    },
+    {
+      "severity": "INFO",
+      "description": "Verification source inference uses static _ASSET_KEYWORDS lookup table — no dynamic code execution, no external API calls.",
+      "location": "prediction_extractor.py:261-267 (_infer_verification_source)"
+    }
+  ],
+  "verdict": "PASS",
+  "notes": "Heuristic-only module with no attack surface. Regex operations on untrusted text are safe (Python re module is not vulnerable to ReDoS in these patterns — no nested quantifiers). All patterns are anchored on literal Chinese characters followed by simple numeric capture groups. No sanitization needed for the extraction path."
+}

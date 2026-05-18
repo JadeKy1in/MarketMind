@@ -1,0 +1,25 @@
+{
+  "ticker": "AAPL",
+  "earnings_dates": [
+    {
+      "date": "2026-07-25",
+      "fiscal_quarter": "Q3 2026",
+      "confirmed": true,
+      "source": "yfinance",
+      "earnings_avg_estimate": 1.58,
+      "earnings_low_estimate": 1.52,
+      "earnings_high_estimate": 1.65,
+      "revenue_avg_estimate": 84.5e9
+    },
+    {
+      "date": "2026-10-28",
+      "fiscal_quarter": "Q4 2026",
+      "confirmed": false,
+      "source": "yfinance",
+      "earnings_avg_estimate": 1.72,
+      "earnings_low_estimate": 1.65,
+      "earnings_high_estimate": 1.80,
+      "revenue_avg_estimate": 92.1e9
+    }
+  ]
+}

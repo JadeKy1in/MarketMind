@@ -1,0 +1,50 @@
+{
+  "module": "pipeline/pre_gate1.py",
+  "timestamp": "2026-05-18T08:22:38Z",
+  "auditor": "PICA-Security-PhaseH-Extraction",
+  "risk_tier": "High",
+  "findings": [
+    {
+      "severity": "INFO",
+      "description": "ShadowStateDB access safe — uses config.shadow.shadows_db_path (validated config path), calls init_schema() to create tables. ShadowStateDB is separately audited (pica-security-shadow_state.json). No raw SQL in this module.",
+      "location": "pre_gate1.py:58-61"
+    },
+    {
+      "severity": "INFO",
+      "description": "Credential exposure — init_gateway(config.deepseek_api_key, config.deepseek_base_url) passes API key to gateway layer. Same pattern as before extraction. Key stays in memory, never logged, never written to disk. No new exposure path.",
+      "location": "pre_gate1.py:35"
+    },
+    {
+      "severity": "INFO",
+      "description": "Graceful degradation for missing modules — flash_triage ImportError falls back to flash_preprocessor (line 123-129), investigation_loop ImportError skips Pro HVR with log message (line 163-164). Pipeline continues with reduced functionality rather than crashing.",
+      "location": "pre_gate1.py:123-129, 163-164"
+    },
+    {
+      "severity": "INFO",
+      "description": "Archive operations wrapped in try/except that logs and continues — _archive() helper (line 45-51) silently handles all exceptions. Archive failures never crash the pipeline. No sensitive data in archive payloads (article metadata, classification counts, hypothesis summaries only).",
+      "location": "pre_gate1.py:45-51"
+    },
+    {
+      "severity": "INFO",
+      "description": "No user input processed — all data flows from config (MarketMindConfig, validated upstream) and LLM pipeline stages. No CLI interaction, no file upload, no URL parameter injection surface.",
+      "location": "pre_gate1.py (entire file)"
+    },
+    {
+      "severity": "INFO",
+      "description": "datetime.now(timezone.utc) used for session_date — timezone-aware, compliant with root CLAUDE.md §3.2 time-awareness rule.",
+      "location": "pre_gate1.py:43"
+    },
+    {
+      "severity": "INFO",
+      "description": "Optional Phase F features (BackgroundScheduler, MultimodalAdapter) gated behind config flags (scheduler_enabled, gemini_flash_enabled) — disabled by default, no risk from dormant code paths.",
+      "location": "pre_gate1.py:76-98"
+    },
+    {
+      "severity": "LOW",
+      "description": "File at 188 lines — under the 250-line Python module soft threshold. Clean single-responsibility: runs pipeline stages 0-3 only. No extraction needed.",
+      "location": "pre_gate1.py (size check)"
+    }
+  ],
+  "verdict": "PASS",
+  "notes": "Extracted pre-Gate 1 module with safe credential passing (same pattern as original), two-level graceful degradation for optional modules, and archived data containing only non-sensitive pipeline metadata. No user input surface. All database ops delegated to separately audited modules. Phase F features gated behind disabled-by-default flags."
+}

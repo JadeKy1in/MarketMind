@@ -1,0 +1,40 @@
+{
+  "module": "pipeline/post_gate1.py",
+  "timestamp": "2026-05-18T08:22:38Z",
+  "auditor": "PICA-Security-PhaseH-Extraction",
+  "risk_tier": "High",
+  "findings": [
+    {
+      "severity": "INFO",
+      "description": "decision.py call — generate_decision() receives validated pipeline outputs (l1_result, l2_result, l3_result, red_team_report, resonance_result, shadow_votes=None, hypotheses). All inputs come from upstream stages that run their own integrity checks. shadow_votes is hardcoded None (design constraint: shadows don't vote). No injection surface in decision inputs.",
+      "location": "post_gate1.py:159-166"
+    },
+    {
+      "severity": "INFO",
+      "description": "Archive path safety — uses archivist from state dict, initialized in pre_gate1 with config.data_dir (validated config path). Archivist is separately audited (pica-security-archivist.json). Archive operations wrapped in try/except that logs and continues (line 39-45) — never crashes pipeline. Archive filenames are hardcoded strings (e.g., '03_layer1_narrative', '04_layer2_fundamental') — no path traversal via filename injection.",
+      "location": "post_gate1.py:39-45"
+    },
+    {
+      "severity": "INFO",
+      "description": "No credential exposure — no API keys or secrets in this module. Gateway was initialized in pre_gate1. All LLM calls delegated to separately audited pipeline modules (layer1, layer2, layer3, red_team, resonance, decision).",
+      "location": "post_gate1.py (entire file)"
+    },
+    {
+      "severity": "INFO",
+      "description": "Shadow ecosystem access — mother.orchestrate_daily_cycle() called only when config.shadow.shadows_enabled=True AND mother is not None (line 107). Phase F crystallization gated behind config.shadow.crystallization_enabled (line 116). Safe guards against None dereference.",
+      "location": "post_gate1.py:107-117"
+    },
+    {
+      "severity": "INFO",
+      "description": "FTS5 archive — archivist.init_fts() and index_document() at Stage 10. Content string constructed from pipeline outputs (event_grade, macro_quadrant, resonance.verdict) — no user-controlled strings injected into FTS index.",
+      "location": "post_gate1.py:184-193"
+    },
+    {
+      "severity": "INFO",
+      "description": "File at 196 lines — under the 250-line Python module soft threshold. Clean single-responsibility: runs pipeline stages 4-10 only. No extraction needed.",
+      "location": "post_gate1.py (size check)"
+    }
+  ],
+  "verdict": "PASS",
+  "notes": "Extracted post-Gate 1 module with no credential exposure, safe archive paths using validated config directory, and hardcoded archive filenames preventing path traversal. Decision inputs all come from validated upstream pipeline stages. Shadows gated behind enabled+not-None check. FTS5 content constructed from pipeline outputs only, no user injection surface."
+}

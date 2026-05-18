@@ -48,7 +48,9 @@ Output JSON:
 }
 
 Key principle: rate of change > absolute level. Sector acceleration/deceleration matters more than current position.
-All scores must be evidence-based. Mark estimates with EST:."""
+All scores must be evidence-based. Mark estimates with EST:.
+
+When identifying fundamental drivers, name specific institutional mechanisms where applicable (e.g., "eSLR exemption increasing dealer balance sheet capacity" rather than "regulatory easing"). Reference the mechanism glossary for standard terminology. If uncertain about a mechanism's details, say so explicitly rather than guessing."""
 
 
 async def analyze_layer2(l1: Layer1Result, market_context: dict | None = None) -> Layer2Result:

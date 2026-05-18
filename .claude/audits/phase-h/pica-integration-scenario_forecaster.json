@@ -1,0 +1,17 @@
+{
+  "module": "scenario_forecaster",
+  "timestamp": "2026-05-18T05:30:02Z",
+  "auditor": "PICA-Integration-PhaseH",
+  "type": "static",
+  "findings": [
+    {
+      "severity": "LOW",
+      "detail": "Imports HypothesisResult from pipeline/investigation_loop (glue layer) rather than pipeline/investigation_types (data module) where the dataclass is defined. causal_decomposition and flow_decomposition import from investigation_types. This is inconsistent but allowed per team lead instructions ('except data types from investigation_loop which is the shared data module'). Consider standardizing on investigation_types for consistency."
+    }
+  ],
+  "verdict": "PASS",
+  "import_boundary_clean": true,
+  "data_flow_intact": true,
+  "backward_compatible": true,
+  "notes": "Imports: config/investigation_config (config), gateway/async_client (gateway), gateway/token_budget (gateway), pipeline/investigation_loop (data type re-export). No sibling back-imports. Single public entry point: forecast_scenarios(hypothesis, include_tail_risk, budget) -> ScenarioTree | None."
+}

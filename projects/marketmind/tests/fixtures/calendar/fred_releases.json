@@ -1,0 +1,84 @@
+{
+  "releases": [
+    {
+      "id": "11",
+      "name": "Consumer Price Index",
+      "link": "https://fred.stlouisfed.org/release?rid=11",
+      "category": "price_indexes",
+      "impact": "HIGH",
+      "next_release_date": "2026-05-16",
+      "previous_release_date": "2026-04-15",
+      "frequency": "monthly"
+    },
+    {
+      "id": "50",
+      "name": "Nonfarm Payrolls / Employment Situation",
+      "link": "https://fred.stlouisfed.org/release?rid=50",
+      "category": "employment",
+      "impact": "HIGH",
+      "next_release_date": "2026-06-06",
+      "previous_release_date": "2026-05-02",
+      "frequency": "monthly"
+    },
+    {
+      "id": "31",
+      "name": "Gross Domestic Product (GDP)",
+      "link": "https://fred.stlouisfed.org/release?rid=31",
+      "category": "national_accounts",
+      "impact": "MEDIUM",
+      "next_release_date": "2026-05-28",
+      "previous_release_date": "2026-04-28",
+      "frequency": "quarterly"
+    },
+    {
+      "id": "54",
+      "name": "Personal Consumption Expenditures (PCE)",
+      "link": "https://fred.stlouisfed.org/release?rid=54",
+      "category": "national_accounts",
+      "impact": "MEDIUM",
+      "next_release_date": "2026-05-30",
+      "previous_release_date": "2026-04-30",
+      "frequency": "monthly"
+    },
+    {
+      "id": "46",
+      "name": "Advance Retail Sales",
+      "link": "https://fred.stlouisfed.org/release?rid=46",
+      "category": "trade",
+      "impact": "MEDIUM",
+      "next_release_date": "2026-05-15",
+      "previous_release_date": "2026-04-15",
+      "frequency": "monthly"
+    },
+    {
+      "id": "188",
+      "name": "Jobless Claims (Initial)",
+      "link": "https://fred.stlouisfed.org/release?rid=188",
+      "category": "employment",
+      "impact": "MEDIUM",
+      "next_release_date": "2026-05-15",
+      "previous_release_date": "2026-05-08",
+      "frequency": "weekly"
+    },
+    {
+      "id": "53",
+      "name": "Industrial Production",
+      "link": "https://fred.stlouisfed.org/release?rid=53",
+      "category": "manufacturing",
+      "impact": "LOW",
+      "next_release_date": "2026-05-15",
+      "previous_release_date": "2026-04-15",
+      "frequency": "monthly"
+    },
+    {
+      "id": "96",
+      "name": "Housing Starts",
+      "link": "https://fred.stlouisfed.org/release?rid=96",
+      "category": "housing",
+      "impact": "LOW",
+      "next_release_date": "2026-05-16",
+      "previous_release_date": "2026-04-16",
+      "frequency": "monthly"
+    }
+  ]
+}

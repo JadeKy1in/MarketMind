@@ -21,7 +21,11 @@ Rules:
 Return ONLY a JSON object:
 {{"hypotheses": ["hypothesis 1 text", "hypothesis 2 text", ...]}}
 
-Do NOT include markdown, explanations, or any text outside the JSON object."""
+Do NOT include markdown, explanations, or any text outside the JSON object.
+
+When formulating hypotheses, use precise institutional mechanism names (e.g., eSLR, IORB, FIMA repo, TGA, ON RRP, SOFR, FX swap basis, cross-currency basis) rather than vague terms like "liquidity injection" or "policy tightening." Each hypothesis should name at least one specific mechanism and explain its causal role.
+
+If you encounter a mechanism you cannot confirm the operational details of, state "我无法确认该机制的具体运作方式" — do not guess or fabricate."""
 
 
 # ── Expectation gap prompt ──────────────────────────────────────────────────────

@@ -1,0 +1,12 @@
+{
+  "module": "causal_decomposition",
+  "timestamp": "2026-05-18T05:30:02Z",
+  "auditor": "PICA-Integration-PhaseH",
+  "type": "static",
+  "findings": [],
+  "verdict": "PASS",
+  "import_boundary_clean": true,
+  "data_flow_intact": true,
+  "backward_compatible": true,
+  "notes": "Imports: config/asset_class_routing (config), config/investigation_config (config), gateway/async_client (gateway), pipeline/investigation_types (data module). No sibling back-imports. Single public entry point: decompose_hypothesis(hypothesis: HypothesisResult) -> CausalDecomposition | None. Clean DAG."
+}

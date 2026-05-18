@@ -1,0 +1,45 @@
+{
+  "module": "entity_memory.py",
+  "audit_level": "PICA-Security",
+  "risk_tier": "Medium",
+  "timestamp": "2026-05-18T12:00:00Z",
+  "findings": [
+    {
+      "id": "SEC-EM-01",
+      "severity": "PASS",
+      "title": "SQL parameterization verified — all queries use ? placeholders",
+      "description": "LearningStore (storage/learning_store.py) uses parameterized queries exclusively. All db.execute() calls use ? placeholders with tuple parameters. Verified across all methods: get_entity_memory(entity_id) line 269-271, update_entity_memory(entity_id, data) lines 289-309, plus predictions, lessons, and calibration methods. The class docstring explicitly states 'All methods use parameterized queries.' No string concatenation or f-string interpolation in SQL.",
+      "remediation": "None required."
+    },
+    {
+      "id": "SEC-EM-02",
+      "severity": "INFO",
+      "title": "entity_id sources are controlled — keyword matching and ticker symbols",
+      "description": "identify_entities() produces entity_ids from three sources: 1) _CB_KEYWORDS hardcoded map (ecb→ECB, fed→Fed, etc.), 2) _SECTOR_KEYWORDS hardcoded map, 3) _INDICATOR_KEYWORDS hardcoded map, 4) ticker symbols from asset_class_routing. None of these sources involve unsanitized user input flowing directly into entity_id. Even if malicious text matched a keyword, the resulting entity_id is from the hardcoded value map, not the input text.",
+      "remediation": "None required."
+    },
+    {
+      "id": "SEC-EM-03",
+      "severity": "INFO",
+      "title": "JSON deserialization uses json.loads — safe",
+      "description": "All deserialization from stored JSON strings uses json.loads() which does not execute code. No eval(), exec(), or pickle usage. The stored JSON comes from internally-generated data (StructuredLesson fields, root_cause taxonomy keys), not raw user input.",
+      "remediation": "None required."
+    },
+    {
+      "id": "SEC-EM-04",
+      "severity": "LOW",
+      "title": "recent_lessons stores lesson dicts including LLM-generated updated_belief",
+      "description": "update_entity_memory() stores the full lesson dict (including 'updated_belief' from LLM output) in recent_lessons (line 152). This LLM-generated text is stored in SQLite via parameterized query (safe from SQL injection) and later retrieved via json.loads (safe from code execution). The data is surfaced through generate_methodology_injection() in expertise_discovery, which applies validate_distillation_safety() checks. Direct prompt injection from stored data is mitigated by: 1) parameterized storage, 2) json.loads deserialization, 3) downstream safety validation. The residual risk is that a compromised LLM response could inject text that passes safety checks — but this requires a compromised LLM, which is the threat model's boundary.",
+      "remediation": "LOW priority. Consider storing a truncated/sanitized version of updated_belief in recent_lessons (e.g., first 200 chars) to limit blast radius."
+    },
+    {
+      "id": "SEC-EM-05",
+      "severity": "INFO",
+      "title": "common_blind_spots limited to 10 entries",
+      "description": "Line 162: if len(mem.common_blind_spots) > 10, trim to last 10. Prevents unbounded growth from repeated lessons.",
+      "remediation": "None required."
+    }
+  ],
+  "verdict": "PASS",
+  "notes": "SQL parameterization verified across all LearningStore methods. Entity IDs come from controlled keyword maps, not raw user input. JSON serialization/deserialization is safe. The residual risk around stored LLM-generated text is inherent to the learning architecture and is mitigated by downstream safety validation in expertise_discovery."
+}

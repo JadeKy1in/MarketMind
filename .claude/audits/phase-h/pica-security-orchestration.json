@@ -1,14 +1,40 @@
 {
   "module": "pipeline/orchestration.py",
-  "timestamp": "2026-05-18T03:47:00Z",
-  "auditor": "PICA-Security-Manual",
-  "risk_tier": "Medium",
+  "timestamp": "2026-05-18T08:22:38Z",
+  "auditor": "PICA-Security-PhaseH-Extraction",
+  "risk_tier": "High",
   "findings": [
     {
-      "severity": "LOW",
-      "description": "File at 365 lines exceeds glue hard ceiling of 300. Phase H will split orchestration further (run_stages_0_3 / run_gate1 / run_stages_4_10). Acceptable for this transitional extraction step."
+      "severity": "INFO",
+      "description": "No direct SQL execution — all database operations delegated to run_pre_gate1/run_post_gate1 (which delegate to ShadowStateDB, archivist, SessionManager). No raw SQL in this module.",
+      "location": "orchestration.py (entire file)"
+    },
+    {
+      "severity": "INFO",
+      "description": "Gate 1 checkpoint data — SessionManager.save() stores gate1_session.selected_direction and gate1_session.rejected_directions (user investment direction preferences). No credentials, no API keys, no PII in the checkpoint payload. SessionManager uses atomic writes (tmp → rename, session.py:57-60) preventing corruption on crash. Data stored as plain JSON in data/sessions/ — local filesystem only, no network exposure.",
+      "location": "orchestration.py:67-76, 115-124"
+    },
+    {
+      "severity": "INFO",
+      "description": "No credential exposure — API key handling delegated to run_pre_gate1 (which calls init_gateway). Orchestration layer never touches the key directly.",
+      "location": "orchestration.py (entire file)"
+    },
+    {
+      "severity": "INFO",
+      "description": "CLI IO handlers (_cli_input_handler, _cli_status_handler) are simple stdin/print wrappers for Gate 1 interaction. No injection surface — input() builtin returns raw string, no command parsing or evaluation.",
+      "location": "orchestration.py:19-27"
+    },
+    {
+      "severity": "INFO",
+      "description": "datetime.now(timezone.utc) used for session_id generation — timezone-aware, compliant with root CLAUDE.md §3.2.",
+      "location": "orchestration.py:53, 101"
+    },
+    {
+      "severity": "INFO",
+      "description": "File at 173 lines (was 516 before extraction) — now 27 lines UNDER the 200-line glue soft threshold. Extraction of pre_gate1.py and post_gate1.py resolved the prior size concern. Clean single-responsibility: coordinates pre_gate1 + optional Gate 1 + post_gate1.",
+      "location": "orchestration.py (size check)"
     }
   ],
   "verdict": "PASS",
-  "notes": "run_daily() code moved from app.py. No new logic. All LLM calls remain through gateway/async_client.py which is input_guard-wired. 754 tests pass."
+  "notes": "Post-extraction orchestration is a thin coordinator (173 lines, down from 516). Gate 1 checkpoint stores only investment direction labels (no credentials/PII) with atomic writes preventing corruption. All database, file, and credential operations delegated to separately audited modules (pre_gate1, post_gate1, SessionManager). No new security risks introduced by extraction — risk surface is smaller than before."
 }

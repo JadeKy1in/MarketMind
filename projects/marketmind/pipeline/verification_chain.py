@@ -1,5 +1,9 @@
 """4-layer verification chain — independent data sources for claim validation.
 
+Mechanism-aware verification data comes from the investigation_loop prompts
+(investigation_prompts.py). The verification layers consume mechanism-named
+hypotheses; this module does not generate its own prompts.
+
 Each layer draws from a genuinely independent information source, fixing the
 Red Team C7 finding that the original L1 and L3 both drew from market data.
 

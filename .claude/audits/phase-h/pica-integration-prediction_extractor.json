@@ -1,0 +1,37 @@
+{
+  "module": "pipeline/prediction_extractor.py",
+  "timestamp": "2026-05-18T06:28:49Z",
+  "auditor": "PICA-Integration-PhaseI-Gate1",
+  "type": "static",
+  "findings": [
+    {
+      "severity": "info",
+      "check": "import_boundary",
+      "detail": "All imports from stdlib only (hashlib, re, dataclasses, datetime). No imports from marketmind modules — zero back-import risk.",
+      "status": "PASS"
+    },
+    {
+      "severity": "info",
+      "check": "single_entry_point",
+      "detail": "Single public function extract_predictions(hypotheses: list) -> list[PredictableHypothesis]. Clean contract with well-defined input/output types.",
+      "status": "PASS"
+    },
+    {
+      "severity": "info",
+      "check": "data_flow",
+      "detail": "Input: list of HypothesisResult objects (from HVR investigation loop). Output: list of PredictableHypothesis dataclass instances. No side effects, no global state mutation. Pure function — deterministic given same input.",
+      "status": "PASS"
+    },
+    {
+      "severity": "info",
+      "check": "backward_compatible",
+      "detail": "Standalone module — no existing callers to break. Consumed by learning_store.save_prediction() and calibration_tracker.track_calibration().",
+      "status": "PASS"
+    }
+  ],
+  "verdict": "PASS",
+  "import_boundary_clean": true,
+  "data_flow_intact": true,
+  "backward_compatible": true,
+  "notes": "Clean extract-module pattern. No dependencies on glue layer or sibling modules. Dataclass PredictableHypothesis is self-contained. The module is importable by any consumer that passes HypothesisResult-like objects with .hypothesis, .direction, .time_window, .verdict, .confidence attributes."
+}

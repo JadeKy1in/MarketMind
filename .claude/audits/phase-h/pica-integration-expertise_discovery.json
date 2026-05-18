@@ -1,0 +1,52 @@
+{
+  "module": "expertise_discovery.py",
+  "audit_level": "PICA-Integration",
+  "risk_tier": "Medium",
+  "timestamp": "2026-05-18T12:00:00Z",
+  "findings": [
+    {
+      "id": "INT-ED-01",
+      "severity": "PASS",
+      "title": "Zero marketmind imports — leaf node in DAG",
+      "description": "Imports: re, dataclasses, datetime (all stdlib). Zero imports from marketmind. This module is a pure leaf — it depends on nothing in the project and is only consumed by downstream code. Zero risk of import cycles or back-imports.",
+      "remediation": "None required."
+    },
+    {
+      "id": "INT-ED-02",
+      "severity": "PASS",
+      "title": "Clear public API: discover + generate + validate",
+      "description": "Three public functions: discover_expertise(calibration_data, ...) -> list[ShadowExpertise], generate_methodology_injection(expertise, entity_memory) -> str, validate_distillation_safety(injection) -> bool. Single responsibility: cross-shadow methodology distillation (Layer 6). No side effects. No module-level state.",
+      "remediation": "None required."
+    },
+    {
+      "id": "INT-ED-03",
+      "severity": "PASS",
+      "title": "Data flow: consumes calibration data + entity memory, produces injection strings",
+      "description": "discover_expertise() reads calibration_data dict (from LearningStore.get_calibration()) → produces ShadowExpertise list. generate_methodology_injection() reads ShadowExpertise + optional EntityMemory → produces Markdown injection string. This is the terminal node in the Phase I learning pipeline: predictions → reflection → lessons → entity_memory → calibration → expertise_discovery → prompt injection. Clean unidirectional flow.",
+      "remediation": "None required."
+    },
+    {
+      "id": "INT-ED-04",
+      "severity": "LOW",
+      "title": "entity_groups grouping uses tracker_id split — fragile parsing",
+      "description": "Line 31-34: tracker_id.split('_', 2) with maxsplit=2. For 'shadow_5_AAPL', this produces ['shadow', '5', 'AAPL']. But for 'shadow_10_USD_JPY', it produces ['shadow', '10', 'USD_JPY'] — the entity_id becomes 'USD_JPY'. What about multi-word entity IDs like 'tech_sector'? 'shadow_3_tech_sector' → ['shadow', '3', 'tech_sector']. This works because maxsplit=2 leaves the rest as the third element. However, if entity_id itself contains no underscores, the grouping is correct. The fragility is that changing the tracker_id format would silently break grouping.",
+      "remediation": "LOW priority. Consider storing entity_id as a separate field in calibration_data rather than embedding it in tracker_id. This would make the code robust to tracker_id format changes."
+    },
+    {
+      "id": "INT-ED-05",
+      "severity": "PASS",
+      "title": "Outperformance detection uses median-based relative comparison",
+      "description": "Line 49-50: median_bs = sorted(brier_scores)[len(brier_scores) // 2]. Line 57: bs < median_bs * (1 - outperformance_threshold). This detects shadows whose Brier score is significantly better than the group median. The approach is robust to overall market difficulty — if all shadows perform poorly, no one looks artificially good. Good statistical design.",
+      "remediation": "None required."
+    },
+    {
+      "id": "INT-ED-06",
+      "severity": "INFO",
+      "title": "Minimum 2 qualified shadows required for discovery",
+      "description": "Line 46: if len(qualified) < 2: continue. This prevents expertise discovery when only one shadow has enough predictions — you can't determine outperformance without a comparison group. Correct safeguard.",
+      "remediation": "None required."
+    }
+  ],
+  "verdict": "PASS",
+  "notes": "Clean leaf module with well-defined interface, correct position as the terminal node in the Phase I DAG, and sound statistical design (median-based outperformance detection). The tracker_id parsing fragility is cosmetic — the current format is stable."
+}

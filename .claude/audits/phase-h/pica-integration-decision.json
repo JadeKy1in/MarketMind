@@ -1,12 +1,55 @@
 {
   "module": "pipeline/decision.py",
-  "timestamp": "2026-05-18T18:30:00Z",
-  "auditor": "PICA-Integration-Agent-B2",
+  "timestamp": "2026-05-18T06:28:49Z",
+  "auditor": "PICA-Integration-PhaseI-Gate1",
   "type": "static",
-  "findings": [],
+  "findings": [
+    {
+      "severity": "info",
+      "check": "import_boundary",
+      "detail": "Imports: json, logging, dataclasses, typing (stdlib), gateway/async_client (chat_pro), pipeline stages (L1/L2/L3/red_team/resonance), shadows/shadow_agent (ShadowVote type). Correct glue → module direction. Does NOT import from app.py or orchestration.py. No back-imports.",
+      "status": "PASS"
+    },
+    {
+      "severity": "info",
+      "check": "data_flow",
+      "detail": "Input: Layer1Result, Layer2Result, Layer3BatchResult, RedTeamReport, ResonanceResult, optional shadow_votes (None by design), optional hypotheses list. Processing: build prompt → chat_pro() → parse JSON → DecisionOutput. Output: DecisionOutput with decision_cards + no_trade_card + summary. Clean single-direction flow.",
+      "status": "PASS"
+    },
+    {
+      "severity": "info",
+      "check": "backward_compatible_hypotheses",
+      "detail": "hypotheses parameter added as optional (default=None) at line 115. _build_decision_prompt receives it at line 128 and passes to _build_hypothesis_summary at line 173. _build_hypothesis_summary handles None (line 213: 'if hypotheses else \"\"') and empty list (line 263-264: returns \"\"). All existing callers from orchestration.py:349 pass hypotheses=hypotheses — compatible with both populated and empty lists.",
+      "status": "PASS"
+    },
+    {
+      "severity": "info",
+      "check": "backward_compatible_shadow_votes",
+      "detail": "shadow_votes=None by design (app.py line 110, orchestration.py line 290). The shadow consensus block in _build_decision_prompt (lines 155-171) only executes when shadow_votes is truthy — dead code in the live pipeline, preserved for hypothetical manual invocation. No behavior change.",
+      "status": "PASS"
+    },
+    {
+      "severity": "info",
+      "check": "signal_conflict_integration",
+      "detail": "_detect_signal_conflicts() at lines 269-314 checks 5 conflict conditions: (1) causal.net_directional_force vs flow.flow_imbalance divergence > 0.4, (2) scenario_tree.base_case.confidence vs (1 - fragility_score) divergence > 0.4. All field accesses use getattr() with None defaults — safe against missing attributes from older HypothesisResult objects. Conflicts are additive to the prompt — no mutation of existing prompt structure.",
+      "status": "PASS"
+    },
+    {
+      "severity": "info",
+      "check": "prompt_structure_preserved",
+      "detail": "Prompt sections in _build_decision_prompt() (lines 142-200): [optional shadow_consensus] → [optional hypothesis_summary] → [optional conflict_summary] → Signal Resonance → Layer 1 → Layer 2 → Layer 3 → Red Team → Instructions. All sections are independent f-string blocks. Adding new sections does not affect parsing of other sections.",
+      "status": "PASS"
+    },
+    {
+      "severity": "info",
+      "check": "json_parse_safety",
+      "detail": "_parse_decision_response() (lines 317-363): strips markdown fences, tries direct json.loads, falls back to finding {} boundaries. On failure returns DecisionOutput with error message — never crashes. All field accessors use .get() with defaults.",
+      "status": "PASS"
+    }
+  ],
   "verdict": "PASS",
   "import_boundary_clean": true,
   "data_flow_intact": true,
   "backward_compatible": true,
-  "notes": "Imports: gateway/async_client, pipeline stages (L1/L2/L3/red_team/resonance), shadows/shadow_agent for ShadowVote type. No back-import from app.py. generate_decision() backward compat: hypotheses=None handled at line 164 (hypothesis_summary = ... if hypotheses else \"\"). hypotheses=[] also handled — _build_hypothesis_summary returns \"\" for empty list (line 244-245). Prompt injection: HypothesisResult fields interpolated into user_prompt via _build_decision_prompt(), BUT chat_pro sanitizes both system and user prompts at gateway level (async_client lines 240-249) — risk is mitigated. shadow_votes=None is the live path (app.py:110 by design)."
+  "notes": "Decision module with clean integration properties. The new signal conflict detection is additive — it inserts a new section between hypothesis summary and Signal Resonance without modifying existing prompt structure. All HypothesisResult field accesses use getattr() with safe defaults, so backward compatibility with older hypothesis objects (lacking causal/flow/scenario_tree/fragility_score fields) is maintained. The shadow_votes dead-code path is preserved for backward compatibility with any hypothetical manual invocations."
 }

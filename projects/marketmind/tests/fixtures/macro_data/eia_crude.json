@@ -1,0 +1,21 @@
+{
+  "response": {
+    "id": "petroleum/stoc/wstk",
+    "name": "Weekly U.S. Ending Stocks excluding SPR of Crude Oil",
+    "description": "Weekly U.S. Ending Stocks excluding SPR of Crude Oil",
+    "frequency": "weekly",
+    "data": [
+      {
+        "period": "2026-05-09",
+        "value": 455000,
+        "period-unit": "week",
+        "duoarea": "NUS",
+        "product": "EPC0",
+        "product-name": "Crude Oil",
+        "process": "SAE",
+        "process-name": "Stocks",
+        "units": "MBBL"
+      }
+    ]
+  }
+}
