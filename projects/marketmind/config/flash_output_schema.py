@@ -156,13 +156,25 @@ def validate_flash_output(data: dict) -> bool:
     scores = data.get("scores", {})
     if not isinstance(scores, dict):
         return False
+
+    if not scores:
+        return False  # truly malformed: no score data
+
+    # Validate each score that IS present (accept string-to-int coercion).
+    # Missing keys are allowed — TriageResult constructor fills defaults (0).
     score_props = schema["properties"]["scores"]["properties"]
-    for score_key, score_spec in score_props.items():
-        val = scores.get(score_key)
+    for score_key, val in scores.items():
+        if isinstance(val, str):
+            try:
+                val = int(val)
+            except (ValueError, TypeError):
+                return False
         if not isinstance(val, (int, float)):
             return False
-        if val < score_spec.get("minimum", 0) or val > score_spec.get("maximum", 10):
-            return False
+        spec = score_props.get(score_key)
+        if spec is not None:
+            if val < spec.get("minimum", 0) or val > spec.get("maximum", 10):
+                return False
 
     # Classification must be a valid enum value
     classification = data.get("classification")

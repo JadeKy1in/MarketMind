@@ -12,9 +12,12 @@ Standard library only + dataclasses.
 
 from __future__ import annotations
 
+import logging
 import re
 import unicodedata
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +186,54 @@ def _escape_markdown(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Financial context detection (prompt injection false-positive filter)
+# ---------------------------------------------------------------------------
+
+# Financial bigrams where "directive", "rules", or "instructions" is legitimate
+# business terminology, not prompt injection.
+_FINANCIAL_PHRASES = [
+    "policy directive", "regulatory directive", "government directive",
+    "commission directive", "council directive",
+    "trading rules", "listing rules", "compliance rules", "sec rules",
+    "market rules", "exchange rules", "clearing rules", "settlement rules",
+    "settlement instructions", "payment instructions", "wire instructions",
+    "standing instructions", "transfer instructions",
+]
+
+# Financial entities that signal legitimate policy/regulatory context.
+_FINANCIAL_ENTITIES = [
+    "ecb", "european central bank", "european commission",
+    "eu commission", "securities and exchange commission",
+    "cftc", "esma", "eba", "basel committee",
+    "federal reserve", "bank of", "central bank",
+    "fed", "sec", "eu",
+]
+
+
+def _is_financial_context(text: str) -> bool:
+    """Check whether text contains legitimate financial terminology.
+
+    When prompt injection patterns contain terms like "directive", "rules",
+    or "instructions", they can overlap with financial/regulatory language.
+    Returns True if the text appears to be financial news rather than a
+    prompt injection attempt.
+    """
+    text_lower = text.lower()
+
+    for phrase in _FINANCIAL_PHRASES:
+        if phrase in text_lower:
+            return True
+
+    # "new directive/rules/instructions" qualified by a financial entity
+    if re.search(r"\bnew\s+(directive|rules|instructions)\b", text_lower):
+        for entity in _FINANCIAL_ENTITIES:
+            if entity in text_lower:
+                return True
+
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -218,7 +269,14 @@ def sanitize_for_llm_prompt(
     # ---- Step 1: Prompt injection pattern detection (on raw text) ---------
     for pattern, warning_msg in _INJECTION_PATTERNS:
         if pattern.search(text):
-            warnings.append(warning_msg)
+            if _is_financial_context(text):
+                logger.debug(
+                    "Prompt injection pattern match downgraded "
+                    "(financial context): %s",
+                    warning_msg,
+                )
+            else:
+                warnings.append(warning_msg)
 
     # ---- Step 2: Source-specific pre-checks (on raw text) ----------------
     if source == "pdf_upload":
