@@ -1,0 +1,58 @@
+{
+  "module": "storage/gate_archiver.py",
+  "timestamp": "2026-05-18T22:00:00Z",
+  "auditor": "PICA-Security-Agent",
+  "risk_tier": "Medium",
+  "findings": [
+    {
+      "severity": "HIGH",
+      "id": "GA-SEC-1",
+      "title": "HTML comment wrapper bypass via `-->` in user text",
+      "detail": "In `_render_turn_md()`, USER content is wrapped in `<!-- USER_TEXT_START -->` / `<!-- USER_TEXT_END -->` HTML comments as a C1 injection mitigation. If user text contains the string `-->`, the comment closes early. Remaining user text after `-->` and the `<!-- USER_TEXT_END -->` end tag are rendered as raw Markdown, defeating the wrapping. Example: if `turn.text = \"Hello --> <script>alert(1)</script> <!--\"`, the wrapper becomes: `<!-- USER_TEXT_START -->\\n> Hello --> <script>... <!--\\n<!-- USER_TEXT_END -->` — the script content escapes the wrapper.",
+      "location": "gate_archiver.py:207-212",
+      "recommendation": "Escape `-->` in user text before embedding in HTML comments. Replace `-->` with `--\\u003E` or use a different wrapping mechanism (e.g., Unicode non-printable markers, or wrap in a Markdown code block instead of HTML comments). Note: the JSONL canonical source is unaffected — this only impacts the human-readable Markdown companion."
+    },
+    {
+      "severity": "HIGH",
+      "id": "GA-SEC-2",
+      "title": "SHA-256 hash truncated to 16 hex chars (64 bits) — weak collision resistance",
+      "detail": "`_hash_file()` returns `hashlib.sha256(...).hexdigest()[:16]`. This truncates a 256-bit hash to 64 bits. For a single session with a few hundred turns, collision probability is near zero. But if the hash is stored long-term across many sessions for integrity comparisons, 64 bits provides only ~2^32 collision resistance (birthday bound), which is weak for archival integrity purposes.",
+      "location": "gate_archiver.py:241",
+      "recommendation": "Use the full hex digest (64 chars) or at minimum 32 chars (128 bits). The 16-char truncation saves only ~48 bytes in the footer — not worth the collision risk for an archival system. If the hash is only for per-session human verification, document this explicitly in the footer text."
+    },
+    {
+      "severity": "MEDIUM",
+      "id": "GA-SEC-3",
+      "title": "No field validation on GateTurn",
+      "detail": "`GateTurn` is a dataclass with no validation. Fields like `turn_type` and `content_type` are free-form strings. If a caller passes `content_type=\"bogus\"`, downstream pipeline consumers that filter on content_type will silently skip the turn. This is a data integrity issue, not a security issue.",
+      "location": "gate_archiver.py:20-35",
+      "recommendation": "Add an `__post_init__` validator that asserts `content_type` is one of the documented values (`user_free_text`, `system_decision`, `ai_response`, `structured_data`). Validate `speaker` is `AI` or `USER`. Log a warning on unexpected values rather than raising."
+    },
+    {
+      "severity": "MEDIUM",
+      "id": "GA-SEC-4",
+      "title": "JSONL atomicity is TOCTOU between validate and append",
+      "detail": "In `log_turn()`, the temp-file validation and the actual JSONL append are separate operations. Between `json.loads(tmp.read_text())` (validation) and `open(jsonl_path, 'a').write(...)` (append), another process could modify the JSONL file. In a single-process async app this is safe, but if the archiver is ever used in a multi-process deployment, this is a TOCTOU vulnerability.",
+      "location": "gate_archiver.py:94-100",
+      "recommendation": "Document that GateArchiver is not safe for multi-process use. If multi-process support is needed, use file locking (portalocker) or append-validate-then-rollback pattern."
+    },
+    {
+      "severity": "MEDIUM",
+      "id": "GA-SEC-5",
+      "title": "Markdown data fields rendered without escaping",
+      "detail": "`_render_data_fields()` outputs `**{key}**: {value}` directly into the Markdown file. The `value` is not escaped — if it contains Markdown formatting characters (e.g., `*`, `_`, `` ` ``), they would be rendered as formatting. For structured data this is low-risk (values are typically numbers or short labels), but it violates the principle of treating all user-originated data as untrusted.",
+      "location": "gate_archiver.py:231-236",
+      "recommendation": "Apply Markdown escaping to values in `_render_data_fields()`, or at minimum escape leading `#`, `>`, `*`, and `_` characters."
+    },
+    {
+      "severity": "LOW",
+      "id": "GA-SEC-6",
+      "title": "Missing type annotation for `gate_number` in `close_session` return",
+      "detail": "`close_session()` returns `dict` but the return type annotation says `dict`. The returned dict has a consistent schema (jsonl_hash, turn_count, jsonl_path, md_path) — consider using a TypedDict or dataclass for stronger typing.",
+      "location": "gate_archiver.py:128",
+      "recommendation": "Consider using `typing.TypedDict` or a small dataclass for the return type."
+    }
+  ],
+  "verdict": "NEEDS_FIX",
+  "notes": "GA-SEC-1 (HTML comment bypass) is a real injection vector in the human-readable Markdown companion. The JSONL canonical source is unaffected. GA-SEC-2 (hash truncation) is a correctness concern for archival integrity. Both should be fixed before integration. The dual-format design (JSONL canonical + MD companion) is architecturally sound and provides defense-in-depth. The atomic write pattern for log_decision is correctly implemented via save_json."
+}

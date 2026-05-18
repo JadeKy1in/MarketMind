@@ -1,0 +1,25 @@
+{
+  "module": "pipeline/investigation_direction.py",
+  "timestamp": "2026-05-18T03:34:06Z",
+  "auditor": "PICA-Security-Agent-B2",
+  "risk_tier": "Low",
+  "findings": [
+    {
+      "severity": "LOW",
+      "description": "Substring matching (pattern.lower() in text_lower) for short codes like 'CPI', 'PPI', 'GDP' (lines 26-27) could produce false positives in natural language text. Not a security issue — heuristic quality concern only. The first-match-wins approach means asset ordering in _ASSET_PATTERNS affects results.",
+      "location": "investigation_direction.py:49-52"
+    },
+    {
+      "severity": "LOW",
+      "description": "_ASSET_PATTERNS and directional keyword lists are module-level constants. No injection risk — all patterns are hardcoded. Regex search targets are user/LLM text but patterns are fixed, preventing ReDoS.",
+      "location": "investigation_direction.py:4-28, 31-36"
+    },
+    {
+      "severity": "LOW",
+      "description": "estimate_risk_level() and estimate_time_window() use simple float comparisons and dict lookups — no injection surface. Input validation is implicit (type hints only, no runtime checks on confidence range 0-1).",
+      "location": "investigation_direction.py:76-107"
+    }
+  ],
+  "verdict": "PASS",
+  "notes": "Pure heuristic module with no LLM calls, no I/O, no external data. Regex patterns are hardcoded (no user-controlled regex). Unicode handling is correct via Python's str.lower(). Substring matching false positives are a data quality concern, not a security concern."
+}

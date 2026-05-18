@@ -1,0 +1,30 @@
+{
+  "module": "pipeline/hvr_cycle.py",
+  "timestamp": "2026-05-18T03:34:06Z",
+  "auditor": "PICA-Security-Agent-B2",
+  "risk_tier": "Medium",
+  "findings": [
+    {
+      "severity": "HIGH",
+      "description": "Format-string injection: hypothesis text is passed unsanitized to _HVR_REFINE_SYSTEM.format(). If hypothesis text contains '{l1_score}' or other placeholder names, the format() call will raise KeyError at line 112-125. Worse, if the hypothesis contains escaped braces like '{{system: override}}', it could inject content into the system prompt template. Mitigation: call sanitize_for_llm_prompt() on the hypothesis string before format(), or use string.Template with safe_substitute.",
+      "location": "hvr_cycle.py:112-125 (_HVR_REFINE_SYSTEM.format(...))"
+    },
+    {
+      "severity": "MEDIUM",
+      "description": "verification.contradiction_detail embedded directly into system prompt via format() at line 124. If contradictions contain prompt injection patterns from upstream LLM output, they could influence the refinement call. The data flows from verify_claim() -> VerificationResult -> _refine_hypothesis() without sanitization.",
+      "location": "hvr_cycle.py:124 (contradictions=contradictions)"
+    },
+    {
+      "severity": "MEDIUM",
+      "description": "No input_guard sanitization applied to any text before LLM calls. The hypothesis text, user_prompt construction, and verification narratives all bypass sanitization. The only gateway-level sanitization happens in chat_pro()/chat_flash(), which sanitize the final prompts — but the template formatting itself is vulnerable before reaching the gateway.",
+      "location": "hvr_cycle.py:128-133 (chat_pro call)"
+    },
+    {
+      "severity": "LOW",
+      "description": "pro_calls_counter (list[int]) is a mutable shared reference. If two HVR cycles run concurrently (unlikely in current single-pipeline architecture, but possible in future parallel analysis), the counter increment at line 211 and 282 would race. Use asyncio.Lock or atomic int if concurrency is planned.",
+      "location": "hvr_cycle.py:97, 135, 211, 282"
+    }
+  ],
+  "verdict": "NEEDS_FIX",
+  "notes": "The format-string injection via hypothesis text is the primary concern. Fix by sanitizing hypothesis/contradictions before format() call, or switch to str.replace() for individual placeholder substitution. The pro_calls_counter race condition is low-priority given current single-threaded pipeline design."
+}

@@ -14,29 +14,27 @@ investigation engine that browses, challenges, and refines financial claims.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
 
-from marketmind.config.investigation_config import (
-    ADVERSARIAL_BEAR_CASE_REQUIRED,
-    BEAR_CASE_CONFIDENCE_DISCOUNT,
-    CONFIDENCE_ACTION_THRESHOLD,
-    CONFIDENCE_WATCH_THRESHOLD,
-    DIMINISHING_RETURNS_THRESHOLD,
-    EXPECTATION_GAP_THRESHOLD,
-    MAX_API_CALLS_PER_THREAD,
-    MAX_DEEPENING_STEPS_PER_THREAD,
-    MAX_HYPOTHESES_PER_SESSION,
-    MIN_CORROBORATION_FOR_HIGH_CONF,
-)
-from marketmind.config.source_independence import count_independent_sources
+from marketmind.config.investigation_config import MAX_HYPOTHESES_PER_SESSION, MAX_PRO_CALLS_PER_SESSION
 from marketmind.gateway.async_client import chat_flash, chat_pro
 from marketmind.pipeline.flash_preprocessor import FlashSignal
-from marketmind.pipeline.verification_chain import VerificationResult, verify_claim
+from marketmind.pipeline.hvr_cycle import _classify_layer_interpretation, run_hvr_cycle
+from marketmind.pipeline.investigation_direction import (
+    estimate_risk_level,
+    estimate_time_window,
+    extract_direction,
+)
+from marketmind.pipeline.investigation_prompts import (
+    _BEAR_CASE_SYSTEM,
+    _EXPECTATION_GAP_SYSTEM,
+    _NARRATIVE_PROMPT,
+    _PRE_ACT_SYSTEM,
+)
+from marketmind.pipeline.investigation_types import HypothesisResult, InvestigationConfig
+from marketmind.pipeline.verification_chain import VerificationResult
 
 logger = logging.getLogger("marketmind.pipeline.investigation_loop")
 
@@ -45,136 +43,6 @@ logger = logging.getLogger("marketmind.pipeline.investigation_loop")
 # TODO: Replace with `from marketmind.pipeline.flash_triage import TriageResult`
 #       when flash_triage.py is implemented.
 TriageResult = FlashSignal
-
-
-# ── Data types ──────────────────────────────────────────────────────────────────
-
-
-@dataclass
-class InvestigationConfig:
-    """Runtime investigation parameters. Defaults loaded from investigation_config."""
-
-    max_hypotheses: int = MAX_HYPOTHESES_PER_SESSION
-    max_deepening_steps: int = MAX_DEEPENING_STEPS_PER_THREAD
-    max_api_calls: int = MAX_API_CALLS_PER_THREAD
-    diminishing_threshold: float = DIMINISHING_RETURNS_THRESHOLD
-    expectation_gap_threshold: float = EXPECTATION_GAP_THRESHOLD
-    confidence_action: float = CONFIDENCE_ACTION_THRESHOLD
-    confidence_watch: float = CONFIDENCE_WATCH_THRESHOLD
-    adversarial_required: bool = ADVERSARIAL_BEAR_CASE_REQUIRED
-    bear_discount: float = BEAR_CASE_CONFIDENCE_DISCOUNT
-
-
-@dataclass
-class HypothesisResult:
-    """Output of one complete HVR investigation thread.
-
-    Attributes:
-        hypothesis: The final (possibly refined) hypothesis text.
-        expectation_gap: |actual - priced_in| ratio. >0.15 = worth investigating.
-        verification: Full 4-layer VerificationResult from verification_chain.
-        refined_hypothesis: The hypothesis after all refinement rounds.
-        confidence: Composite confidence (0-1) after refinement.
-        bear_case: Adversarial counter-argument — mandatory.
-        bear_case_confidence: How strong the bear case is (0-1).
-        verdict: ACTIONABLE | MONITOR | DISCARD | PRICED_IN | HIGH_CONTENTION.
-        logic_chain: Step-by-step reasoning trace from all HVR rounds.
-    """
-
-    hypothesis: str
-    expectation_gap: float
-    verification: VerificationResult
-    refined_hypothesis: str
-    confidence: float
-    bear_case: str
-    bear_case_confidence: float
-    verdict: str  # ACTIONABLE | MONITOR | DISCARD | PRICED_IN | HIGH_CONTENTION
-    logic_chain: list[str] = field(default_factory=list)
-
-
-# ── Pre-Act planning prompt ─────────────────────────────────────────────────────
-
-_PRE_ACT_SYSTEM = """You are a senior macro analyst scanning financial headlines to identify testable hypotheses.
-
-For the headlines provided:
-1. Group related headlines into 2-5 themes (e.g., monetary policy shift, commodity supply shock, sector rotation).
-2. For each theme, formulate a SPECIFIC, FALSIFIABLE hypothesis. A falsifiable hypothesis makes a concrete claim that can be verified or refuted with data.
-3. Each hypothesis must include: WHAT is changing, WHY it matters, and WHAT data would prove it wrong.
-
-Rules:
-- Maximum {max_hypotheses} hypotheses.
-- Each hypothesis must be 1-2 sentences.
-- Avoid vague statements like "markets are uncertain" — be specific.
-- Reference specific assets, sectors, or economic indicators where possible.
-
-Return ONLY a JSON object:
-{{"hypotheses": ["hypothesis 1 text", "hypothesis 2 text", ...]}}
-
-Do NOT include markdown, explanations, or any text outside the JSON object."""
-
-
-# ── Expectation gap prompt ──────────────────────────────────────────────────────
-
-_EXPECTATION_GAP_SYSTEM = """You are assessing whether a financial hypothesis is already priced in by markets.
-
-Hypothesis: {hypothesis}
-
-Check these data sources to determine what the market currently expects:
-- For rate claims: CME FedWatch or equivalent futures pricing
-- For event risk: options implied volatility (elevated IV = market already pricing uncertainty)
-- For price claims: current price vs claimed price
-- For macro claims: analyst consensus, previous data prints, forward guidance
-
-Return ONLY a JSON object:
-{{"priced_in_pct": <int 0-100>, "rationale": "<one sentence explaining why>"}}
-
-where priced_in_pct = what percentage of this thesis is already reflected in current market prices.
-Gap = (100 - priced_in_pct) / 100.
-
-IMPORTANT: If market data is unavailable, state "DATA_UNAVAILABLE" in rationale and set priced_in_pct to 50 (neutral). Never fabricate numbers."""
-
-
-# ── HVR refinement prompt ───────────────────────────────────────────────────────
-
-_HVR_REFINE_SYSTEM = """You are refining a financial hypothesis based on verification results.
-
-Original hypothesis: {hypothesis}
-
-Verification results:
-- Market Pricing layer (0-1): {l1_score} — {l1_interpretation}
-- Fundamental Data layer (0-1): {l2_score} — {l2_interpretation}
-- Multi-Source News layer (0-1): {l3_score} — {l3_interpretation}
-- Historical Pattern layer (0-1): {l4_score} — {l4_interpretation}
-- Composite confidence: {confidence}
-- Verdict: {verdict}
-- Contradictions: {contradictions}
-
-Refinement rules:
-1. If confidence >= 0.80: Keep the hypothesis as-is. It is verified.
-2. If confidence <= 0.30: ABANDON. State "HYPOTHESIS_ABANDONED" and explain why.
-3. If 0.30 < confidence < 0.80: REFINE. Adjust the hypothesis to account for which layers supported/refuted it. Narrow the claim, add conditions, or change scope.
-
-Return ONLY a JSON object:
-{{"refined_hypothesis": "<refined text or HYPOTHESIS_ABANDONED>",
- "action": "KEEP | ABANDON | REFINE",
- "rationale": "<one sentence>"}}"""
-
-
-# ── Adversarial bear case prompt ────────────────────────────────────────────────
-
-_BEAR_CASE_SYSTEM = """You are now a skeptical short-seller. You MUST argue AGAINST the following hypothesis.
-Provide at least ONE quantitative counter-argument (with specific numbers) and ONE qualitative counter-argument (logical flaw in the thesis).
-
-Hypothesis: {hypothesis}
-
-Supporting evidence: {verification_summary}
-
-You have 300 words maximum. Be specific and ruthless. Attack the weakest link in the chain.
-
-Return ONLY a JSON object:
-{{"bear_case": "<your 300-word bear argument>",
- "confidence": <float 0-1 — how likely the bear case is to be correct>,
- "strongest_counterpoint": "<the single most damaging argument>"}}"""
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────────
@@ -205,20 +73,6 @@ def _parse_json_strict(content: str) -> dict | None:
             except json.JSONDecodeError:
                 pass
     return None
-
-
-def _classify_layer_interpretation(score: float) -> str:
-    """Human-readable label for a layer verification score."""
-    if score >= 0.80:
-        return "strongly supports"
-    elif score >= 0.60:
-        return "moderately supports"
-    elif score >= 0.40:
-        return "neutral / inconclusive"
-    elif score >= 0.20:
-        return "moderately contradicts"
-    else:
-        return "strongly contradicts"
 
 
 def _determine_verdict(
@@ -255,20 +109,87 @@ def _determine_verdict(
     return base
 
 
+# ── Narrative generation ────────────────────────────────────────────────────────
+
+
+async def _generate_layer_narratives(result: HypothesisResult) -> HypothesisResult:
+    """Generate one-sentence narratives for each verification layer using Flash LLM.
+
+    Also populates direction (heuristic), risk_level (heuristic), time_window
+    (heuristic), and core_logic (Flash LLM). Layer narratives are generated via
+    a single cheap Flash call.
+
+    Args:
+        result: HypothesisResult with verification scores populated.
+
+    Returns:
+        Same HypothesisResult with narrative fields filled in.
+    """
+    # Heuristic fields (no LLM needed)
+    result.direction = extract_direction(result.hypothesis)
+    result.risk_level = estimate_risk_level(result.confidence, result.bear_case_confidence)
+    result.time_window = estimate_time_window(result.verdict)
+
+    # Generate layer narratives + core_logic via Flash LLM
+    try:
+        prompt = _NARRATIVE_PROMPT.format(
+            hypothesis=result.hypothesis[:800],
+            refined_hypothesis=result.refined_hypothesis[:800],
+            l1=result.verification.layer_1_market,
+            l2=result.verification.layer_2_fundamental,
+            l3=result.verification.layer_3_multisource,
+            l4=result.verification.layer_4_historical,
+        )
+        response = await chat_flash(
+            system_prompt="You are a financial editor. Write concise, specific Chinese narratives. Return JSON only.",
+            user_prompt=prompt,
+            temperature=0.3,
+            max_tokens=1024,
+        )
+        content = response.get("content", "")
+        parsed = _parse_json_strict(content)
+        if parsed:
+            result.layer_1_narrative = str(parsed.get("layer_1_narrative", ""))
+            result.layer_2_narrative = str(parsed.get("layer_2_narrative", ""))
+            result.layer_3_narrative = str(parsed.get("layer_3_narrative", ""))
+            result.layer_4_narrative = str(parsed.get("layer_4_narrative", ""))
+            result.core_logic = str(parsed.get("core_logic", ""))
+            logger.debug("Layer narratives generated: core_logic=%s", result.core_logic[:80])
+        else:
+            logger.warning("_generate_layer_narratives: Flash response parse failed: %.200s", content)
+    except Exception as e:
+        logger.error("_generate_layer_narratives: Flash call failed: %s", e)
+        # Narratives remain empty strings on failure — non-blocking
+
+    return result
+
+
 # ── Phase 1: Pre-Act planning ───────────────────────────────────────────────────
 
 
-async def _pre_act_planning(headlines: list[TriageResult]) -> list[str]:
+async def _pre_act_planning(
+    headlines: list[TriageResult],
+    pro_calls_counter: list[int] | None = None,
+) -> list[str]:
     """Pro scans top headlines → identifies themes → generates testable hypotheses.
 
     Args:
         headlines: Top-ranked triaged headlines (FlashSignal objects).
+        pro_calls_counter: Mutable [int] counter for per-session Pro call cap.
 
     Returns:
         List of hypothesis strings (max MAX_HYPOTHESES_PER_SESSION).
     """
     if not headlines:
         logger.warning("Pre-Act planning: no headlines provided")
+        return []
+
+    # H-SEC-2: check Pro call cap before LLM call
+    if pro_calls_counter is not None and pro_calls_counter[0] >= MAX_PRO_CALLS_PER_SESSION:
+        logger.warning(
+            "Pre-Act planning: Pro call cap reached (%d/%d) — skipping",
+            pro_calls_counter[0], MAX_PRO_CALLS_PER_SESSION,
+        )
         return []
 
     # Build a compact headline summary for Pro
@@ -292,6 +213,8 @@ async def _pre_act_planning(headlines: list[TriageResult]) -> list[str]:
             temperature=0.4,
             max_tokens=2048,
         )
+        if pro_calls_counter is not None:
+            pro_calls_counter[0] += 1
         content = result.get("content", "")
         parsed = _parse_json_strict(content)
         if parsed and "hypotheses" in parsed and isinstance(parsed["hypotheses"], list):
@@ -311,7 +234,10 @@ async def _pre_act_planning(headlines: list[TriageResult]) -> list[str]:
 # ── Phase 2: Expectation gap check ──────────────────────────────────────────────
 
 
-async def _expectation_gap_check(hypothesis: str) -> float:
+async def _expectation_gap_check(
+    hypothesis: str,
+    pro_calls_counter: list[int] | None = None,
+) -> float:
     """Check how much of this hypothesis is already priced in by the market.
 
     Uses Pro to assess CME FedWatch, options IV, current prices, and analyst
@@ -319,11 +245,20 @@ async def _expectation_gap_check(hypothesis: str) -> float:
 
     Args:
         hypothesis: The hypothesis text to evaluate.
+        pro_calls_counter: Mutable [int] counter for per-session Pro call cap.
 
     Returns:
         Gap ratio: |actual - priced_in| / priced_in. Range [0, 1].
         >0.15 = worth investigating (thesis is not fully priced in).
     """
+    # H-SEC-2: check Pro call cap before LLM call
+    if pro_calls_counter is not None and pro_calls_counter[0] >= MAX_PRO_CALLS_PER_SESSION:
+        logger.warning(
+            "Expectation gap: Pro call cap reached (%d/%d) — using neutral default",
+            pro_calls_counter[0], MAX_PRO_CALLS_PER_SESSION,
+        )
+        return 0.50  # neutral default when cap is hit
+
     try:
         system = _EXPECTATION_GAP_SYSTEM.format(hypothesis=hypothesis[:1500])
         result = await chat_pro(
@@ -332,6 +267,8 @@ async def _expectation_gap_check(hypothesis: str) -> float:
             temperature=0.2,
             max_tokens=1024,
         )
+        if pro_calls_counter is not None:
+            pro_calls_counter[0] += 1
         content = result.get("content", "")
         parsed = _parse_json_strict(content)
         if parsed and "priced_in_pct" in parsed:
@@ -352,188 +289,13 @@ async def _expectation_gap_check(hypothesis: str) -> float:
         return 0.50  # neutral on failure
 
 
-# ── Phase 3: HVR loop ───────────────────────────────────────────────────────────
-
-
-async def _hvr_cycle(
-    hypothesis: str,
-    max_rounds: int = 3,
-    config: InvestigationConfig | None = None,
-) -> HypothesisResult:
-    """HVR: Hypothesize → Verify (4-layer) → Refine (repeat if gain > 5%).
-
-    The audit finding (Druckenmiller discipline): "Failure to confirm" is NOT
-    "refine." If verification confidence drops below 0.30, we ABANDON rather
-    than refining to a weaker version.
-
-    Args:
-        hypothesis: Initial hypothesis string.
-        max_rounds: Maximum refinement rounds (default 3, from config).
-        config: InvestigationConfig with thresholds.
-
-    Returns:
-        HypothesisResult with final hypothesis, verification, logic chain.
-    """
-    cfg = config or InvestigationConfig()
-    current_hypothesis = hypothesis
-    logic_chain: list[str] = []
-    last_confidence = 0.0
-    final_verification: VerificationResult | None = None
-    api_calls_used = 0
-
-    # Initial verification before entering refinement loop
-    verification = await verify_claim(claim=current_hypothesis)
-    api_calls_used += 1
-    final_verification = verification
-    last_confidence = verification.weighted_confidence
-    logic_chain.append(
-        f"R0 (initial): hypothesis='{current_hypothesis[:100]}', "
-        f"confidence={verification.weighted_confidence:.3f}, "
-        f"verdict={verification.verdict}"
-    )
-
-    # If already strong — done
-    if verification.weighted_confidence >= cfg.confidence_action:
-        logger.info(
-            "HVR: hypothesis verified on first pass (conf=%.3f)", verification.weighted_confidence
-        )
-    else:
-        # Refinement loop
-        for round_num in range(1, max_rounds + 1):
-            if api_calls_used >= cfg.max_api_calls:
-                logger.warning("HVR: max API calls (%d) reached, stopping", cfg.max_api_calls)
-                break
-
-            # Check: is current confidence too low? Abandon rather than refine.
-            if verification.weighted_confidence < 0.30:
-                logger.info(
-                    "HVR: confidence below abandon threshold (%.3f < 0.30) — abandoning",
-                    verification.weighted_confidence,
-                )
-                logic_chain.append(
-                    f"R{round_num}: ABANDONED — confidence={verification.weighted_confidence:.3f} "
-                    f"below 0.30 threshold. Not refining a contradicted thesis."
-                )
-                break
-
-            # Refine: ask Pro to update the hypothesis based on verification
-            refined = await _refine_hypothesis(
-                current_hypothesis, verification, cfg
-            )
-            api_calls_used += 1
-
-            action = refined.get("action", "REFINE")
-            if action == "ABANDON":
-                logic_chain.append(
-                    f"R{round_num}: ABANDONED by refinement agent — {refined.get('rationale', '')}"
-                )
-                break
-            elif action == "KEEP":
-                logic_chain.append(f"R{round_num}: KEPT — hypothesis verified, no changes needed")
-                break
-
-            # REFINE: update hypothesis and re-verify
-            current_hypothesis = refined.get("refined_hypothesis", current_hypothesis)
-            verification = await verify_claim(claim=current_hypothesis)
-            api_calls_used += 1
-            final_verification = verification
-
-            gain = verification.weighted_confidence - last_confidence
-            logic_chain.append(
-                f"R{round_num}: refined hypothesis, "
-                f"confidence={verification.weighted_confidence:.3f} "
-                f"(gain={gain:+.3f}), verdict={verification.verdict}"
-            )
-
-            # Diminishing returns check
-            if abs(gain) < cfg.diminishing_threshold:
-                logger.info(
-                    "HVR: diminishing returns (gain=%.3f < %.3f) — stopping refinement",
-                    abs(gain),
-                    cfg.diminishing_threshold,
-                )
-                break
-
-            last_confidence = verification.weighted_confidence
-
-            # If refined to high confidence — done
-            if verification.weighted_confidence >= cfg.confidence_action:
-                logger.info("HVR: refined to actionable confidence (%.3f)", verification.weighted_confidence)
-                break
-
-    confidence = final_verification.weighted_confidence if final_verification else 0.0
-
-    return HypothesisResult(
-        hypothesis=hypothesis,
-        expectation_gap=0.0,              # filled in by caller
-        verification=final_verification or VerificationResult(
-            claim=hypothesis,
-            layer_1_market=0.50,
-            layer_2_fundamental=0.50,
-            layer_3_multisource=0.50,
-            layer_4_historical=0.50,
-            weighted_confidence=0.0,
-            verdict="UNVERIFIED",
-        ),
-        refined_hypothesis=current_hypothesis,
-        confidence=confidence,
-        bear_case="",                     # filled in by caller
-        bear_case_confidence=0.0,         # filled in by caller
-        verdict="DISCARD",                # filled in by caller
-        logic_chain=logic_chain,
-    )
-
-
-async def _refine_hypothesis(
-    hypothesis: str,
-    verification: VerificationResult,
-    config: InvestigationConfig,
-) -> dict:
-    """Ask Pro to refine a hypothesis based on 4-layer verification results.
-
-    Returns dict with keys: refined_hypothesis, action (KEEP|ABANDON|REFINE), rationale.
-    """
-    contradictions = verification.contradiction_detail or "none detected"
-    system = _HVR_REFINE_SYSTEM.format(
-        hypothesis=hypothesis,
-        l1_score=verification.layer_1_market,
-        l1_interpretation=_classify_layer_interpretation(verification.layer_1_market),
-        l2_score=verification.layer_2_fundamental,
-        l2_interpretation=_classify_layer_interpretation(verification.layer_2_fundamental),
-        l3_score=verification.layer_3_multisource,
-        l3_interpretation=_classify_layer_interpretation(verification.layer_3_multisource),
-        l4_score=verification.layer_4_historical,
-        l4_interpretation=_classify_layer_interpretation(verification.layer_4_historical),
-        confidence=verification.weighted_confidence,
-        verdict=verification.verdict,
-        contradictions=contradictions,
-    )
-
-    try:
-        result = await chat_pro(
-            system_prompt=system,
-            user_prompt=f"Refine this hypothesis based on the verification data above.\nHypothesis: {hypothesis}",
-            temperature=0.3,
-            max_tokens=1536,
-        )
-        content = result.get("content", "")
-        parsed = _parse_json_strict(content)
-        if parsed and "refined_hypothesis" in parsed:
-            return parsed
-        else:
-            logger.warning("Refinement: could not parse response: %.200s", content)
-            return {"refined_hypothesis": hypothesis, "action": "KEEP",
-                    "rationale": "parse failed — keeping original"}
-    except Exception as e:
-        logger.error("HVR refinement call failed: %s", e)
-        return {"refined_hypothesis": hypothesis, "action": "KEEP",
-                "rationale": f"API error: {e}"}
-
-
 # ── Phase 4: Adversarial bear case ──────────────────────────────────────────────
 
 
-async def _adversarial_bear_check(result: HypothesisResult) -> HypothesisResult:
+async def _adversarial_bear_check(
+    result: HypothesisResult,
+    pro_calls_counter: list[int] | None = None,
+) -> HypothesisResult:
     """Generate mandatory bear case via skeptical short-seller Pro persona.
 
     C8 fix: The adversarial self-check must be a real Pro call with a
@@ -543,10 +305,21 @@ async def _adversarial_bear_check(result: HypothesisResult) -> HypothesisResult:
 
     Args:
         result: HypothesisResult from HVR cycle (without bear case).
+        pro_calls_counter: Mutable [int] counter for per-session Pro call cap.
 
     Returns:
         Same HypothesisResult with bear_case and bear_case_confidence populated.
     """
+    # H-SEC-2: check Pro call cap before LLM call
+    if pro_calls_counter is not None and pro_calls_counter[0] >= MAX_PRO_CALLS_PER_SESSION:
+        logger.warning(
+            "Bear case: Pro call cap reached (%d/%d) — using placeholder",
+            pro_calls_counter[0], MAX_PRO_CALLS_PER_SESSION,
+        )
+        result.bear_case = "BEAR CASE SKIPPED — Pro call cap reached."
+        result.bear_case_confidence = 0.30
+        return result
+
     verification_summary = (
         f"Weighted confidence: {result.verification.weighted_confidence:.3f}. "
         f"Verdict: {result.verification.verdict}. "
@@ -569,6 +342,8 @@ async def _adversarial_bear_check(result: HypothesisResult) -> HypothesisResult:
             temperature=0.5,
             max_tokens=1536,
         )
+        if pro_calls_counter is not None:
+            pro_calls_counter[0] += 1
         content = response.get("content", "")
         parsed = _parse_json_strict(content)
         if parsed and "bear_case" in parsed:
@@ -616,16 +391,19 @@ async def run_investigation_loop(
         Results with verdict PRICED_IN are included but deprioritized.
     """
     cfg = config or InvestigationConfig()
+    pro_calls_used: list[int] = [0]  # H-SEC-2: mutable counter for per-session Pro call cap
+
     t_start = datetime.now(timezone.utc)
     logger.info(
-        "Investigation loop: %d headlines, max %d hypotheses, max %d rounds each",
+        "Investigation loop: %d headlines, max %d hypotheses, max %d rounds each, Pro cap=%d",
         len(selected_headlines),
         cfg.max_hypotheses,
         cfg.max_deepening_steps,
+        MAX_PRO_CALLS_PER_SESSION,
     )
 
     # 1. Pre-Act: Pro scans → generates hypotheses
-    hypotheses = await _pre_act_planning(selected_headlines)
+    hypotheses = await _pre_act_planning(selected_headlines, pro_calls_used)
     if not hypotheses:
         logger.warning("Investigation loop: no hypotheses generated — aborting")
         return []
@@ -636,7 +414,7 @@ async def run_investigation_loop(
         logger.info("Investigating H%d/%d: %s", i + 1, len(hypotheses), h[:120])
 
         # 2. Expectation gap: is this already priced in?
-        gap = await _expectation_gap_check(h)
+        gap = await _expectation_gap_check(h, pro_calls_used)
         if gap < cfg.expectation_gap_threshold:
             logger.info("  H%d: priced_in (gap=%.3f < %.3f) — skipping deep verification", i + 1, gap, cfg.expectation_gap_threshold)
             # Create a minimal result for priced-in hypotheses
@@ -662,12 +440,12 @@ async def run_investigation_loop(
             continue
 
         # 3. HVR cycle: Hypothesize → Verify → Refine
-        hvr_result = await _hvr_cycle(h, max_rounds=cfg.max_deepening_steps, config=cfg)
+        hvr_result = await run_hvr_cycle(h, max_rounds=cfg.max_deepening_steps, config=cfg, pro_calls_counter=pro_calls_used)
         hvr_result.expectation_gap = gap
 
         # 4. Adversarial bear case (C8 fix — mandatory)
         if cfg.adversarial_required:
-            hvr_result = await _adversarial_bear_check(hvr_result)
+            hvr_result = await _adversarial_bear_check(hvr_result, pro_calls_used)
 
         # 5. Classify verdict
         hvr_result.verdict = _determine_verdict(
@@ -676,6 +454,10 @@ async def run_investigation_loop(
             bear_confidence=hvr_result.bear_case_confidence,
             config=cfg,
         )
+
+        # 6. Generate hypothesis card narratives (direction, risk, time window, layer narratives)
+        hvr_result = await _generate_layer_narratives(hvr_result)
+
         results.append(hvr_result)
         logger.info(
             "  H%d: verdict=%s conf=%.3f gap=%.3f bear_conf=%.3f",
@@ -693,11 +475,12 @@ async def run_investigation_loop(
     elapsed = (datetime.now(timezone.utc) - t_start).total_seconds()
     actionable = sum(1 for r in results if r.verdict == "ACTIONABLE")
     logger.info(
-        "Investigation loop complete: %d hypotheses in %.1fs — %d ACTIONABLE, %d PRICED_IN",
+        "Investigation loop complete: %d hypotheses in %.1fs — %d ACTIONABLE, %d PRICED_IN, %d Pro calls used",
         len(results),
         elapsed,
         actionable,
         sum(1 for r in results if r.verdict == "PRICED_IN"),
+        pro_calls_used[0],
     )
 
     return results

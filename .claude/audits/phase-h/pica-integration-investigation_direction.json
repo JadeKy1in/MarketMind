@@ -1,0 +1,12 @@
+{
+  "module": "pipeline/investigation_direction.py",
+  "timestamp": "2026-05-18T18:30:00Z",
+  "auditor": "PICA-Integration-Agent-B2",
+  "type": "static",
+  "findings": [],
+  "verdict": "PASS",
+  "import_boundary_clean": true,
+  "data_flow_intact": true,
+  "backward_compatible": true,
+  "notes": "Pure data/utility module — zero marketmind imports. Functions extract_direction(str)->str, estimate_risk_level(float,float)->str, estimate_time_window(str)->str all match investigation_loop.py caller signatures (lines 25-29). No sibling imports, no back-imports. No test file exists at tests/test_pipeline/test_investigation_direction.py — but this is a PICA-Unit concern, not Integration."
+}

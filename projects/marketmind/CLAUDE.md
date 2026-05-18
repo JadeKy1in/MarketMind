@@ -31,6 +31,27 @@ Phase 2: Shadow Ecosystem (build AFTER Phase 1 is complete)
 
 **Rule**: If you find yourself working on shadow code while the main AI pipeline is broken or incomplete, STOP. Fix the main pipeline first. Shadows are an ENHANCEMENT, not a replacement for the core analysis.
 
+## Phase H Status (2026-05-18)
+
+Phase H upgrades the pipeline from surface-level sentiment analysis to deep structural macro analysis.
+
+### Completed
+- Security fixes: session.py atomic writes, archivist.py atomic writes, graceful KeyError handling
+- Module extraction: investigation_loop.py 918→486 lines (hvr_cycle, prompts, types, direction)
+- New modules: input_guard.py, gate_archiver.py, hypothesis_card.py, kill_monitor.py
+- Gate 1 interaction loop (in progress)
+- Data model: HypothesisResult +11 fields (direction, core_logic, risk_level, time_window, layer narratives)
+- HypothesisResult wired into generate_decision()
+- input_guard wired into gateway (async_client, macro_data)
+- API cost ceiling added (MAX_PRO_CALLS_PER_SESSION=30)
+- PICA audit artifacts: 12 Security + 7 Integration + 1 Regression (732/732 pass)
+- Research: 7 files in .claude/research/
+
+### Pending
+- Gate 1 interaction loop completion
+- Phase H comprehensive architecture plan revision (asset-class routing, 6 new modules)
+- app.py further extraction (currently 392 lines, target 150)
+
 ## Quick Start
 
 ```bash
@@ -87,6 +108,16 @@ marketmind/
 │   ├── resonance.py            # Multi-dimensional resonance
 │   ├── position_patrol.py      # Position monitoring
 │   ├── red_team.py             # Red Team adversarial review
+│   ├── hypothesis_card.py      # Gate 1 hypothesis card generation (3-card, frequency framing, progressive disclosure)
+│   ├── kill_monitor.py         # Downstream kill-criteria monitoring
+│   ├── gate1_interaction.py    # Gate 1 conversation loop + state machine
+│   ├── hvr_cycle.py            # HVR investigation cycle (extracted from investigation_loop)
+│   ├── investigation_prompts.py  # HVR system prompt constants (data module)
+│   ├── investigation_types.py    # HVR data types (data module)
+│   ├── investigation_direction.py  # HVR direction extraction (data module)
+│   ├── investigation_loop.py   # Investigation orchestration (glue layer)
+│   ├── backtest_entry.py       # Backtest runner entry point (extracted from app.py)
+│   ├── orchestration.py        # Pipeline orchestration (run_interactive extracted from app.py)
 │   └── cache.py                # Response caching
 ├── ui/                         # Command Center GUI (customtkinter)
 │   ├── main_window.py          # Main application window
@@ -102,10 +133,12 @@ marketmind/
 │   └── progress.py             # Progress indicators
 ├── storage/                    # Persistence
 │   ├── session.py              # Session state management
-│   └── archivist.py            # Decision archive
+│   ├── archivist.py            # Decision archive
+│   └── gate_archiver.py        # Gate conversation JSONL+MD archiver
 ├── integrity/                  # Quality assurance
 │   ├── watchdog.py             # Integrity monitoring
-│   └── fact_checker.py         # Claim verification
+│   ├── fact_checker.py         # Claim verification
+│   └── input_guard.py          # Shared input sanitization (prompt injection, Markdown escaping, Unicode normalization)
 ├── config/                     # Configuration
 │   ├── settings.py             # MarketMindConfig + ShadowSettings
 │   ├── asset_universe.py       # Tradable asset matrix
@@ -143,6 +176,10 @@ Step 1: Scout — fetch_all_sources()
 
 Step 2: Flash Preprocessor — preprocess_batch(news_items[:50])
         Flash LLM extracts FlashSignal per batch of 15 headlines
+
+Step 2b: HVR Investigation — investigate(top_signals, news_items)
+        Pro LLM deep-dive on flash signals: hypothesis formation, causal decomposition,
+        entity-level flow tracking, evidence collection. Produces HypothesisResult.
 
 Step 3: L1 Narrative — analyze_layer1(signals[:15], news_items)
         Pro LLM produces Layer1Result: event_grade, matrix_quadrant, sentiment

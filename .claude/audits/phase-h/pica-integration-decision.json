@@ -1,0 +1,12 @@
+{
+  "module": "pipeline/decision.py",
+  "timestamp": "2026-05-18T18:30:00Z",
+  "auditor": "PICA-Integration-Agent-B2",
+  "type": "static",
+  "findings": [],
+  "verdict": "PASS",
+  "import_boundary_clean": true,
+  "data_flow_intact": true,
+  "backward_compatible": true,
+  "notes": "Imports: gateway/async_client, pipeline stages (L1/L2/L3/red_team/resonance), shadows/shadow_agent for ShadowVote type. No back-import from app.py. generate_decision() backward compat: hypotheses=None handled at line 164 (hypothesis_summary = ... if hypotheses else \"\"). hypotheses=[] also handled — _build_hypothesis_summary returns \"\" for empty list (line 244-245). Prompt injection: HypothesisResult fields interpolated into user_prompt via _build_decision_prompt(), BUT chat_pro sanitizes both system and user prompts at gateway level (async_client lines 240-249) — risk is mitigated. shadow_votes=None is the live path (app.py:110 by design)."
+}

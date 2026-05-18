@@ -1,0 +1,34 @@
+{
+  "module": "orchestration.py",
+  "timestamp": "2026-05-18T02:48:24Z",
+  "auditor": "PICA-Integration-Agent",
+  "type": "static",
+  "findings": [
+    {
+      "severity": "info",
+      "check": "import_boundary",
+      "detail": "Only TYPE_CHECKING import for MarketMindConfig (avoids runtime circular import). All real imports are lazy (inside function body). Does NOT import from app.py. Clean.",
+      "status": "PASS"
+    },
+    {
+      "severity": "info",
+      "check": "run_interactive_signature_compat",
+      "detail": "Signature: async def run_interactive(config, mock=False, verbose=False, shadow_count=None) -> int. Test file test_run_interactive_smoke.py:149 calls with (config, mock=True, verbose=False, shadow_count=None). Matches exactly.",
+      "status": "PASS"
+    },
+    {
+      "severity": "info",
+      "check": "test_import_resolution",
+      "detail": "test_run_interactive_smoke.py imports via 'from marketmind.pipeline.orchestration import run_interactive'. Resolves correctly. All dependency imports (gateway, session_context, layer1-3_interactive, decision_interactive) exist.",
+      "status": "PASS"
+    },
+    {
+      "severity": "info",
+      "check": "dead_loop_check",
+      "detail": "Sequential stage execution with explicit return-early (skip → return 0, not confirmed → return 0). No recursion, no while loops. No dead loop risk.",
+      "status": "PASS"
+    }
+  ],
+  "verdict": "PASS",
+  "notes": "All checks pass. Clean orchestration module with lazy imports, TYPE_CHECKING guard, and clear sequential flow."
+}

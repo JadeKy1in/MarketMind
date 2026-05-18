@@ -1,0 +1,12 @@
+{
+  "module": "app.py",
+  "timestamp": "2026-05-18T03:47:00Z",
+  "auditor": "PICA-Integration-Manual",
+  "type": "static",
+  "findings": [],
+  "verdict": "PASS",
+  "import_boundary_clean": true,
+  "data_flow_intact": true,
+  "backward_compatible": true,
+  "notes": "main() imports run_daily from pipeline.orchestration. All dispatch paths verified: --mode daily, --mode interactive, --mode backtest, --mode gui. 754 tests pass."
+}

@@ -1,11 +1,14 @@
 """Session checkpoint persistence — auto-save after each gate, resume on restart."""
 from __future__ import annotations
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger("marketmind.storage.session")
 
 
 @dataclass
@@ -50,7 +53,10 @@ class SessionManager:
     def save(self, state: SessionState) -> Path:
         filepath = self.checkpoint_dir / f"{state.session_id}.json"
         data = _serialize_state(state)
-        filepath.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        # Atomic write: temp file → rename, prevents corruption on crash
+        tmp = filepath.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+        tmp.replace(filepath)
         return filepath
 
     def load(self, session_id: str) -> SessionState | None:
@@ -71,8 +77,8 @@ class SessionManager:
                     "started_at": data.get("started_at", ""),
                     "complete": (data.get("gate3") or {}).get("completed", False),
                 })
-            except Exception:
-                pass
+            except (json.JSONDecodeError, OSError, ValueError) as e:
+                logger.warning("Corrupted session file %s: %s", f.name, e)
         return sessions
 
     def delete(self, session_id: str) -> bool:
@@ -96,17 +102,30 @@ def _serialize_state(state: SessionState) -> dict:
     }
 
 
+def _deserialize_gate(data: dict | None, gate_number: int) -> GateCheckpoint | None:
+    """Gracefully deserialize a GateCheckpoint, using defaults for missing/corrupt fields."""
+    if not isinstance(data, dict):
+        return None
+    try:
+        completed = bool(data.get("completed", False))
+    except (TypeError, ValueError):
+        completed = False
+    return GateCheckpoint(
+        gate_number,
+        completed,
+        timestamp=str(data.get("timestamp", "")),
+        data=data.get("data", {}) if isinstance(data.get("data"), dict) else {},
+    )
+
+
 def _deserialize_state(data: dict) -> SessionState:
-    g1 = data.get("gate1")
-    g2 = data.get("gate2")
-    g3 = data.get("gate3")
     return SessionState(
-        session_id=data["session_id"],
+        session_id=data.get("session_id", "unknown"),
         mode=data.get("mode", "full"),
         current_gate=data.get("current_gate", 1),
-        gate1=GateCheckpoint(1, g1["completed"], g1.get("timestamp", ""), g1.get("data", {})) if g1 else None,
-        gate2=GateCheckpoint(2, g2["completed"], g2.get("timestamp", ""), g2.get("data", {})) if g2 else None,
-        gate3=GateCheckpoint(3, g3["completed"], g3.get("timestamp", ""), g3.get("data", {})) if g3 else None,
+        gate1=_deserialize_gate(data.get("gate1"), 1),
+        gate2=_deserialize_gate(data.get("gate2"), 2),
+        gate3=_deserialize_gate(data.get("gate3"), 3),
         started_at=data.get("started_at", ""),
         last_activity=data.get("last_activity", ""),
     )

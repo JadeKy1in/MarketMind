@@ -1,0 +1,17 @@
+{
+  "module": "pipeline/hypothesis_card.py",
+  "timestamp": "2026-05-18T18:30:00Z",
+  "auditor": "PICA-Integration-Agent-B2",
+  "type": "static",
+  "findings": [
+    {
+      "severity": "MEDIUM",
+      "description": "Line 14 imports HypothesisResult from investigation_loop (a sibling behavioral/glue module). HypothesisResult is defined in investigation_types.py (a shared data module). This violates the extraction rule 'No back-imports from sibling modules at the same level.' The fix is trivial: change line 14 to 'from marketmind.pipeline.investigation_types import HypothesisResult'."
+    }
+  ],
+  "verdict": "NEEDS_FIX",
+  "import_boundary_clean": false,
+  "data_flow_intact": true,
+  "backward_compatible": true,
+  "notes": "sanitize_for_llm_prompt called correctly on all string fields (core_logic, narratives, bear_case, source_detail, upside/downside scenarios) before card rendering. All HypothesisResult fields mapped to HypothesisCard. generate_cards() data flow: list[HypothesisResult] -> list[HypothesisCard] complete. The sibling import from investigation_loop is functionally correct (re-export) but architecturally wrong."
+}

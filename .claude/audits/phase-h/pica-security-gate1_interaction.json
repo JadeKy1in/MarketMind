@@ -1,0 +1,35 @@
+{
+  "module": "pipeline/gate1_interaction.py",
+  "timestamp": "2026-05-18T03:34:06Z",
+  "auditor": "PICA-Security-Agent-B2",
+  "risk_tier": "Medium",
+  "findings": [
+    {
+      "severity": "LOW",
+      "description": "io_handler and status_handler parameters are typed as 'callable' with no signature validation (lines 188-189). If a malicious handler is injected, it could execute arbitrary code. This is inherent to the callable pattern — the caller controls what functions are passed. Not exploitable from user input but worth noting in threat model.",
+      "location": "gate1_interaction.py:188-189"
+    },
+    {
+      "severity": "LOW",
+      "description": "Parking lot items stored at line 293 use user_input[:200] — only truncated, not sanitized. When re-displayed at lines 364-366, the raw (unsanitized) text is shown. While display is to the same user who provided the input (reflected self-XSS is typically not a risk), if the parking lot is persisted and re-displayed to a different user in future sessions, this becomes a stored content injection vector. The archive path at line 232 DOES sanitize, but parking lot display bypasses it.",
+      "location": "gate1_interaction.py:293, 364-366"
+    },
+    {
+      "severity": "LOW",
+      "description": "Turn limit enforcement (TURN_LIMIT=50) is correct. Force-close at line 375-381 defaults to cards[0].direction if no selection made. This is a safe default — no crash, no infinite loop. Turn warning at line 282-284 uses f-string with session.turns (int) — no injection risk.",
+      "location": "gate1_interaction.py:26-27, 274-381"
+    },
+    {
+      "severity": "INFO",
+      "description": "KeyboardInterrupt handling at lines 411-429: saves checkpoint with partial state, marks interrupted=True, returns session. Correct behavior — no state corruption on Ctrl+C. The finally block (432) always closes the archiver session.",
+      "location": "gate1_interaction.py:411-433"
+    },
+    {
+      "severity": "INFO",
+      "description": "The _log helper (line 230-241) calls sanitize_for_llm_prompt() before archiving. Warnings are stored alongside sanitized text. This means the archive contains both the cleaned text and any injection warnings — useful for audit trails.",
+      "location": "gate1_interaction.py:230-241"
+    }
+  ],
+  "verdict": "PASS",
+  "notes": "Well-structured interaction loop with proper turn limits, state machine, and KeyboardInterrupt handling. The parking lot display bypasses sanitization but since it shows the user their own input, this is low-risk. If parking lot data is shared across sessions/users in the future, add sanitization at display time. No LLM calls — all logic is heuristic."
+}

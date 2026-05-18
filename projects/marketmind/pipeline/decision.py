@@ -103,6 +103,7 @@ async def generate_decision(
     #     crystallization — they do NOT vote on investment decisions.
     #     The parameter is preserved only for backward compatibility with
     #     any hypothetical manual invocation that might pass votes directly.
+    hypotheses: list | None = None,
 ) -> DecisionOutput:
     """Generate final decision cards and no-trade card."""
     if not resonance.passed and not l3.green_lights:
@@ -115,7 +116,7 @@ async def generate_decision(
             ),
             summary="No actionable signal today. Cash is a valid position."
         )
-    user_prompt = _build_decision_prompt(l1, l2, l3, red_team, resonance, shadow_votes)
+    user_prompt = _build_decision_prompt(l1, l2, l3, red_team, resonance, shadow_votes, hypotheses)
     try:
         result = await chat_pro(
             system_prompt=DECISION_SYSTEM_PROMPT,
@@ -133,6 +134,7 @@ def _build_decision_prompt(
     l1: Layer1Result, l2: Layer2Result, l3: Layer3BatchResult,
     red_team: RedTeamReport, resonance: ResonanceResult,
     shadow_votes: dict | None = None,
+    hypotheses: list | None = None,
 ) -> str:
     green = [r.ticker for r in l3.green_lights]
     challenges_str = "\n".join(f"- [{c.severity}] {c.challenge}" for c in red_team.challenges[:5])
@@ -159,7 +161,9 @@ def _build_decision_prompt(
             lines.append("Note: Shadows are independent agents. Consensus is informational, not directive.")
             shadow_consensus_str = "\n".join(lines) + "\n\n"
 
-    return f"""{shadow_consensus_str}## Signal Resonance
+    hypothesis_summary = _build_hypothesis_summary(hypotheses) if hypotheses else ""
+
+    return f"""{shadow_consensus_str}{hypothesis_summary}## Signal Resonance
 Verdict: {resonance.verdict} | DSR: {resonance.dsr} | PBO: {resonance.pbo}
 
 ## Layer 1 Narrative
@@ -175,6 +179,72 @@ Tickers: {', '.join(l2.ticker_candidates[:10])}
 {challenges_str if challenges_str else 'No challenges raised'}
 
 Produce decision cards for GREEN-light tickers only. Generate a parallel no-trade card with equal rigor."""
+
+
+def _build_hypothesis_summary(hypotheses: list) -> str:
+    """Format HVR investigation results as a pre-analysis summary for the decision prompt.
+
+    Extracts: ACTIONABLE direction/confidence/core_logic/risk, HIGH_CONTENTION risks,
+    and the top hypothesis's 4-layer verification summary.
+    """
+    actionable = [h for h in hypotheses if getattr(h, 'verdict', '') == 'ACTIONABLE']
+    high_contention = [h for h in hypotheses if getattr(h, 'verdict', '') == 'HIGH_CONTENTION']
+
+    lines = ["## Pre-Analysis: HVR Investigation Results\n"]
+
+    if actionable:
+        lines.append(f"### ACTIONABLE Hypotheses ({len(actionable)})\n")
+        for i, h in enumerate(actionable[:5]):
+            direction = getattr(h, 'direction', '') or 'N/A'
+            confidence = getattr(h, 'confidence', 0)
+            core_logic = getattr(h, 'core_logic', '') or getattr(h, 'hypothesis', '')[:120]
+            risk_level = getattr(h, 'risk_level', '') or 'N/A'
+            time_window = getattr(h, 'time_window', '') or 'N/A'
+            bear_case = (getattr(h, 'bear_case', '') or '')[:150]
+            lines.append(f"H{i + 1}. [{direction}] (confidence={confidence:.0%}, risk={risk_level}, window={time_window})")
+            lines.append(f"   Thesis: {core_logic}")
+            if bear_case:
+                lines.append(f"   Bear Case: {bear_case}")
+            lines.append("")
+
+        # 4-layer verification summary from top hypothesis
+        top = actionable[0]
+        if any(getattr(top, f'layer_{n}_narrative', '') for n in range(1, 5)):
+            lines.append("#### Top Hypothesis 4-Layer Verification")
+            for layer_num in range(1, 5):
+                narrative = getattr(top, f'layer_{layer_num}_narrative', '') or ''
+                if narrative:
+                    lines.append(f"  L{layer_num}: {narrative[:200]}")
+            lines.append("")
+
+    if high_contention:
+        lines.append(f"### HIGH_CONTENTION Risks ({len(high_contention)})\n")
+        for i, h in enumerate(high_contention[:3]):
+            hypothesis = getattr(h, 'hypothesis', '')[:120]
+            bear_case = (getattr(h, 'bear_case', '') or '')[:120]
+            lines.append(f"C{i + 1}. {hypothesis}")
+            if bear_case:
+                lines.append(f"   Counter: {bear_case}")
+            lines.append("")
+        lines.append("Note: HIGH_CONTENTION means bears and bulls are both credible. Factor this uncertainty into position sizing.\n")
+
+    monitor_count = sum(1 for h in hypotheses if getattr(h, 'verdict', '') == 'MONITOR')
+    priced_in_count = sum(1 for h in hypotheses if getattr(h, 'verdict', '') == 'PRICED_IN')
+    discarded = sum(1 for h in hypotheses if getattr(h, 'verdict', '') == 'DISCARD')
+    if monitor_count or priced_in_count or discarded:
+        parts = []
+        if monitor_count:
+            parts.append(f"{monitor_count} MONITOR")
+        if priced_in_count:
+            parts.append(f"{priced_in_count} PRICED_IN")
+        if discarded:
+            parts.append(f"{discarded} DISCARD")
+        lines.append(f"Other: {', '.join(parts)} — see archive for details.\n")
+
+    if not lines[1:]:
+        return ""  # no hypotheses to summarize
+
+    return "\n".join(lines) + "\n"
 
 
 def _parse_decision_response(content: str) -> DecisionOutput:

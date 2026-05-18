@@ -1,0 +1,40 @@
+{
+  "module": "gate_archiver.py",
+  "timestamp": "2026-05-18T02:48:24Z",
+  "auditor": "PICA-Integration-Agent",
+  "type": "static",
+  "findings": [
+    {
+      "severity": "info",
+      "check": "import_boundary",
+      "detail": "Imports from marketmind.storage.archivist (sibling). Unidirectional DAG: gate_archiver depends on archivist (foundational layer). No cycle. Acceptable for coordinated storage package.",
+      "status": "PASS"
+    },
+    {
+      "severity": "info",
+      "check": "archivist_api_usage",
+      "detail": "Uses archive.today_path(), archive.save_json(subdir, filename, data). save_json('gates', f'gate{gate_number}_decision', payload) matches archivist.save_json signature. No API mismatch.",
+      "status": "PASS"
+    },
+    {
+      "severity": "info",
+      "check": "data_flow_jsonl_md_decision_footer",
+      "detail": "Complete data flow: GateTurn → JSONL line (canonical, with flattened data fields) → MD section (with HTML comment wrapping) → decision JSON (atomic write via save_json) → integrity footer (hash + event count). JSONL is declared canonical source. No gaps.",
+      "status": "PASS"
+    },
+    {
+      "severity": "info",
+      "check": "directory_creation",
+      "detail": "gate_dir = archive.today_path() / 'gates' with mkdir(parents=True, exist_ok=True). Correct. 'gates' also listed in archivist.ensure_dirs().",
+      "status": "PASS"
+    },
+    {
+      "severity": "low",
+      "check": "atomic_append_limitation",
+      "detail": "log_turn writes to .tmp, validates JSON, then appends to JSONL. Between validation and append, another process could interleave — true atomic append requires file locking. Acceptable for single-process usage.",
+      "status": "NOTE"
+    }
+  ],
+  "verdict": "PASS",
+  "notes": "All checks pass. One minor note about append-not-truly-atomic for JSONL; acceptable for single-process pipeline. The decision JSON uses true atomic write (tmp → rename)."
+}

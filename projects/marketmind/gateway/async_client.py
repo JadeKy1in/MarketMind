@@ -201,6 +201,18 @@ async def chat_flash(
 ) -> dict[str, Any]:
     """Internal: raw Flash call without integrity protocol injection.
     Shadow agents MUST use chat_with_integrity() instead."""
+    from marketmind.integrity.input_guard import sanitize_for_llm_prompt  # late import (circular via integrity.__init__ → fact_checker)
+    sys_result = sanitize_for_llm_prompt(system_prompt, source="llm_prompt")
+    usr_result = sanitize_for_llm_prompt(user_prompt, source="llm_prompt")
+    if sys_result.warnings:
+        for w in sys_result.warnings:
+            logger.warning("input_guard [llm_prompt] system_prompt: %s", w)
+    if usr_result.warnings:
+        for w in usr_result.warnings:
+            logger.warning("input_guard [llm_prompt] user_prompt: %s", w)
+    system_prompt = sys_result.sanitized
+    user_prompt = usr_result.sanitized
+
     gw = await get_gateway()
     budget = await get_budget()
     estimated = max_tokens + 1024
@@ -224,6 +236,18 @@ async def chat_pro(
 ) -> dict[str, Any]:
     """Internal: raw Pro call without integrity protocol injection.
     Shadow agents MUST use chat_with_integrity() instead."""
+    from marketmind.integrity.input_guard import sanitize_for_llm_prompt  # late import (circular via integrity.__init__ → fact_checker)
+    sys_result = sanitize_for_llm_prompt(system_prompt, source="llm_prompt")
+    usr_result = sanitize_for_llm_prompt(user_prompt, source="llm_prompt")
+    if sys_result.warnings:
+        for w in sys_result.warnings:
+            logger.warning("input_guard [llm_prompt] system_prompt: %s", w)
+    if usr_result.warnings:
+        for w in usr_result.warnings:
+            logger.warning("input_guard [llm_prompt] user_prompt: %s", w)
+    system_prompt = sys_result.sanitized
+    user_prompt = usr_result.sanitized
+
     gw = await get_gateway()
     budget = await get_budget()
     estimated = max_tokens + 2048

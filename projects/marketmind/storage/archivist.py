@@ -40,7 +40,7 @@ class MarketMindArchive:
         return self.base_dir / str(now.year) / f"{now.month:02d}" / f"{now.day:02d}"
 
     def ensure_dirs(self) -> Path:
-        for sub in ("raw", "analysis", "decisions", "review"):
+        for sub in ("raw", "analysis", "decisions", "review", "gates"):
             (self.today_path() / sub).mkdir(parents=True, exist_ok=True)
         return self.today_path()
 
@@ -48,7 +48,10 @@ class MarketMindArchive:
         dir_path = self.today_path() / subdir
         dir_path.mkdir(parents=True, exist_ok=True)
         filepath = dir_path / f"{filename}.json"
-        filepath.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+        # Atomic write: temp file → rename, prevents corruption on crash
+        tmp = filepath.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+        tmp.replace(filepath)
         return filepath
 
     def load_json(self, subdir: str, filename: str) -> Any:

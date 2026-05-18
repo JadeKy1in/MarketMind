@@ -1,0 +1,14 @@
+{
+  "module": "pipeline/orchestration.py",
+  "timestamp": "2026-05-18T03:47:00Z",
+  "auditor": "PICA-Security-Manual",
+  "risk_tier": "Medium",
+  "findings": [
+    {
+      "severity": "LOW",
+      "description": "File at 365 lines exceeds glue hard ceiling of 300. Phase H will split orchestration further (run_stages_0_3 / run_gate1 / run_stages_4_10). Acceptable for this transitional extraction step."
+    }
+  ],
+  "verdict": "PASS",
+  "notes": "run_daily() code moved from app.py. No new logic. All LLM calls remain through gateway/async_client.py which is input_guard-wired. 754 tests pass."
+}

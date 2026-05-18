@@ -1,0 +1,25 @@
+{
+  "module": "pipeline/hypothesis_card.py",
+  "timestamp": "2026-05-18T03:34:06Z",
+  "auditor": "PICA-Security-Agent-B2",
+  "risk_tier": "Low",
+  "findings": [
+    {
+      "severity": "LOW",
+      "description": "hash(session_id) is non-deterministic across Python processes due to PYTHONHASHSEED. The docstring claims 'Stable identifier for reproducible card ordering' (line 265) but the shuffle order will differ between restarts. Not a security issue — reproducibility gap only. For true reproducibility, use hashlib.sha256(session_id.encode()).digest() and convert to int.",
+      "location": "hypothesis_card.py:281 (hash(session_id) % (2**31))"
+    },
+    {
+      "severity": "LOW",
+      "description": "_RISK_MULTIPLIER uses float keys for dict lookup at line 82: _RISK_MULTIPLIER.get(risk_level, 0.8). This works because the keys are str ('低', '中等', '高') and risk_level comes from estimate_risk_level() which returns str. No risk of float precision mismatch — the dict keys are strings.",
+      "location": "hypothesis_card.py:58, 82"
+    },
+    {
+      "severity": "INFO",
+      "description": "Sanitization audit: sanitize_for_llm_prompt() is called on ALL LLM-bound text fields: one_line_thesis (line 228), layer_evidence narratives (line 199), source_detail (line 209), upside_scenario (line 234), downside_scenario (line 237), bear_case_summary (line 243). Full coverage confirmed.",
+      "location": "hypothesis_card.py:199-243 (multiple)"
+    }
+  ],
+  "verdict": "PASS",
+  "notes": "Strong sanitization coverage — every text field that could reach an LLM is passed through sanitize_for_llm_prompt(). No LLM calls in this module (pure transformation). Frequency framing calculation is correct. The hash() non-determinism is a behavior issue, not a security issue."
+}

@@ -76,6 +76,26 @@ pipeline:
       status: COMPLETE
       planned_replacement: "stage_2_heuristic"  # see heuristic-workflow plan
 
+    - id: stage_2b_investigation
+      name: "HVR Investigation Loop"
+      required: true
+      entry_point: "pipeline/investigation_loop.py"
+      entry_function: "run_investigation_loop"
+      description: >
+        Pro-driven HVR (Hypothesize-Verify-Refine) investigation loop. Scans
+        top headlines → generates testable hypotheses → expectation gap check
+        → 4-layer verification → adversarial bear case → verdict classification.
+        Produces HypothesisResult objects with confidence scores, verdicts,
+        and logic chains. This is the Pro-level analysis engine that replaces
+        passive signal consumption.
+      dependencies: [stage_2_flash]
+      produces:
+        - hypotheses (list[HypothesisResult])
+        - actionable, monitor, priced_in
+      tokens_estimate: 12000
+      status: COMPLETE
+      gate: gate1  # Gate 1 insertion point — user confirms direction here
+
     - id: stage_3_layer1
       name: "Layer 1 — Narrative Analysis"
       required: true

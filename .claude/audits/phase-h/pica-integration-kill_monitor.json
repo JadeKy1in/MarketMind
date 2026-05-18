@@ -1,0 +1,12 @@
+{
+  "module": "pipeline/kill_monitor.py",
+  "timestamp": "2026-05-18T18:30:00Z",
+  "auditor": "PICA-Integration-Agent-B2",
+  "type": "static",
+  "findings": [],
+  "verdict": "PASS",
+  "import_boundary_clean": true,
+  "data_flow_intact": true,
+  "backward_compatible": true,
+  "notes": "Zero marketmind imports — logging, re, dataclasses, datetime only. extract_kill_criteria(hypothesis_result) uses duck-typed getattr (bear_case, hypothesis, refined_hypothesis) — compatible with HypothesisResult. Returns list[KillCriterion]. monitor_kill_criteria(list[KillCriterion], dict|None) returns KillMonitorReport. Pure heuristics, no LLM calls, no sibling imports."
+}

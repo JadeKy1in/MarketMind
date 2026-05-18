@@ -1,0 +1,58 @@
+{
+  "module": "integrity/input_guard.py",
+  "timestamp": "2026-05-18T22:00:00Z",
+  "auditor": "PICA-Security-Agent",
+  "risk_tier": "Medium",
+  "findings": [
+    {
+      "severity": "MEDIUM",
+      "id": "IG-SEC-1",
+      "title": "Markdown escaping only escapes first # character",
+      "detail": "In `_escape_markdown()`, when a line starts with `#`, only the first character is escaped. `## heading` becomes `\\## heading`, which renders as literal `#` followed by `# heading` — still a valid h1 heading. Multi-level headings (###, ####) are partially bypassed. All leading `#` characters should be escaped.",
+      "location": "input_guard.py:131",
+      "recommendation": "Change to: `escaped_lines.append(indent + '\\\\' + stripped.lstrip('#') + stripped[stripped.count('#'):])` or escape all leading `#` characters."
+    },
+    {
+      "severity": "MEDIUM",
+      "id": "IG-SEC-2",
+      "title": "Missing backtick fence and horizontal-rule escaping",
+      "detail": "`_escape_markdown()` does not escape lines starting with backticks (```), tildes (~~~), or `---`/`===` (horizontal rules / setext headings). A user could inject a code fence to break out of a Markdown template block, or inject a horizontal rule to separate content visually.",
+      "location": "input_guard.py:120-142",
+      "recommendation": "Add checks for lines starting with triple-backtick, triple-tilde, `---`, and `===`."
+    },
+    {
+      "severity": "MEDIUM",
+      "id": "IG-SEC-3",
+      "title": "Inline Markdown injection not addressed",
+      "detail": "`_escape_markdown()` only handles line-starting patterns. Inline patterns (bold `**text**`, italic `*text*`, inline code backticks, links `[text](url)`) within a line are not escaped. In templates with strict section boundaries this is low-risk; in free-form templates it could alter rendered output.",
+      "location": "input_guard.py:120-142",
+      "recommendation": "Document the limitation clearly. If inline injection is a concern, add inline escaping or use the HTML comment wrapping approach (as gate_archiver does) for any free-form user text."
+    },
+    {
+      "severity": "MEDIUM",
+      "id": "IG-SEC-4",
+      "title": "Regex injection patterns are static and cannot adapt",
+      "detail": "The 20 injection patterns in `_INJECTION_PATTERNS` are hardcoded regexes. New jailbreak techniques (e.g., base64-encoded instructions, multi-turn role-play, language-switching attacks) will not be caught. Patterns also miss leetspeak variants (e.g., `1gnore` for `ignore`).",
+      "location": "input_guard.py:46-87",
+      "recommendation": "Consider adding leetspeak normalization (e.g., `1→i`, `0→o`) before pattern matching. Document that the pattern library is a best-effort defense layer, not a comprehensive injection firewall."
+    },
+    {
+      "severity": "LOW",
+      "id": "IG-SEC-5",
+      "title": "Unicode normalization order relative to Markdown escaping",
+      "detail": "NFC normalization (step 4) occurs AFTER Markdown escaping (step 3). This means a Unicode homoglyph that normalizes to `#` would bypass the Markdown escape check. NFC normalization should precede Markdown escaping so that normalized characters are escaped.",
+      "location": "input_guard.py:198-202",
+      "recommendation": "Swap steps 3 and 4: normalize first, then escape Markdown characters."
+    },
+    {
+      "severity": "LOW",
+      "id": "IG-SEC-6",
+      "title": "Truncation marker may be truncated itself",
+      "detail": "When text exceeds `max_length`, the truncation marker is appended AFTER slicing to `max_length` characters. If `max_length` is very small (e.g., 100), the marker could be longer than the truncated text, but both fit within the buffer. The marker is correctly placed after the slice, so the full marker is always present.",
+      "location": "input_guard.py:206-211",
+      "recommendation": "No action needed — current logic is correct. Verified: marker is appended after `text[:max_length]`, so `sanitized` can be up to `max_length + len(marker)` characters. Document this behavior in the docstring."
+    }
+  ],
+  "verdict": "PASS",
+  "notes": "No CRITICAL or HIGH findings. The module is defensive-by-design (flags never block) and the 4-layer sanitization pipeline is well-conceived. MEDIUM findings are edge cases in the Markdown escaping layer — the HTML comment wrapping approach in gate_archiver.py (the primary consumer) provides an additional defense layer. LOW finding IG-SEC-5 (normalization order) is worth fixing for correctness but has minimal exploitability since malicious Unicode in a heading would need a specific target template."
+}
