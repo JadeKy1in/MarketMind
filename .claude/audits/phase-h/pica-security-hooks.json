@@ -1,0 +1,47 @@
+{
+  "module": "hooks",
+  "timestamp": "2026-05-19T14:30:00Z",
+  "severity": "HIGH",
+  "findings": [
+    {
+      "id": "H1",
+      "severity": "Critical",
+      "status": "FIXED",
+      "title": "Restore bypass: source path validated to backups/hooks/"
+    },
+    {
+      "id": "H2",
+      "severity": "High",
+      "status": "ACCEPTED",
+      "title": "Debug logging env-var gated"
+    },
+    {
+      "id": "H3",
+      "severity": "Medium",
+      "status": "FIXED",
+      "title": "integrity_check no longer auto-restores on hash mismatch"
+    },
+    {
+      "id": "H4",
+      "severity": "Medium",
+      "status": "FIXED",
+      "title": "danger_guard redirect: only blocks > to protected paths"
+    }
+  ],
+  "files_checked": {
+    ".claude/hooks/config_guardian.py": "316f2b5def1983fa7236d4ed5ffb29a539fd969e33474b023150a6327caf974b",
+    ".claude/hooks/conversation_archiver.py": "82418f24f2876fdb259853384b521664892e8e2dcb77cb1da0939833525307b2",
+    ".claude/hooks/danger_guard.py": "d4a1e1d13fed7761d60dd4b0bfe00a5d6684cba053f7f4e85a510bf9d7da1832",
+    ".claude/hooks/integrity_check.py": "1c67e47d01f6972fcc71cfcdb290895d9b0fb3c64b39b4b3ba078bef2177a3e1",
+    ".claude/hooks/pre_compact.py": "fc63571538555af0eb66ae866e004c6a6e622575ece15fe373ad5cd3a86cdba7",
+    ".claude/hooks/pre_session.py": "0957f5fac66b277e51faea18c126540af7ab258108d6da8abc8fae24f397edd4",
+    ".claude/hooks/recover_config.py": "4a3d1ed9c02d490b1d8bcc34d47168aecf80763829688e5148185763c7c3289f",
+    ".claude/hooks/session_activity_logger.py": "aae580fbcebdc1591da65029def6def9b551685e70b7d894398d365a1e66e768",
+    ".claude/hooks/skill_profiler.py": "2d1969d63da6850b134412e7b4f706bdb212f576dc073a7a320f123091c52ab0",
+    ".claude/hooks/startup_report.py": "042bb50a29b6d4f0ad067274fae5dd17a9e4ccb66ded9634e1426900c27546bd",
+    ".claude/hooks/stop_gate_check.py": "304eedc8e1b3723df0dd6b4afefbe6498033a1a03da3ee57b33a59716d96e5f9",
+    ".claude/hooks/task_manifest.py": "5e6e24ae6d0578f43a90bdc6f49bf89da4687f6b1576dbf306f010dd3a263aa4",
+    ".claude/hooks/time_anchor.py": "95b04717575e8d71a5f70750299d0a3bb754e03f8037eb3f905758060a037d7b"
+  },
+  "summary": "13 files audited. 0 eval/exec/shell=True. All findings resolved."
+}

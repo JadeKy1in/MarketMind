@@ -1,0 +1,70 @@
+{
+  "overall_narrative": "The dominant market narrative on 2026-05-19 is a decisive pivot toward monetary easing, driven by the US CPI surprise to 2.8%. This is the first time since early 2025 that inflation has printed below 3%, and markets are aggressively re-pricing the rate cut trajectory. The 2-year Treasury yield fell 18bp on the print, the largest single-day move since the SVB crisis. Equity markets are celebrating the 'Fed put' revival, with SPX futures up 1.2% and the VIX falling below 14.",
+  "event_grade": "A",
+  "matrix_quadrant": "Growth + Easing",
+  "sentiment": "bullish",
+  "key_themes": [
+    "Disinflation acceleration — CPI 2.8%, core services ex-housing at 2.1% annualized",
+    "Fed pivot repricing — market now pricing 2 cuts in 2026, first in July",
+    "Gold as structural allocation — central banks buying 800+ tonnes/year",
+    "BOJ divergence — Japan normalizing while US easing, yen appreciation risk",
+    "AI capex sustainability — hyperscaler spending at 18% of revenue vs 10% norm"
+  ],
+  "signals": [
+    {
+      "source": "US CPI (May 19)",
+      "signal": "Disinflation confirms, rate cuts back on table",
+      "strength": "strong",
+      "direction": "bullish",
+      "affected_assets": [
+        "SPX",
+        "TLT",
+        "QQQ",
+        "IWM"
+      ]
+    },
+    {
+      "source": "Gold ATH (May 19)",
+      "signal": "Structural safe-haven demand driven by CB buying",
+      "strength": "strong",
+      "direction": "bullish",
+      "affected_assets": [
+        "GLD",
+        "GDX",
+        "XAU/USD"
+      ]
+    },
+    {
+      "source": "BOJ Hints (May 19)",
+      "signal": "Japan rate normalization creates carry trade unwind risk",
+      "strength": "moderate",
+      "direction": "bearish",
+      "affected_assets": [
+        "USD/JPY",
+        "EWJ",
+        "FXY"
+      ]
+    },
+    {
+      "source": "OPEC+ Cuts (May 19)",
+      "signal": "Oil supply tightening supports energy sector",
+      "strength": "moderate",
+      "direction": "bullish",
+      "affected_assets": [
+        "USO",
+        "XLE"
+      ]
+    },
+    {
+      "source": "Foxconn Chip Warning (May 19)",
+      "signal": "Semiconductor supply chain risk persists",
+      "strength": "weak",
+      "direction": "neutral",
+      "affected_assets": [
+        "SOXX",
+        "TSM",
+        "NVDA"
+      ]
+    }
+  ]
+}

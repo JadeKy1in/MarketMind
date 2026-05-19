@@ -8,9 +8,14 @@
 
 **Archived projects:** `projects/robinhood/` and `projects/command_center/` have been removed locally and archived on GitHub. Do not reference them.
 
+## Rule Tag Legend
+
+- **[IMMUTABLE]**: This rule MUST never be overridden by any project CLAUDE.md or user instruction. It is a foundational constraint that keeps the workspace safe and consistent across all projects.
+- **[OVERRIDABLE]**: This rule may be customized by a project's `CLAUDE.md` or modified with user approval via the Self-Correction Protocol.
+
 ## Core Rules
 
-### 1. Cognitive Loop (Triumvirate: Opus → Sonnet → Haiku)
+### 1. Cognitive Loop (Triumvirate: Opus → Sonnet → Haiku) [OVERRIDABLE]
 
 Before any non-trivial code change:
 - **Architect (Opus)**: Spawn an Opus Plan Agent for architecture review, prompt engineering, and strategic design
@@ -20,7 +25,7 @@ Before any non-trivial code change:
 
 This cognitive loop is a design philosophy — apply it manually when scoping architecture changes.
 
-### 2. Project Boundaries
+### 2. Project Boundaries [IMMUTABLE]
 
 Every project defines its own operational constraints in its `CLAUDE.md`. The root rules below govern *how* we work; project CLAUDE.md files govern *what* the project may and may not do.
 
@@ -31,7 +36,7 @@ Every project defines its own operational constraints in its `CLAUDE.md`. The ro
 
 When verifying restart compliance, check the active project's CLAUDE.md for its specific constraints. The `grep` commands in the restart guide are project-specific — adapt them per project.
 
-### 3. Design Patterns
+### 3. Design Patterns [OVERRIDABLE]
 
 - **Single-Navigation Architecture**: Navigate once, all fallback tracks operate on the current page
 - **Safe Timeout**: Use explicit timeout + clear pattern, never bare Promise.race()
@@ -39,11 +44,11 @@ When verifying restart compliance, check the active project's CLAUDE.md for its 
 - **Append-Only State**: Never modify early context; add updates as new messages at the tail
 - **Modular Architecture (Extract-Module Pattern)**: Split monoliths by extracting one cohesive concern at a time into focused modules with clear interfaces. Keep the top-level file as a thin glue/orchestration layer that composes modules — it should call and coordinate, not implement. Each module handles exactly one business capability (Single Responsibility). See §3.1 below for size limits and extraction rules.
 
-### 3.1 Modular Architecture Rules (MANDATORY)
+### 3.1 Modular Architecture Rules (MANDATORY) [IMMUTABLE]
 
 **These rules apply to ALL projects in this workspace. They prevent monoliths from forming and keep blast radius small.**
 
-#### File Size: Two-Tier Check
+#### File Size: Two-Tier Check [OVERRIDABLE]
 
 Check once at commit time or phase completion — NOT during active development.
 
@@ -56,7 +61,7 @@ The table below is the **default for Python projects**. Static-language projects
 | Glue / orchestration | 200 lines | 300 lines |
 | Test files | 300 lines | 500 lines |
 
-**Tier 1 — Soft threshold (triggers investigation):**
+**Tier 1 — Soft threshold (triggers investigation):** [IMMUTABLE]
 When a file exceeds the soft threshold, answer 4 questions:
 1. Does the module do more than one thing? (description needs "and"/"or" → SRP violation)
 2. Does it export more than 10 public functions? (likely mixed responsibilities)
@@ -66,7 +71,7 @@ When a file exceeds the soft threshold, answer 4 questions:
 If ALL answers are "no" → the file is large but clean; proceed.
 If ANY answer is "yes" → extract the violating responsibility into its own module.
 
-**Tier 2 — Hard ceiling (automatic split):**
+**Tier 2 — Hard ceiling (automatic split):** [IMMUTABLE]
 At this size, SRP violation is presumed. Do NOT run the 4 questions — split the file.
 The hard ceiling exists to save debate time, not to punish long files.
 
@@ -75,9 +80,9 @@ A 200-line module doing one thing is clean. A 40-line module doing three things 
 
 Files exceeding the hard maximum trigger a mandatory refactoring before any new features can be added to that file.
 
-**Grandfather clause**: Files that exceed limits as of 2026-05-15 (app.py: 971, layer1_interactive.py: 657, methodology_rules.py: 639, shadow_agent.py: 567, multimodal_adapter.py: 591) may receive extraction-only changes and bug fixes. New feature work on these files requires extraction first. Bug fixes exceeding 20 lines require a brief justification in the commit message. Target: all files compliant by end of Phase D.
+**Grandfather clause**: [OVERRIDABLE] Files that exceed limits as of 2026-05-15 (app.py: 971, layer1_interactive.py: 657, methodology_rules.py: 639, shadow_agent.py: 567, multimodal_adapter.py: 591) may receive extraction-only changes and bug fixes. New feature work on these files requires extraction first. Bug fixes exceeding 20 lines require a brief justification in the commit message. Target: all files compliant by end of Phase D.
 
-#### Extraction Rules
+#### Extraction Rules [IMMUTABLE]
 
 1. **One module = one concern.** Each extracted module handles exactly one business capability (e.g., `l3_interactive.py` for L3 review, not "pipeline utilities").
 2. **Clear contract.** Every module exports a single public entry point with well-defined inputs/outputs (e.g., `async def run_X(ctx: SessionContext, cli_handler) -> bool`).
@@ -90,7 +95,7 @@ Files exceeding the hard maximum trigger a mandatory refactoring before any new 
 
 **Exception — data modules**: Constants, enums, label maps, and configuration modules may export multiple names. The single-entry-point rule applies to behavioral modules, not data containers.
 
-#### Extraction Priority (extract in this order)
+#### Extraction Priority (extract in this order) [OVERRIDABLE]
 
 | Priority | What to Extract | Why First |
 |:---:|------|------|
@@ -99,7 +104,7 @@ Files exceeding the hard maximum trigger a mandatory refactoring before any new 
 | 3 | Utility/shared logic (output filter, parsers) | Depends on data types |
 | 4 | Orchestration helpers (broadcast, ELITE) | May depend on glue globals — use snapshots |
 
-#### Glue Layer Contract
+#### Glue Layer Contract [IMMUTABLE]
 
 The glue layer (e.g., `app.py`) must ONLY:
 - Initialize shared state (SessionContext)
@@ -116,7 +121,7 @@ The glue layer must NOT:
 
 **Entry point files** (`app.py`, `main.py`): These naturally contain CLI argument parsing, mode dispatch, and initialization (~50-100 lines). If run-mode functions (e.g., `run_daily`, `run_gui`) live in the same file, extract them to a dedicated orchestration module. The entry point should read like a table of contents.
 
-#### Measurable Criteria
+#### Measurable Criteria [IMMUTABLE]
 
 After extraction, verify:
 - [ ] Glue layer contains only orchestration calls (no analysis/decision code)
@@ -127,7 +132,7 @@ After extraction, verify:
 - [ ] 0 test regressions (full suite passes)
 - [ ] New module interface documented with docstring Args/Returns
 
-### 3.2 Time-Awareness Rule (MANDATORY)
+### 3.2 Time-Awareness Rule (MANDATORY) [IMMUTABLE]
 
 **AI has no native time awareness — the mental anchor for "now" defaults to training cutoff (~Jan 2026). This rule prevents timestamp hallucination.**
 
@@ -135,28 +140,28 @@ After extraction, verify:
 2. **Progress files**: `**Updated**: YYYY-MM-DD HH:MM` must use command output, never LLM-generated.
 3. **Git commits**: Verify date references against `date` output.
 4. **Relative dates** ("next Monday", "tomorrow"): Compute from `date` output, never training data.
-5. **MarketMind runtime**: `datetime.now()` MUST use `datetime.now(timezone.utc)`. Verify with `grep -rn "datetime.now()" --include="*.py" projects/marketmind/ | grep -v "timezone.utc" | grep -v tests/` — must return empty. New code must follow this pattern. Do NOT reference the date the audit was done — the requirement is ongoing.
+5. **MarketMind runtime**: [OVERRIDABLE] `datetime.now()` MUST use `datetime.now(timezone.utc)`. Verify with `grep -rn "datetime.now()" --include="*.py" projects/marketmind/ | grep -v "timezone.utc" | grep -v tests/` — must return empty. New code must follow this pattern. Do NOT reference the date the audit was done — the requirement is ongoing.
 6. **Dual time anchor**: LLM prompts must include BOTH current date AND knowledge cutoff.
 7. **Memory freshness**: Verify memory entries against current file/code state before recommending.
 8. **Mechanical enforcement**: The `time_anchor.py` SessionStart hook (see `.claude/hooks/time_anchor.py`) runs `date` on every session start, writes `current_time.txt`, and prints the training-cutoff delta. This mechanizes Points 1–6 above so enforcement does not rely on AI memory. If the hook output is absent, the AI should run `date` manually — because the enforcement mechanism itself may be down.
 
 ## Development Workflow
 
-1. **Research first**: Search for existing solutions before building new
-2. **Skill evaluation (Security-First)**: All third-party files (skills, plugins, GitHub repos, MCP servers) MUST pass through `.claude/sandbox/` before installation. See `.claude/sandbox/SANDBOX.md` for the full protocol: isolate → scan → approve → install. Updates follow the same process.
-3. **Plan before code**: Use Triumvirate pipeline (Opus→Sonnet→Haiku) for architecture decisions
-4. **Verify after code**: Syntax check + run tests before declaring done
-5. **Commit after each sub-phase**: `git add` + `git commit` after every sub-phase completes with passing tests. Never accumulate multiple sub-phases in the working directory without version control.
-6. **Red Team before completion**: Independent Red Team audit produces `.claude/audits/phase-X-red-team.md` BEFORE the phase is marked complete. Completion is never self-declared without external audit confirmation.
-7. **Memory after milestone**: Save key decisions and state to auto-memory
+1. **Research first**: Search for existing solutions before building new [OVERRIDABLE]
+2. **Skill evaluation (Security-First)**: All third-party files (skills, plugins, GitHub repos, MCP servers) MUST pass through `.claude/sandbox/` before installation. See `.claude/sandbox/SANDBOX.md` for the full protocol: isolate → scan → approve → install. Updates follow the same process. [IMMUTABLE]
+3. **Plan before code**: Use Triumvirate pipeline (Opus→Sonnet→Haiku) for architecture decisions [OVERRIDABLE]
+4. **Verify after code**: Syntax check + run tests before declaring done [IMMUTABLE]
+5. **Commit after each sub-phase**: `git add` + `git commit` after every sub-phase completes with passing tests. Never accumulate multiple sub-phases in the working directory without version control. [IMMUTABLE]
+6. **Red Team before completion**: Independent Red Team audit produces `.claude/audits/phase-X-red-team.md` BEFORE the phase is marked complete. Completion is never self-declared without external audit confirmation. [IMMUTABLE]
+7. **Memory after milestone**: Save key decisions and state to auto-memory [OVERRIDABLE]
 
-### 4. PICA Protocol: Pre-Integration Code Audit (MANDATORY)
+### 4. PICA Protocol: Pre-Integration Code Audit (MANDATORY) [IMMUTABLE]
 
 **Every code change MUST pass through the 4-level PICA protocol before integration. This applies to ALL projects in this workspace, now and in the future. This is NOT optional — it is enforced by audit artifact requirements.**
 
 Full specification: defined in this file under §4. PICA protocol — no external file needed.
 
-#### PICA Levels (sequential, each must pass before proceeding)
+#### PICA Levels (sequential, each must pass before proceeding) [IMMUTABLE]
 
 ```
 Code written → PICA-Unit → PICA-Security → PICA-Integration → PICA-Regression → Commit
@@ -169,7 +174,7 @@ Code written → PICA-Unit → PICA-Security → PICA-Integration → PICA-Regre
 | **PICA-Integration** | Static: backward compat, data flow, dead loops, import boundaries. Dynamic: generated integration test scenarios | 1 AI Agent + pytest | For new modules, API changes, control flow changes, schema migrations |
 | **PICA-Regression** | Full pytest suite + optimization review | Developer + 1 AI Agent | Always (except test-only and doc changes) |
 
-#### Risk Tiers (Critical/High/Medium/Low)
+#### Risk Tiers (Critical/High/Medium/Low) [OVERRIDABLE]
 
 PICA-Security and PICA-Integration requirements scale with risk:
 - **Critical** (`async_client.py`, `shadow_state.py`, `decision.py`): Full PICA-Security (2 agents) + Full PICA-Integration
@@ -177,7 +182,7 @@ PICA-Security and PICA-Integration requirements scale with risk:
 - **Medium** (config, storage, utilities): 1 Security Agent only
 - **Low** (UI, formatting, comments): Skip to PICA-Regression
 
-#### Enforcement: Audit Artifacts
+#### Enforcement: Audit Artifacts [IMMUTABLE]
 
 After each level passes, write a JSON or Markdown artifact to `.claude/audits/{phase}/`:
 - `pica-unit-{module}.json`
@@ -187,33 +192,33 @@ After each level passes, write a JSON or Markdown artifact to `.claude/audits/{p
 
 **Artifact rule**: For every modified `.py` file, the corresponding audit artifact MUST exist with a timestamp newer than the file's last modification. If missing, stop and run the missing level. No artifact = no commit.
 
-#### Emergency Channel
+#### Emergency Channel [IMMUTABLE]
 
 Production hotfixes and security patches: PICA-Unit + 1 Security Agent + PICA-Regression (mandatory). Remaining levels must be backfilled within 24 hours with a recorded justification.
 
-#### Verification (do this at session START)
+#### Verification (do this at session START) [IMMUTABLE]
 
 When starting a session with modified files:
 1. Check each modified `.py` file against `.claude/audits/` for matching artifacts
 2. If artifacts missing or stale, run the missing PICA level BEFORE any new work
 3. Record findings in the progress file
 
-### 5. Hard Rule: Progress Checkpoint After EVERY Sub-Task (MANDATORY)
+### 5. Hard Rule: Progress Checkpoint After EVERY Sub-Task (MANDATORY) [IMMUTABLE]
 
 **This rule exists to prevent lost work from crashes, power loss, or session termination. It is NOT optional. Violating it means progress is invisible to future sessions.**
 
-#### When to write a checkpoint:
+#### When to write a checkpoint: [IMMUTABLE]
 - After completing ANY sub-task (a single bug fix, a file edit, a test passing, a commit)
 - After finishing a discussion/design decision
 - Before starting a risky operation (destructive git, large refactor)
 - When stopping work (end of session, or user says they're done for now)
 - **Rule of thumb: if you did something you'd hate to redo, write it down.**
 
-#### Where to write it:
+#### Where to write it: [IMMUTABLE]
 - **Active progress file**: `.claude/progress/phase-X-batch-Y-progress.md` (or create one if it doesn't exist)
 - **Format**: Markdown checklist. Mark completed items with `[x]`, add new items with `[ ]`. Append a timestamp line at the bottom: `**Updated**: YYYY-MM-DD HH:MM — <what just happened>`
 
-#### What to record (minimum):
+#### What to record (minimum): [IMMUTABLE]
 ```
 **Updated**: 2026-05-15 14:30 — Fixed C1 wfe_ratios NameError, tests pass
 ```
@@ -222,25 +227,25 @@ For new tasks:
 - [ ] <task id>: <description> — <file(s) affected>
 ```
 
-#### Verification (do this at session START):
+#### Verification (do this at session START): [IMMUTABLE]
 1. Check `.claude/progress/` for the most recent progress file
 2. Cross-reference with `git log` and `git diff` to verify the recorded state matches reality
 3. If there's a discrepancy, update the progress file BEFORE doing any new work
 4. If no progress file exists, create one immediately from `git log` + working tree state
 
-#### Crash recovery:
+#### Crash recovery: [IMMUTABLE]
 When a session starts and uncommitted changes exist with no matching progress file, the FIRST action is to reconstruct state:
 1. Read `git diff --stat` to see what files changed
 2. Read any new untracked files
 3. Write a progress file capturing what was in flight
 4. Then (and only then) continue work
 
-#### Anti-patterns (DO NOT DO):
+#### Anti-patterns (DO NOT DO): [IMMUTABLE]
 - "I'll write the checkpoint after I finish this next thing" → crash happens first
 - "This is a small change, no need to log it" → 10 small changes = 1 lost day
 - "The git log is enough" → git doesn't track task-level progress or what's half-done
 
-## Merge-Readiness Pack (MRP) Format
+## Merge-Readiness Pack (MRP) Format [OVERRIDABLE]
 
 When completing a major module or encountering a complex logic deadlock, halt and produce an MRP:
 
@@ -255,7 +260,7 @@ When completing a major module or encountering a complex logic deadlock, halt an
 **Review requested from**: Sonnet (code review) / Opus (architecture review)
 ```
 
-## Self-Correction Protocol
+## Self-Correction Protocol [IMMUTABLE]
 
 When encountering repeated errors or inefficient patterns caused by existing rules:
 1. Identify the root cause (specific rule, prompt, or workflow)
@@ -265,11 +270,11 @@ When encountering repeated errors or inefficient patterns caused by existing rul
 
 ## Agent Skills
 
-### Mandatory Skill Checkpoints (MANDATORY)
+### Mandatory Skill Checkpoints (MANDATORY) [OVERRIDABLE]
 
 **Every non-trivial task MUST invoke these skill groups. This is NOT optional.**
 
-### Context7 & MCP Security Rule (MANDATORY)
+### Context7 & MCP Security Rule (MANDATORY) [IMMUTABLE]
 
 Context7 MCP injects latest library docs. It sends queries to `mcp.context7.com` (Upstash). To prevent proprietary data leakage:
 - Context7: use ONLY for library API reference (pandas, numpy, aiohttp, etc.)
@@ -278,19 +283,19 @@ Context7 MCP injects latest library docs. It sends queries to `mcp.context7.com`
 - Figma MCP: limited to 6 free calls/month — use sparingly
 - Chrome DevTools MCP: local-only, no data exfiltration risk
 
-1. **Superpowers** (`superpowers@claude-plugins-official`): Before writing plan/design code, invoke `Skill("superpowers:brainstorming")` to clarify the problem. Before implementing, invoke `Skill("superpowers:writing-plans")` to formalize approach. After implementation, invoke `Skill("superpowers:verification-before-completion")` to validate completeness.
+1. **Superpowers** (`superpowers@claude-plugins-official`): Before writing plan/design code, invoke `Skill("superpowers:brainstorming")` to clarify the problem. Before implementing, invoke `Skill("superpowers:writing-plans")` to formalize approach. After implementation, invoke `Skill("superpowers:verification-before-completion")` to validate completeness. [OVERRIDABLE]
 
-2. **Mattpocock Engineering Skills** (`mattpocock-skills@mattpocock-skills`): For architecture changes, invoke `Skill("mattpocock-skills:engineering/improve-codebase-architecture")`. For bug triage, invoke `Skill("mattpocock-skills:engineering/triage")`. For TDD workflow, invoke `Skill("mattpocock-skills:engineering/tdd")`. For diagnosing complex issues, invoke `Skill("mattpocock-skills:engineering/diagnose")`.
+2. **Mattpocock Engineering Skills** (`mattpocock-skills@mattpocock-skills`): For architecture changes, invoke `Skill("mattpocock-skills:engineering/improve-codebase-architecture")`. For bug triage, invoke `Skill("mattpocock-skills:engineering/triage")`. For TDD workflow, invoke `Skill("mattpocock-skills:engineering/tdd")`. For diagnosing complex issues, invoke `Skill("mattpocock-skills:engineering/diagnose")`. [OVERRIDABLE]
 
-3. **Agent Team** (`.claude/agents/AGENTS.md`): The 8-agent team MUST be spawned for architecture work. At minimum: Architect (design) → Builder (implement) → Red Team Code (syntax) → Red Team Logic (audit). Each agent has distinct responsibilities and restrictions (see AGENTS.md Discipline Rules).
+3. **Agent Team** (`.claude/agents/AGENTS.md`): The 8-agent team MUST be spawned for architecture work. At minimum: Architect (design) → Builder (implement) → Red Team Code (syntax) → Red Team Logic (audit). Each agent has distinct responsibilities and restrictions (see AGENTS.md Discipline Rules). [OVERRIDABLE]
 
-**Enforcement**: If these skills aren't available in the `Skill` tool list, the session has an initialization problem that must be fixed BEFORE any code work proceeds.
+**Enforcement**: If these skills aren't available in the `Skill` tool list, the session has an initialization problem that must be fixed BEFORE any code work proceeds. [IMMUTABLE]
 
-### Issue tracker
+### Issue tracker [OVERRIDABLE]
 GitHub Issues — use `gh issue` CLI for all operations. See `docs/agents/issue-tracker.md`.
 
-### Triage labels
+### Triage labels [OVERRIDABLE]
 Default five-label vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
 
-### Domain docs
+### Domain docs [OVERRIDABLE]
 Multi-context — `CONTEXT-MAP.md` at repo root points to per-context `CONTEXT.md` files. Currently active: `projects/marketmind/`. See `docs/agents/domain.md`.

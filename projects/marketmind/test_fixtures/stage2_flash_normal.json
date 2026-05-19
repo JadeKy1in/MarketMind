@@ -1,7 +1,273 @@
 [
-  {"headline": "ECB holds rates steady at 4.25%", "source_name": "Reuters", "source_tier": 1, "scores": {"market_impact": 7, "cross_source_corroboration": 8, "contradicts_consensus": 2, "investigative_depth_needed": 5, "urgency": 6}, "classification": "macro", "affected_assets": ["EUR/USD", "DAX"], "cluster_hints": ["eurozone", "monetary_policy"], "cluster_id": "c1", "head_index": 0},
-  {"headline": "US CPI drops to 2.8%", "source_name": "Bloomberg", "source_tier": 1, "scores": {"market_impact": 9, "cross_source_corroboration": 9, "contradicts_consensus": 7, "investigative_depth_needed": 6, "urgency": 10}, "classification": "macro", "affected_assets": ["SPX", "TLT"], "cluster_hints": ["inflation", "fed_policy"], "cluster_id": "c2", "head_index": 1},
-  {"headline": "NVIDIA record Q1 revenue", "source_name": "CNBC", "source_tier": 1, "scores": {"market_impact": 6, "cross_source_corroboration": 7, "contradicts_consensus": 4, "investigative_depth_needed": 3, "urgency": 4}, "classification": "company", "affected_assets": ["NVDA", "SMH"], "cluster_hints": ["ai_chips", "earnings"], "cluster_id": "c3", "head_index": 2},
-  {"headline": "Gold hits new ATH above $3,200", "source_name": "Financial Times", "source_tier": 1, "scores": {"market_impact": 8, "cross_source_corroboration": 8, "contradicts_consensus": 3, "investigative_depth_needed": 5, "urgency": 5}, "classification": "macro", "affected_assets": ["GLD", "GDX"], "cluster_hints": ["safe_haven", "geopolitical"], "cluster_id": "c4", "head_index": 3},
-  {"headline": "Treasury yields slide on rate cut bets", "source_name": "WSJ", "source_tier": 1, "scores": {"market_impact": 7, "cross_source_corroboration": 6, "contradicts_consensus": 5, "investigative_depth_needed": 4, "urgency": 5}, "classification": "macro", "affected_assets": ["TLT", "IEF"], "cluster_hints": ["bonds", "rate_cuts"], "cluster_id": "c5", "head_index": 4}
+  {
+    "headline": "ECB holds rates steady at 4.25%",
+    "source_name": "Reuters",
+    "source_tier": 1,
+    "scores": {
+      "market_impact": 7,
+      "cross_source_corroboration": 8,
+      "contradicts_consensus": 2,
+      "investigative_depth_needed": 5,
+      "urgency": 6
+    },
+    "classification": "macro",
+    "affected_assets": [
+      "EUR/USD",
+      "DAX"
+    ],
+    "cluster_hints": [
+      "eurozone",
+      "monetary_policy"
+    ],
+    "cluster_id": 1,
+    "head_index": 0,
+    "direction": "neutral",
+    "confidence": 0.65,
+    "event_type": "monetary_policy"
+  },
+  {
+    "headline": "US CPI drops to 2.8%",
+    "source_name": "Bloomberg",
+    "source_tier": 1,
+    "scores": {
+      "market_impact": 9,
+      "cross_source_corroboration": 9,
+      "contradicts_consensus": 7,
+      "investigative_depth_needed": 6,
+      "urgency": 10
+    },
+    "classification": "macro",
+    "affected_assets": [
+      "SPX",
+      "TLT",
+      "IWM"
+    ],
+    "cluster_hints": [
+      "inflation",
+      "fed_policy"
+    ],
+    "cluster_id": 2,
+    "head_index": 1,
+    "direction": "bullish",
+    "confidence": 0.8,
+    "event_type": "economic_data"
+  },
+  {
+    "headline": "NVIDIA record Q1 revenue",
+    "source_name": "CNBC",
+    "source_tier": 1,
+    "scores": {
+      "market_impact": 6,
+      "cross_source_corroboration": 7,
+      "contradicts_consensus": 4,
+      "investigative_depth_needed": 3,
+      "urgency": 4
+    },
+    "classification": "company",
+    "affected_assets": [
+      "NVDA",
+      "SMH",
+      "QQQ"
+    ],
+    "cluster_hints": [
+      "ai_chips",
+      "earnings"
+    ],
+    "cluster_id": 3,
+    "head_index": 2,
+    "direction": "bullish",
+    "confidence": 0.75,
+    "event_type": "earnings"
+  },
+  {
+    "headline": "Gold hits new ATH above $3,200",
+    "source_name": "Financial Times",
+    "source_tier": 1,
+    "scores": {
+      "market_impact": 8,
+      "cross_source_corroboration": 8,
+      "contradicts_consensus": 3,
+      "investigative_depth_needed": 5,
+      "urgency": 5
+    },
+    "classification": "macro",
+    "affected_assets": [
+      "GLD",
+      "GDX",
+      "XAU/USD"
+    ],
+    "cluster_hints": [
+      "safe_haven",
+      "geopolitical"
+    ],
+    "cluster_id": 4,
+    "head_index": 3,
+    "direction": "bullish",
+    "confidence": 0.7,
+    "event_type": "geopolitical"
+  },
+  {
+    "headline": "Treasury yields slide on rate cut bets",
+    "source_name": "WSJ",
+    "source_tier": 1,
+    "scores": {
+      "market_impact": 7,
+      "cross_source_corroboration": 6,
+      "contradicts_consensus": 5,
+      "investigative_depth_needed": 4,
+      "urgency": 5
+    },
+    "classification": "macro",
+    "affected_assets": [
+      "TLT",
+      "IEF",
+      "SHY"
+    ],
+    "cluster_hints": [
+      "bonds",
+      "rate_cuts"
+    ],
+    "cluster_id": 5,
+    "head_index": 4,
+    "direction": "bullish",
+    "confidence": 0.72,
+    "event_type": "monetary_policy"
+  },
+  {
+    "headline": "China PMI surprises to upside",
+    "source_name": "Reuters",
+    "source_tier": 1,
+    "scores": {
+      "market_impact": 7,
+      "cross_source_corroboration": 7,
+      "contradicts_consensus": 6,
+      "investigative_depth_needed": 5,
+      "urgency": 4
+    },
+    "classification": "macro",
+    "affected_assets": [
+      "FXI",
+      "MCHI",
+      "CNH"
+    ],
+    "cluster_hints": [
+      "china",
+      "manufacturing"
+    ],
+    "cluster_id": 6,
+    "head_index": 5,
+    "direction": "bullish",
+    "confidence": 0.68,
+    "event_type": "economic_data"
+  },
+  {
+    "headline": "OPEC+ extends production cuts",
+    "source_name": "Bloomberg",
+    "source_tier": 1,
+    "scores": {
+      "market_impact": 8,
+      "cross_source_corroboration": 8,
+      "contradicts_consensus": 3,
+      "investigative_depth_needed": 4,
+      "urgency": 6
+    },
+    "classification": "macro",
+    "affected_assets": [
+      "USO",
+      "XLE",
+      "CL=F"
+    ],
+    "cluster_hints": [
+      "oil",
+      "supply"
+    ],
+    "cluster_id": 7,
+    "head_index": 6,
+    "direction": "bullish",
+    "confidence": 0.78,
+    "event_type": "geopolitical"
+  },
+  {
+    "headline": "Apple supplier Foxconn warns of chip shortage",
+    "source_name": "Nikkei Asia",
+    "source_tier": 2,
+    "scores": {
+      "market_impact": 5,
+      "cross_source_corroboration": 4,
+      "contradicts_consensus": 2,
+      "investigative_depth_needed": 4,
+      "urgency": 3
+    },
+    "classification": "company",
+    "affected_assets": [
+      "AAPL",
+      "SOXX",
+      "TSM"
+    ],
+    "cluster_hints": [
+      "semiconductors",
+      "supply_chain"
+    ],
+    "cluster_id": 8,
+    "head_index": 7,
+    "direction": "bearish",
+    "confidence": 0.55,
+    "event_type": "supply_chain"
+  },
+  {
+    "headline": "BOJ hints at possible July rate hike",
+    "source_name": "Nikkei Asia",
+    "source_tier": 2,
+    "scores": {
+      "market_impact": 8,
+      "cross_source_corroboration": 6,
+      "contradicts_consensus": 7,
+      "investigative_depth_needed": 6,
+      "urgency": 5
+    },
+    "classification": "macro",
+    "affected_assets": [
+      "USD/JPY",
+      "EWJ",
+      "NKY"
+    ],
+    "cluster_hints": [
+      "japan",
+      "yen",
+      "carry_trade"
+    ],
+    "cluster_id": 9,
+    "head_index": 8,
+    "direction": "bearish",
+    "confidence": 0.73,
+    "event_type": "monetary_policy"
+  },
+  {
+    "headline": "Tesla cuts prices again in China",
+    "source_name": "CNBC",
+    "source_tier": 1,
+    "scores": {
+      "market_impact": 6,
+      "cross_source_corroboration": 7,
+      "contradicts_consensus": 3,
+      "investigative_depth_needed": 3,
+      "urgency": 4
+    },
+    "classification": "company",
+    "affected_assets": [
+      "TSLA",
+      "NIO",
+      "XPEV"
+    ],
+    "cluster_hints": [
+      "ev",
+      "china",
+      "price_war"
+    ],
+    "cluster_id": 10,
+    "head_index": 9,
+    "direction": "bearish",
+    "confidence": 0.62,
+    "event_type": "corporate_action"
+  }
 ]

@@ -1,0 +1,11 @@
+{
+  "type": "architect",
+  "files": [
+    ".claude/hooks/*.py",
+    ".claude/settings.local.json",
+    "CLAUDE.md",
+    "PROJECT_ROADMAP.md"
+  ],
+  "risk": "critical",
+  "pica_complete": true
+}

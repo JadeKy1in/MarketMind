@@ -1,7 +1,122 @@
 [
-  {"headline": "ECB holds rates steady at 4.25%, signals patience on cuts", "url": "https://example.com/ecb-rates", "source_name": "Reuters", "source_tier": 1, "published_at": "2026-05-19T08:00:00Z", "content_preview": "The European Central Bank maintained its key interest rate at 4.25%..."},
-  {"headline": "US CPI unexpectedly drops to 2.8%, fueling rate cut bets", "url": "https://example.com/us-cpi", "source_name": "Bloomberg", "source_tier": 1, "published_at": "2026-05-19T07:30:00Z", "content_preview": "US consumer price inflation fell to 2.8% year-on-year in April..."},
-  {"headline": "NVIDIA reports record Q1 revenue, AI chip demand surges", "url": "https://example.com/nvidia-earnings", "source_name": "CNBC", "source_tier": 1, "published_at": "2026-05-19T06:45:00Z", "content_preview": "NVIDIA posted record quarterly revenue of $42 billion..."},
-  {"headline": "Gold hits new all-time high above $3,200 amid geopolitical tensions", "url": "https://example.com/gold-ath", "source_name": "Financial Times", "source_tier": 1, "published_at": "2026-05-19T06:00:00Z", "content_preview": "Gold prices surged past $3,200 per ounce on Monday..."},
-  {"headline": "Treasury yields slide as bond market prices in two 2026 cuts", "url": "https://example.com/treasury-yields", "source_name": "WSJ", "source_tier": 1, "published_at": "2026-05-19T05:30:00Z", "content_preview": "US Treasury yields fell across the curve as traders increased bets on rate cuts..."}
+  {
+    "headline": "ECB holds rates steady at 4.25%, signals patience on cuts",
+    "url": "https://example.com/ecb-rates",
+    "source_name": "Reuters",
+    "source_tier": 1,
+    "published_at": "[TIMESTAMP]",
+    "content_preview": "The European Central Bank maintained its key interest rate at 4.25%..."
+  },
+  {
+    "headline": "US CPI unexpectedly drops to 2.8%, fueling rate cut bets",
+    "url": "https://example.com/us-cpi",
+    "source_name": "Bloomberg",
+    "source_tier": 1,
+    "published_at": "[TIMESTAMP]",
+    "content_preview": "US consumer price inflation fell to 2.8% year-on-year in April..."
+  },
+  {
+    "headline": "NVIDIA reports record Q1 revenue, AI chip demand surges",
+    "url": "https://example.com/nvidia-earnings",
+    "source_name": "CNBC",
+    "source_tier": 1,
+    "published_at": "[TIMESTAMP]",
+    "content_preview": "NVIDIA posted record quarterly revenue of $42 billion..."
+  },
+  {
+    "headline": "Gold hits new all-time high above $3,200 amid geopolitical tensions",
+    "url": "https://example.com/gold-ath",
+    "source_name": "Financial Times",
+    "source_tier": 1,
+    "published_at": "[TIMESTAMP]",
+    "content_preview": "Gold prices surged past $3,200 per ounce on Monday..."
+  },
+  {
+    "headline": "Treasury yields slide as bond market prices in two 2026 cuts",
+    "url": "https://example.com/treasury-yields",
+    "source_name": "WSJ",
+    "source_tier": 1,
+    "published_at": "[TIMESTAMP]",
+    "content_preview": "US Treasury yields fell across the curve as traders increased bets on rate cuts..."
+  },
+  {
+    "headline": "China PMI surprises to upside, manufacturing expands for third month",
+    "url": "https://example.com/china-pmi",
+    "source_name": "Reuters",
+    "source_tier": 1,
+    "published_at": "[TIMESTAMP]",
+    "content_preview": "China's official manufacturing PMI rose to 51.2 in April, beating expectations..."
+  },
+  {
+    "headline": "Oil prices jump 3% after OPEC+ extends production cuts",
+    "url": "https://example.com/opec-cuts",
+    "source_name": "Bloomberg",
+    "source_tier": 1,
+    "published_at": "[TIMESTAMP]",
+    "content_preview": "Crude oil prices rose sharply after OPEC+ announced an extension of production cuts..."
+  },
+  {
+    "headline": "Apple supplier Foxconn warns of chip shortage extending into 2027",
+    "url": "https://example.com/foxconn-chip",
+    "source_name": "Nikkei Asia",
+    "source_tier": 2,
+    "published_at": "[TIMESTAMP]",
+    "content_preview": "Foxconn executives warned that semiconductor shortages may persist..."
+  },
+  {
+    "headline": "BOJ Governor Ueda hints at possible rate hike in July meeting",
+    "url": "https://example.com/boj-hike",
+    "source_name": "Nikkei Asia",
+    "source_tier": 2,
+    "published_at": "[TIMESTAMP]",
+    "content_preview": "Bank of Japan Governor Kazuo Ueda signaled readiness to raise rates..."
+  },
+  {
+    "headline": "SEC approves first spot Ethereum ETF, crypto markets rally",
+    "url": "https://example.com/sec-eth-etf",
+    "source_name": "CoinDesk",
+    "source_tier": 3,
+    "published_at": "[TIMESTAMP]",
+    "content_preview": "The SEC granted approval for the first spot Ethereum ETF..."
+  },
+  {
+    "headline": "European natural gas prices surge on Norway pipeline maintenance",
+    "url": "https://example.com/natgas-europe",
+    "source_name": "Reuters",
+    "source_tier": 1,
+    "published_at": "[TIMESTAMP]",
+    "content_preview": "European natural gas futures jumped 8% after Norway announced..."
+  },
+  {
+    "headline": "Tesla cuts prices again in China, EV price war intensifies",
+    "url": "https://example.com/tesla-china-cuts",
+    "source_name": "CNBC",
+    "source_tier": 1,
+    "published_at": "[TIMESTAMP]",
+    "content_preview": "Tesla reduced prices on its Model Y and Model 3 in China..."
+  },
+  {
+    "headline": "UK inflation sticky at 3.1%, BOE rate cut timeline pushed back",
+    "url": "https://example.com/uk-cpi",
+    "source_name": "BBC",
+    "source_tier": 2,
+    "published_at": "[TIMESTAMP]",
+    "content_preview": "UK CPI came in at 3.1% for April, above the 2.9% forecast..."
+  },
+  {
+    "headline": "Microsoft announces $50B AI infrastructure investment plan",
+    "url": "https://example.com/msft-ai-invest",
+    "source_name": "WSJ",
+    "source_tier": 1,
+    "published_at": "[TIMESTAMP]",
+    "content_preview": "Microsoft unveiled a $50 billion plan to expand its AI cloud infrastructure..."
+  },
+  {
+    "headline": "Emerging market currencies under pressure as dollar strengthens",
+    "url": "https://example.com/em-fx-pressure",
+    "source_name": "Financial Times",
+    "source_tier": 1,
+    "published_at": "[TIMESTAMP]",
+    "content_preview": "Emerging market currencies faced broad selling pressure..."
+  }
 ]

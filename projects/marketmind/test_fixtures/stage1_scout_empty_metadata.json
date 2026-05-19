@@ -1,7 +1,7 @@
 {
   "stage": "stage1_scout",
-  "name": "normal",
-  "created_at": "2026-05-19T13:57:18.278484+00:00",
+  "name": "empty",
+  "created_at": "2026-05-19T13:57:18.283098+00:00",
   "pipeline_content_hash": "b3929d689aa927e2f81271b3db3a341ed0fda7b33396a8443d1fd1c81cb95a4c",
   "python_version": ""
 }

@@ -1,0 +1,112 @@
+[
+  {
+    "hypothesis": "Disinflation Trend Accelerates — Rate Cut Cycle Broadens",
+    "refined_hypothesis": "US CPI drop to 2.8% represents a structural break in the disinflation trajectory, not a one-off. Federal Reserve will deliver two 25bp cuts in 2026, starting July. This re-rates growth equities and duration-sensitive assets.",
+    "confidence": 0.82,
+    "verdict": "ACTIONABLE",
+    "expectation_gap": "Market pricing only 60% probability of July cut vs 85% implied by data",
+    "direction": "bullish",
+    "core_logic": "CPI at 2.8% is the lowest since early 2025. Shelter costs decelerating. Core services ex-housing at 2.1% annualized 3-month. This is not noise — it's a regime shift in inflation dynamics.",
+    "risk_level": "medium",
+    "time_window": "3-6 months",
+    "bear_case": "Shelter costs re-accelerate in Q3 due to seasonal factors. Oil price spike from OPEC+ cuts flows through to headline CPI. Fed stays on hold.",
+    "bear_case_confidence": 0.25,
+    "logic_chain": "CPI↓ → Fed dovish pivot → real yields↓ → P/E expansion → growth/tech outperforms",
+    "verification_scores": {
+      "layer_1_market": 0.85,
+      "layer_2_fundamental": 0.78,
+      "layer_3_multisource": 0.82,
+      "layer_4_historical": 0.74,
+      "weighted_confidence": 0.82,
+      "verdict": "ACTIONABLE"
+    }
+  },
+  {
+    "hypothesis": "BOJ Policy Normalization Triggers Yen Appreciation Wave",
+    "refined_hypothesis": "BOJ will hike rates in July to 0.50%, sparking a 15-20% yen appreciation against USD over 6 months. This unwinds JPY-funded carry trades and creates EM FX contagion risk.",
+    "confidence": 0.75,
+    "verdict": "ACTIONABLE",
+    "expectation_gap": "Consensus sees BOJ on hold until Q4; we see July as the pivot point",
+    "direction": "bearish",
+    "core_logic": "Ueda's hawkish shift is deliberate. Spring wage negotiations delivered 3.8% average raise — highest since 1991. Real wages turning positive for first time in 2 years. BOJ has a narrow window before global slowdown closes it.",
+    "risk_level": "high",
+    "time_window": "2-4 months",
+    "bear_case": "BOJ delays to October or later. Global recession fears force dovish hold. Yen stays weak.",
+    "bear_case_confidence": 0.3,
+    "logic_chain": "BOJ hike → JPY strength → carry trade unwind → risk-off → EM FX sell-off → volatility spike",
+    "verification_scores": {
+      "layer_1_market": 0.72,
+      "layer_2_fundamental": 0.8,
+      "layer_3_multisource": 0.68,
+      "layer_4_historical": 0.75,
+      "weighted_confidence": 0.75,
+      "verdict": "ACTIONABLE"
+    }
+  },
+  {
+    "hypothesis": "Gold Bull Market Enters Acceleration Phase Above $3,200",
+    "refined_hypothesis": "Gold's breakout above $3,200 is driven by structural central bank buying (800+ tonnes in 2025), not just geopolitical fear. Institutional re-allocation from bonds to gold accelerates as real yields stay negative in most DM economies.",
+    "confidence": 0.78,
+    "verdict": "ACTIONABLE",
+    "expectation_gap": "Retail still underweight gold; ETF flows only starting to turn positive",
+    "direction": "bullish",
+    "core_logic": "Central bank gold purchases running at 800+ tonnes/year vs 450 pre-2022. China PBOC alone added 320 tonnes in 2025. This is a structural demand shift, not a cyclical trade. Bond market risk is pushing sovereign wealth funds into gold.",
+    "risk_level": "medium",
+    "time_window": "6-12 months",
+    "bear_case": "Peace breakthrough in major conflict zones. Dollar strengthens sharply on rate differential. Gold corrects 10-15%.",
+    "bear_case_confidence": 0.2,
+    "logic_chain": "CB buying↑ + real yields↓ + geopolitical risk↑ → structural bid → $3,500-3,800 target",
+    "verification_scores": {
+      "layer_1_market": 0.82,
+      "layer_2_fundamental": 0.76,
+      "layer_3_multisource": 0.79,
+      "layer_4_historical": 0.71,
+      "weighted_confidence": 0.78,
+      "verdict": "ACTIONABLE"
+    }
+  },
+  {
+    "hypothesis": "NVIDIA Earnings Beat Masks AI Capex Sustainability Risk",
+    "refined_hypothesis": "NVDA's Q1 beat is impressive but forward guidance implied decelerating growth rate. Hyperscaler capex ($250B in 2025) is unsustainable at current ROI. AI infrastructure spending peaks in H2 2026, then normalizes.",
+    "confidence": 0.68,
+    "verdict": "MONITOR",
+    "expectation_gap": "Street models 35% revenue growth in 2027 — we see 15-20% as more realistic",
+    "direction": "neutral",
+    "core_logic": "Hyperscaler capex running at 18% of revenue vs 10% historical norm. ROIC on AI infra is 6-8% vs 12-15% for traditional cloud. This math doesn't work long-term. NVDA is pricing perfection.",
+    "risk_level": "high",
+    "time_window": "6-12 months",
+    "bear_case": "AI adoption accelerates beyond expectations. Enterprise AI revenue grows 5x. Hyperscalers find monetization model.",
+    "bear_case_confidence": 0.35,
+    "logic_chain": "Capex/revenue ratio↑ → ROIC↓ → spending deceleration → semi cycle peak → multiple compression",
+    "verification_scores": {
+      "layer_1_market": 0.65,
+      "layer_2_fundamental": 0.72,
+      "layer_3_multisource": 0.6,
+      "layer_4_historical": 0.68,
+      "weighted_confidence": 0.68,
+      "verdict": "MONITOR"
+    }
+  },
+  {
+    "hypothesis": "European Energy Crisis 2.0 — Gas Price Spike Has Second-Round Effects",
+    "refined_hypothesis": "Norway pipeline maintenance is a short-term trigger but exposes Europe's structural gas dependency. If Asian LNG demand picks up in Q3 (summer cooling), European gas prices could spike 40%+. This hits chemical and industrial sectors hardest.",
+    "confidence": 0.62,
+    "verdict": "MONITOR",
+    "expectation_gap": "Market treating this as a 2-week blip; we see risk of 3-6 month elevated prices",
+    "direction": "bearish",
+    "core_logic": "EU gas storage at 58% vs 72% last year. LNG import capacity maxed out. Asian LNG competition for Q3 cooling season. Industrial demand destruction threshold is around EUR 45/MWh — we're at EUR 38 and rising.",
+    "risk_level": "medium",
+    "time_window": "1-3 months",
+    "bear_case": "Norway maintenance completed ahead of schedule. Mild weather reduces demand. LNG cargoes re-route to Europe.",
+    "bear_case_confidence": 0.4,
+    "logic_chain": "Gas supply↓ → prices↑ → industrial margins↓ → chemicals/metals sector↓ → EU growth↓",
+    "verification_scores": {
+      "layer_1_market": 0.7,
+      "layer_2_fundamental": 0.55,
+      "layer_3_multisource": 0.6,
+      "layer_4_historical": 0.65,
+      "weighted_confidence": 0.62,
+      "verdict": "MONITOR"
+    }
+  }
+]

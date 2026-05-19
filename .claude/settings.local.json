@@ -73,9 +73,9 @@
       "Bash(head -5 E:/AI_Studio_Workspace/projects/marketmind/tests/conftest.py)",
       "Bash(PYTHONPATH=\"E:/AI_Studio_Workspace/projects/marketmind;E:/AI_Studio_Workspace\" python -c \"from marketmind.pipeline.gate1_interaction import run_gate1, Gate1Session; print\\('Import OK'\\)\")",
       "Bash(PYTHONPATH=\"E:/AI_Studio_Workspace/projects\" python -c \"from marketmind.pipeline.gate1_interaction import run_gate1, Gate1Session; print\\('Import OK'\\)\")",
-      "Bash(PYTHONPATH=\"E:/AI_Studio_Workspace/projects/marketmind\" python -c \"import sys; sys.path.insert\\(0, 'E:/AI_Studio_Workspace/projects/marketmind'\\); import marketmind.config.asset_class_routing as m; result = m.route_asset_class\\('\u7f8e\u503a\u6536\u76ca\u7387\u4e0a\u5347\uff0c\u7f8e\u8054\u50a8\u53ef\u80fd\u964d\u606f', ['TLT']\\); print\\(f'Routed to: {result.name if result else None}'\\)\")",
+      "Bash(PYTHONPATH=\"E:/AI_Studio_Workspace/projects/marketmind\" python -c \"import sys; sys.path.insert\\(0, 'E:/AI_Studio_Workspace/projects/marketmind'\\); import marketmind.config.asset_class_routing as m; result = m.route_asset_class\\('美债收益率上升，美联储可能降息', ['TLT']\\); print\\(f'Routed to: {result.name if result else None}'\\)\")",
       "Bash(PYTHONPATH=\"E:/AI_Studio_Workspace/projects/marketmind\" python -c \"import sys; sys.path.insert\\(0, 'E:/AI_Studio_Workspace/projects/marketmind'\\); import marketmind.config.mechanism_glossary as m; print\\(f'{len\\(m.MECHANISM_GLOSSARY\\)} mechanisms loaded'\\)\")",
-      "Bash(PYTHONPATH=E:/AI_Studio_Workspace/projects python -c \"from marketmind.config.asset_class_routing import ASSET_CLASSES, route_asset_class; print\\(f'{len\\(ASSET_CLASSES\\)} classes'\\); r = route_asset_class\\('\u7f8e\u503a\u6536\u76ca\u7387\u4e0a\u5347', ['TLT']\\); print\\(f'Route: {r.name if r else None}'\\)\")",
+      "Bash(PYTHONPATH=E:/AI_Studio_Workspace/projects python -c \"from marketmind.config.asset_class_routing import ASSET_CLASSES, route_asset_class; print\\(f'{len\\(ASSET_CLASSES\\)} classes'\\); r = route_asset_class\\('美债收益率上升', ['TLT']\\); print\\(f'Route: {r.name if r else None}'\\)\")",
       "Bash(PYTHONPATH=E:/AI_Studio_Workspace/projects python -c \"from marketmind.config.asset_class_routing import ASSET_CLASSES, route_asset_class; print\\(f'{len\\(ASSET_CLASSES\\)} classes'\\); for cid, c in ASSET_CLASSES.items\\(\\): print\\(f'  {cid}: {len\\(c.keywords\\)} keywords, {len\\(c.tickers\\)} tickers'\\)\")",
       "Bash(PYTHONPATH=E:/AI_Studio_Workspace/projects python -c \"from marketmind.config.asset_class_routing import ASSET_CLASSES; print\\(len\\(ASSET_CLASSES\\), 'classes'\\); [print\\(' ', cid\\) for cid in ASSET_CLASSES]\")",
       "Bash(powershell *)",
@@ -111,11 +111,27 @@
       "Bash(npx ctx7 *)",
       "Bash(claude mcp *)",
       "Bash(rm -rf \"E:\\\\\\\\AI_Studio_Workspace\\\\\\\\.claude\\\\\\\\skills\\\\\\\\web-design-guidelines\")",
-      "Bash(rm -rf \"E:\\\\\\\\AI_Studio_Workspace\\\\\\\\.agents\\\\\\\\skills\\\\\\\\web-design-guidelines\")"
+      "Bash(rm -rf \"E:\\\\\\\\AI_Studio_Workspace\\\\\\\\.agents\\\\\\\\skills\\\\\\\\web-design-guidelines\")",
+      "Bash(where figma-developer-mcp *)",
+      "Bash(npx figma-developer-mcp *)",
+      "Bash(mkdir -p \"E:/AI_Studio_Workspace/.claude/state\")",
+      "Bash(mkdir -p \"E:/AI_Studio_Workspace/.claude/backups/hooks\")",
+      "Read(//c/Users/Administrator/.claude/plugins/**)",
+      "Read(//c/Users/Administrator/.claude/plugins/cache/**)",
+      "Read(//c/Users/Administrator/.claude/plugins/marketplaces/**)"
     ]
   },
   "hooks": {
     "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"E:/AI_Studio_Workspace/.claude/hooks/integrity_check.py\""
+          }
+        ]
+      },
       {
         "matcher": "",
         "hooks": [
@@ -139,7 +155,69 @@
         "hooks": [
           {
             "type": "command",
+            "command": "python \"E:/AI_Studio_Workspace/.claude/hooks/task_manifest.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
             "command": "python \"E:/AI_Studio_Workspace/.claude/hooks/startup_report.py\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"E:/AI_Studio_Workspace/.claude/hooks/danger_guard.py\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"E:/AI_Studio_Workspace/.claude/hooks/skill_profiler.py\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"E:/AI_Studio_Workspace/.claude/hooks/stop_gate_check.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"E:/AI_Studio_Workspace/.claude/hooks/conversation_archiver.py\""
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"E:/AI_Studio_Workspace/.claude/hooks/pre_compact.py\""
           }
         ]
       }
