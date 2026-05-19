@@ -4,7 +4,7 @@
 
 **Project-specific instructions:** Each project has its own `projects/<name>/CLAUDE.md`. When working inside a project directory, load that project's CLAUDE.md FIRST, then fall back to this file for global rules. The project CLAUDE.md takes precedence for architecture, commands, and file paths; this file governs workflow, methodology, and cross-project standards.
 
-**Active project:** MarketMind (`projects/marketmind/`). See `projects/marketmind/CLAUDE.md`.
+**Active project:** MarketMind (Phase H complete, Phase I complete, 1272 tests, Gate 2/3 COMPLETE). See `projects/marketmind/CLAUDE.md`.
 
 **Archived projects:** `projects/robinhood/` and `projects/command_center/` have been removed locally and archived on GitHub. Do not reference them.
 
@@ -138,6 +138,7 @@ After extraction, verify:
 5. **MarketMind runtime**: `datetime.now()` MUST use `datetime.now(timezone.utc)`. Verify with `grep -rn "datetime.now()" --include="*.py" projects/marketmind/ | grep -v "timezone.utc" | grep -v tests/` — must return empty. New code must follow this pattern. Do NOT reference the date the audit was done — the requirement is ongoing.
 6. **Dual time anchor**: LLM prompts must include BOTH current date AND knowledge cutoff.
 7. **Memory freshness**: Verify memory entries against current file/code state before recommending.
+8. **Mechanical enforcement**: The `time_anchor.py` SessionStart hook (see `.claude/hooks/time_anchor.py`) runs `date` on every session start, writes `current_time.txt`, and prints the training-cutoff delta. This mechanizes Points 1–6 above so enforcement does not rely on AI memory. If the hook output is absent, the AI should run `date` manually — because the enforcement mechanism itself may be down.
 
 ## Development Workflow
 
@@ -263,6 +264,18 @@ When encountering repeated errors or inefficient patterns caused by existing rul
 4. Log the correction to auto-memory
 
 ## Agent Skills
+
+### Mandatory Skill Checkpoints (MANDATORY)
+
+**Every non-trivial task MUST invoke these skill groups. This is NOT optional.**
+
+1. **Superpowers** (`superpowers@claude-plugins-official`): Before writing plan/design code, invoke `Skill("superpowers:brainstorming")` to clarify the problem. Before implementing, invoke `Skill("superpowers:writing-plans")` to formalize approach. After implementation, invoke `Skill("superpowers:verification-before-completion")` to validate completeness.
+
+2. **Mattpocock Engineering Skills** (`mattpocock-skills@mattpocock-skills`): For architecture changes, invoke `Skill("mattpocock-skills:engineering/improve-codebase-architecture")`. For bug triage, invoke `Skill("mattpocock-skills:engineering/triage")`. For TDD workflow, invoke `Skill("mattpocock-skills:engineering/tdd")`. For diagnosing complex issues, invoke `Skill("mattpocock-skills:engineering/diagnose")`.
+
+3. **Agent Team** (`.claude/agents/AGENTS.md`): The 8-agent team MUST be spawned for architecture work. At minimum: Architect (design) → Builder (implement) → Red Team Code (syntax) → Red Team Logic (audit). Each agent has distinct responsibilities and restrictions (see AGENTS.md Discipline Rules).
+
+**Enforcement**: If these skills aren't available in the `Skill` tool list, the session has an initialization problem that must be fixed BEFORE any code work proceeds.
 
 ### Issue tracker
 GitHub Issues — use `gh issue` CLI for all operations. See `docs/agents/issue-tracker.md`.
