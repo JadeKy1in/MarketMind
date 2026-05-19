@@ -154,7 +154,7 @@ After extraction, verify:
 
 **Every code change MUST pass through the 4-level PICA protocol before integration. This applies to ALL projects in this workspace, now and in the future. This is NOT optional — it is enforced by audit artifact requirements.**
 
-Full specification: `.claude/plans/4-gate-audit-protocol.md`
+Full specification: defined in this file under §4. PICA protocol — no external file needed.
 
 #### PICA Levels (sequential, each must pass before proceeding)
 
@@ -268,6 +268,15 @@ When encountering repeated errors or inefficient patterns caused by existing rul
 ### Mandatory Skill Checkpoints (MANDATORY)
 
 **Every non-trivial task MUST invoke these skill groups. This is NOT optional.**
+
+### Context7 & MCP Security Rule (MANDATORY)
+
+Context7 MCP injects latest library docs. It sends queries to `mcp.context7.com` (Upstash). To prevent proprietary data leakage:
+- Context7: use ONLY for library API reference (pandas, numpy, aiohttp, etc.)
+- Do NOT invoke Context7 during analysis of proprietary data, API keys, or internal architecture
+- GitHub MCP: read-only operations preferred; never expose tokens in prompts
+- Figma MCP: limited to 6 free calls/month — use sparingly
+- Chrome DevTools MCP: local-only, no data exfiltration risk
 
 1. **Superpowers** (`superpowers@claude-plugins-official`): Before writing plan/design code, invoke `Skill("superpowers:brainstorming")` to clarify the problem. Before implementing, invoke `Skill("superpowers:writing-plans")` to formalize approach. After implementation, invoke `Skill("superpowers:verification-before-completion")` to validate completeness.
 

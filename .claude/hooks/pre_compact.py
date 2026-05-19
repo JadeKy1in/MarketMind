@@ -43,10 +43,27 @@ def main():
     except Exception:
         git_log = "unavailable"
 
+    # Read latest progress file for semantic task state
+    task_context = ""
+    progress_dir = WORKSPACE / ".claude" / "progress"
+    try:
+        if progress_dir.exists():
+            progress_files = sorted(progress_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if progress_files:
+                latest = progress_files[0]
+                content = latest.read_text(encoding="utf-8", errors="replace")
+                # Extract lines with [x] or [ ] task markers
+                task_lines = [line.strip() for line in content.split("\n")
+                              if "[" in line and ("x]" in line or " ]" in line)][-5:]
+                task_context = "\n".join(task_lines)[:500]
+    except Exception:
+        task_context = "unavailable"
+
     snapshot = {
         "timestamp": timestamp,
         "modified_files": git_status,
         "recent_commits": git_log,
+        "task_context": task_context,
     }
 
     # Append to snapshot log

@@ -35,7 +35,114 @@
       "EnterPlanMode",
       "ExitPlanMode",
       "Bash(git add *)",
-      "Bash(git rm *)"
+      "Bash(git rm *)",
+      "Bash(mkdir -p __TRACKED_VAR__/.claude/hooks)",
+      "Bash(cp E:/AI_Studio_Workspace/.claude/hooks/config_guardian.py __TRACKED_VAR__/.claude/hooks/config_guardian.py)",
+      "Bash(gh repo *)",
+      "Bash(git clone *)",
+      "Bash(mkdir -p __TRACKED_VAR__/.claude/plugins/marketplaces/mattpocock-skills)",
+      "Bash(cp -r /tmp/mattpocock-skills/* __TRACKED_VAR__/.claude/plugins/marketplaces/mattpocock-skills/)",
+      "Bash(cp -r /tmp/mattpocock-skills/.claude-plugin __TRACKED_VAR__/.claude/plugins/marketplaces/mattpocock-skills/)",
+      "Bash(cp /tmp/mattpocock-skills/.git __TRACKED_VAR__/.claude/plugins/marketplaces/mattpocock-skills/)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(npm view *)",
+      "WebFetch(domain:dev.to)",
+      "WebFetch(domain:registry.npmjs.org)",
+      "Bash(npm pack *)",
+      "Bash(tar -xzf dotoricode-afd-2.0.2.tgz)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('teams', 'NO TEAMS KEY'\\), indent=2\\)\\)\")",
+      "Bash(cp \"E:/AI_Studio_Workspace/.claude/hooks/config_guardian.py\" /c/Users/Administrator/.claude/hooks/config_guardian.py)",
+      "Bash(cp \"E:/AI_Studio_Workspace/.claude/hooks/recover_config.py\" /c/Users/Administrator/.claude/hooks/recover_config.py)",
+      "Bash(rm -f \"E:/AI_Studio_Workspace/.claude/hooks/hud_sentinel.py\")",
+      "Bash(rm -f /c/Users/Administrator/.claude/hooks/hud_sentinel.py)",
+      "Bash(npx tailwindcss *)",
+      "Bash(npx tsc *)",
+      "Bash(npx vite *)",
+      "Bash(./node_modules/.bin/tsc -b)",
+      "Bash(./node_modules/.bin/vite build *)",
+      "Bash(node_modules/.bin/tsc --version)",
+      "Bash(sed -n '24,232p' shadows/shadow_state.py)",
+      "Read(//tmp/**)",
+      "Bash(powershell -Command \"Get-Date -AsUTC -Format 'yyyy-MM-ddTHH:mm:ssZ'\")",
+      "Bash(PYTHONPATH=\"E:/AI_Studio_Workspace/projects/marketmind\" python -c \"from marketmind.pipeline.investigation_loop import run_investigation_loop, InvestigationConfig, HypothesisResult, _classify_layer_interpretation, _determine_verdict, _parse_json_strict, TriageResult; from marketmind.pipeline.hvr_cycle import run_hvr_cycle; from marketmind.pipeline.investigation_direction import extract_direction, estimate_risk_level, estimate_time_window; from marketmind.pipeline.investigation_prompts import _PRE_ACT_SYSTEM, _EXPECTATION_GAP_SYSTEM, _BEAR_CASE_SYSTEM, _NARRATIVE_PROMPT; from marketmind.pipeline.investigation_types import HypothesisResult, InvestigationConfig; print\\('All imports OK'\\)\")",
+      "Bash(taskkill /F /IM python.exe)",
+      "Bash(PYTHONPATH=\"E:/AI_Studio_Workspace/projects/marketmind;E:/AI_Studio_Workspace\" python -c \"from marketmind.pipeline.gate1_interaction import run_gate1, Gate1Session, _parse_user_intent, _match_card; print\\('Import OK'\\)\")",
+      "Bash(PYTHONPATH=\"E:/AI_Studio_Workspace/projects/marketmind\" python -c \"from pipeline.gate1_interaction import run_gate1, Gate1Session; print\\('Import OK'\\)\")",
+      "Bash(head -5 E:/AI_Studio_Workspace/projects/marketmind/tests/conftest.py)",
+      "Bash(PYTHONPATH=\"E:/AI_Studio_Workspace/projects/marketmind;E:/AI_Studio_Workspace\" python -c \"from marketmind.pipeline.gate1_interaction import run_gate1, Gate1Session; print\\('Import OK'\\)\")",
+      "Bash(PYTHONPATH=\"E:/AI_Studio_Workspace/projects\" python -c \"from marketmind.pipeline.gate1_interaction import run_gate1, Gate1Session; print\\('Import OK'\\)\")",
+      "Bash(PYTHONPATH=\"E:/AI_Studio_Workspace/projects/marketmind\" python -c \"import sys; sys.path.insert\\(0, 'E:/AI_Studio_Workspace/projects/marketmind'\\); import marketmind.config.asset_class_routing as m; result = m.route_asset_class\\('\u7f8e\u503a\u6536\u76ca\u7387\u4e0a\u5347\uff0c\u7f8e\u8054\u50a8\u53ef\u80fd\u964d\u606f', ['TLT']\\); print\\(f'Routed to: {result.name if result else None}'\\)\")",
+      "Bash(PYTHONPATH=\"E:/AI_Studio_Workspace/projects/marketmind\" python -c \"import sys; sys.path.insert\\(0, 'E:/AI_Studio_Workspace/projects/marketmind'\\); import marketmind.config.mechanism_glossary as m; print\\(f'{len\\(m.MECHANISM_GLOSSARY\\)} mechanisms loaded'\\)\")",
+      "Bash(PYTHONPATH=E:/AI_Studio_Workspace/projects python -c \"from marketmind.config.asset_class_routing import ASSET_CLASSES, route_asset_class; print\\(f'{len\\(ASSET_CLASSES\\)} classes'\\); r = route_asset_class\\('\u7f8e\u503a\u6536\u76ca\u7387\u4e0a\u5347', ['TLT']\\); print\\(f'Route: {r.name if r else None}'\\)\")",
+      "Bash(PYTHONPATH=E:/AI_Studio_Workspace/projects python -c \"from marketmind.config.asset_class_routing import ASSET_CLASSES, route_asset_class; print\\(f'{len\\(ASSET_CLASSES\\)} classes'\\); for cid, c in ASSET_CLASSES.items\\(\\): print\\(f'  {cid}: {len\\(c.keywords\\)} keywords, {len\\(c.tickers\\)} tickers'\\)\")",
+      "Bash(PYTHONPATH=E:/AI_Studio_Workspace/projects python -c \"from marketmind.config.asset_class_routing import ASSET_CLASSES; print\\(len\\(ASSET_CLASSES\\), 'classes'\\); [print\\(' ', cid\\) for cid in ASSET_CLASSES]\")",
+      "Bash(powershell *)",
+      "WebFetch(domain:corporate.northerntrust.com)",
+      "WebFetch(domain:www.ubs.com)",
+      "Bash(PYTHONPATH=. python -c ' *)",
+      "Bash(xxd \"E:/AI_Studio_Workspace/projects/marketmind/CLAUDE.md\")",
+      "Bash(xxd)",
+      "Bash(PYTHONPATH=\"E:\\\\AI_Studio_Workspace\\\\projects\\\\marketmind\" python -c \"from marketmind.shadows.shadow_analysis_repo import save_analyses; print\\('Import OK'\\)\")",
+      "Bash(PYTHONPATH=\"E:\\\\AI_Studio_Workspace\\\\projects\\\\marketmind;E:\\\\AI_Studio_Workspace\\\\projects\" python -c \"import sys; sys.path.insert\\(0, 'E:/AI_Studio_Workspace/projects/marketmind'\\); sys.path.insert\\(0, 'E:/AI_Studio_Workspace/projects'\\); from marketmind.shadows.shadow_analysis_repo import save_analyses; print\\('Import OK'\\)\")",
+      "Bash(PYTHONPATH=/e/AI_Studio_Workspace/projects/marketmind python *)",
+      "Bash(PYTHONPATH=/e/AI_Studio_Workspace/projects python *)",
+      "WebFetch(domain:www.ecb.europa.eu)",
+      "Bash(PYTHONPATH=. python -c \"from pipeline.bls_fetcher import fetch_bls_indicators; import asyncio; print\\(asyncio.run\\(fetch_bls_indicators\\(\\)\\)\\)\")",
+      "Bash(PYTHONPATH=E:/AI_Studio_Workspace/projects python -c \"from marketmind.config import load_shadow_prompts; p = load_shadow_prompts\\(reload=True\\); print\\('agri' in p, len\\(p\\), sorted\\(p.keys\\(\\)\\)[-3:]\\)\")",
+      "Bash(PYTHONPATH=E:/AI_Studio_Workspace/projects python *)",
+      "Bash(mkdir -p E:/AI_Studio_Workspace/.claude/archived-files)",
+      "Bash(mv E:/AI_Studio_Workspace/.clinerules E:/AI_Studio_Workspace/.claude/archived-files/)",
+      "Bash(mv E:/AI_Studio_Workspace/projects/marketmind/.clinerules E:/AI_Studio_Workspace/.claude/archived-files/marketmind-.clinerules)",
+      "Bash(mv E:/AI_Studio_Workspace/projects/marketmind/projects/ro E:/AI_Studio_Workspace/.claude/archived-files/sentiment_collector.py)",
+      "Bash(mv E:/AI_Studio_Workspace/projects/marketmind/package.json E:/AI_Studio_Workspace/projects/marketmind/package-lock.json E:/AI_Studio_Workspace/projects/marketmind/jest.config.js E:/AI_Studio_Workspace/projects/marketmind/src E:/AI_Studio_Workspace/.claude/archived-files/)",
+      "Bash(PYTHONPATH=\"E:/AI_Studio_Workspace/projects\" timeout 180 python app.py --mode daily --mock --verbose)",
+      "Bash(sqlite3 \"E:\\\\AI_Studio_Workspace\\\\projects\\\\marketmind\\\\data\\\\shadows.db\" \"SELECT status, shadow_type, COUNT\\(*\\) FROM shadows GROUP BY status, shadow_type;\")",
+      "Bash(PYTHONPATH=E:/AI_Studio_Workspace/projects timeout 30 python -c ' *)",
+      "Bash(PYTHONPATH=E:/AI_Studio_Workspace/projects timeout 60 python -c ' *)",
+      "Bash(PYTHONPATH=\"E:/AI_Studio_Workspace/projects\" timeout 300 python app.py --mode daily --mock --verbose)",
+      "Bash(tee /tmp/daily_final.txt)",
+      "Bash(PYTHONPATH=E:/AI_Studio_Workspace/projects timeout 90 python -c ' *)",
+      "Bash(npx --version)",
+      "Bash(npx skills *)",
+      "Bash(cd \"E:\\\\\\\\AI_Studio_Workspace\")",
+      "Bash(git reset *)",
+      "Bash(npx ctx7 *)",
+      "Bash(claude mcp *)",
+      "Bash(rm -rf \"E:\\\\\\\\AI_Studio_Workspace\\\\\\\\.claude\\\\\\\\skills\\\\\\\\web-design-guidelines\")",
+      "Bash(rm -rf \"E:\\\\\\\\AI_Studio_Workspace\\\\\\\\.agents\\\\\\\\skills\\\\\\\\web-design-guidelines\")"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"E:/AI_Studio_Workspace/.claude/hooks/config_guardian.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"E:/AI_Studio_Workspace/.claude/hooks/time_anchor.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"E:/AI_Studio_Workspace/.claude/hooks/startup_report.py\""
+          }
+        ]
+      }
     ]
   }
 }

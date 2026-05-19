@@ -55,8 +55,8 @@ STATUSLINE_CMD = (
 
 # Guard 4: hardcoded env keys (M3)
 REQUIRED_ENV = {
-    "ANTHROPIC_BASE_URL": "http://127.0.0.1:15721",
-    "ANTHROPIC_AUTH_TOKEN": "PROXY_MANAGED",
+    # ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN are set by Claude Code.bat.
+    # Do NOT hardcode them here — the batch file is the single source of truth.
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
     "ENABLE_TOOL_SEARCH": "true",
 }
