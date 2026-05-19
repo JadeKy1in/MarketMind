@@ -128,7 +128,7 @@ def verify_plugin_files(settings: dict) -> list[str]:
                 log(f"Plugin descriptor missing for: {plugin_id}", "FAIL")
             continue
 
-        # Skills plugins: must have skills/ directory with content
+        # Skills/plugin: check for skills/ OR agents/ directory (both are valid)
         found = False
         for plugin_dir in marketplace_dir.iterdir():
             if not plugin_dir.name.startswith(plugin_name):
@@ -136,9 +136,13 @@ def verify_plugin_files(settings: dict) -> list[str]:
             for version_dir in plugin_dir.iterdir():
                 if not version_dir.is_dir():
                     continue
-                skills_dir = version_dir / "skills"
-                if skills_dir.exists() and any(skills_dir.iterdir()):
-                    found = True
+                # /plugin install uses agents/, npx skills uses skills/
+                for content_dir in ("skills", "agents"):
+                    d = version_dir / content_dir
+                    if d.exists() and any(d.iterdir()):
+                        found = True
+                        break
+                if found:
                     break
             if found:
                 break
