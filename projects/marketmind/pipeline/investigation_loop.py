@@ -196,7 +196,7 @@ async def _pre_act_planning(
     # Build a compact headline summary for Pro
     headline_lines = []
     for i, h in enumerate(headlines[:30]):  # at most 30 headlines for context
-        source = getattr(h, "source_headline", "") or getattr(h, "signal_id", f"SIG-{i}")
+        source = getattr(h, "headline", "") or getattr(h, "source_headline", "") or getattr(h, "signal_id", f"SIG-{i}")
         direction = getattr(h, "direction", "neutral")
         conf = getattr(h, "confidence", 0.5)
         event_type = getattr(h, "event_type", "unknown")
