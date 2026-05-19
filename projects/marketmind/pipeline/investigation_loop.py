@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime, timezone
 
 from marketmind.config.investigation_config import MAX_HYPOTHESES_PER_SESSION, MAX_PRO_CALLS_PER_SESSION
@@ -62,10 +63,10 @@ def _parse_json_strict(content: str) -> dict | None:
         if content.endswith("```"):
             content = content[:-3]
         content = content.strip()
+    content = re.sub(r",\s*([}\]])", r"\1", content)
     try:
         return json.loads(content)
     except json.JSONDecodeError:
-        # Try to find JSON object boundaries
         start = content.find("{")
         end = content.rfind("}")
         if start != -1 and end != -1 and end > start:
@@ -212,7 +213,7 @@ async def _pre_act_planning(
             system_prompt=system,
             user_prompt=user_prompt,
             temperature=0.4,
-            max_tokens=2048,
+            max_tokens=4096,
         )
         if pro_calls_counter is not None:
             pro_calls_counter[0] += 1
