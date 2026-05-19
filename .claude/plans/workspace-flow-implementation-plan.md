@@ -159,14 +159,17 @@ All new tools follow sandbox protocol:
 - **Plugins**: pre_session.py WARNING at 30 days stale, ERROR (block launch) at 60 days stale [Fix: L7]
 - **Automated**: Future — GitHub Actions cron job for weekly `npx skills update --dry-run` to flag outdated skills
 
-## 9. Feature-Dev Private Repo Mitigation [Fix: H2]
+## 9. Feature-Dev Installation (Resolved)
 
-`anthropic/feature-dev` is a private repo requiring `gh auth login`. Safety protocol:
-1. Clone into `.claude/sandbox/incoming/feature-dev/` FIRST (read-only)
-2. Run full sandbox scan before installing
-3. Pin to specific commit hash after approval
-4. Never grant `gh auth` during active development — authenticate once beforehand
-5. Private-sourced skills require 2-person review (user + agent) before install
+**Correct method** (not `npx skills`, not `gh auth login`):
+
+```bash
+/plugin marketplace add anthropics/claude-plugins-official
+/plugin install feature-dev@claude-plugins-official
+/reload-plugins
+```
+
+This installs from the official Anthropic marketplace — no private repo access needed. The earlier `anthropic/feature-dev` GitHub repo (404) and `npx skills add` (wrong mechanism) were incorrect. Feature-dev is a Claude Code plugin, not an npx skill.
 
 ## 9. Files Created/Modified
 
@@ -198,8 +201,10 @@ REMOVED:
 
 ---
 
-**MRP Status**: RED_TEAM_FIXES_APPLIED
+**MRP Status**: READY_FOR_FINAL_RED_TEAM_REVIEW
 **Estimated new code**: ~350 lines (hooks + plan doc + Red Team fixes)
 **Risk**: LOW — all additions are additive, no pipeline code modified
-**Dependencies**: Context7 needs session restart to load tools; feature-dev needs gh auth + sandbox first
-**Pending manual actions**: (1) `gh auth login` for anthropic/feature-dev, (2) session restart to load Context7 MCP tools + 28 plugins
+**All plugins installed**: Superpowers + Mattpocock + Karpathy + feature-dev + Claude HUD (5 plugins, 35 skills)
+**All workspace skills installed**: find-skills, frontend-design, vercel-react-best-practices, parallel-feature-development
+**MCP**: Context7 HTTP mode — Connected. Tools load on session restart.
+**No pending manual actions**
