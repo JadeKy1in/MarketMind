@@ -60,7 +60,7 @@ async def run_pre_gate1(config: "MarketMindConfig", mock: bool = False,
         shadow_db = ShadowStateDB(config.shadow.shadows_db_path)
         shadow_db.init_schema()
 
-        # Initialize permanent shadows (15 experts + 8 daredevils)
+        # Initialize permanent shadows (16 experts + 8 daredevils)
         from marketmind.shadows.expert_shadows import create_expert_shadows
         from marketmind.shadows.daredevil_shadows import create_daredevil_shadows
         create_expert_shadows(shadow_db, config.shadow)

@@ -1,0 +1,1 @@
+{"module": "pipeline/flash_triage.py", "timestamp": "2026-05-19T03:25:00Z", "level": "PICA-Unit", "test_count": 25, "passed": 25, "failed": 0, "verdict": "PASS", "change": "Added direction/confidence/event_type to TriageResult + system prompt + parsing — fixes HVR Pre-Act planner receiving [NEUTRAL] unknown for all items"}

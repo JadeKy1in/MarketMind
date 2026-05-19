@@ -1,30 +1,31 @@
 {
   "module": "gateway/async_client.py",
-  "timestamp": "2026-05-18T03:34:06Z",
-  "auditor": "PICA-Security-Agent-B2",
-  "risk_tier": "High",
+  "timestamp": "2026-05-19T03:00:00Z",
+  "level": "PICA-Security",
+  "risk_tier": "critical",
+  "change": "chat_flash() reasoning_effort default: max → minimal (line 200)",
   "findings": [
     {
       "severity": "INFO",
-      "description": "Input guard wiring audit — VERIFIED CORRECT: sanitize_for_llm_prompt() is called on BOTH system_prompt and user_prompt in chat_flash() (lines 205-213) and chat_pro() (lines 239-248). Sanitization happens BEFORE the LLM call (_call_with_retry). Warnings are logged at WARNING level for both prompts. Sanitized values replace originals before being sent.",
-      "location": "async_client.py:205-213, 239-248"
+      "description": "Audit point 1 — chat_pro unaffected: chat_pro() line 239 retains its own reasoning_effort='max' default. The _call() method default at line 103 is 'max' but both chat_flash and chat_pro always pass reasoning_effort explicitly via _call_with_retry, so _call() default is never used for flash. Confirmed no cross-contamination.",
+      "location": "async_client.py:195-231, 234-266"
     },
     {
       "severity": "INFO",
-      "description": "chat_with_integrity() at line 323-353: injects M1 integrity header + optional cash-reframing protocol into system_prompt, then delegates to chat_flash()/chat_pro() which apply input guard sanitization. The integrity header is hardcoded (no injection risk). Cash reframing substitution at lines 341-344 uses .replace() with str() conversion on capital — safe since template is hardcoded.",
-      "location": "async_client.py:323-353"
-    },
-    {
-      "severity": "LOW",
-      "description": "KeyRotator._remaining dict maps integer indices to Optional[int]. If a key is rotated out before a response is received, update_remaining (line 133) writes to the current key index which may have changed mid-flight. This is a quota-tracking accuracy issue, not a security issue. The asyncio.Lock at line 36 protects rotation but not the update_remaining call which is outside the lock.",
-      "location": "async_client.py:37, 42-44, 130-135"
+      "description": "Audit point 2 — explicit callers unaffected: All 4 callers passing reasoning_effort explicitly (shadow_agent.py:164/343, ael_evolution.py:179, ecosystem_auditor.py:227, challenger_engine.py:212 via ShadowConfig) route through chat_with_integrity() with **kwargs passthrough. Explicit values override the default — no behavior change for these paths.",
+      "location": "async_client.py:327-355, shadows/shadow_agent.py, shadows/ael_evolution.py, shadows/ecosystem_auditor.py"
     },
     {
       "severity": "INFO",
-      "description": "RateLimitError handling at lines 286-296: one retry with key rotation on 429. No infinite retry loop. Shared-pool detection at lines 58-61, 179-185 logs warning once per session — helps operators detect misconfigured API keys.",
-      "location": "async_client.py:286-296, 58-61, 179-185"
+      "description": "Audit point 3 — direct chat_flash callers verified safe: All 6 callers (flash_preprocessor x2, flash_triage, event_clusterer x2, investigation_loop, reflection_agent, chat_batch_flash) are data-extraction/classification tasks where minimal reasoning is correct. The original 'max' was a bug causing empty content (all output tokens consumed as reasoning_tokens). 'minimal' fixes this and is semantically appropriate for triage/parsing tasks.",
+      "location": "pipeline/flash_preprocessor.py:83/108, pipeline/flash_triage.py:149, pipeline/event_clusterer.py:673/737, pipeline/investigation_loop.py:144, pipeline/reflection_agent.py:120, gateway/async_client.py:312"
+    },
+    {
+      "severity": "INFO",
+      "description": "Security surface: X-Reasoning-Effort header (line 117) controls model-internal token allocation only. Does not affect authentication, authorization, data access, rate limiting, or any security boundary. No injection risk — the value is a hardcoded string from a function default, never user-controlled.",
+      "location": "async_client.py:116-117"
     }
   ],
   "verdict": "PASS",
-  "notes": "Input guard wiring is correctly implemented and verified. Sanitization happens before LLM calls on both prompts. Warnings are logged. The key rotation quota tracking race is a low-impact accuracy concern. No security vulnerabilities found in the modified code paths."
+  "summary": "Single-parameter default change fixing a real bug (Flash empty content due to reasoning tokens exhausting output budget). chat_pro unaffected (separate default). All 4 explicit reasoning_effort callers bypass the default via **kwargs. All 6 direct chat_flash callers are data-task modules where 'minimal' is semantically correct. Zero security surface change."
 }

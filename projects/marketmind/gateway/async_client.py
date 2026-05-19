@@ -197,10 +197,14 @@ async def chat_flash(
     user_prompt: str,
     temperature: float = 0.3,
     max_tokens: int = 4096,
-    reasoning_effort: str = "max",
+    reasoning_effort: str = "minimal",
 ) -> dict[str, Any]:
     """Internal: raw Flash call without integrity protocol injection.
-    Shadow agents MUST use chat_with_integrity() instead."""
+    Shadow agents MUST use chat_with_integrity() instead.
+
+    reasoning_effort defaults to 'minimal' — Flash is a fast data-task model.
+    Reasoning tokens consume output budget without benefit for triage/parsing tasks.
+    """
     from marketmind.integrity.input_guard import sanitize_for_llm_prompt  # late import (circular via integrity.__init__ → fact_checker)
     sys_result = sanitize_for_llm_prompt(system_prompt, source="llm_prompt")
     usr_result = sanitize_for_llm_prompt(user_prompt, source="llm_prompt")

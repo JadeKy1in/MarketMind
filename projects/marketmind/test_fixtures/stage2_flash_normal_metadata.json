@@ -1,0 +1,7 @@
+{
+  "stage": "stage2_flash",
+  "name": "normal",
+  "created_at": "2026-05-19T03:07:50.082906+00:00",
+  "pipeline_content_hash": "911c84cde51fe050d8b0c757c432f026e0d8e67a801f32b0f3ff0967fa6a8af9",
+  "source": "synthetic \u2014 regenerate with --regenerate-fixtures --force for real data"
+}

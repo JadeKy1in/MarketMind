@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 import logging
+import re
 
 logger = logging.getLogger("marketmind.pipeline.red_team")
 from dataclasses import dataclass, field
@@ -92,13 +93,18 @@ def _parse_red_team_response(content: str) -> RedTeamReport:
         content = "\n".join(lines[1:])
         if content.endswith("```"):
             content = content[:-3]
+    content = re.sub(r",\s*([}\]])", r"\1", content)
     try:
         data = json.loads(content)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        logger.debug("Red Team JSON decode error (pos %d): %s", e.pos, str(e)[:120])
         start = content.find("{")
         end = content.rfind("}")
         if start != -1 and end != -1:
-            data = json.loads(content[start:end + 1])
+            try:
+                data = json.loads(content[start:end + 1])
+            except json.JSONDecodeError:
+                return RedTeamReport(overall_assessment="Failed to parse Red Team output")
         else:
             return RedTeamReport(overall_assessment="Failed to parse Red Team output")
     challenges = []

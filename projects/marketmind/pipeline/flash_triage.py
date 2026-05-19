@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
@@ -43,16 +44,15 @@ Scoring axes:
 Classification: macro | company | geopolitical | sentiment | technical
 
 Output ONLY a JSON array. No markdown, no explanation.
-[{"headline_index": 0, "scores": {"market_impact": 7, "cross_source_corroboration": 8, "contradicts_consensus": 2, "investigative_depth_needed": 5, "urgency": 6}, "classification": "macro", "affected_assets": ["EUR/USD"], "cluster_hints": ["eurozone", "monetary_policy"]}, ...]"""
+[{"headline_index": 0, "scores": {"market_impact": 7, "cross_source_corroboration": 8, "contradicts_consensus": 2, "investigative_depth_needed": 5, "urgency": 6}, "classification": "macro", "direction": "bearish", "confidence": 0.75, "event_type": "monetary_policy", "affected_assets": ["EUR/USD"], "cluster_hints": ["eurozone", "monetary_policy"]}, ...]"""
 
 
 @dataclass
 class TriageResult:
     """Lightweight news scoring result for a single headline.
 
-    Contains 5-axis scores, classification, ticker hints, and cluster keywords.
-    Deep analysis (event_type, event_grade, direction, confidence, key_facts)
-    is deferred to the Pro HVR loop.
+    Contains 5-axis scores, classification, ticker hints, cluster keywords,
+    and directional signal for Pre-Act HVR planning.
     """
     headline: str              # truncated to 300 chars
     source_name: str
@@ -65,6 +65,9 @@ class TriageResult:
     classification: str        # macro | company | geopolitical | sentiment | technical
     affected_assets: list[str]  # ticker hints only (not full analysis)
     cluster_hints: list[str]    # keywords for later clustering (country, sector, event type)
+    direction: str = "neutral"  # bullish | bearish | neutral — for Pre-Act HVR planner
+    confidence: float = 0.5     # 0.0-1.0 directional confidence
+    event_type: str = "unknown"  # earnings | economic_data | geopolitical | monetary_policy | etc.
 
     # Event clustering context (NEW — Phase G)
     cluster_id: int | None = None
@@ -94,20 +97,20 @@ def _parse_json_response(content: str) -> list[dict]:
     content = content.strip()
     if content.startswith("```"):
         lines = content.split("\n")
-        # Remove opening fence
         content = "\n".join(lines[1:]) if len(lines) > 1 else content
-        # Remove closing fence
         if content.endswith("```"):
             content = content[:-3]
         content = content.strip()
+    # Remove trailing commas — LLMs frequently produce {...,} or [...,]
+    content = re.sub(r",\s*([}\]])", r"\1", content)
     try:
         parsed = json.loads(content)
         if isinstance(parsed, list):
             return parsed
         elif isinstance(parsed, dict):
             return [parsed]
-    except json.JSONDecodeError:
-        # Attempt to extract JSON array embedded in surrounding text
+    except json.JSONDecodeError as e:
+        logger.debug("JSON decode error (pos %d): %s", e.pos, str(e)[:120])
         start = content.find("[")
         end = content.rfind("]")
         if start != -1 and end != -1 and end > start:
@@ -216,12 +219,22 @@ async def triage_batch(
                 classification = raw.get("classification", "sentiment")
                 affected_assets = raw.get("affected_assets", [])
                 cluster_hints = raw.get("cluster_hints", [])
+                direction = raw.get("direction", "neutral")
+                confidence = raw.get("confidence", 0.5)
+                event_type = raw.get("event_type", "unknown")
 
                 # Ensure list types (Flash may return non-list values)
                 if not isinstance(affected_assets, list):
                     affected_assets = []
                 if not isinstance(cluster_hints, list):
                     cluster_hints = []
+                # Ensure scalar types
+                if not isinstance(direction, str):
+                    direction = "neutral"
+                if not isinstance(confidence, (int, float)):
+                    confidence = 0.5
+                if not isinstance(event_type, str):
+                    event_type = "unknown"
 
                 results.append(TriageResult(
                     headline=news_item.title[:300],
@@ -240,6 +253,9 @@ async def triage_batch(
                     classification=classification,
                     affected_assets=affected_assets,
                     cluster_hints=cluster_hints,
+                    direction=direction,
+                    confidence=confidence,
+                    event_type=event_type,
                 ))
 
             except Exception as exc:
