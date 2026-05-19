@@ -139,16 +139,38 @@ def _parse_layer1_response(content: str) -> Layer1Result:
             data = json.loads(content[start:end + 1])
         else:
             raise
+    # Safe numeric parser: strips "EST:" prefix and other non-numeric noise
+    def _safe_float(val, default=0.0):
+        if isinstance(val, (int, float)):
+            return float(val)
+        if isinstance(val, str):
+            val = val.strip().removeprefix("EST:").removeprefix("est:").strip()
+            try:
+                return float(val)
+            except (ValueError, TypeError):
+                return default
+        return default
+
+    def _safe_int(val, default=1):
+        if isinstance(val, int):
+            return val
+        if isinstance(val, (float, str)):
+            try:
+                return int(float(str(val).strip().removeprefix("EST:").removeprefix("est:")))
+            except (ValueError, TypeError):
+                return default
+        return default
+
     return Layer1Result(
         event_grade=data.get("event_grade", "E"),
         surprise_level=data.get("surprise_level", "low"),
         market_size=data.get("market_size", "small"),
         matrix_quadrant=data.get("matrix_quadrant", "observe_skip"),
-        price_in_score=float(data.get("price_in_score", 0.5)),
-        cascade_rank=int(data.get("cascade_rank", 1)),
+        price_in_score=_safe_float(data.get("price_in_score"), 0.5),
+        cascade_rank=_safe_int(data.get("cascade_rank"), 1),
         cascade_hub=bool(data.get("cascade_hub", False)),
         sentiment_direction=data.get("sentiment_direction", "neutral"),
-        sentiment_intensity=float(data.get("sentiment_intensity", 0.0)),
+        sentiment_intensity=_safe_float(data.get("sentiment_intensity"), 0.0),
         sentiment_vs_attention=data.get("sentiment_vs_attention", "neither"),
         expert_signals=data.get("expert_signals", []),
         institutional_surprise=data.get("institutional_surprise", ""),
