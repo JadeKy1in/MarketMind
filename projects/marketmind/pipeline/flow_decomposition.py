@@ -3,6 +3,7 @@ Phase H-1 Module 2. Uses asset-class-keyed entity types (NOT US-centric).
 """
 
 from __future__ import annotations
+import re
 
 import json
 import logging
@@ -72,6 +73,7 @@ def _parse_json(content: str) -> dict | None:
         if content.endswith("```"):
             content = content[:-3]
         content = content.strip()
+    content = re.sub(r",\s*([}\]])", r"\1", content)
     try:
         return json.loads(content)
     except json.JSONDecodeError:

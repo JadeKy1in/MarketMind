@@ -2,7 +2,6 @@
 Phase H-1 Module 1 — decomposes hypotheses into directional factors using
 the correct decomposition lens based on asset class routing.
 """
-
 from __future__ import annotations
 
 import json
@@ -125,6 +124,7 @@ def _parse_decomposition_json(content: str) -> dict | None:
         if content.endswith("```"):
             content = content[:-3]
         content = content.strip()
+    content = re.sub(r",\s*([}\]])", r"\1", content)
     try:
         return json.loads(content)
     except json.JSONDecodeError:

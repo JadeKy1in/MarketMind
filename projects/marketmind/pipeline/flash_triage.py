@@ -152,7 +152,7 @@ async def triage_batch(
                 system_prompt=FLASH_TRIAGE_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 temperature=0.2,
-                max_tokens=4096,
+                max_tokens=8192,
             )
         except Exception as exc:
             logger.warning(
