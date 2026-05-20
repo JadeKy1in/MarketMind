@@ -6,7 +6,7 @@
 
 ## Restart Command
 
-> 继续 MarketMind 开发。阅读 `.claude/RESTART_GUIDE.md`。影子生态最终方案在 `.claude/plans/shadow-ecosystem-final-plan.md`，市场人物模块在 `.claude/plans/market-figure-intelligence-module.md`。先确认上次红方审核结果的应用状态，再继续推进。
+> 继续 MarketMind 开发。阅读 `.claude/RESTART_GUIDE.md`。今天的任务：(1) 审批影子生态最终方案，审批通过后开始 Phase 1-4 实现；(2) 按 `shadow-information-sources.md` 的优先级清单，新增信息源并逐个验证其可用性和数据质量；(3) 日内交易研究写入最终方案。
 
 ---
 
@@ -87,6 +87,33 @@
 ---
 
 ## 待续任务
+
+### 信息源新增与验证（明天首要任务）
+
+**背景**：`shadow-information-sources.md` 已逐影子列出信息缺口。`shadow-ecosystem-final-plan.md` §6.1 定义了数据预取清单（P01-P13）。
+
+**立即可验证（VIABLE NOW，$0）**：
+- FRED API 扩展（从 2 个系列 → ~30 个系列，覆盖 14 个影子）
+- DeFiLlama TVL API（加密，免费无 Key）
+- EIA 能源库存 API（免费，需注册 Key）
+- USDA FAS PSD API（农产品供需，免费）
+- NOAA NCEI API（气候/ENSO，免费无 Key）
+- CoinMetrics Community API（链上数据，免费）
+- Twelve Data（800 次/天，官方 API）
+- Ken French Data Library（Fama-French 因子，基准数据，完全免费）
+
+**需要短期建设（NEEDS WORK）**：
+- AAII 情绪爬虫（每周四，约 1-2 天）
+- iTick API 接入（LME 库存，免费层）
+- yfinance 期货 ticker 映射（CBOT/ICE 农产品）
+
+**验证流程**（每个源）：
+1. 运行 API 调用/爬虫 → 确认返回数据
+2. 交叉验证：与已知可靠源对比（如 FRED vs Yahoo）
+3. 记录延迟、完整度、异常值频率
+4. 更新 `source_authority.py` 的 SourceStatus
+
+**目标**：明天至少验证 5 个 VIABLE NOW 源并接入数据管道。
 
 ### 日内交易频率（研究已完成，方案待写入）
 
