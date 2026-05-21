@@ -115,7 +115,9 @@ async def run_pre_gate1(config: "MarketMindConfig", mock: bool = False,
                    "published": n.published_at} for n in news_items]
     })
 
-    # 1a. Info injection — merge user-provided external information
+    # 1a. Info injection — user-provided info merged at TOP of news_items
+    # Injected items have content_type="user_injected" and MUST be discussed
+    # by main AI — they bypass Flash triage filtering (see L1 narrative stage).
     if inject_result and inject_result.has_content:
         from marketmind.pipeline.scout import NewsItem
         injected_items = []
@@ -126,10 +128,12 @@ async def run_pre_gate1(config: "MarketMindConfig", mock: bool = False,
                 source_name="user_injected",
                 url="",
                 published_at=item["timestamp"],
-                content_type=item.get("content_type", "external_info"),
+                content_type="user_injected",  # bypass Flash triage
+                source_tier=0,                  # highest priority
+                source_reliability=1.0,         # trusted by user
             ))
         news_items = injected_items + list(news_items)
-        tracker.result(f"{len(injected_items)} external info items injected")
+        tracker.result(f"{len(injected_items)} external info items injected (BYPASS triage, priority=CRITICAL)")
 
     # 1b. Event clustering — group headlines into named themes with cross-cluster links
     clustering_result = None
