@@ -91,10 +91,10 @@ def _sanitize(data: dict, source: str = "commodity_data") -> dict:
 
 
 async def get_lme_metal_inventory(metal: str) -> dict:
-    """Fetch the latest LME warehouse inventory for a given metal.
+    """Fetch metal price — tries LME JSON first, falls back to World Bank.
 
-    Args:
-        metal: One of "copper", "aluminum", "zinc", "nickel", "lead".
+    LME is Cloudflare-protected (often 403). World Bank Pink Sheet provides
+    monthly metal prices (free, no key) as reliable fallback.
     """
     metal = metal.strip().lower()
     key = f"lme:{metal}"
@@ -105,18 +105,39 @@ async def get_lme_metal_inventory(metal: str) -> dict:
     async with _cache_locks[key]:
         if key in _cache:
             return _cache[key]
+
+        # Try LME JSON first
         result = await _fetch_lme(metal)
+        if "error" not in result:
+            _cache[key] = result
+            return result
+
+        # Fallback: World Bank Pink Sheet
+        wb = await get_world_bank_commodities()
+        if "error" not in wb and metal in wb.get("metals", {}):
+            result = {
+                "metal": metal,
+                "label": _LME_METALS.get(metal, {}).get("label", metal.title()),
+                "price_usd": wb["metals"][metal],
+                "date": wb["date"],
+                "source": "world_bank",
+                "cadence": "monthly",
+            }
         _cache[key] = result
         return result
 
 
-async def get_usda_wasde() -> dict:
-    """Fetch the latest USDA WASDE monthly supply/demand report.
+async def get_world_bank_commodities() -> dict:
+    """Fetch commodity prices from World Bank Pink Sheet (monthly Excel, free).
 
-    WASDE is published as PDF; this function attempts to scrape the landing
-    page for structured data. Degrades gracefully if unavailable.
+    Covers metals (copper, aluminum, zinc, nickel, lead) AND agricultural
+    commodities (corn, wheat, soybean). This is the RELIABLE replacement for:
+    - LME inventory (Cloudflare-blocked) → metal PRICES from WB
+    - USDA WASDE (PDF-only, unparseable) → grain PRICES from WB
+
+    Source: https://thedocs.worldbank.org (free, no key, monthly updates)
     """
-    key = "usda_wasde"
+    key = "wb_commodities"
     if key in _cache:
         return _cache[key]
     if key not in _cache_locks:
@@ -124,9 +145,14 @@ async def get_usda_wasde() -> dict:
     async with _cache_locks[key]:
         if key in _cache:
             return _cache[key]
-        result = await _fetch_wasde()
+        result = await _fetch_world_bank()
         _cache[key] = result
         return result
+
+
+async def get_usda_wasde() -> dict:
+    """Legacy stub — WASDE is PDF-only. Use get_world_bank_commodities() instead."""
+    return await get_world_bank_commodities()
 
 
 async def get_eia_extended(product: str) -> dict:
@@ -331,6 +357,123 @@ def _extract_wasde_date(html: str) -> str:
 
 
 # ===================================================================
+# World Bank Pink Sheet implementation (replaces LME + USDA)
+# ===================================================================
+
+_WB_PINK_SHEET_URL = (
+    "https://thedocs.worldbank.org/en/doc/"
+    "5d903e848db1d1b83e0ec8f744e55570-0350012021/related/"
+    "CMO-Historical-Data-Monthly.xlsx"
+)
+
+# Column name patterns for metals and grains in the Pink Sheet Excel
+_WB_METAL_COLUMNS = {
+    "copper": ["Copper", "copper", "COPPER"],
+    "aluminum": ["Aluminum", "aluminium", "ALUMINUM", "Aluminium"],
+    "zinc": ["Zinc", "zinc", "ZINC"],
+    "nickel": ["Nickel", "nickel", "NICKEL"],
+    "lead": ["Lead", "lead", "LEAD"],
+}
+_WB_GRAIN_COLUMNS = {
+    "corn": ["Maize", "Corn", "corn", "MAIZE", "CORN"],
+    "wheat": ["Wheat", "wheat", "WHEAT"],
+    "soybean": ["Soybean", "Soybeans", "soybean", "SOYBEAN"],
+}
+
+
+async def _fetch_world_bank() -> dict:
+    """Fetch latest commodity prices from World Bank Pink Sheet monthly Excel."""
+    client = httpx.AsyncClient(timeout=httpx.Timeout(50.0))
+    try:
+        resp = await client.get(_WB_PINK_SHEET_URL)
+        resp.raise_for_status()
+
+        import io
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(resp.content), data_only=True)
+        except ImportError:
+            logger.warning("openpyxl not available — cannot parse World Bank Pink Sheet")
+            return _sanitize({
+                "error": "source_unavailable",
+                "detail": "openpyxl not installed. Run: pip install openpyxl",
+            }, "wb_data")
+
+        sheet = wb["Monthly Prices"] if "Monthly Prices" in wb.sheetnames else wb[wb.sheetnames[0]]
+        rows = list(sheet.iter_rows(values_only=True))
+
+        if len(rows) < 3:
+            return _sanitize({"error": "source_unavailable", "detail": "Pink Sheet too short"}, "wb_data")
+
+        # Header row (usually row 3-5)
+        headers = [str(h).strip() if h else "" for h in (rows[3] or [])]
+
+        # Find metal and grain columns
+        def find_column(patterns):
+            for i, h in enumerate(headers):
+                for p in patterns:
+                    if p.lower() in h.lower():
+                        return i
+            return None
+
+        metals = {}
+        for name, patterns in _WB_METAL_COLUMNS.items():
+            col = find_column(patterns)
+            if col is not None:
+                # Get last row's value
+                for row in reversed(rows[4:]):
+                    if row and col < len(row) and row[col] is not None:
+                        try:
+                            metals[name] = float(row[col])
+                        except (ValueError, TypeError):
+                            pass
+                        break
+
+        grains = {}
+        for name, patterns in _WB_GRAIN_COLUMNS.items():
+            col = find_column(patterns)
+            if col is not None:
+                for row in reversed(rows[4:]):
+                    if row and col < len(row) and row[col] is not None:
+                        try:
+                            grains[name] = float(row[col])
+                        except (ValueError, TypeError):
+                            pass
+                        break
+
+        wb.close()
+
+        if not metals and not grains:
+            return _sanitize({
+                "error": "source_unavailable",
+                "detail": "Could not locate metal or grain columns in Pink Sheet",
+            }, "wb_data")
+
+        return _sanitize({
+            "indicator": "world_bank_commodities",
+            "metals": metals,
+            "grains": grains,
+            "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "source": "world_bank",
+            "cadence": "monthly",
+        }, "wb_data")
+
+    except httpx.HTTPStatusError as e:
+        logger.warning("World Bank Pink Sheet HTTP error: %s", e)
+        return _sanitize({
+            "error": "source_unavailable",
+            "detail": f"World Bank returned HTTP {e.response.status_code}",
+        }, "wb_data")
+    except Exception as e:
+        logger.warning("World Bank fetch failed: %s", e)
+        return _sanitize({
+            "error": "source_unavailable",
+            "detail": _redact(str(e)),
+        }, "wb_data")
+    finally:
+        await client.aclose()
+
+
 # EIA extended implementation
 # ===================================================================
 
