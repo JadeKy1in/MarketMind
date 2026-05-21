@@ -31,9 +31,11 @@ async def _cli_status_handler(message: str) -> None:
 # ── Run modes ──────────────────────────────────────────────────────────────────
 
 async def run_daily(config: "MarketMindConfig", mock: bool = False, verbose: bool = False,
-                    shadow_count: int | None = None) -> int:
+                    shadow_count: int | None = None,
+                    inject_result=None) -> int:
     """Execute full daily analysis pipeline (stages 0-10, no Gate 1)."""
-    state = await run_pre_gate1(config, mock, verbose, shadow_count)
+    state = await run_pre_gate1(config, mock, verbose, shadow_count,
+                                inject_result=inject_result)
     return await run_post_gate1(config, state, mock, verbose)
 
 

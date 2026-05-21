@@ -51,6 +51,10 @@ def main():
                         help="Backtest end date (YYYY-MM-DD)")
     parser.add_argument("--output", type=str, default=None, metavar="PATH",
                         help="Backtest output path (JSON)")
+    parser.add_argument("--inject", type=str, default=None, metavar="TEXT",
+                        help="Inject external information before analysis")
+    parser.add_argument("--inject-files", type=str, nargs="*", default=None, metavar="PATH",
+                        help="Inject files (images/PDFs) before analysis")
     args = parser.parse_args()
 
     config = MarketMindConfig.from_env()
@@ -72,9 +76,21 @@ def main():
     )
     shadow_n = 0 if args.no_shadows else args.shadows
 
+    # ── Info injection (before pipeline start) ──
+    inject_result = None
+    if args.inject or args.inject_files:
+        from marketmind.pipeline.info_injector import inject_user_info
+        inject_result = asyncio.run(inject_user_info(
+            text=args.inject or "",
+            files=args.inject_files,
+        ))
+        if inject_result.has_content:
+            print(f"\n[外部信息] 已注入 {len(inject_result.items)} 项, {inject_result.total_chars} 字符\n")
+
     if args.mode == "daily":
         return asyncio.run(run_daily(config, mock=args.mock, verbose=args.verbose,
-                                      shadow_count=shadow_n))
+                                      shadow_count=shadow_n,
+                                      inject_result=inject_result))
     elif args.mode == "interactive":
         return asyncio.run(run_interactive(config, mock=args.mock, verbose=args.verbose,
                                             shadow_count=shadow_n))

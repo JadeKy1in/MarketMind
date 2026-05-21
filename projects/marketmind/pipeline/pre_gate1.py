@@ -26,10 +26,12 @@ class _StageTracker:
 
 async def run_pre_gate1(config: "MarketMindConfig", mock: bool = False,
                         verbose: bool = False,
-                        shadow_count: int | None = None) -> dict:
+                        shadow_count: int | None = None,
+                        inject_result=None) -> dict:
     """Run stages 0-3: Shadow init → Scout → Flash → Investigation.
 
-    Returns dict with all intermediate state needed by stages 4-10.
+    If inject_result is provided, injected items are merged into news_items
+    after scout. Shadows receive raw text only (Chinese Wall compliance).
     """
     from marketmind.gateway.async_client import init_gateway
     init_gateway(config.deepseek_api_key, config.deepseek_base_url)
@@ -112,6 +114,22 @@ async def run_pre_gate1(config: "MarketMindConfig", mock: bool = False,
         "items": [{"title": n.title, "source": n.source_name, "url": n.url,
                    "published": n.published_at} for n in news_items]
     })
+
+    # 1a. Info injection — merge user-provided external information
+    if inject_result and inject_result.has_content:
+        from marketmind.pipeline.scout import NewsItem
+        injected_items = []
+        for item in inject_result.pipeline_items:
+            injected_items.append(NewsItem(
+                title=item["title"],
+                content=item["content"],
+                source_name="user_injected",
+                url="",
+                published_at=item["timestamp"],
+                content_type=item.get("content_type", "external_info"),
+            ))
+        news_items = injected_items + list(news_items)
+        tracker.result(f"{len(injected_items)} external info items injected")
 
     # 1b. Event clustering — group headlines into named themes with cross-cluster links
     clustering_result = None
