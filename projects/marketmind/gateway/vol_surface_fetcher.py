@@ -1,11 +1,9 @@
 """On-demand, session-cached volatility surface data fetchers.
 
-Four public async functions, using httpx + yfinance fallback (no new dependencies):
+Two public async functions, using httpx + yfinance fallback (no new dependencies):
 
 - get_vix_term_structure() — CBOE VIX futures term structure (public CSV)
 - get_skew_index() — CBOE SKEW Index, yfinance fallback
-- get_vvix() — CBOE VVIX via yfinance
-- get_global_vol_indexes() — Global vol indexes via yfinance (VSTOXX, NKY VI, KOSPI VI)
 
 All data is CONTEXT only, not trading signals (Law 3 compliance).
 Session-level in-memory cache (same pattern as macro_data.py).
@@ -34,10 +32,6 @@ _CBOE_SKEW_URL = "https://www.cboe.com/us/indices/dashboard/SKEW/"
 
 # Yahoo Finance tickers for volatility indexes
 _YF_SKEW = "^SKEW"
-_YF_VVIX = "^VVIX"
-_YF_VSTOXX = "^V2TX"
-_YF_NKY_VI = "^VNKY"
-_YF_KOSPI_VI = "^VKOSPI"
 
 # ---------------------------------------------------------------------------
 # Session-level cache
@@ -100,39 +94,6 @@ async def get_skew_index() -> dict:
         if key in _cache:
             return _cache[key]
         result = await _fetch_skew()
-        _cache[key] = result
-        return result
-
-
-async def get_vvix() -> dict:
-    """Fetch CBOE VVIX (volatility of VIX) via yfinance ^VVIX ticker."""
-    key = "vvix"
-    if key in _cache:
-        return _cache[key]
-    if key not in _cache_locks:
-        _cache_locks[key] = asyncio.Lock()
-    async with _cache_locks[key]:
-        if key in _cache:
-            return _cache[key]
-        result = await _fetch_vvix()
-        _cache[key] = result
-        return result
-
-
-async def get_global_vol_indexes() -> dict:
-    """Fetch global volatility indexes via yfinance.
-
-    Returns VSTOXX (Euro Stoxx 50 vol), NKY VI (Nikkei vol), KOSPI VI (Korea vol).
-    """
-    key = "global_vol"
-    if key in _cache:
-        return _cache[key]
-    if key not in _cache_locks:
-        _cache_locks[key] = asyncio.Lock()
-    async with _cache_locks[key]:
-        if key in _cache:
-            return _cache[key]
-        result = await _fetch_global_vol()
         _cache[key] = result
         return result
 
@@ -387,64 +348,6 @@ async def _fetch_skew_from_cboe() -> dict:
 async def _fetch_skew_from_yfinance() -> dict:
     """Fetch SKEW Index from Yahoo Finance ^SKEW ticker."""
     return await _fetch_yfinance_ticker(_YF_SKEW, "skew")
-
-
-# ===================================================================
-# VVIX implementation (yfinance)
-# ===================================================================
-
-
-async def _fetch_vvix() -> dict:
-    """Fetch CBOE VVIX from Yahoo Finance ^VVIX ticker."""
-    return await _fetch_yfinance_ticker(_YF_VVIX, "vvix")
-
-
-# ===================================================================
-# Global Volatility Indexes implementation (yfinance multi-ticker)
-# ===================================================================
-
-
-async def _fetch_global_vol() -> dict:
-    """Fetch global volatility indexes: VSTOXX, Nikkei VI, Korea KOSPI VI."""
-    tickers = {
-        "vstoxx": _YF_VSTOXX,
-        "vnky": _YF_NKY_VI,
-        "vkospi": _YF_KOSPI_VI,
-    }
-
-    results: dict[str, float] = {}
-    date_val = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    errors: list[str] = []
-
-    for name, ticker in tickers.items():
-        try:
-            data = await _fetch_yfinance_raw(ticker)
-            if data is not None:
-                results[name] = data["value"]
-                if data.get("date"):
-                    date_val = data["date"]
-            else:
-                results[name] = 0.0
-                errors.append(f"{name}: no data returned")
-        except Exception as e:
-            results[name] = 0.0
-            errors.append(f"{name}: {e}")
-
-    if errors and all(v == 0.0 for v in results.values()):
-        return _sanitize({
-            "error": "source_unavailable",
-            "detail": f"Global vol indexes — all tickers failed: {'; '.join(errors)}",
-        }, "global_vol_data")
-
-    return _sanitize({
-        "indicator": "global_vol",
-        "vstoxx": results.get("vstoxx", 0.0),
-        "vnky": results.get("vnky", 0.0),
-        "vkospi": results.get("vkospi", 0.0),
-        "date": date_val,
-        "source": "multi",
-        "cadence": "daily",
-    }, "global_vol_data")
 
 
 # ===================================================================

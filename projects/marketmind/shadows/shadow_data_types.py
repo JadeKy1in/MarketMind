@@ -33,7 +33,7 @@ class ShadowConfig:
     retirement_reason: str | None = None  # "challenger_loss" | "tier_degradation" | "methodology_obsolete" | "manual"
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
-    _VALID_TYPES = {"beta", "expert", "daredevil", "temp_event", "challenger", "missed_path", "catfish"}
+    _VALID_TYPES = {"beta", "expert", "daredevil", "momentum", "contrarian", "temp_event", "challenger", "missed_path", "catfish"}
     _VALID_STATUSES = {"active", "beta", "retired", "paused", "watch", "endangered", "eliminated"}
     _RETIREMENT_REASONS = {"challenger_loss", "tier_degradation", "methodology_obsolete", "manual"}
 

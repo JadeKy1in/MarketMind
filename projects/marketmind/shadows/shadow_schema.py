@@ -13,7 +13,7 @@ logger = logging.getLogger("marketmind.shadows.shadow_schema")
 
 # ── SQLite database ──────────────────────────────────────────────────────────
 
-CODE_VERSION = 11  # Increment on any schema change; add migration to _MIGRATIONS
+CODE_VERSION = 12  # Increment on any schema change; add migration to _MIGRATIONS
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS metadata (
@@ -486,6 +486,44 @@ def _migration_11_upgrade_cycle_checkpoints(conn: sqlite3.Connection) -> None:
     """)
 
 
+def _migration_12_add_phase_c_independent_tools(conn: sqlite3.Connection) -> None:
+    """Phase C independent tools: add pending_signals + event_tracks tables."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS pending_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            shadow_id TEXT NOT NULL,
+            signal_type TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            trigger_condition TEXT DEFAULT '',
+            ticker TEXT NOT NULL,
+            expected_date TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'awaiting',
+            created_at TEXT NOT NULL,
+            triggered_at TEXT,
+            FOREIGN KEY (shadow_id) REFERENCES shadows(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_pending_signals_shadow ON pending_signals(shadow_id);
+        CREATE INDEX IF NOT EXISTS idx_pending_signals_status ON pending_signals(status);
+
+        CREATE TABLE IF NOT EXISTS event_tracks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            shadow_id TEXT NOT NULL,
+            topic TEXT NOT NULL,
+            category TEXT NOT NULL,
+            key_metric TEXT DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'active',
+            notes TEXT DEFAULT '',
+            outcome TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT,
+            closed_at TEXT,
+            FOREIGN KEY (shadow_id) REFERENCES shadows(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_event_tracks_shadow ON event_tracks(shadow_id);
+        CREATE INDEX IF NOT EXISTS idx_event_tracks_status ON event_tracks(status);
+    """)
+
+
 _MIGRATIONS: list[tuple[int, callable]] = [
     (1, _migration_1_add_discount_rate),
     (2, _migration_2_add_belief_tables),
@@ -498,4 +536,5 @@ _MIGRATIONS: list[tuple[int, callable]] = [
     (9, _migration_9_add_beta_and_retired),
     (10, _migration_10_rename_shadow_votes_to_shadow_analyses),
     (11, _migration_11_upgrade_cycle_checkpoints),
+    (12, _migration_12_add_phase_c_independent_tools),
 ]

@@ -670,85 +670,56 @@ class ShadowStateDB:
         finally:
             conn.close()
 
-    # ── Cycle checkpoints (P3-4 partial-state recovery) ────────────────────
+    # ── Cycle checkpoints (delegated to shadow_checkpoint_repo) ──────────────
 
     def save_checkpoint(self, date: str, shadow_id: str, status: str,
                         step: int, analysis_json: str | None = None,
                         error_message: str | None = None) -> None:
         """Save a per-shadow checkpoint for partial-state recovery (P3-4).
 
-        Called after each individual shadow analysis completes or fails.
-        If the DB write itself fails, logs a warning but does NOT raise —
-        checkpoint persistence failures must not crash the analysis loop.
-
-        Args:
-            date: ISO date string (YYYY-MM-DD).
-            shadow_id: Shadow identifier.
-            status: 'pending', 'completed', or 'failed'.
-            step: Pipeline step number (4 = analysis step).
-            analysis_json: Serialized analysis output (for completed checkpoints).
-            error_message: Exception message (for failed checkpoints).
+        Delegated to shadow_checkpoint_repo.save_checkpoint.
         """
+        from marketmind.shadows.shadow_checkpoint_repo import save_checkpoint
         conn = self._connect()
         try:
-            now = datetime.now(timezone.utc).isoformat()
-            completed_at = now if status == 'completed' else None
-            started_at = now if status == 'pending' else None
-
-            conn.execute(
-                """INSERT OR REPLACE INTO cycle_checkpoints
-                   (date, shadow_id, status, step_completed, analysis_json,
-                    started_at, completed_at, error_message)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (date, shadow_id, status, step, analysis_json,
-                 started_at, completed_at, error_message)
-            )
-            conn.commit()
-        except Exception as e:
-            logger.warning(
-                "Failed to save checkpoint for %s/%s: %s", date, shadow_id, e
-            )
+            save_checkpoint(conn, date, shadow_id, status, step,
+                           analysis_json, error_message)
         finally:
             conn.close()
 
     def get_checkpoint(self, date: str, shadow_id: str) -> dict | None:
         """Get checkpoint for a specific shadow on a specific date (P3-4).
 
-        Returns None if no checkpoint exists for this (date, shadow_id) pair.
+        Delegated to shadow_checkpoint_repo.get_checkpoint.
         """
+        from marketmind.shadows.shadow_checkpoint_repo import get_checkpoint
         conn = self._connect()
         try:
-            row = conn.execute(
-                "SELECT * FROM cycle_checkpoints WHERE date = ? AND shadow_id = ?",
-                (date, shadow_id)
-            ).fetchone()
-            return dict(row) if row else None
+            return get_checkpoint(conn, date, shadow_id)
         finally:
             conn.close()
 
     def get_incomplete_shadows(self, date: str) -> list[str]:
         """Return shadow_ids with status='pending' or 'failed' for a date (P3-4).
 
-        Used at cycle start to determine which shadows need to be re-run
-        after a mid-cycle crash.
+        Delegated to shadow_checkpoint_repo.get_incomplete_shadows.
         """
+        from marketmind.shadows.shadow_checkpoint_repo import get_incomplete_shadows
         conn = self._connect()
         try:
-            rows = conn.execute(
-                "SELECT shadow_id FROM cycle_checkpoints "
-                "WHERE date = ? AND status IN ('pending', 'failed')",
-                (date,)
-            ).fetchall()
-            return [r["shadow_id"] for r in rows]
+            return get_incomplete_shadows(conn, date)
         finally:
             conn.close()
 
     def clear_date_checkpoints(self, date: str) -> None:
-        """Delete all checkpoints for a date (cleanup after cycle completes, P3-4)."""
+        """Delete all checkpoints for a date (cleanup after cycle completes, P3-4).
+
+        Delegated to shadow_checkpoint_repo.clear_date_checkpoints.
+        """
+        from marketmind.shadows.shadow_checkpoint_repo import clear_date_checkpoints
         conn = self._connect()
         try:
-            conn.execute("DELETE FROM cycle_checkpoints WHERE date = ?", (date,))
-            conn.commit()
+            clear_date_checkpoints(conn, date)
         finally:
             conn.close()
 
@@ -832,51 +803,33 @@ class ShadowStateDB:
         finally:
             conn.close()
 
-    # ── Market prices CRUD (P2-4) ─────────────────────────────────────
+    # ── Market prices (delegated to shadow_market_repo) ───────────────────
 
     def insert_market_price(self, ticker: str, date: str, open_price: float,
                             high: float, low: float, close: float, volume: int,
                             next_day_return: float | None = None) -> None:
+        from marketmind.shadows.shadow_market_repo import insert_market_price
         conn = self._connect()
         try:
-            conn.execute(
-                """INSERT OR REPLACE INTO market_prices
-                   (ticker, date, open, high, low, close, volume, next_day_return)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (ticker, date, open_price, high, low, close, volume, next_day_return))
-            conn.commit()
+            insert_market_price(conn, ticker, date, open_price, high, low,
+                               close, volume, next_day_return)
         finally:
             conn.close()
 
     def get_market_prices(self, ticker: str, start_date: str | None = None,
                           end_date: str | None = None) -> list[dict]:
+        from marketmind.shadows.shadow_market_repo import get_market_prices
         conn = self._connect()
         try:
-            if start_date and end_date:
-                rows = conn.execute(
-                    """SELECT * FROM market_prices WHERE ticker = ? AND date >= ? AND date <= ?
-                       ORDER BY date ASC""",
-                    (ticker, start_date, end_date)).fetchall()
-            elif start_date:
-                rows = conn.execute(
-                    """SELECT * FROM market_prices WHERE ticker = ? AND date >= ?
-                       ORDER BY date ASC""",
-                    (ticker, start_date)).fetchall()
-            else:
-                rows = conn.execute(
-                    """SELECT * FROM market_prices WHERE ticker = ? ORDER BY date ASC""",
-                    (ticker,)).fetchall()
-            return [dict(r) for r in rows]
+            return get_market_prices(conn, ticker, start_date, end_date)
         finally:
             conn.close()
 
     def get_next_day_return(self, ticker: str, date: str) -> float | None:
+        from marketmind.shadows.shadow_market_repo import get_next_day_return
         conn = self._connect()
         try:
-            row = conn.execute(
-                "SELECT next_day_return FROM market_prices WHERE ticker = ? AND date = ?",
-                (ticker, date)).fetchone()
-            return row["next_day_return"] if row else None
+            return get_next_day_return(conn, ticker, date)
         finally:
             conn.close()
 

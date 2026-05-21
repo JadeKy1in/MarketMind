@@ -7,67 +7,11 @@ import pytest
 from marketmind.gateway.vol_surface_fetcher import (
     get_vix_term_structure,
     get_skew_index,
-    get_vvix,
-    get_global_vol_indexes,
     _cache,
     _clear_cache,
     _parse_float,
     _find_column,
 )
-
-
-# ---------------------------------------------------------------------------
-# yfinance mock helper
-# ---------------------------------------------------------------------------
-
-class _FakeYfHistory:
-    """Fake DataFrame-like object to mock yfinance.Ticker.history()."""
-    def __init__(self, close_val: float, date_str: str = "2026-05-20"):
-        self._close = close_val
-        self._date_str = date_str
-        self.empty = False
-
-    @property
-    def iloc(self):
-        return _FakeIloc(self)
-
-    def __bool__(self):
-        return True
-
-
-class _FakeIloc:
-    def __init__(self, parent: _FakeYfHistory):
-        self._parent = parent
-
-    def __getitem__(self, idx):
-        return _FakeLatestRow(self._parent._close, self._parent._date_str)
-
-
-class _FakeLatestRow:
-    def __init__(self, close_val: float, date_str: str):
-        self._close = close_val
-        self._name = _FakeTimestamp(date_str)
-
-    def __getitem__(self, key):
-        if key == "Close":
-            return self._close
-        raise KeyError(key)
-
-
-class _FakeTimestamp:
-    def __init__(self, date_str: str):
-        self._date_str = date_str
-
-    def strftime(self, fmt: str) -> str:
-        return self._date_str
-
-    def __str__(self):
-        return self._date_str
-
-
-def _make_fake_close(val: float, date_str: str = "2026-05-20"):
-    """Create a fake yfinance result tuple for asyncio.to_thread mock."""
-    return _FakeYfHistory(val, date_str)
 
 
 # ===================================================================
@@ -201,108 +145,6 @@ class TestSkewIndex:
 
 
 # ===================================================================
-# VVIX tests
-# ===================================================================
-
-
-@pytest.mark.asyncio
-class TestVVIX:
-    """CBOE VVIX via yfinance."""
-
-    async def test_vvix_returns_dict(self):
-        _clear_cache()
-        with patch(
-            "marketmind.gateway.vol_surface_fetcher._fetch_yfinance_raw",
-            new_callable=AsyncMock
-        ) as mock_yf:
-            mock_yf.return_value = {"value": 95.20, "date": "2026-05-20"}
-            result = await get_vvix()
-
-        assert result["indicator"] == "vvix"
-        assert result["value"] == 95.20
-        assert result["source"] == "cboe"
-        assert "error" not in result
-        mock_yf.assert_called_once()
-
-    async def test_vvix_yfinance_failure_returns_error(self):
-        _clear_cache()
-        with patch(
-            "marketmind.gateway.vol_surface_fetcher._fetch_yfinance_raw",
-            new_callable=AsyncMock
-        ) as mock_yf:
-            mock_yf.return_value = None
-            result = await get_vvix()
-
-        assert result["error"] == "source_unavailable"
-
-
-# ===================================================================
-# Global Vol Indexes tests
-# ===================================================================
-
-
-@pytest.mark.asyncio
-class TestGlobalVolIndexes:
-    """Global volatility indexes via yfinance multi-ticker."""
-
-    async def test_global_vol_indexes_returns_dict(self):
-        _clear_cache()
-        yf_responses = {
-            "^V2TX": {"value": 22.15, "date": "2026-05-20"},
-            "^VNKY": {"value": 25.30, "date": "2026-05-20"},
-            "^VKOSPI": {"value": 18.75, "date": "2026-05-20"},
-        }
-
-        async def mock_yf_raw(ticker: str):
-            return yf_responses.get(ticker)
-
-        with patch(
-            "marketmind.gateway.vol_surface_fetcher._fetch_yfinance_raw",
-            side_effect=mock_yf_raw
-        ):
-            result = await get_global_vol_indexes()
-
-        assert result["indicator"] == "global_vol"
-        assert result["vstoxx"] == 22.15
-        assert result["vnky"] == 25.30
-        assert result["vkospi"] == 18.75
-        assert result["source"] == "multi"
-        assert "error" not in result
-
-    async def test_global_vol_partial_failure_returns_partial_data(self):
-        """When some tickers fail, return available data with zeros for failures."""
-        _clear_cache()
-
-        async def mock_yf_raw(ticker: str):
-            if ticker == "^V2TX":
-                return {"value": 22.15, "date": "2026-05-20"}
-            return None
-
-        with patch(
-            "marketmind.gateway.vol_surface_fetcher._fetch_yfinance_raw",
-            side_effect=mock_yf_raw
-        ):
-            result = await get_global_vol_indexes()
-
-        assert result["indicator"] == "global_vol"
-        assert result["vstoxx"] == 22.15
-        assert result["vnky"] == 0.0
-        assert result["vkospi"] == 0.0
-        assert "error" not in result
-
-    async def test_global_vol_all_failures_returns_error(self):
-        _clear_cache()
-        with patch(
-            "marketmind.gateway.vol_surface_fetcher._fetch_yfinance_raw",
-            new_callable=AsyncMock
-        ) as mock_yf:
-            mock_yf.return_value = None
-            result = await get_global_vol_indexes()
-
-        assert result["error"] == "source_unavailable"
-
-
-# ===================================================================
 # Cache tests
 # ===================================================================
 
@@ -327,19 +169,6 @@ class TestVolSurfaceCache:
             r2 = await get_vix_term_structure()
             mock_get.assert_called_once()
             assert r1 is r2
-
-    async def test_vvix_cache_works(self):
-        _clear_cache()
-        with patch(
-            "marketmind.gateway.vol_surface_fetcher._fetch_yfinance_raw",
-            new_callable=AsyncMock
-        ) as mock_yf:
-            mock_yf.return_value = {"value": 95.20, "date": "2026-05-20"}
-            r1 = await get_vvix()
-            r2 = await get_vvix()
-            mock_yf.assert_called_once()
-            assert r1 is r2
-
 
 # ===================================================================
 # Graceful degradation tests
