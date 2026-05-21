@@ -1,43 +1,65 @@
-# MarketMind
+# MarketMind v2.0
 
-> AI-Powered Investment Analysis Workstation · AI 驱动的投资分析工作站
+> AI-Powered Investment Analysis Workstation · Multi-Agent Shadow Ecosystem
+> AI 驱动的投资分析工作站 · 多智能体影子生态系统
 
-MarketMind is an AI-native investment analysis workstation that processes daily market signals through an adversarial pipeline. It ingests multi-source news, runs layered narrative/fundamental/technical analysis, cross-validates findings via an independent Red Team challenger, and surfaces high-conviction investment decisions — all orchestrated through an autonomous shadow agent ecosystem that hunts for bias, collusion, and missed counterfactuals.
+MarketMind is a personal AI investment analysis platform. Every morning, it collects global financial news from 35 sources, runs deep analysis through a 10-stage LLM pipeline, and presents structured investment decisions. Meanwhile, 24 independent AI "shadows" — each a virtual fund manager with their own personality, strategy, and data sources — compete in an internal ranking system, evolve their methodologies through 6 layers of self-evolution, and graduate to earn discussion rights at Gate 2.
 
-MarketMind 是一个 AI 原生的投资分析工作站，通过对抗性管道处理每日市场信号。系统采集多源新闻，运行分层分析，由独立 Red Team 对抗审查交叉验证，最终输出高置信度投资决策——整个过程由自主运行的影子代理生态编排，持续追猎偏见、合谋与错失的反事实路径。
+MarketMind 是一个个人 AI 投资分析平台。每天从 35 个全球信息源采集新闻，通过 10 阶段 LLM 管道进行深度分析，输出结构化投资决策。同时，24 个独立 AI「影子」在内部排名系统中竞争，通过 6 层自进化持续优化方法论，并毕业获得 Gate 2 对话资格。
+
+**MarketMind does not trade for you. You remain the final decision maker.**
+**MarketMind 不替你交易。你始终是最终决策者。**
 
 ---
 
-## Quick Start
+## Quick Start · 快速开始
 
 ```bash
-# GUI dashboard
+# Web Dashboard (recommended)
 cd projects/marketmind
-python app.py
+python api_server.py
+# Open http://localhost:8520
 
-# CLI daily analysis (mock mode)
+# CLI daily analysis
 python app.py --mode daily --mock --verbose
 
-# Run tests
+# Inject external information
+python app.py --mode daily --inject "Your info here" --inject-files report.pdf
+
+# Run tests (1,744 tests)
 python -m pytest projects/marketmind/tests/ -v --tb=short
 ```
 
-## Key Capabilities
+## Architecture · 架构
 
-- **Adversarial Pipeline** — Scout → Flash Preprocess → Narrative → Fundamental + Technical → Shadow Ecosystem → Red Team → Resonance → Decision → Archive
-- **Shadow Agent Ecosystem** — 21+ independent analyst shadows (expert, daredevil, catfish, temp event, missed path) with virtual capital, composite ranking, collusion detection, and emergency quota audits
-- **Red Team Auditor** — Structurally independent adversary hunting for confirmation bias, survivorship bias, and unsupported claims
-- **Counterfactual Tracking** — Missed-path shadows quantify what would have happened if rejected directions were chosen
-- **Resonance Validation** — Statistical cross-check of signal alignment across narrative, fundamental, technical, and sentiment dimensions
-- **Dual Interface** — CLI for batch runs + CustomTkinter GUI with live dashboard, decision cards, and shadow status panels
+```
+10-stage Main Pipeline · 主管道
+  Scout (35 sources) → Flash Triage → HVR Deep-dive → L1 Narrative →
+  L2 Fundamental + L3 Technical → Red Team → Decision → Gate 1/2/3
 
-## Tech Stack
+24-Shadow Ecosystem · 影子生态
+  16 Experts + 4 Momentum + 4 Contrarian · 16 专家 + 4 动量 + 4 逆向
+  6-layer Self-Evolution · 6 层自进化
+  Ranking → Challenger → Knowledge → Diversity → Crystallization → Simulation
+```
 
-Python · asyncio · httpx · yfinance · feedparser · CustomTkinter · SQLite · pytest
+## Key Numbers · 关键数据
 
-## Development
+| Metric · 指标 | Value · 值 |
+|------|:--:|
+| Python files · 文件 | 329 |
+| Lines of code · 代码行 | ~79,000 |
+| Tests · 测试 | 1,744 |
+| Information sources · 信息源 | 17 |
+| Shadow agents · 影子 | 24 |
+| PICA audit · 审计 | 全链通过 |
 
-For architecture details, model routing, testing commands, and full project structure:
+## Tech Stack · 技术栈
 
-- **[CLAUDE.md](CLAUDE.md)** — Global workspace conventions and workflow
-- **[projects/marketmind/CLAUDE.md](projects/marketmind/CLAUDE.md)** — MarketMind-specific architecture and development guide
+Python · FastAPI · asyncio · httpx · DeepSeek · SQLite · yfinance · scipy · numpy · CustomTkinter · pytest
+
+## Development · 开发指南
+
+- **[CLAUDE.md](CLAUDE.md)** — Workspace conventions · 工作区规范
+- **[projects/marketmind/CLAUDE.md](projects/marketmind/CLAUDE.md)** — Architecture guide · 架构指南
+- **[.claude/RESTART_GUIDE.md](.claude/RESTART_GUIDE.md)** — Session restart · 会话重启
