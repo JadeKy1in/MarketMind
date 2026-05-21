@@ -24,24 +24,7 @@ logger = logging.getLogger("marketmind.pipeline.figure_news_pusher")
 # ── Data Types ──────────────────────────────────────────────────────────────────
 
 
-@dataclass
-class FigureSignal:
-    """A scored signal from a tracked market figure.
-
-    Defined per design doc §8.2. Used by FigureSignalExtractor (future module)
-    and distributed by FigureNewsPusher.
-    """
-    person_name: str
-    category: str                # I-VI (policy maker, politician, CEO, activist, fund manager, celebrity)
-    signal_direction: str        # "directional" | "contrarian" | "confirmatory"
-    event_type: str              # "speech" | "trade" | "filing" | "social_post"
-    ticker: str | None = None
-    direction: str | None = None  # "long" | "short" | "warn"
-    awa_score: float = 0.0       # 0-1, Ability × Willingness × Acknowledgment
-    confidence: float = 0.5      # 0.0-1.0 directional confidence
-    summary: str = ""            # Flash-generated one-line summary
-    source_url: str = ""
-    timestamp: str = ""          # ISO-format UTC
+from marketmind.pipeline.figure_signal import FigureSignal
 
 
 @dataclass

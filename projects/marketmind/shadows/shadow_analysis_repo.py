@@ -152,3 +152,39 @@ def get_pnl_by_domain(
         (domain,)
     ).fetchall()
     return [r["pnl_pct"] for r in rows]
+
+
+# ── Beta analysis persistence ─────────────────────────────────────────────────
+
+def save_beta_analyses(
+    conn: sqlite3.Connection, shadow_id: str, date: str, analyses: list,
+    methodology_variant: str | None = None
+) -> None:
+    """Persist beta shadow analyses to isolated beta_analyses table."""
+    if not analyses:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    for a in analyses:
+        conn.execute(
+            """INSERT INTO beta_analyses (shadow_id, date, ticker, direction,
+               confidence, thesis, risk_note, methodology_variant, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (shadow_id, date,
+             a.get("ticker", ""), a.get("direction", "abstain"),
+             a.get("confidence", 0.0), a.get("thesis", ""),
+             a.get("risk_note", ""), methodology_variant, now)
+        )
+    conn.commit()
+
+
+def get_analyses_with_direction(
+    conn: sqlite3.Connection, shadow_id: str, days: int = 90
+) -> list[dict]:
+    """Get analyses with non-abstain direction, most recent first."""
+    rows = conn.execute(
+        """SELECT ticker, direction, date FROM shadow_analyses
+           WHERE shadow_id = ? AND direction != 'abstain'
+           ORDER BY date DESC LIMIT ?""",
+        (shadow_id, days)).fetchall()
+    return [{"ticker": r["ticker"], "direction": r["direction"],
+             "date": r["date"]} for r in rows]

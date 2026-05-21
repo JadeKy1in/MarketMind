@@ -7,11 +7,12 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger("marketmind.shadows.ranking_engine")
 
 from marketmind.config.settings import ShadowSettings
+from marketmind.shadows.composite_scoring import CompositeScoring
+from marketmind.shadows.plateau_detector import PlateauDetector
 
 
 @dataclass
@@ -52,8 +53,14 @@ class RankingResult:
 class RankingEngine:
     """Pure Python ranking computation. No LLM calls."""
 
+    # Backward-compatible aliases for constants extracted to CompositeScoring
+    _V2_WEIGHTS = CompositeScoring.V2_WEIGHTS
+    _V2_CALIBRATION_WEIGHT = CompositeScoring.V2_CALIBRATION_WEIGHT
+
     def __init__(self, config: ShadowSettings):
         self.config = config
+        self._composite = CompositeScoring(config)
+        self._plateau = PlateauDetector(config)
 
     # ── Core metrics ─────────────────────────────────────────────────────
 
@@ -93,192 +100,20 @@ class RankingEngine:
             return 0.0
         return cumulative_return * 252 / days
 
-    # ── Composite scoring ────────────────────────────────────────────────
-
-    # Dynamic win-rate line parameters
-    _WR_LINE_FLOOR = 0.45         # Hard floor — actual win rate can never go below this
-    _WR_WEIGHT_FLOOR = 0.12       # Minimum WR weight in composite (distinct from line)
-    _WR_EARLY_DAYS = 60           # New shadow: heavy WR emphasis
-    _WR_MATURE_DAYS = 180         # Mature shadow: can trade WR for profitability
-    _WR_EARLY_WEIGHT_BOOST = 0.10  # Extra WR weight during early career (+10pp)
-    _PROFIT_LOSS_PENALTY = 0.40   # Multiplicative penalty when cumulative return < 0
-    _PROFIT_LOSS_FLOOR = 0.02     # Minimum composite after penalty (prevent zero-division)
-
-    # V2 composite weights (Phase 2b: learning-enhanced ranking)
-    _V2_WEIGHTS = {"mppm": 0.30, "calmar": 0.20, "omega": 0.15, "win_rate": 0.15}
-    _V2_CALIBRATION_WEIGHT = 0.20
+    # ── Composite scoring (delegated to CompositeScoring) ────────────────
 
     def compute_composite_score(
         self, perf: ShadowPerformance, career_days: int | None = None
     ) -> tuple[float, dict[str, float], dict[str, float]]:
         """Returns (C_raw, component_scores_dict, modifiers_dict).
 
-        Modifiers track the dynamic WR line adjustments and profitability
-        penalties for transparency in ranking display.
-
-        V2 formula (Phase 2b): when calibration data is available,
-        C_v2 = 0.30*MPPM + 0.20*Calmar + 0.15*Omega + 0.15*WR + 0.20*Calibration_Score.
-        If no Brier/calibration data, the 0.20 calibration weight redistributes
-        across the 4 existing components (backward compatible with v1).
+        Delegated to CompositeScoring. Modifiers track dynamic WR line
+        adjustments and profitability penalties for ranking display.
         """
-        has_calibration = perf.brier_score < 1.0 or perf.calibration_score > 0.0
-
-        if has_calibration:
-            w = dict(self._V2_WEIGHTS)
-            calibration_weight = self._V2_CALIBRATION_WEIGHT
-        else:
-            w = dict(self.config.composite_weights)
-            calibration_weight = 0.0
-
-        perf_pool = 1.0 - calibration_weight  # 0.80 in v2, 1.0 in v1
-
-        modifiers = {
-            "wr_weight_raw": w["win_rate"],
-            "wr_weight_adjusted": w["win_rate"],
-            "wr_line_value": 0.0,
-            "profitability_penalty": 0.0,
-            "career_days": career_days or 0,
-            "calibration_weight": calibration_weight,
-            "has_calibration": has_calibration,
-        }
-
-        omega = self.compute_omega(perf.daily_returns)
-        calmar = self.compute_calmar(perf.cumulative_return, perf.max_drawdown)
-        mppm = self.compute_mppm(perf.daily_returns)
-
-        components = {
-            "mppm": mppm,
-            "calmar": calmar,
-            "omega": omega,
-            "win_rate": perf.win_rate,
-        }
-
-        # —— Dynamic win-rate line ——
-        wr_line = self._compute_wr_line(
-            career_days,
-            domain=getattr(perf, 'domain', None),
-            shadow_type=getattr(perf, 'shadow_type', None),
+        return self._composite.compute_composite_score(
+            perf, career_days,
+            self.compute_omega, self.compute_calmar, self.compute_mppm,
         )
-        modifiers["wr_line_value"] = wr_line
-
-        if career_days is not None and career_days < self._WR_EARLY_DAYS:
-            # Early career: boost WR weight to incentivize direction accuracy
-            boosted = min(w["win_rate"] + self._WR_EARLY_WEIGHT_BOOST, 0.50)
-            if perf_pool > boosted:
-                ratio = (perf_pool - boosted) / (perf_pool - w["win_rate"])
-                for key in ("mppm", "calmar", "omega"):
-                    w[key] *= ratio
-            w["win_rate"] = boosted
-
-        elif career_days is not None and career_days >= self._WR_MATURE_DAYS:
-            # Mature: allow WR weight to decrease if profitability is strong
-            if perf.cumulative_return > 0.10:
-                wr_discount = min(0.08, (perf.cumulative_return - 0.10) * 0.15)
-                w["win_rate"] = max(self._WR_WEIGHT_FLOOR, w["win_rate"] - wr_discount)
-                redist = wr_discount / 3.0
-                for key in ("mppm", "calmar", "omega"):
-                    w[key] += redist
-
-        modifiers["wr_weight_adjusted"] = w["win_rate"]
-
-        # Normalize each component to [0, 1]
-        mppm_norm = self._normalize_mppm(mppm)
-        calmar_norm = self._normalize_calmar(calmar)
-        omega_norm = omega / 10.0
-        wr_norm = perf.win_rate
-
-        composite = (
-            w["mppm"] * mppm_norm +
-            w["calmar"] * calmar_norm +
-            w["omega"] * omega_norm +
-            w["win_rate"] * wr_norm
-        )
-
-        # —— Calibration score (Phase 2b v2 formula) ——
-        if has_calibration:
-            if perf.calibration_score > 0.0:
-                cal_score = perf.calibration_score
-            else:
-                brier_component = 1.0 - perf.brier_score
-                if perf.domain_scores:
-                    scores = list(perf.domain_scores.values())
-                    mean_score = sum(scores) / len(scores)
-                    resolution = sum((s - mean_score) ** 2 for s in scores) / len(scores)
-                else:
-                    resolution = 0.0
-                cal_score = 0.5 * brier_component + 0.5 * resolution
-                cal_score = max(0.0, min(1.0, cal_score))
-
-            composite += calibration_weight * cal_score
-            components["calibration"] = cal_score
-            modifiers["calibration_score"] = cal_score
-
-        # —— Profitability penalty ——
-        if perf.cumulative_return < 0:
-            penalty = min(
-                self._PROFIT_LOSS_PENALTY,
-                abs(perf.cumulative_return) * 0.5
-            )
-            composite = max(composite * (1.0 - penalty), self._PROFIT_LOSS_FLOOR)
-            modifiers["profitability_penalty"] = penalty
-
-        # —— Abstention penalty (anti-conservatism, Phase 2) ——
-        abstention_penalty = 0.0
-        if career_days and career_days > 0:
-            abstention_rate = perf.abstention_days / career_days
-            if abstention_rate > 0.3:  # Only penalize if >30% days abstained
-                abstention_penalty = self.config.abstention_penalty_weight * abstention_rate
-                composite -= abstention_penalty
-        modifiers["abstention_penalty"] = abstention_penalty
-
-        return max(composite, 0.0), components, modifiers
-
-    @staticmethod
-    def _compute_wr_line(career_days: int | None, domain: str | None = None,
-                         shadow_type: str | None = None) -> float:
-        """Dynamic win-rate floor. Returns the minimum acceptable WR for ranking bonus.
-
-        Early career: higher line (encourage direction accuracy).
-        Mature career: line can relax if shadow is profitable.
-        Domain/shadow_type flexibility: daredevil and contrarian strategies
-        naturally have lower win rates.
-        """
-        if career_days is None:
-            return RankingEngine._WR_LINE_FLOOR
-
-        # Strategy-type adjustment: daredevils and contrarian strategies
-        # structurally have lower win rates by design
-        domain_adjust = 0.0
-        if shadow_type == "daredevil":
-            domain_adjust = -0.05
-        elif domain and domain in ("contrarian", "short"):
-            domain_adjust = -0.05
-
-        if career_days < RankingEngine._WR_EARLY_DAYS:
-            return max(RankingEngine._WR_LINE_FLOOR, 0.55 + domain_adjust)
-        elif career_days < RankingEngine._WR_MATURE_DAYS:
-            progress = (career_days - RankingEngine._WR_EARLY_DAYS) / (
-                RankingEngine._WR_MATURE_DAYS - RankingEngine._WR_EARLY_DAYS
-            )
-            return max(RankingEngine._WR_LINE_FLOOR, 0.55 - 0.10 * progress + domain_adjust)
-        else:
-            return max(RankingEngine._WR_LINE_FLOOR, 0.45 + domain_adjust)
-
-    @staticmethod
-    def _normalize_mppm(mppm: float) -> float:
-        """Normalize MPPM to [0, 1]. Log-sigmoid transform.
-        MPPM typically ranges from -2 to +2 for daily returns.
-        """
-        if mppm == float("-inf"):
-            return 0.0
-        if math.isnan(mppm):
-            return 0.0
-        return 1.0 / (1.0 + math.exp(-mppm))
-
-    @staticmethod
-    def _normalize_calmar(calmar: float) -> float:
-        """Normalize Calmar to [0, 1]. Calmar > 3 is exceptional."""
-        return min(calmar / 3.0, 1.0)
 
     # ── Bayesian overfitting haircut ──────────────────────────────────────
 
@@ -475,7 +310,7 @@ class RankingEngine:
                 break
         return count
 
-    # ── Plateau detection ─────────────────────────────────────────────────
+    # ── Plateau detection (delegated to PlateauDetector) ──────────────────
 
     def detect_plateau(
         self,
@@ -484,44 +319,10 @@ class RankingEngine:
         win_rate_history: list[tuple[str, float]],
         insight_dates: list[str],
     ) -> tuple[bool, float]:
-        """Returns (is_plateaued, plateau_score) where higher score = more stale.
-
-        Plateau weights: 0.5 stagnation + 0.3 wr_stability + 0.2 insight_drought
-        """
-        cfg = self.config
-
-        # Minimum-age guard: new shadows (< plateau_no_elite_days snapshots) skip detection
-        if len(tier_history) < cfg.plateau_no_elite_days:
-            return False, 0.0
-        scores = []
-
-        # Stagnation: no elite in plateau_no_elite_days
-        sorted_tiers = sorted(tier_history, key=lambda x: x[0], reverse=True)
-        recent_tiers = [t for d, t in sorted_tiers[:cfg.plateau_no_elite_days]]
-        no_elite = "elite" not in recent_tiers if recent_tiers else True
-        scores.append(0.5 if no_elite else 0.0)
-
-        # WR stability: range of win rates in recent history
-        sorted_wr = sorted(win_rate_history, key=lambda x: x[0], reverse=True)
-        recent_wr = [wr for _, wr in sorted_wr[:cfg.plateau_no_elite_days]]
-        if len(recent_wr) >= 2:
-            wr_range = max(recent_wr) - min(recent_wr)
-            scores.append(0.3 * min(wr_range / cfg.plateau_wr_range_pp, 1.0))
-        else:
-            scores.append(0.0)
-
-        # Insight drought
-        if insight_dates:
-            latest_insight = max(insight_dates)
-            days_since = (datetime.now(timezone.utc).date() -
-                          datetime.strptime(latest_insight, "%Y-%m-%d").date()).days
-            drought = min(days_since / cfg.plateau_no_insight_days, 1.0)
-        else:
-            drought = 1.0
-        scores.append(0.2 * drought)
-
-        plateau_score = sum(scores)
-        return plateau_score >= 0.5, plateau_score
+        """Returns (is_plateaued, plateau_score) where higher score = more stale."""
+        return self._plateau.detect_plateau(
+            shadow_id, tier_history, win_rate_history, insight_dates,
+        )
 
     # ── Full ranking pipeline ─────────────────────────────────────────────
 
@@ -648,45 +449,8 @@ class RankingEngine:
 
     @staticmethod
     def _apply_holm_bonferroni(results: list[RankingResult]) -> None:
-        """Apply Holm-Bonferroni correction to achievement tier assignments.
-
-        For N shadows, the probability of at least one false ELITE is
-        ~1 - (1-alpha)^N. With 22 shadows, this is ~97% without correction.
-        This method steps down through ranked shadows and requires surviving
-        a corrected alpha threshold.
-
-        Shadows at the boundary that fail the corrected threshold are
-        downgraded to the next tier.
-        """
-        n = len(results)
-        if n < 2:
-            return
-
-        # Tier severity ordering (for downgrade logic)
-        tier_order = {"elite": 4, "excellent": 3, "normal": 2, "watch": 1, "endangered": 0}
-        reverse_tier = {4: "elite", 3: "excellent", 2: "normal", 1: "watch", 0: "endangered"}
-
-        # For ELITE/EXCELLENT shadows: require surviving step-down
-        # Sort by percentile_rank descending (most significant first) for Holm
-        alpha = 0.05  # family-wise error rate
-        ranked = sorted(results, key=lambda r: r.percentile_rank, reverse=True)
-
-        # Count how many ELITE + EXCELLENT exist
-        elevated = [r for r in ranked if r.achievement_tier in ("elite", "excellent")]
-        k = len(elevated)
-
-        for i, r in enumerate(elevated):
-            corrected_alpha = alpha / (k - i)  # Holm step-down
-            # If shadow's percentile rank would not be significant at corrected alpha,
-            # downgrade to NORMAL
-            if r.percentile_rank < (1.0 - corrected_alpha):
-                old_tier = r.achievement_tier
-                r.achievement_tier = "normal"
-                logger.info(
-                    "Holm-Bonferroni: %s downgraded from %s to normal "
-                    "(percentile=%.2f, corrected_alpha=%.4f)",
-                    r.shadow_id, old_tier, r.percentile_rank, corrected_alpha
-                )
+        """Apply Holm-Bonferroni correction. Delegated to CompositeScoring."""
+        CompositeScoring.apply_holm_bonferroni(results)
 
     @staticmethod
     def _estimate_sharpe(returns: list[float]) -> float:
@@ -700,7 +464,7 @@ class RankingEngine:
         daily_sharpe = mean / math.sqrt(variance)
         return daily_sharpe * math.sqrt(252)
 
-    # ── Reset eligibility (Phase 2) ────────────────────────────────────
+    # ── Reset eligibility (delegated to PlateauDetector) ──────────────────
 
     def check_reset_eligibility(
         self,
@@ -710,60 +474,11 @@ class RankingEngine:
     ) -> tuple[bool, str]:
         """Check if a shadow should be reset to baseline methodology.
 
-        Three conditions must ALL be met:
-        1. No EXCELLENT or higher in reset_no_excellent_months
-        2. Win rate fluctuation < ±5% for reset_flat_wr_months
-        3. No insight produced in reset_no_insight_months
-
-        Returns (should_reset, reason).
+        Delegated to PlateauDetector.
         """
-        from datetime import datetime, timedelta
-
-        cfg = self.config
-        today = datetime.now(timezone.utc).date()
-        months_ago_6 = today - timedelta(days=cfg.reset_no_excellent_months * 30)
-        months_ago_3 = today - timedelta(days=cfg.reset_flat_wr_months * 30)
-        insight_cutoff = today - timedelta(days=cfg.reset_no_insight_months * 30)
-
-        # Condition 1: No EXCELLENT in N months
-        has_excellent = False
-        for date_str, tier in tier_history:
-            try:
-                d = datetime.strptime(date_str, "%Y-%m-%d").date()
-                if d >= months_ago_6 and tier in ("excellent", "elite"):
-                    has_excellent = True
-                    break
-            except ValueError:
-                continue
-
-        if has_excellent:
-            return False, ""
-
-        # Condition 2: WR flat for N months
-        recent_wr = [
-            wr for date_str, wr in wr_history
-            if (d := datetime.strptime(date_str, "%Y-%m-%d").date()) and d >= months_ago_3
-        ]
-        if recent_wr and len(recent_wr) >= 5:
-            wr_range = max(recent_wr) - min(recent_wr)
-            if wr_range > 0.05:
-                return False, ""
-
-        # Condition 3: No insight in N months
-        has_insight = any(
-            datetime.strptime(d, "%Y-%m-%d").date() >= insight_cutoff
-            for d in insight_dates
+        return self._plateau.check_reset_eligibility(
+            tier_history, wr_history, insight_dates,
         )
-
-        if not has_insight and (not recent_wr or len(recent_wr) < 5 or wr_range <= 0.05):
-            return True, (
-                f"No EXCELLENT tier in {cfg.reset_no_excellent_months} months, "
-                f"WR range {max(recent_wr)-min(recent_wr):.2%} in "
-                f"{cfg.reset_flat_wr_months} months, "
-                f"no insight in {cfg.reset_no_insight_months} months"
-            )
-
-        return False, ""
 
 
 # ── Token efficiency (standalone) ────────────────────────────────────────

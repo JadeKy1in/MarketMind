@@ -1,11 +1,9 @@
-"""Shadow state persistence -- SQLite schema, config models, CRUD operations."""
+"""Shadow state persistence -- SQLite schema, thin delegation layer to repo modules."""
 from __future__ import annotations
 
-import json
+import importlib
 import logging
 import sqlite3
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 
 from marketmind.shadows.shadow_data_types import (  # noqa: F401 — re-export for backward compat
@@ -28,8 +26,10 @@ logger = logging.getLogger("marketmind.shadows.shadow_state")
 # Schema version + DDL + migrations imported from shadow_schema
 _ = _SCHEMA_SQL  # reference to suppress unused-import warning
 
+_REPO_BASE = "marketmind.shadows"
+
 class ShadowStateDB:
-    """SQLite-backed shadow state persistence."""
+    """SQLite-backed shadow state persistence -- thin delegation to repo modules."""
 
     def __init__(self, db_path: str = "data/shadows/shadows.db"):
         self.db_path = db_path
@@ -43,6 +43,16 @@ class ShadowStateDB:
         conn.execute("PRAGMA foreign_keys=ON")
         conn.row_factory = sqlite3.Row
         return conn
+
+    def _delegate(self, module_path: str, func_name: str, *args, **kwargs):
+        """Generic delegation: import repo function, connect, call, close."""
+        mod = importlib.import_module(module_path)
+        func = getattr(mod, func_name)
+        conn = self._connect()
+        try:
+            return func(conn, *args, **kwargs)
+        finally:
+            conn.close()
 
     def init_schema(self) -> None:
         conn = self._connect()
@@ -77,782 +87,247 @@ class ShadowStateDB:
     @staticmethod
     def _migrate_add_column(conn: sqlite3.Connection, table: str,
                             column: str, col_type: str) -> None:
-        """Safe ALTER TABLE ADD COLUMN — ignores if column already exists."""
+        """Safe ALTER TABLE ADD COLUMN -- ignores if column already exists."""
         try:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
             logger.info("Migration: added %s.%s %s", table, column, col_type)
         except sqlite3.OperationalError:
-            pass  # Column already exists — safe to ignore
+            pass  # Column already exists -- safe to ignore
 
     def close(self) -> None:
         pass  # SQLite connections are closed per-operation
 
-    # ── Shadow CRUD ──────────────────────────────────────────────────────
+    # ── Shadow CRUD ──────────────────────────────────────────────────────────
 
     def create_shadow(self, config: ShadowConfig) -> str:
-        conn = self._connect()
-        try:
-            existing = conn.execute(
-                "SELECT id FROM shadows WHERE id = ?", (config.shadow_id,)
-            ).fetchone()
-            if existing:
-                raise ValueError(f"Shadow '{config.shadow_id}' already exists")
-
-            config_json = json.dumps({
-                "virtual_capital": config.virtual_capital,
-                "max_positions": config.max_positions,
-                "model": config.model,
-                "temperature": config.temperature,
-                "reasoning_effort": config.reasoning_effort,
-                "domain": config.domain,
-                "max_drawdown_limit": config.max_drawdown_limit,
-                "min_trades_for_ranking": config.min_trades_for_ranking,
-                "parent_shadow_id": config.parent_shadow_id,
-                "generation": config.generation,
-            })
-            conn.execute(
-                """INSERT INTO shadows (id, shadow_type, display_name, status,
-                   methodology_prompt, config_json, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (config.shadow_id, config.shadow_type, config.display_name,
-                 config.status, config.methodology_prompt, config_json,
-                 config.created_at)
-            )
-            conn.commit()
-            return config.shadow_id
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_config_repo", "create_shadow", config)
 
     def get_shadow(self, shadow_id: str) -> ShadowConfig | None:
-        conn = self._connect()
-        try:
-            row = conn.execute(
-                "SELECT * FROM shadows WHERE id = ?", (shadow_id,)
-            ).fetchone()
-            if row is None:
-                return None
-            return self._row_to_config(row)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_config_repo", "get_shadow", shadow_id)
 
     def get_active_shadows(self, shadow_type: str | None = None) -> list[ShadowConfig]:
-        conn = self._connect()
-        try:
-            if shadow_type:
-                rows = conn.execute(
-                    "SELECT * FROM shadows WHERE status NOT IN ('eliminated','retired') AND shadow_type = ?",
-                    (shadow_type,)
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM shadows WHERE status NOT IN ('eliminated','retired')"
-                ).fetchall()
-            return [self._row_to_config(r) for r in rows]
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_config_repo", "get_active_shadows", shadow_type)
 
     def get_visible_shadows(self) -> list[ShadowConfig]:
-        conn = self._connect()
-        try:
-            rows = conn.execute(
-                "SELECT * FROM shadows WHERE status NOT IN ('eliminated','retired')"
-                " AND shadow_type != 'challenger'"
-            ).fetchall()
-            return [self._row_to_config(r) for r in rows]
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_config_repo", "get_visible_shadows")
 
     def get_ranking_eligible_shadows(self) -> list[ShadowConfig]:
-        """Shadows eligible for ranking, collusion detection, and challenger engine.
-        Excludes beta, retired, eliminated, and challenger shadows."""
-        conn = self._connect()
-        try:
-            rows = conn.execute(
-                "SELECT * FROM shadows WHERE status NOT IN ('eliminated','retired','beta')"
-                " AND shadow_type != 'challenger'"
-            ).fetchall()
-            return [self._row_to_config(r) for r in rows]
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_config_repo", "get_ranking_eligible_shadows")
 
     def update_shadow_status(self, shadow_id: str, status: str) -> None:
-        conn = self._connect()
-        try:
-            conn.execute(
-                "UPDATE shadows SET status = ? WHERE id = ?",
-                (status, shadow_id)
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        self._delegate(f"{_REPO_BASE}.shadow_config_repo", "update_shadow_status", shadow_id, status)
 
     def retire_shadow(self, shadow_id: str, reason: str) -> None:
-        """Mark shadow as retired. Preserves methodology and history as frozen benchmark."""
-        conn = self._connect()
-        try:
-            now = datetime.now(timezone.utc).isoformat()
-            conn.execute(
-                "UPDATE shadows SET status = 'retired', retired_at = ?, "
-                "retirement_reason = ? WHERE id = ?",
-                (now, reason, shadow_id)
-            )
-            conn.execute(
-                """UPDATE virtual_trades SET exit_reason = 'shadow_retired',
-                   exit_date = ? WHERE shadow_id = ? AND exit_price IS NULL""",
-                (now[:10], shadow_id)
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        self._delegate(f"{_REPO_BASE}.shadow_config_repo", "retire_shadow", shadow_id, reason)
 
     def eliminate_shadow(self, shadow_id: str, reason: str) -> None:
-        conn = self._connect()
-        try:
-            now = datetime.now(timezone.utc).isoformat()
-            conn.execute(
-                "UPDATE shadows SET status = 'eliminated', eliminated_at = ? WHERE id = ?",
-                (now, shadow_id)
-            )
-            conn.execute(
-                """UPDATE virtual_trades SET exit_reason = 'shadow_eliminated',
-                   exit_date = ? WHERE shadow_id = ? AND exit_price IS NULL""",
-                (now[:10], shadow_id)
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        self._delegate(f"{_REPO_BASE}.shadow_config_repo", "eliminate_shadow", shadow_id, reason)
 
     def update_shadow_type(self, shadow_id: str, new_type: str) -> bool:
-        """Change a shadow's type (e.g., challenger → expert on promotion)."""
-        conn = self._connect()
-        try:
-            conn.execute(
-                "UPDATE shadows SET shadow_type = ? WHERE id = ?",
-                (new_type, shadow_id)
-            )
-            conn.commit()
-            return conn.total_changes > 0
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_config_repo", "update_shadow_type", shadow_id, new_type)
+
+    # ── Methodology ──────────────────────────────────────────────────────────
 
     def update_methodology_prompt(self, shadow_id: str, new_prompt: str,
                                     reason: str = "") -> bool:
-        """Update a shadow's methodology prompt and log the change (P1-1).
-
-        Returns True if the shadow was found and updated.
-        """
-        conn = self._connect()
-        try:
-            old = conn.execute(
-                "SELECT methodology_prompt FROM shadows WHERE id = ?",
-                (shadow_id,)
-            ).fetchone()
-            if old is None:
-                return False
-            old_prompt = old["methodology_prompt"] or ""
-
-            now = datetime.now(timezone.utc).isoformat()
-            conn.execute(
-                "UPDATE shadows SET methodology_prompt = ? WHERE id = ?",
-                (new_prompt, shadow_id)
-            )
-            conn.execute(
-                """INSERT INTO methodology_changes
-                   (shadow_id, change_type, old_prompt, new_prompt, reason, changed_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (shadow_id, "update", old_prompt[:500], new_prompt[:500], reason, now)
-            )
-            conn.commit()
-            logger.info("Methodology updated for %s: %s", shadow_id, reason)
-            return True
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_config_repo", "update_methodology_prompt",
+                            shadow_id, new_prompt, reason)
 
     def get_methodology_history(self, shadow_id: str,
                                  limit: int = 20) -> list[dict]:
-        """Get methodology change history for a shadow (P1-1)."""
-        conn = self._connect()
-        try:
-            rows = conn.execute(
-                """SELECT change_type, reason, changed_at FROM methodology_changes
-                   WHERE shadow_id = ? ORDER BY changed_at DESC LIMIT ?""",
-                (shadow_id, limit)
-            ).fetchall()
-            return [{"change_type": r["change_type"], "reason": r["reason"],
-                     "changed_at": r["changed_at"]} for r in rows]
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_config_repo", "get_methodology_history",
+                            shadow_id, limit)
 
     def get_original_methodology(self, shadow_id: str) -> str | None:
-        """Get the first recorded methodology prompt (baseline) for a shadow."""
-        conn = self._connect()
-        try:
-            row = conn.execute(
-                """SELECT old_prompt FROM methodology_changes
-                   WHERE shadow_id = ? ORDER BY changed_at ASC LIMIT 1""",
-                (shadow_id,)
-            ).fetchone()
-            return row["old_prompt"] if row else None
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_config_repo", "get_original_methodology", shadow_id)
 
     def get_failure_patterns(self, shadow_id: str, days: int = 90) -> list[str]:
-        """Get failure patterns from AEL debriefs (P3-1).
-
-        Queries methodology_changes for debrief-type entries within the
-        specified day window. Each row's reason field contains one failure
-        pattern description.
-
-        Args:
-            shadow_id: The shadow whose debriefs to query.
-            days: Lookback window in days (default 90).
-
-        Returns:
-            List of failure pattern strings, most recent first. Empty if none.
-        """
-        conn = self._connect()
-        try:
-            from datetime import timedelta
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-            rows = conn.execute(
-                """SELECT reason, new_prompt FROM methodology_changes
-                   WHERE shadow_id = ? AND change_type = 'debrief'
-                   AND changed_at >= ?
-                   ORDER BY changed_at DESC""",
-                (shadow_id, cutoff)
-            ).fetchall()
-
-            patterns = []
-            for row in rows:
-                reason = (row["reason"] or "").strip()
-                if reason:
-                    patterns.append(reason)
-
-            # Also extract from [FAILURE PATTERNS TO AVOID] block in new_prompt
-            for row in rows:
-                new_prompt = row["new_prompt"] or ""
-                if "[FAILURE PATTERNS TO AVOID" in new_prompt:
-                    section = new_prompt.split("[FAILURE PATTERNS TO AVOID")[1]
-                    section = section.split("\n\n")[0] if "\n\n" in section else section
-                    for line in section.split("\n"):
-                        line = line.strip().lstrip("-").strip()
-                        if line and not line.startswith("learned"):
-                            patterns.append(line)
-
-            return patterns
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_config_repo", "get_failure_patterns",
+                            shadow_id, days)
 
     def get_retired_insights(self, shadow_id: str, days: int = 90) -> list[str]:
-        """Get retired insights from crystallization (P3-1).
+        return self._delegate(f"{_REPO_BASE}.shadow_config_repo", "get_retired_insights",
+                            shadow_id, days)
 
-        Queries methodology_changes for crystallization_retire entries.
-        Retired insights are previously-validated insights that have been
-        invalidated by new evidence.
-
-        Args:
-            shadow_id: The shadow whose retired insights to query.
-            days: Lookback window in days (default 90).
-
-        Returns:
-            List of retired insight strings, most recent first. Empty if none.
-        """
-        conn = self._connect()
-        try:
-            from datetime import timedelta
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-            rows = conn.execute(
-                """SELECT reason, new_prompt FROM methodology_changes
-                   WHERE shadow_id = ? AND change_type = 'crystallization_retire'
-                   AND changed_at >= ?
-                   ORDER BY changed_at DESC""",
-                (shadow_id, cutoff)
-            ).fetchall()
-
-            insights = []
-            for row in rows:
-                reason = (row["reason"] or "").strip()
-                if reason:
-                    insights.append(reason)
-
-            # Also extract from [RETIRED] block in new_prompt
-            for row in rows:
-                new_prompt = row["new_prompt"] or ""
-                if "[RETIRED:" in new_prompt:
-                    section = new_prompt.split("[RETIRED:")[1]
-                    section = section.split("]")[0] if "]" in section else section
-                    section = section.strip()
-                    if section:
-                        insights.append(section)
-
-            return insights
-        finally:
-            conn.close()
-
-    @staticmethod
-    def _row_to_config(row: sqlite3.Row) -> ShadowConfig:
-        try:
-            config_json = json.loads(row["config_json"] or "{}")
-        except json.JSONDecodeError:
-            logger.warning("Corrupted config_json for shadow %s, using defaults", row["id"])
-            config_json = {}
-        return ShadowConfig(
-            shadow_id=row["id"],
-            shadow_type=row["shadow_type"],
-            display_name=row["display_name"],
-            methodology_prompt=row["methodology_prompt"] or "",
-            virtual_capital=config_json.get("virtual_capital", 0),
-            max_positions=config_json.get("max_positions", 3),
-            model=config_json.get("model", "pro"),
-            temperature=config_json.get("temperature", 0.3),
-            reasoning_effort=config_json.get("reasoning_effort", "max"),
-            domain=config_json.get("domain"),
-            max_drawdown_limit=config_json.get("max_drawdown_limit", 0.35),
-            min_trades_for_ranking=config_json.get("min_trades_for_ranking", 5),
-            parent_shadow_id=config_json.get("parent_shadow_id"),
-            generation=config_json.get("generation", 0),
-            status=row["status"],
-            eliminated_at=row["eliminated_at"],
-            retired_at=row["retired_at"],
-            retirement_reason=row["retirement_reason"],
-            created_at=row["created_at"],
-        )
-
-    # ── Virtual trades (delegated to shadow_trade_repo) ───────────────────
+    # ── Virtual trades ──────────────────────────────────────────────────────
 
     def record_trade_open(self, shadow_id: str, trade: VirtualTradeOpen) -> int:
-        from marketmind.shadows.shadow_trade_repo import record_trade_open
-        conn = self._connect()
-        try:
-            return record_trade_open(conn, shadow_id, trade)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_trade_repo", "record_trade_open", shadow_id, trade)
 
     def record_trade_close(self, trade_id: int, exit_price: float,
                            exit_reason: str, pnl_pct: float) -> None:
-        from marketmind.shadows.shadow_trade_repo import record_trade_close
-        conn = self._connect()
-        try:
-            record_trade_close(conn, trade_id, exit_price, exit_reason, pnl_pct)
-        finally:
-            conn.close()
+        self._delegate(f"{_REPO_BASE}.shadow_trade_repo", "record_trade_close",
+                      trade_id, exit_price, exit_reason, pnl_pct)
 
     def get_open_trades(self, shadow_id: str) -> list[VirtualTrade]:
-        from marketmind.shadows.shadow_trade_repo import get_open_trades
-        conn = self._connect()
-        try:
-            return get_open_trades(conn, shadow_id)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_trade_repo", "get_open_trades", shadow_id)
 
     def get_trade_history(self, shadow_id: str, limit: int = 90) -> list[VirtualTrade]:
-        from marketmind.shadows.shadow_trade_repo import get_trade_history
-        conn = self._connect()
-        try:
-            return get_trade_history(conn, shadow_id, limit)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_trade_repo", "get_trade_history", shadow_id, limit)
 
-    # ── Daily snapshots (delegated to shadow_snapshot_repo) ───────────────
+    # ── Daily snapshots ─────────────────────────────────────────────────────
 
     def save_snapshot(self, shadow_id: str, snapshot: DailySnapshot) -> None:
-        from marketmind.shadows.shadow_snapshot_repo import save_snapshot
-        conn = self._connect()
-        try:
-            save_snapshot(conn, shadow_id, snapshot)
-        finally:
-            conn.close()
+        self._delegate(f"{_REPO_BASE}.shadow_snapshot_repo", "save_snapshot", shadow_id, snapshot)
 
     def get_snapshot_history(self, shadow_id: str, days: int = 90) -> list[DailySnapshot]:
-        from marketmind.shadows.shadow_snapshot_repo import get_snapshot_history
-        conn = self._connect()
-        try:
-            return get_snapshot_history(conn, shadow_id, days)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_snapshot_repo", "get_snapshot_history", shadow_id, days)
 
     def get_latest_snapshot(self, shadow_id: str) -> DailySnapshot | None:
-        from marketmind.shadows.shadow_snapshot_repo import get_latest_snapshot
-        conn = self._connect()
-        try:
-            return get_latest_snapshot(conn, shadow_id)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_snapshot_repo", "get_latest_snapshot", shadow_id)
 
     def get_tier_history(self, shadow_id: str, days: int = 120) -> list[tuple[str, str]]:
-        from marketmind.shadows.shadow_snapshot_repo import get_tier_history
-        conn = self._connect()
-        try:
-            return get_tier_history(conn, shadow_id, days)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_snapshot_repo", "get_tier_history", shadow_id, days)
 
     def get_wr_history(self, shadow_id: str, days: int = 120) -> list[tuple[str, float]]:
-        from marketmind.shadows.shadow_snapshot_repo import get_wr_history
-        conn = self._connect()
-        try:
-            return get_wr_history(conn, shadow_id, days)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_snapshot_repo", "get_wr_history", shadow_id, days)
 
     def get_insight_dates(self, shadow_id: str, days: int = 120) -> list[str]:
-        from marketmind.shadows.shadow_snapshot_repo import get_insight_dates
-        conn = self._connect()
-        try:
-            return get_insight_dates(conn, shadow_id, days)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_snapshot_repo", "get_insight_dates", shadow_id, days)
 
     def get_abstention_days(self, shadow_id: str, days: int = 180) -> int:
-        from marketmind.shadows.shadow_snapshot_repo import get_abstention_days
-        conn = self._connect()
-        try:
-            return get_abstention_days(conn, shadow_id, days)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_snapshot_repo", "get_abstention_days", shadow_id, days)
 
     def save_raw_output(self, shadow_id: str, date: str, raw_output: str,
                          token_count: int = 0, model: str = "pro") -> None:
-        from marketmind.shadows.shadow_snapshot_repo import save_raw_output
-        conn = self._connect()
-        try:
-            save_raw_output(conn, shadow_id, date, raw_output, token_count, model)
-        finally:
-            conn.close()
+        self._delegate(f"{_REPO_BASE}.shadow_snapshot_repo", "save_raw_output",
+                      shadow_id, date, raw_output, token_count, model)
 
     def count_consecutive_zero_insights(self, shadow_id: str,
                                          max_days: int = 8) -> int:
-        from marketmind.shadows.shadow_snapshot_repo import count_consecutive_zero_insights
-        conn = self._connect()
-        try:
-            return count_consecutive_zero_insights(conn, shadow_id, max_days)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_snapshot_repo", "count_consecutive_zero_insights",
+                            shadow_id, max_days)
 
     def get_raw_output(self, shadow_id: str, date: str) -> str | None:
-        from marketmind.shadows.shadow_snapshot_repo import get_raw_output
-        conn = self._connect()
-        try:
-            return get_raw_output(conn, shadow_id, date)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_snapshot_repo", "get_raw_output", shadow_id, date)
 
     def get_token_history(self, shadow_id: str, days: int = 30) -> list[int]:
-        from marketmind.shadows.shadow_snapshot_repo import get_token_history
-        conn = self._connect()
-        try:
-            return get_token_history(conn, shadow_id, days)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_snapshot_repo", "get_token_history", shadow_id, days)
 
     def update_snapshot_fields(self, shadow_id: str, date: str, **fields) -> None:
-        from marketmind.shadows.shadow_snapshot_repo import update_snapshot_fields
-        conn = self._connect()
-        try:
-            update_snapshot_fields(conn, shadow_id, date, **fields)
-        finally:
-            conn.close()
+        self._delegate(f"{_REPO_BASE}.shadow_snapshot_repo", "update_snapshot_fields",
+                      shadow_id, date, **fields)
 
-    # ── Rankings (delegated to shadow_analysis_repo) ───────────────────────
+    def get_all_daily_snapshots(self, date: str) -> list[DailySnapshot]:
+        return self._delegate(f"{_REPO_BASE}.shadow_snapshot_repo", "get_all_daily_snapshots", date)
+
+    # ── Rankings ────────────────────────────────────────────────────────────
 
     def save_rankings(self, date: str, rankings: list[tuple[str, float, float, dict]]) -> None:
-        from marketmind.shadows.shadow_analysis_repo import save_rankings
-        conn = self._connect()
-        try:
-            save_rankings(conn, date, rankings)
-        finally:
-            conn.close()
+        self._delegate(f"{_REPO_BASE}.shadow_analysis_repo", "save_rankings", date, rankings)
 
     def get_ranking_history(self, shadow_id: str, days: int = 90) -> list[dict]:
-        from marketmind.shadows.shadow_analysis_repo import get_ranking_history
-        conn = self._connect()
-        try:
-            return get_ranking_history(conn, shadow_id, days)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_analysis_repo", "get_ranking_history", shadow_id, days)
 
-    # ── Integrity / Emergency / Collusion (delegated to shadow_integrity_repo) ─
+    # ── Integrity / Emergency / Collusion ────────────────────────────────────
 
     def record_integrity_event(self, shadow_id: str, event: IntegrityEvent) -> bool:
-        from marketmind.shadows.shadow_integrity_repo import record_integrity_event
-        conn = self._connect()
-        try:
-            return record_integrity_event(conn, shadow_id, event)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_integrity_repo", "record_integrity_event",
+                            shadow_id, event)
 
     def get_integrity_score(self, shadow_id: str) -> int:
-        from marketmind.shadows.shadow_integrity_repo import get_integrity_score
-        conn = self._connect()
-        try:
-            return get_integrity_score(conn, shadow_id)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_integrity_repo", "get_integrity_score", shadow_id)
 
     def get_integrity_history(self, shadow_id: str, days: int = 90) -> list[IntegrityEvent]:
-        from marketmind.shadows.shadow_integrity_repo import get_integrity_history
-        conn = self._connect()
-        try:
-            return get_integrity_history(conn, shadow_id, days)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_integrity_repo", "get_integrity_history",
+                            shadow_id, days)
 
     def record_emergency_quota(self, shadow_id: str, quota: EmergencyQuotaRequest) -> int:
-        from marketmind.shadows.shadow_integrity_repo import record_emergency_quota
-        conn = self._connect()
-        try:
-            return record_emergency_quota(conn, shadow_id, quota)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_integrity_repo", "record_emergency_quota",
+                            shadow_id, quota)
 
     def update_emergency_result(self, quota_id: int, result: str,
                                 pnl_impact: float, penalty: str) -> None:
-        from marketmind.shadows.shadow_integrity_repo import update_emergency_result
-        conn = self._connect()
-        try:
-            update_emergency_result(conn, quota_id, result, pnl_impact, penalty)
-        finally:
-            conn.close()
+        self._delegate(f"{_REPO_BASE}.shadow_integrity_repo", "update_emergency_result",
+                      quota_id, result, pnl_impact, penalty)
 
     def get_pending_emergency_audits(self) -> list[EmergencyQuotaRequest]:
-        from marketmind.shadows.shadow_integrity_repo import get_pending_emergency_audits
-        conn = self._connect()
-        try:
-            return get_pending_emergency_audits(conn)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_integrity_repo", "get_pending_emergency_audits")
 
     def record_collusion_flag(self, flag: CollusionFlag) -> None:
-        from marketmind.shadows.shadow_integrity_repo import record_collusion_flag
-        conn = self._connect()
-        try:
-            record_collusion_flag(conn, flag)
-        finally:
-            conn.close()
+        self._delegate(f"{_REPO_BASE}.shadow_integrity_repo", "record_collusion_flag", flag)
 
     def get_recent_collusion_flags(self, days: int = 30) -> list[CollusionFlag]:
-        from marketmind.shadows.shadow_integrity_repo import get_recent_collusion_flags
-        conn = self._connect()
-        try:
-            return get_recent_collusion_flags(conn, days)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_integrity_repo", "get_recent_collusion_flags", days)
 
     def save_emergency_quota_state(self, shadow_id: str, state_json: str) -> None:
-        from marketmind.shadows.shadow_integrity_repo import save_emergency_quota_state
-        conn = self._connect()
-        try:
-            save_emergency_quota_state(conn, shadow_id, state_json)
-        finally:
-            conn.close()
+        self._delegate(f"{_REPO_BASE}.shadow_integrity_repo", "save_emergency_quota_state",
+                      shadow_id, state_json)
 
     def load_emergency_quota_state(self, shadow_id: str) -> str | None:
-        from marketmind.shadows.shadow_integrity_repo import load_emergency_quota_state
-        conn = self._connect()
-        try:
-            return load_emergency_quota_state(conn, shadow_id)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_integrity_repo", "load_emergency_quota_state", shadow_id)
 
     def save_paper_live_gap_state(self, shadow_id: str, state_json: str) -> None:
-        from marketmind.shadows.shadow_integrity_repo import save_paper_live_gap_state
-        conn = self._connect()
-        try:
-            save_paper_live_gap_state(conn, shadow_id, state_json)
-        finally:
-            conn.close()
+        self._delegate(f"{_REPO_BASE}.shadow_integrity_repo", "save_paper_live_gap_state",
+                      shadow_id, state_json)
 
     def load_paper_live_gap_state(self, shadow_id: str) -> str | None:
-        from marketmind.shadows.shadow_integrity_repo import load_paper_live_gap_state
-        conn = self._connect()
-        try:
-            return load_paper_live_gap_state(conn, shadow_id)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_integrity_repo", "load_paper_live_gap_state", shadow_id)
 
-    # ── Cycle checkpoints (delegated to shadow_checkpoint_repo) ──────────────
+    # ── Cycle checkpoints ────────────────────────────────────────────────────
 
     def save_checkpoint(self, date: str, shadow_id: str, status: str,
                         step: int, analysis_json: str | None = None,
                         error_message: str | None = None) -> None:
-        """Save a per-shadow checkpoint for partial-state recovery (P3-4).
-
-        Delegated to shadow_checkpoint_repo.save_checkpoint.
-        """
-        from marketmind.shadows.shadow_checkpoint_repo import save_checkpoint
-        conn = self._connect()
-        try:
-            save_checkpoint(conn, date, shadow_id, status, step,
-                           analysis_json, error_message)
-        finally:
-            conn.close()
+        self._delegate(f"{_REPO_BASE}.shadow_checkpoint_repo", "save_checkpoint",
+                      date, shadow_id, status, step, analysis_json, error_message)
 
     def get_checkpoint(self, date: str, shadow_id: str) -> dict | None:
-        """Get checkpoint for a specific shadow on a specific date (P3-4).
-
-        Delegated to shadow_checkpoint_repo.get_checkpoint.
-        """
-        from marketmind.shadows.shadow_checkpoint_repo import get_checkpoint
-        conn = self._connect()
-        try:
-            return get_checkpoint(conn, date, shadow_id)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_checkpoint_repo", "get_checkpoint", date, shadow_id)
 
     def get_incomplete_shadows(self, date: str) -> list[str]:
-        """Return shadow_ids with status='pending' or 'failed' for a date (P3-4).
-
-        Delegated to shadow_checkpoint_repo.get_incomplete_shadows.
-        """
-        from marketmind.shadows.shadow_checkpoint_repo import get_incomplete_shadows
-        conn = self._connect()
-        try:
-            return get_incomplete_shadows(conn, date)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_checkpoint_repo", "get_incomplete_shadows", date)
 
     def clear_date_checkpoints(self, date: str) -> None:
-        """Delete all checkpoints for a date (cleanup after cycle completes, P3-4).
+        self._delegate(f"{_REPO_BASE}.shadow_checkpoint_repo", "clear_date_checkpoints", date)
 
-        Delegated to shadow_checkpoint_repo.clear_date_checkpoints.
-        """
-        from marketmind.shadows.shadow_checkpoint_repo import clear_date_checkpoints
-        conn = self._connect()
-        try:
-            clear_date_checkpoints(conn, date)
-        finally:
-            conn.close()
-
-    # ── Bulk operations ───────────────────────────────────────────────────
-
-    def get_all_daily_snapshots(self, date: str) -> list[DailySnapshot]:
-        conn = self._connect()
-        try:
-            rows = conn.execute(
-                "SELECT * FROM daily_snapshots WHERE date = ?",
-                (date,)
-            ).fetchall()
-            return [self._row_to_snapshot(r) for r in rows]
-        finally:
-            conn.close()
-
-    # ── Analysis / PnL (delegated to shadow_analysis_repo) ─────────────────
-    # NOTE: These methods are for BACKTEST and internal ecosystem use ONLY.
-    # Shadows are an internal competition ecosystem for ranking/evolution/
-    # crystallization. They do NOT vote on investment decisions.
-    # app.py:110 sets shadow_analyses = None by design — this is intentional.
-    # Analysis persistence exists solely for backtest_runner.py signal-quality
-    # analysis and crystallization validation.
+    # ── Analysis / PnL ──────────────────────────────────────────────────────
 
     def get_all_active_analyses(self, date: str, ticker: str) -> list[dict]:
-        """[INTERNAL-ONLY] Get active shadow metadata. For ecosystem health, NOT decision input."""
-        from marketmind.shadows.shadow_analysis_repo import get_all_active_analyses
-        conn = self._connect()
-        try:
-            return get_all_active_analyses(conn, date, ticker)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_analysis_repo", "get_all_active_analyses",
+                            date, ticker)
 
     def get_next_day_return_sign(self, ticker_or_shadow: str, date: str) -> int | None:
-        from marketmind.shadows.shadow_analysis_repo import get_next_day_return_sign
-        conn = self._connect()
-        try:
-            return get_next_day_return_sign(conn, ticker_or_shadow, date)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_analysis_repo", "get_next_day_return_sign",
+                            ticker_or_shadow, date)
 
     def save_analyses(self, shadow_id: str, date: str, analyses: list) -> None:
-        """[INTERNAL-ONLY] Persist shadow analyses for backtest/audit. NOT a decision input."""
-        from marketmind.shadows.shadow_analysis_repo import save_analyses
         if not analyses:
             return
-        conn = self._connect()
-        try:
-            save_analyses(conn, shadow_id, date, analyses)
-        finally:
-            conn.close()
+        self._delegate(f"{_REPO_BASE}.shadow_analysis_repo", "save_analyses",
+                      shadow_id, date, analyses)
 
     def save_beta_analyses(self, shadow_id: str, date: str, analyses: list,
                            methodology_variant: str | None = None) -> None:
-        """Persist beta shadow analyses to isolated beta_analyses table."""
         if not analyses:
             return
-        conn = self._connect()
-        now = datetime.now(timezone.utc).isoformat()
-        try:
-            for a in analyses:
-                conn.execute(
-                    """INSERT INTO beta_analyses (shadow_id, date, ticker, direction,
-                       confidence, thesis, risk_note, methodology_variant, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (shadow_id, date,
-                     a.get("ticker", ""), a.get("direction", "abstain"),
-                     a.get("confidence", 0.0), a.get("thesis", ""),
-                     a.get("risk_note", ""), methodology_variant, now)
-                )
-            conn.commit()
-        finally:
-            conn.close()
+        self._delegate(f"{_REPO_BASE}.shadow_analysis_repo", "save_beta_analyses",
+                      shadow_id, date, analyses, methodology_variant)
 
     def get_analyses_by_date_range(self, start_date: str, end_date: str) -> list[dict]:
-        """[INTERNAL-ONLY] Query analyses for BACKTEST signal-quality analysis. NOT a decision input."""
-        from marketmind.shadows.shadow_analysis_repo import get_analyses_by_date_range
-        conn = self._connect()
-        try:
-            return get_analyses_by_date_range(conn, start_date, end_date)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_analysis_repo", "get_analyses_by_date_range",
+                            start_date, end_date)
 
-    # ── Market prices (delegated to shadow_market_repo) ───────────────────
+    def get_analyses_with_direction(self, shadow_id: str,
+                                     days: int = 90) -> list[dict]:
+        return self._delegate(f"{_REPO_BASE}.shadow_analysis_repo", "get_analyses_with_direction",
+                            shadow_id, days)
+
+    def get_pnl_by_domain(self, domain: str) -> list[float]:
+        return self._delegate(f"{_REPO_BASE}.shadow_analysis_repo", "get_pnl_by_domain", domain)
+
+    # ── Market prices ───────────────────────────────────────────────────────
 
     def insert_market_price(self, ticker: str, date: str, open_price: float,
                             high: float, low: float, close: float, volume: int,
                             next_day_return: float | None = None) -> None:
-        from marketmind.shadows.shadow_market_repo import insert_market_price
-        conn = self._connect()
-        try:
-            insert_market_price(conn, ticker, date, open_price, high, low,
-                               close, volume, next_day_return)
-        finally:
-            conn.close()
+        self._delegate(f"{_REPO_BASE}.shadow_market_repo", "insert_market_price",
+                      ticker, date, open_price, high, low, close, volume, next_day_return)
 
     def get_market_prices(self, ticker: str, start_date: str | None = None,
                           end_date: str | None = None) -> list[dict]:
-        from marketmind.shadows.shadow_market_repo import get_market_prices
-        conn = self._connect()
-        try:
-            return get_market_prices(conn, ticker, start_date, end_date)
-        finally:
-            conn.close()
+        return self._delegate(f"{_REPO_BASE}.shadow_market_repo", "get_market_prices",
+                            ticker, start_date, end_date)
 
     def get_next_day_return(self, ticker: str, date: str) -> float | None:
-        from marketmind.shadows.shadow_market_repo import get_next_day_return
-        conn = self._connect()
-        try:
-            return get_next_day_return(conn, ticker, date)
-        finally:
-            conn.close()
-
-    def get_analyses_with_direction(self, shadow_id: str,
-                                     days: int = 90) -> list[dict]:
-        conn = self._connect()
-        try:
-            rows = conn.execute(
-                """SELECT ticker, direction, date FROM shadow_analyses
-                   WHERE shadow_id = ? AND direction != 'abstain'
-                   ORDER BY date DESC LIMIT ?""",
-                (shadow_id, days)).fetchall()
-            return [{"ticker": r["ticker"], "direction": r["direction"],
-                     "date": r["date"]} for r in rows]
-        finally:
-            conn.close()
-
-    def get_pnl_by_domain(self, domain: str) -> list[float]:
-        from marketmind.shadows.shadow_analysis_repo import get_pnl_by_domain
-        conn = self._connect()
-        try:
-            return get_pnl_by_domain(conn, domain)
-        finally:
-            conn.close()
-
-
+        return self._delegate(f"{_REPO_BASE}.shadow_market_repo", "get_next_day_return", ticker, date)

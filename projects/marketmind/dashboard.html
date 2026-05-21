@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MarketMind</title>
+<style>
+  /* ── Design System: Bloomberg precision + Apple restraint ──────── */
+  :root {
+    --bg-primary: #0a0c0f;
+    --bg-card: #111418;
+    --bg-elevated: #181c23;
+    --border: #252830;
+    --border-active: #3a3f48;
+    --text-primary: #e8eaed;
+    --text-secondary: #9aa0b0;
+    --text-muted: #6a7280;
+    --accent-green: #5cb878;
+    --accent-red: #e0556a;
+    --accent-amber: #c8a050;
+    --accent-blue: #5a8fd0;
+    --accent-purple: #8878c8;
+    --font-mono: 'SF Mono', 'Cascadia Code', 'JetBrains Mono', 'Consolas', monospace;
+    --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+    --radius: 3px;
+    --transition: 180ms ease;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  /* ── Header ──────────────────────────────────────────────────── */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-card);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .logo {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    color: var(--accent-amber);
+  }
+  .logo span { color: var(--text-secondary); font-weight: 400; }
+  .status-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent-green);
+    display: inline-block;
+  }
+  .status-text { color: var(--text-muted); font-size: 11px; }
+  .header-right {
+    display: flex; align-items: center; gap: 20px;
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+  }
+  .header-right .value { color: var(--text-secondary); }
+
+  /* ── Layout ───────────────────────────────────────────────────── */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 1px;
+    background: var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .panel {
+    background: var(--bg-card);
+    padding: 16px 20px;
+    overflow: hidden;
+  }
+  .panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .panel-title {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--text-muted);
+  }
+  .panel-badge {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: var(--radius);
+    color: var(--accent-green);
+    background: rgba(92, 184, 120, 0.08);
+  }
+
+  /* ── Log Section ──────────────────────────────────────────────── */
+  .log-section {
+    border-top: 1px solid var(--border);
+    padding: 12px 24px;
+    background: var(--bg-card);
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .log-section::-webkit-scrollbar { width: 3px; }
+  .log-section::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .log-entry {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 3px 0;
+    display: flex; gap: 12px;
+    color: var(--text-muted);
+  }
+  .log-time { color: var(--text-muted); min-width: 50px; }
+  .log-ok { color: var(--accent-green); }
+  .log-warn { color: var(--accent-amber); }
+  .log-err { color: var(--accent-red); }
+
+  /* ── Bottom Grid ──────────────────────────────────────────────── */
+  .bottom-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--border);
+    min-height: 280px;
+  }
+
+  /* ── Position Table ───────────────────────────────────────────── */
+  .pos-table { width: 100%; border-collapse: collapse; }
+  .pos-table th {
+    text-align: left; font-size: 10px; font-weight: 500;
+    color: var(--text-muted); padding: 6px 8px; border-bottom: 1px solid var(--border);
+  }
+  .pos-table td {
+    padding: 8px; font-family: var(--font-mono); font-size: 12px;
+    border-bottom: 1px solid rgba(37, 40, 48, 0.5);
+  }
+  .pos-table tr.empty td { color: var(--text-muted); font-style: italic; padding: 20px; }
+  .pnl-pos { color: var(--accent-green); }
+  .pnl-neg { color: var(--accent-red); }
+
+  /* ── Progress Bar ─────────────────────────────────────────────── */
+  .stage-list { display: flex; flex-direction: column; gap: 4px; }
+  .stage-row {
+    display: flex; align-items: center; gap: 10px; padding: 5px 0;
+  }
+  .stage-name {
+    font-size: 10px; font-weight: 500; color: var(--text-secondary);
+    min-width: 70px; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .stage-indicator {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    background: var(--border);
+  }
+  .stage-indicator.done { background: var(--accent-green); }
+  .stage-indicator.running { background: var(--accent-amber); animation: pulse 1.2s infinite; }
+  .stage-indicator.pending { background: var(--border); }
+  .stage-bar {
+    flex: 1; height: 2px; background: var(--border); border-radius: 1px;
+  }
+  .stage-bar.done { background: var(--accent-green); }
+  .stage-bar.running {
+    background: linear-gradient(90deg, var(--accent-amber) 60%, var(--border) 60%);
+    animation: progressPulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+  @keyframes progressPulse {
+    0% { background: linear-gradient(90deg, var(--accent-amber) 40%, var(--border) 40%); }
+    50% { background: linear-gradient(90deg, var(--accent-amber) 70%, var(--border) 70%); }
+    100% { background: linear-gradient(90deg, var(--accent-amber) 40%, var(--border) 40%); }
+  }
+  .overall-progress {
+    margin-top: 12px; display: flex; align-items: center; gap: 12px;
+  }
+  .progress-pct {
+    font-family: var(--font-mono); font-size: 24px; font-weight: 300;
+    color: var(--text-primary);
+  }
+  .progress-track {
+    flex: 1; height: 2px; background: var(--border); border-radius: 1px;
+  }
+  .progress-fill {
+    height: 100%; border-radius: 1px; background: var(--accent-amber);
+    transition: width 0.5s ease;
+    width: 0%;
+  }
+  .progress-meta { font-size: 10px; color: var(--text-muted); }
+
+  /* ── Shadow Tiers ─────────────────────────────────────────────── */
+  .tier-bar-group { display: flex; flex-direction: column; gap: 3px; margin-bottom: 16px; }
+  .tier-row {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--font-mono); font-size: 11px;
+  }
+  .tier-label { color: var(--text-muted); min-width: 55px; font-size: 10px; }
+  .tier-count { color: var(--text-primary); min-width: 24px; text-align: right; }
+  .tier-fill {
+    flex: 1; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden;
+  }
+  .tier-fill-inner {
+    height: 100%; border-radius: 2px; transition: width 0.4s ease;
+  }
+  .tier-elite .tier-fill-inner { background: var(--accent-amber); }
+  .tier-excel .tier-fill-inner { background: var(--accent-blue); }
+  .tier-normal .tier-fill-inner { background: var(--text-muted); }
+  .tier-watch .tier-fill-inner { background: var(--accent-purple); }
+  .tier-endang .tier-fill-inner { background: var(--accent-red); }
+
+  .shadow-top5 { margin-top: 12px; }
+  .shadow-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 0; font-size: 11px;
+  }
+  .shadow-rank { color: var(--text-muted); min-width: 16px; font-family: var(--font-mono); }
+  .shadow-name { flex: 1; color: var(--text-secondary); }
+  .shadow-tier {
+    font-size: 9px; padding: 1px 6px; border-radius: var(--radius);
+    font-weight: 500;
+  }
+  .tier-badge-elite { color: var(--accent-amber); background: rgba(200, 160, 80, 0.1); }
+  .tier-badge-excel { color: var(--accent-blue); background: rgba(90, 143, 208, 0.1); }
+  .shadow-score { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+
+  /* ── Decision History ─────────────────────────────────────────── */
+  .history-table { width: 100%; border-collapse: collapse; }
+  .history-table th {
+    text-align: left; font-size: 10px; font-weight: 500;
+    color: var(--text-muted); padding: 6px 10px; border-bottom: 1px solid var(--border);
+  }
+  .history-table td {
+    padding: 7px 10px; border-bottom: 1px solid rgba(37, 40, 48, 0.4);
+    font-family: var(--font-mono); font-size: 11px;
+  }
+  .history-table tr.empty td { color: var(--text-muted); padding: 16px; }
+
+  /* ── Collapsible Sections ─────────────────────────────────────── */
+  .section-toggle {
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    padding: 10px 24px; border-top: 1px solid var(--border);
+    background: var(--bg-card); user-select: none;
+    font-size: 10px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 1.2px; color: var(--text-muted);
+    transition: color var(--transition);
+  }
+  .section-toggle:hover { color: var(--text-secondary); }
+  .section-toggle .arrow {
+    transition: transform var(--transition); font-family: var(--font-mono);
+  }
+  .section-toggle.open .arrow { transform: rotate(90deg); }
+  .section-content { display: none; }
+  .section-content.open { display: block; }
+
+  /* ── Responsive ───────────────────────────────────────────────── */
+  @media (max-width: 1400px) {
+    .main-grid { grid-template-columns: 1fr 1fr; }
+    .bottom-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="header">
+  <div class="header-left">
+    <div class="logo">MarketMind <span>v2.0</span></div>
+    <span class="status-dot"></span>
+    <span class="status-text" id="statusText">System Ready</span>
+  </div>
+  <div class="header-right">
+    <span id="clock">--:--:-- UTC</span>
+    <span>Sources: <span class="value" id="sourceCount">--</span></span>
+    <span>Uptime: <span class="value" id="uptime">--</span></span>
+  </div>
+</header>
+
+<!-- Layer 1: Always Visible -->
+<div class="main-grid">
+
+  <!-- Portfolio -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Portfolio</span>
+      <span class="panel-badge" id="patrolBadge">idle</span>
+    </div>
+    <table class="pos-table">
+      <thead><tr><th>Ticker</th><th>Entry</th><th>Last</th><th>P&amp;L</th></tr></thead>
+      <tbody id="posBody">
+        <tr class="empty"><td colspan="4">No active positions</td></tr>
+      </tbody>
+    </table>
+    <div style="margin-top:12px;display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">
+      <span>Cash: <span style="color:var(--text-secondary)" id="cashPct">100%</span></span>
+      <span>Value: <span style="color:var(--text-primary)" id="totalValue">$0</span></span>
+    </div>
+  </div>
+
+  <!-- Gate Status -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Decision Queue</span>
+      <span class="panel-badge" id="gateBadge">idle</span>
+    </div>
+    <div id="gateContent" style="font-size:12px;color:var(--text-secondary)">
+      <div style="padding:8px 0;border-bottom:1px solid var(--border)">
+        <span style="color:var(--text-muted)">Gate 1</span>
+        <span style="float:right" id="gate1Status">idle</span>
+      </div>
+      <div style="padding:8px 0;border-bottom:1px solid var(--border)">
+        <span style="color:var(--text-muted)">Gate 2</span>
+        <span style="float:right" id="gate2Status">idle</span>
+      </div>
+      <div style="padding:8px 0;border-bottom:1px solid var(--border)">
+        <span style="color:var(--text-muted)">Gate 3</span>
+        <span style="float:right" id="gate3Status">idle</span>
+      </div>
+      <div style="padding:8px 0;font-size:10px;color:var(--text-muted)">
+        Injected: <span style="color:var(--text-secondary)" id="injectCount">0</span> items
+      </div>
+    </div>
+  </div>
+
+  <!-- Progress -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Pipeline</span>
+      <span class="panel-badge" id="progressBadge">idle</span>
+    </div>
+    <div class="stage-list" id="stageList">
+    </div>
+    <div class="overall-progress">
+      <span class="progress-pct" id="progressPct">--</span>
+      <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+      <span class="progress-meta" id="progressMeta"></span>
+    </div>
+  </div>
+
+  <!-- Cost -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Usage</span>
+      <span class="panel-badge" id="cbBadge">closed</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px;font-family:var(--font-mono);font-size:11px">
+      <div>
+        <span style="color:var(--text-muted)">Pro</span>
+        <span style="float:right" id="proCalls">0 / 50</span>
+        <div style="height:2px;background:var(--border);margin-top:4px;border-radius:1px"><div id="proBar" style="height:100%;width:0%;background:var(--accent-blue);border-radius:1px;transition:width 0.5s"></div></div>
+      </div>
+      <div>
+        <span style="color:var(--text-muted)">Flash</span>
+        <span style="float:right" id="flashCalls">0 / 100</span>
+        <div style="height:2px;background:var(--border);margin-top:4px;border-radius:1px"><div id="flashBar" style="height:100%;width:0%;background:var(--accent-purple);border-radius:1px;transition:width 0.5s"></div></div>
+      </div>
+      <div>
+        <span style="color:var(--text-muted)">Tokens</span>
+        <span style="float:right" id="tokenUse">0 / 2.0M</span>
+      </div>
+      <div>
+        <span style="color:var(--text-muted)">Month Est</span>
+        <span style="float:right;color:var(--text-secondary)" id="monthEst">$0.00</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Layer 2: System Log -->
+<div class="section-toggle" onclick="toggleSection('logSection', this)">
+  <span class="arrow">&#9654;</span> System Log
+</div>
+<div class="section-content" id="logSection">
+  <div class="log-section" id="logContent">
+    <div class="log-entry"><span class="log-time">--:--:--</span><span class="log-ok">System ready</span></div>
+  </div>
+</div>
+
+<!-- Layer 3 + 4: Shadows + History -->
+<div class="bottom-grid">
+
+  <!-- Shadow Ecosystem -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Shadow Ecosystem</span>
+      <span class="panel-badge" id="diversityBadge">normal</span>
+    </div>
+    <div class="tier-bar-group" id="tierBars">
+    </div>
+    <div class="shadow-top5" id="shadowRankings">
+      <div style="color:var(--text-muted);font-size:10px;margin-bottom:6px">TOP 5 BY COMPOSITE SCORE</div>
+      <div style="color:var(--text-muted);font-size:10px">No data yet</div>
+    </div>
+    <div style="margin-top:14px;font-size:10px;color:var(--text-muted);display:flex;gap:16px">
+      <span>Evolutions: <span style="color:var(--text-secondary)" id="evoToday">0</span></span>
+      <span>Trials: <span style="color:var(--text-secondary)" id="trialsActive">0</span></span>
+      <span>Graduates: <span style="color:var(--text-secondary)" id="gradCount">0</span></span>
+    </div>
+  </div>
+
+  <!-- Decision History -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Decision History</span>
+      <span class="panel-badge" id="accuracyBadge">--</span>
+    </div>
+    <table class="history-table">
+      <thead><tr><th>Date</th><th>Ticker</th><th>Direction</th><th>Conf</th><th>Result</th></tr></thead>
+      <tbody id="historyBody">
+        <tr class="empty"><td colspan="5">No decisions recorded</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+// ── Clock ─────────────────────────────────────────────────────────
+function updateClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent =
+    now.toISOString().slice(11, 19) + ' UTC';
+}
+updateClock(); setInterval(updateClock, 1000);
+
+// ── Section Toggle ────────────────────────────────────────────────
+function toggleSection(id, el) {
+  const content = document.getElementById(id);
+  content.classList.toggle('open');
+  el.classList.toggle('open');
+}
+
+// ── API Polling ───────────────────────────────────────────────────
+async function refresh() {
+  try {
+    const [health, cost, shadows, history] = await Promise.all([
+      fetch('/api/health').then(r => r.json()),
+      fetch('/api/cost').then(r => r.json()),
+      fetch('/api/shadows/overview').then(r => r.json()),
+      fetch('/api/history/decisions').then(r => r.json()),
+    ]);
+
+    // Status
+    document.getElementById('statusText').textContent =
+      health.status === 'ok' ? 'System Ready' : 'Degraded';
+    document.getElementById('sourceCount').textContent =
+      `${health.sources_ok}/${health.sources_total}`;
+    document.getElementById('uptime').textContent = health.uptime;
+
+    // Cost
+    document.getElementById('proCalls').textContent =
+      `${cost.pro_calls} / ${cost.pro_limit}`;
+    document.getElementById('proBar').style.width =
+      `${(cost.pro_calls / cost.pro_limit) * 100}%`;
+    document.getElementById('flashCalls').textContent =
+      `${cost.flash_calls} / ${cost.flash_limit}`;
+    document.getElementById('flashBar').style.width =
+      `${(cost.flash_calls / cost.flash_limit) * 100}%`;
+    document.getElementById('tokenUse').textContent =
+      `${(cost.tokens_used / 1_000_000).toFixed(1)}M / ${(cost.token_budget / 1_000_000).toFixed(1)}M`;
+    document.getElementById('monthEst').textContent =
+      `$${cost.monthly_est.toFixed(2)}`;
+    document.getElementById('cbBadge').textContent = cost.circuit_breaker;
+
+    // Shadows
+    const tiers = shadows.tiers || {};
+    document.getElementById('tierBars').innerHTML = ['elite','excellent','normal','watch','endangered']
+      .map(t => {
+        const count = tiers[t] || 0;
+        const maxW = Math.max(...Object.values(tiers), 24);
+        const w = maxW > 0 ? (count / maxW) * 100 : 0;
+        return `<div class="tier-row tier-${t}">
+          <span class="tier-label">${t.toUpperCase()}</span>
+          <span class="tier-count">${count}</span>
+          <div class="tier-fill"><div class="tier-fill-inner" style="width:${w}%"></div></div>
+        </div>`;
+      }).join('');
+    document.getElementById('evoToday').textContent = shadows.evolutions_today || 0;
+    document.getElementById('trialsActive').textContent = shadows.challenger_trials || 0;
+    document.getElementById('gradCount').textContent = shadows.graduates || 0;
+    document.getElementById('diversityBadge').textContent = shadows.diversity || 'normal';
+
+    // History
+    const decisions = history.decisions || [];
+    if (decisions.length === 0) {
+      document.getElementById('historyBody').innerHTML =
+        '<tr class="empty"><td colspan="5">No decisions recorded</td></tr>';
+      document.getElementById('accuracyBadge').textContent = '--';
+    } else {
+      document.getElementById('historyBody').innerHTML = decisions.slice(0, 10).map(d =>
+        `<tr>
+          <td>${d.date?.slice(5) || ''}</td>
+          <td>${d.ticker || '--'}</td>
+          <td style="color:${d.direction==='long'?'var(--accent-green)':'var(--accent-red)'}">${(d.direction||'').toUpperCase()}</td>
+          <td>${d.confidence ? (d.confidence*100).toFixed(0)+'%' : '--'}</td>
+          <td style="color:${(d.result||0)>0?'var(--accent-green)':'var(--accent-red)'}">${d.result ? (d.result>0?'+':'')+d.result.toFixed(1)+'%' : '--'}</td>
+        </tr>`
+      ).join('');
+    }
+
+    // Logs
+    try {
+      const log = await fetch('/api/log').then(r => r.json());
+      const entries = log.entries || [];
+      if (entries.length > 0) {
+        document.getElementById('logContent').innerHTML = entries.slice(-30).map(e =>
+          `<div class="log-entry">
+            <span class="log-time">${e.time}</span>
+            <span class="log-${e.level==='error'?'err':e.level==='warn'?'warn':'ok'}">${e.message}</span>
+          </div>`
+        ).join('');
+      }
+    } catch(e) {}
+
+  } catch(e) {
+    document.getElementById('statusText').textContent = 'Connection lost';
+  }
+}
+
+// Initial load + periodic refresh
+refresh();
+setInterval(refresh, 5000);
+
+// ── Build initial stage list ──────────────────────────────────────
+const stages = ['Scout','Flash','HVR','L1','L2/L3','Shadows','Red Team','Decision'];
+document.getElementById('stageList').innerHTML = stages.map(s =>
+  `<div class="stage-row">
+    <div class="stage-indicator pending"></div>
+    <span class="stage-name">${s}</span>
+    <div class="stage-bar"></div>
+  </div>`
+).join('');
+</script>
+
+</body>
+</html>

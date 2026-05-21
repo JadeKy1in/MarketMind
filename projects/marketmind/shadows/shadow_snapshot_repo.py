@@ -217,3 +217,14 @@ def _row_to_snapshot(row: sqlite3.Row) -> DailySnapshot:
         discount_rate=row["discount_rate"]
         if "discount_rate" in row.keys() and row["discount_rate"] is not None else None,
     )
+
+
+def get_all_daily_snapshots(
+    conn: sqlite3.Connection, date: str
+) -> list[DailySnapshot]:
+    """Get all shadow snapshots for a given date."""
+    rows = conn.execute(
+        "SELECT * FROM daily_snapshots WHERE date = ?",
+        (date,)
+    ).fetchall()
+    return [_row_to_snapshot(r) for r in rows]
