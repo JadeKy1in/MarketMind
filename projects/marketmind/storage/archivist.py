@@ -135,6 +135,77 @@ class MarketMindArchive:
         ).fetchall()
         return [{"date": r[0], "category": r[1], "title": r[2], "snippet": r[3]} for r in results]
 
+    # ── SHARP rule audit (P3-2a) ──────────────────────────────────────────
+
+    def save_rule_audit(self, rule_id: str, audit_data: dict) -> None:
+        """Save attribution hypothesis and backtest result for a rule.
+
+        Each audit entry is appended to a daily JSONL file under
+        <base_dir>/rule_audit/. This provides an append-only audit trail
+        for walk-forward backtest validation.
+
+        Args:
+            rule_id: The rule being audited (e.g. "RRSK-A1B2C3D4").
+            audit_data: Dict with event type, hypothesis, outcome, etc.
+                        Must include an 'event' key describing what happened.
+        """
+        entry = {
+            "rule_id": rule_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **audit_data,
+        }
+        audit_dir = self.base_dir / "rule_audit"
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        audit_file = audit_dir / f"{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.jsonl"
+        with open(audit_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+    def get_rule_audit_history(
+        self, rule_id: str, days: int = 90
+    ) -> list[dict]:
+        """Get audit history for a rule for WFA backtest.
+
+        Scans daily JSONL files in <base_dir>/rule_audit/ and returns
+        all entries matching the given rule_id within the time window.
+
+        Args:
+            rule_id: The rule to retrieve history for.
+            days: Number of days to look back (default 90).
+
+        Returns:
+            List of audit entry dicts, newest first.
+        """
+        from datetime import timedelta
+
+        audit_dir = self.base_dir / "rule_audit"
+        if not audit_dir.exists():
+            return []
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        entries: list[dict] = []
+
+        for f in sorted(audit_dir.glob("*.jsonl"), reverse=True):
+            try:
+                with open(f, "r", encoding="utf-8") as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                            ts = datetime.fromisoformat(entry.get("timestamp", ""))
+                            if ts < cutoff:
+                                continue
+                            if entry.get("rule_id") != rule_id:
+                                continue
+                            entries.append(entry)
+                        except (json.JSONDecodeError, KeyError, ValueError):
+                            continue
+            except OSError:
+                continue
+
+        return entries
+
 
 def get_archivist(base_dir: str | Path = "data/archive") -> MarketMindArchive:
     return MarketMindArchive(base_dir)

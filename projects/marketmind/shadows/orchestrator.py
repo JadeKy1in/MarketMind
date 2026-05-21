@@ -30,6 +30,7 @@ class Orchestrator:
         today: str,
         result: "ShadowOrchestrationResult",
         market_data: dict,
+        market_accuracies: dict[str, float] | None = None,
     ) -> dict:
         """Compute composite rankings, detect plateaus, check reset eligibility,
         and calibrate paper-to-live gap. Returns performances dict."""
@@ -76,7 +77,9 @@ class Orchestrator:
                     performances[config.shadow_id] = perf
 
             if performances:
-                rankings = engine.rank_shadows(performances, {}, today)
+                rankings = engine.rank_shadows(
+                    performances, {}, today,
+                    market_accuracies=market_accuracies)
                 result.rankings = rankings
                 # Backfill ranking data into snapshots
                 for rr in rankings:

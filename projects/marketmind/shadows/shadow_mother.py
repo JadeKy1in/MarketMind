@@ -6,6 +6,7 @@ knowledge management, and challenger execution to focused modules.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -18,6 +19,7 @@ from marketmind.shadows.temp_shadow_lifecycle import TempShadowLifecycle
 from marketmind.shadows.orchestrator import Orchestrator
 from marketmind.shadows.knowledge_manager import KnowledgeManager
 from marketmind.shadows.challenger_execution import ChallengerExecutor
+from marketmind.shadows.market_data_fetcher import MarketDataFetcher
 
 logger = logging.getLogger("marketmind.shadows.shadow_mother")
 
@@ -271,11 +273,15 @@ class ShadowMother:
         # 3. Run all shadow analyses, collect votes
         all_votes = await self._step_collect_votes(news_items, market_data, visible, today, result)
 
+        # 3b. P2-4: Fetch external market data, compute per-shadow accuracy
+        market_accuracies = await self._step_market_anchor(today, result)
+
         # 4-5. Rankings + plateau detection + paper-live gap + surveillance
         # Beta shadows excluded from ranking, collusion, and challenger engine.
         ranking_eligible = self.state_db.get_ranking_eligible_shadows()
         performances = await self._orchestrator.step_rank_and_calibrate(
-            ranking_eligible, today, result, market_data)
+            ranking_eligible, today, result, market_data,
+            market_accuracies=market_accuracies)
         await self._orchestrator.step_surveillance(
             all_votes, market_data, today, result, ranking_eligible)
 
@@ -322,13 +328,49 @@ class ShadowMother:
     async def _step_collect_votes(self, news_items: list[dict], market_data: dict,
                                    visible: list, today: str,
                                    result: ShadowOrchestrationResult) -> list:
-        """Run all shadow analyses in parallel, collect votes, update snapshots."""
+        """Run all shadow analyses in parallel, collect votes, update snapshots.
+
+        P3-4 partial-state recovery: filters out already-completed shadows
+        (cached replay) and saves a per-shadow checkpoint after EACH
+        individual analysis. If the cycle crashes mid-step, the next run
+        skips completed shadows and only re-runs incomplete/failed ones.
+        """
         from marketmind.shadows.shadow_agent import create_shadow_agent
+
+        # P3-4 RESUME CHECK: Filter out shadows that already completed
+        # successfully in a previous (crashed) run.
+        visible_to_run: list = []
+        resume_count = 0
+        for s in visible:
+            cp = self.state_db.get_checkpoint(today, s.shadow_id)
+            if cp and cp.get("status") == "completed":
+                logger.info(
+                    "Shadow %s already completed — skipping (cached replay)", s.shadow_id
+                )
+                continue
+            if cp and cp.get("status") in ("pending", "failed"):
+                resume_count += 1
+            visible_to_run.append(s)
+
+        if resume_count > 0:
+            logger.info(
+                "Resuming %d incomplete/failed shadows from previous run", resume_count
+            )
+
+        if not visible_to_run:
+            logger.info("All shadows already completed — nothing to run")
+            return []
 
         all_votes: list = []
         semaphore = asyncio.Semaphore(self.config.max_concurrent_shadows)
 
         async def _run_one(config):
+            # P3-4: Save "pending" checkpoint BEFORE analysis starts
+            self.state_db.save_checkpoint(
+                date=today, shadow_id=config.shadow_id,
+                status='pending', step=4
+            )
+
             async with semaphore:
                 try:
                     agent = create_shadow_agent(config, self.state_db, self.config)
@@ -344,12 +386,47 @@ class ShadowMother:
                                     config.shadow_id, today, output.votes)
                         except Exception as e:
                             logger.error("Failed to save analyses for %s: %s", config.shadow_id, e)
+
+                    # P3-4: Save successful checkpoint with cached analysis output
+                    try:
+                        analysis_dict = {
+                            "shadow_id": output.shadow_id,
+                            "date": output.date,
+                            "vote_count": len(output.votes),
+                            "insight_count": len(output.insights),
+                            "quota_used": output.quota_used,
+                            "latency_ms": output.latency_ms,
+                        }
+                        self.state_db.save_checkpoint(
+                            date=today, shadow_id=config.shadow_id,
+                            status='completed', step=4,
+                            analysis_json=json.dumps(analysis_dict)
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to save completed checkpoint for %s: %s",
+                            config.shadow_id, e
+                        )
+
                     return config.shadow_id, output, None, config.status
                 except Exception as e:
                     logger.error("Shadow %s analysis failed: %s", config.shadow_id, e)
+
+                    # P3-4: Save failed checkpoint for retry on resume
+                    try:
+                        self.state_db.save_checkpoint(
+                            date=today, shadow_id=config.shadow_id,
+                            status='failed', step=4, error_message=str(e)
+                        )
+                    except Exception as ckpt_err:
+                        logger.warning(
+                            "Failed to save failure checkpoint for %s: %s",
+                            config.shadow_id, ckpt_err
+                        )
+
                     return config.shadow_id, None, e, config.status
 
-        tasks = [_run_one(c) for c in visible]
+        tasks = [_run_one(c) for c in visible_to_run]
         results_list = await asyncio.gather(*tasks)
 
         for sid, output, err, status in results_list:
@@ -372,6 +449,92 @@ class ShadowMother:
                     logger.debug("Snapshot update failed for %s: %s", sid, e)
 
         return all_votes
+
+    # ── P2-4: Market anchor step ─────────────────────────────────────────
+
+    async def _step_market_anchor(
+        self, today: str, result: ShadowOrchestrationResult
+    ) -> dict[str, float]:
+        """Fetch external market data and compute per-shadow directional accuracy.
+
+        Runs between vote collection and ranking. Fetches OHLCV data for
+        tickers referenced by shadow analyses, stores prices in market_prices
+        table, and computes directional accuracy per shadow.
+
+        Returns dict mapping shadow_id -> market_accuracy (0.0-1.0).
+        """
+        market_accuracies: dict[str, float] = {}
+        fetcher = MarketDataFetcher()
+
+        # Collect unique tickers from today's shadow analyses
+        tickers_needed: set[str] = set()
+        for sid, output in result.shadow_analyses.items():
+            analyses = getattr(output, "analyses", []) or []
+            for a in analyses:
+                ticker = a.get("ticker", "") if isinstance(a, dict) else getattr(a, "ticker", "")
+                if ticker:
+                    tickers_needed.add(ticker)
+
+        if not tickers_needed:
+            logger.debug("No tickers to fetch for market anchor")
+            return market_accuracies
+
+        # Fetch OHLCV for each ticker
+        for ticker in tickers_needed:
+            data = await fetcher.fetch_ohlcv(ticker, period="5d")
+            if data is None:
+                continue
+            try:
+                # Look up yesterday's close to compute next_day_return
+                yesterday_prices = self.state_db.get_market_prices(
+                    ticker, end_date=data["date"])
+                ndr = None
+                if yesterday_prices:
+                    yesterday_close = yesterday_prices[-1].get("close", 0)
+                    if yesterday_close and yesterday_close > 0:
+                        ndr = (data["close"] - yesterday_close) / yesterday_close
+                        # Update yesterday's next_day_return
+                        yesterday_date = yesterday_prices[-1].get("date", "")
+                        if yesterday_date:
+                            conn = self.state_db._connect()
+                            try:
+                                conn.execute(
+                                    "UPDATE market_prices SET next_day_return = ? "
+                                    "WHERE ticker = ? AND date = ?",
+                                    (ndr, ticker, yesterday_date))
+                                conn.commit()
+                            finally:
+                                conn.close()
+
+                self.state_db.insert_market_price(
+                    ticker=ticker, date=data["date"],
+                    open_price=data["open"], high=data["high"],
+                    low=data["low"], close=data["close"],
+                    volume=data["volume"],
+                    next_day_return=None)
+            except Exception as e:
+                logger.debug("Failed to insert market price for %s: %s", ticker, e)
+
+        # Compute per-shadow accuracy from historical analyses
+        for sid in result.shadow_analyses:
+            try:
+                analyses = self.state_db.get_analyses_with_direction(sid, days=90)
+                if not analyses:
+                    continue
+                correct = 0
+                total = 0
+                for a in analyses:
+                    ndr = self.state_db.get_next_day_return(a["ticker"], a["date"])
+                    if ndr is not None:
+                        if fetcher.compute_accuracy(a["direction"], ndr):
+                            correct += 1
+                        total += 1
+                if total > 0:
+                    market_accuracies[sid] = correct / total
+            except Exception as e:
+                logger.debug("Accuracy computation failed for %s: %s", sid, e)
+
+        return market_accuracies
 
     # ── Step 6: Knowledge management ───────────────────────────────────────
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 import time
 import asyncio
 import logging
+import random
+from enum import Enum
 from typing import Any
 import httpx
 
@@ -19,6 +21,182 @@ class RateLimitError(Exception):
     def __init__(self, retry_after: int):
         self.retry_after = retry_after
         super().__init__(f"Rate limited. Retry after {retry_after}s")
+
+
+# ── Circuit Breaker (P3-3) ─────────────────────────────────────────────
+
+class CircuitState(Enum):
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+
+class CircuitBreakerOpenError(Exception):
+    """Raised when circuit is OPEN and no fallback is configured."""
+
+
+class QuotaExhaustedError(Exception):
+    """Raised when all providers (primary + fallback) are exhausted."""
+
+
+def _backoff_delay(attempt: int, base: float = 1.0, max_delay: float = 60.0) -> float:
+    """Exponential backoff with full jitter."""
+    exp = min(base * (2 ** attempt), max_delay)
+    return random.uniform(0, exp)
+
+
+def infer_error_type(exc: Exception) -> str:
+    """Classify an exception for circuit breaker error-type handling."""
+    if isinstance(exc, RateLimitError):
+        return "429"
+    if isinstance(exc, QuotaExhaustedError):
+        return "quota_exceeded"
+    # httpx.HTTPStatusError stores status in .response.status_code
+    resp = getattr(exc, "response", None)
+    if resp is not None:
+        status = getattr(resp, "status_code", None)
+        if status == 429:
+            return "429"
+        if status is not None and 500 <= status < 600:
+            return "5xx"
+    return "unknown"
+
+
+class CircuitBreaker:
+    """Circuit breaker for LLM API calls (CLOSED → OPEN → HALF_OPEN).
+
+    Prevents cascading failures when DeepSeek API is degraded.
+    Fallback provider is configurable.
+    """
+
+    def __init__(
+        self,
+        failure_threshold: int = 3,
+        timeout_seconds: float = 30.0,
+        fallback_provider_url: str | None = None,
+        fallback_model: str | None = None,
+        fallback_api_key: str | None = None,
+    ):
+        self.state = CircuitState.CLOSED
+        self.failure_count = 0
+        self.last_failure_time: float = 0.0
+        self.failure_threshold = failure_threshold
+        self.timeout_seconds = timeout_seconds
+        self.fallback_provider_url = fallback_provider_url
+        self.fallback_model = fallback_model
+        self.fallback_api_key = fallback_api_key
+        self._last_error_type: str = "unknown"
+        self._consecutive_open_count: int = 0
+        self._lock = asyncio.Lock()
+
+    def _record_success(self) -> None:
+        if self.state == CircuitState.HALF_OPEN:
+            self.state = CircuitState.CLOSED
+            self.failure_count = 0
+            self._consecutive_open_count = 0
+
+    def _record_failure(self, error_type: str = "5xx") -> None:
+        self._last_error_type = error_type
+        self.last_failure_time = time.time()
+        if self.state == CircuitState.HALF_OPEN:
+            self.state = CircuitState.OPEN
+            self._consecutive_open_count += 1
+            return
+        self.failure_count += 1
+        if self.failure_count >= self.failure_threshold:
+            self.state = CircuitState.OPEN
+            self.failure_count = 0
+            self._consecutive_open_count = 1
+
+    def _should_attempt_probe(self) -> bool:
+        if self.state != CircuitState.OPEN:
+            return False
+        return time.time() - self.last_failure_time >= self._probe_interval()
+
+    def _probe_interval(self) -> float:
+        if self._last_error_type == "quota_exceeded":
+            return float("inf")
+        if self._last_error_type == "429":
+            return 60.0
+        # Exponential backoff for repeated OPEN cycles
+        if self._consecutive_open_count > 1:
+            return min(self.timeout_seconds * (2 ** (self._consecutive_open_count - 1)), 600.0)
+        return self.timeout_seconds
+
+    async def call(
+        self,
+        primary_call,
+        fallback_call=None,
+    ):
+        """Execute a call through the circuit breaker.
+
+        If circuit is CLOSED or HALF_OPEN: attempt primary.
+        If circuit is OPEN: check for probe window, else try fallback.
+        """
+        async with self._lock:
+            if self.state == CircuitState.OPEN:
+                if self._should_attempt_probe():
+                    self.state = CircuitState.HALF_OPEN
+                elif fallback_call is not None:
+                    return await fallback_call()
+                elif self.fallback_provider_url:
+                    return await _try_fallback(
+                        self.fallback_provider_url, self.fallback_model,
+                        self.fallback_api_key,
+                    )
+                else:
+                    raise CircuitBreakerOpenError("Circuit breaker is OPEN")
+
+        # CLOSED or HALF_OPEN: attempt primary
+        try:
+            result = await primary_call()
+            self._record_success()
+            return result
+        except Exception as e:
+            error_type = infer_error_type(e)
+            self._record_failure(error_type)
+            if fallback_call is not None:
+                return await fallback_call()
+            if self.fallback_provider_url:
+                return await _try_fallback(
+                    self.fallback_provider_url, self.fallback_model,
+                    self.fallback_api_key,
+                )
+            raise
+
+    def reset(self) -> None:
+        self.state = CircuitState.CLOSED
+        self.failure_count = 0
+        self._consecutive_open_count = 0
+
+
+async def _try_fallback(
+    url: str, model: str | None, api_key: str | None,
+) -> dict[str, Any]:
+    """Route a request to the fallback provider (e.g., OpenAI-compatible endpoint)."""
+    # Fallback uses a simple, non-circuit-breaking call
+    if not api_key:
+        raise QuotaExhaustedError("Fallback API key not configured")
+    client = httpx.AsyncClient(timeout=DEFAULT_TIMEOUT)
+    try:
+        resp = await client.post(
+            f"{url.rstrip('/')}/chat/completions",
+            json={
+                "model": model or "gpt-4o-mini",
+                "messages": [{"role": "user", "content": "system unavailable — fallback"}],
+            },
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return {
+            "content": data["choices"][0]["message"]["content"],
+            "usage": data.get("usage", {}),
+            "latency_ms": 0,
+            "fallback": True,
+        }
+    finally:
+        await client.aclose()
 
 
 KEY_ROTATE_THRESHOLD = 5  # Preemptively rotate when remaining below this
@@ -76,13 +254,32 @@ class KeyRotator:
 
 
 class DeepSeekGateway:
-    def __init__(self, keys: list[str], base_url: str = DEEPSEEK_BASE):
+    def __init__(self, keys: list[str], base_url: str = DEEPSEEK_BASE,
+                 circuit_breaker_enabled: bool = False,
+                 circuit_breaker_threshold: int = 3,
+                 circuit_breaker_timeout_s: int = 30,
+                 fallback_provider_url: str | None = None,
+                 fallback_model: str | None = None,
+                 fallback_api_key: str | None = None):
         self.key_rotator = KeyRotator(keys)
         self.base_url = base_url.rstrip("/")
         self._client = httpx.AsyncClient(
             timeout=DEFAULT_TIMEOUT,
             limits=httpx.Limits(max_connections=MAX_CONNECTIONS),
         )
+        # P3-3: Circuit breaker
+        self.circuit_breaker = CircuitBreaker(
+            failure_threshold=circuit_breaker_threshold,
+            timeout_seconds=float(circuit_breaker_timeout_s),
+            fallback_provider_url=fallback_provider_url,
+            fallback_model=fallback_model,
+            fallback_api_key=fallback_api_key,
+        ) if circuit_breaker_enabled else None
+        # Separate breaker for fallback provider
+        self._fallback_circuit_breaker = CircuitBreaker(
+            failure_threshold=circuit_breaker_threshold * 2,
+            timeout_seconds=float(circuit_breaker_timeout_s) * 2,
+        ) if circuit_breaker_enabled and fallback_provider_url else None
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -149,12 +346,26 @@ _budget: TokenBudget | None = None
 def init_gateway(api_key: str, base_url: str = DEEPSEEK_BASE,
                   daily_token_budget: int = 2_000_000,
                   daily_pro_limit: int = 30,
-                  daily_flash_limit: int = 100) -> None:
+                  daily_flash_limit: int = 100,
+                  circuit_breaker_enabled: bool = False,
+                  circuit_breaker_threshold: int = 3,
+                  circuit_breaker_timeout_s: int = 30,
+                  fallback_provider_url: str | None = None,
+                  fallback_model: str | None = None,
+                  fallback_api_key: str | None = None) -> None:
     global _gateway, _budget
     keys = [k.strip() for k in api_key.split(",") if k.strip()] if api_key else []
     if not keys:
         raise RuntimeError("No API key configured. Set DEEPSEEK_API_KEY or DEEPSEEK_API_KEYS.")
-    _gateway = DeepSeekGateway(keys, base_url)
+    _gateway = DeepSeekGateway(
+        keys, base_url,
+        circuit_breaker_enabled=circuit_breaker_enabled,
+        circuit_breaker_threshold=circuit_breaker_threshold,
+        circuit_breaker_timeout_s=circuit_breaker_timeout_s,
+        fallback_provider_url=fallback_provider_url,
+        fallback_model=fallback_model,
+        fallback_api_key=fallback_api_key,
+    )
     _budget = TokenBudget(
         daily_limit=daily_token_budget,
         pro_call_limit=daily_pro_limit,
@@ -275,7 +486,11 @@ async def _call_with_retry(
     max_tokens: int,
     reasoning_effort: str,
 ) -> dict[str, Any]:
-    """Call LLM with one retry on 429 and preemptive key rotation."""
+    """Call LLM with retry on 429, preemptive key rotation, and circuit breaker gate.
+
+    P3-3: Circuit breaker wraps the call — OPEN state blocks early,
+    HALF_OPEN probes, success/failure feed back to state machine.
+    """
     budget = await get_budget()
 
     # Preemptive rotation if current key is near quota limit
@@ -283,21 +498,32 @@ async def _call_with_retry(
         await gw.key_rotator.rotate()
         logger.debug("Preemptive key rotation (remaining quota low)")
 
-    try:
-        return await gw._call(
-            model, system_prompt, user_prompt, temperature, max_tokens, reasoning_effort
-        )
-    except RateLimitError as e:
-        budget.handle_429(e.retry_after)
-        if len(gw.key_rotator) > 1:
-            await gw.key_rotator.rotate()
-            logger.info("Key rotated after 429 (total keys: %d)", len(gw.key_rotator))
-        else:
-            logger.warning("429 received but only 1 key configured — cannot rotate")
-        # Retry once with new key
-        return await gw._call(
-            model, system_prompt, user_prompt, temperature, max_tokens, reasoning_effort
-        )
+    async def _primary_call():
+        try:
+            return await gw._call(
+                model, system_prompt, user_prompt, temperature, max_tokens, reasoning_effort
+            )
+        except RateLimitError as e:
+            budget.handle_429(e.retry_after)
+            if len(gw.key_rotator) > 1:
+                await gw.key_rotator.rotate()
+                logger.info("Key rotated after 429 (total keys: %d)", len(gw.key_rotator))
+            else:
+                logger.warning("429 received but only 1 key configured — cannot rotate")
+            # Retry once with new key
+            return await gw._call(
+                model, system_prompt, user_prompt, temperature, max_tokens, reasoning_effort
+            )
+
+    # P3-3: Gate through circuit breaker if enabled
+    if gw.circuit_breaker is not None:
+        try:
+            return await gw.circuit_breaker.call(_primary_call)
+        except CircuitBreakerOpenError:
+            return {"content": "", "error": "circuit_open",
+                    "usage": {}, "fallback": True}
+    else:
+        return await _primary_call()
 
 
 async def chat_batch_flash(

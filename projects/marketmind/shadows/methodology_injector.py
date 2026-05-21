@@ -103,18 +103,47 @@ class MethodologyInjector:
             return False
 
         old_prompt = config.methodology_prompt
-        # Remove any previous [FAILURE PATTERNS] section
-        base = old_prompt.split("[FAILURE PATTERNS TO AVOID]")[0].strip()
-
-        failures_text = "\n".join(f"- {f}" for f in failures)
-        new_prompt = (
-            f"[FAILURE PATTERNS TO AVOID — learned from predecessor]\n"
-            f"{failures_text}\n\n{base}"
-        )
+        new_prompt = self.format_failure_patterns(old_prompt, failures)
 
         return self._state_db.update_methodology_prompt(
             shadow_id, new_prompt,
             reason=f"Injected {len(failures)} predecessor failure patterns"
+        )
+
+    @staticmethod
+    def format_failure_patterns(prompt: str, failures: list[str]) -> str:
+        """Format a methodology prompt with failure patterns prepended (P3-1).
+
+        Pure text-formatting method — no DB required. Used during challenger
+        creation before the shadow exists in the DB, and by inject_failure_patterns()
+        for the DB-backed path.
+
+        Args:
+            prompt: The methodology prompt text to augment.
+            failures: List of failure pattern strings to prepend.
+
+        Returns:
+            Modified prompt with [FAILURE PATTERNS TO AVOID] block prepended.
+            Returns prompt unchanged if failures list is empty after dedup.
+        """
+        # Deduplicate while preserving order
+        seen = set()
+        unique_failures = []
+        for f in failures:
+            if f and f.strip() and f.strip() not in seen:
+                unique_failures.append(f.strip())
+                seen.add(f.strip())
+
+        if not unique_failures:
+            return prompt
+
+        # Remove any previous [FAILURE PATTERNS] section
+        base = prompt.split("[FAILURE PATTERNS TO AVOID]")[0].strip()
+
+        failures_text = "\n".join(f"- {f}" for f in unique_failures)
+        return (
+            f"[FAILURE PATTERNS TO AVOID — learned from predecessor]\n"
+            f"{failures_text}\n\n{base}"
         )
 
     def reset_to_baseline(self, shadow_id: str) -> bool:

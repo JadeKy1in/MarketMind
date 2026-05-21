@@ -130,6 +130,12 @@ class MarketMindConfig:
     session_checkpoint_dir: Path | None = None
     position_protection_days: int = 60
     shadow: ShadowSettings = field(default_factory=ShadowSettings)
+    # P3-3: Circuit breaker
+    fallback_provider_url: str | None = None
+    fallback_model: str | None = None
+    fallback_api_key: str | None = field(default_factory=lambda: os.getenv("FALLBACK_API_KEY"))
+    circuit_breaker_threshold: int = 3
+    circuit_breaker_timeout_s: int = 30
 
     def __post_init__(self):
         self.data_dir = Path(self.data_dir)

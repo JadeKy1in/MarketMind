@@ -182,6 +182,10 @@ class ChallengerEngine:
         The challenger inherits the target's methodology but is invisible to rankings
         (shadow_type="challenger" is excluded by get_visible_shadows()).
 
+        P3-1: Predecessor failure patterns from AEL debriefs and crystallization
+        retirements are injected into the challenger's methodology prompt so the
+        challenger learns from the target's documented mistakes.
+
         Args:
             target_shadow_id: The shadow being challenged.
 
@@ -199,12 +203,42 @@ class ChallengerEngine:
         ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
         challenger_id = f"challenger:{target.domain or 'general'}:{ts}"
 
+        # ── P3-1: Inject predecessor failure patterns ──────────────────
+        methodology_prompt = target.methodology_prompt
+        try:
+            from marketmind.shadows.methodology_injector import MethodologyInjector
+
+            # Query failure patterns from AEL debriefs (last 90 days)
+            failure_patterns = self.state_db.get_failure_patterns(
+                target_shadow_id, days=90
+            )
+
+            # Query retired insights from crystallization
+            retired_insights = self.state_db.get_retired_insights(
+                target_shadow_id, days=90
+            )
+
+            # Combine and cap at 5 total patterns
+            all_patterns = (failure_patterns or []) + (retired_insights or [])
+            if len(all_patterns) > 5:
+                all_patterns = all_patterns[:5]
+
+            if all_patterns:
+                methodology_prompt = MethodologyInjector.format_failure_patterns(
+                    methodology_prompt, all_patterns
+                )
+        except Exception as e:
+            logger.debug(
+                "Failure pattern injection skipped for %s: %s",
+                target_shadow_id, e,
+            )
+
         # Build challenger config — inherits target methodology with challenger marker
         challenger_config = ShadowConfig(
             shadow_id=challenger_id,
             shadow_type="challenger",
             display_name=f"Challenger[{target.display_name}]",
-            methodology_prompt=target.methodology_prompt,
+            methodology_prompt=methodology_prompt,
             virtual_capital=target.virtual_capital,
             max_positions=target.max_positions,
             model=target.model,

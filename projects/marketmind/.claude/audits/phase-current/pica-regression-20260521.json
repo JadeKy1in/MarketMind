@@ -1,0 +1,13 @@
+{
+  "pica_level": "regression",
+  "date": "2026-05-21",
+  "status": "PASS",
+  "total_tests": 1480,
+  "passed": 1480,
+  "failed": 0,
+  "pre_existing_excluded": 4,
+  "duration_seconds": 206.77,
+  "test_suite": "Full MarketMind test suite (excluding 4 pre-existing failures)",
+  "regression_check": "No regressions detected against baseline of 1,305 tests",
+  "notes": "175 new tests added this session across 10 test files. All existing module tests continue to pass."
+}

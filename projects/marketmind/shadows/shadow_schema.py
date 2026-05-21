@@ -13,7 +13,7 @@ logger = logging.getLogger("marketmind.shadows.shadow_schema")
 
 # ── SQLite database ──────────────────────────────────────────────────────────
 
-CODE_VERSION = 10  # Increment on any schema change; add migration to _MIGRATIONS
+CODE_VERSION = 11  # Increment on any schema change; add migration to _MIGRATIONS
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS metadata (
@@ -157,6 +157,20 @@ CREATE TABLE IF NOT EXISTS paper_live_gap_state (
     updated_at TEXT NOT NULL,
     FOREIGN KEY (shadow_id) REFERENCES shadows(id)
 );
+
+CREATE TABLE IF NOT EXISTS cycle_checkpoints (
+    date TEXT NOT NULL,
+    shadow_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    step_completed INTEGER DEFAULT 0,
+    analysis_json TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    error_message TEXT,
+    PRIMARY KEY (date, shadow_id)
+);
+CREATE INDEX IF NOT EXISTS idx_cycle_checkpoints_date ON cycle_checkpoints(date);
+CREATE INDEX IF NOT EXISTS idx_cycle_checkpoints_shadow_date ON cycle_checkpoints(shadow_id, date);
 
 CREATE TABLE IF NOT EXISTS shadow_analyses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -445,6 +459,33 @@ def _migration_10_rename_shadow_votes_to_shadow_analyses(conn: sqlite3.Connectio
         pass  # Table already renamed or fresh DB (shadow_analyses created directly)
 
 
+def _migration_11_upgrade_cycle_checkpoints(conn: sqlite3.Connection) -> None:
+    """P3-4: upgrade cycle_checkpoints from cycle-level to per-shadow schema.
+
+    The old v4 migration created a cycle-level table (date PRIMARY KEY, one row
+    per day). P3-4 needs per-shadow granularity with composite PK (date, shadow_id)
+    for partial-state recovery after crashes mid-cycle.
+    """
+    # Drop old cycle-level table (data is non-critical checkpoint state)
+    conn.execute("DROP TABLE IF EXISTS cycle_checkpoints")
+    # Create new per-shadow table with analysis cache
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS cycle_checkpoints (
+            date TEXT NOT NULL,
+            shadow_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            step_completed INTEGER DEFAULT 0,
+            analysis_json TEXT,
+            started_at TEXT,
+            completed_at TEXT,
+            error_message TEXT,
+            PRIMARY KEY (date, shadow_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_cycle_checkpoints_date ON cycle_checkpoints(date);
+        CREATE INDEX IF NOT EXISTS idx_cycle_checkpoints_shadow_date ON cycle_checkpoints(shadow_id, date);
+    """)
+
+
 _MIGRATIONS: list[tuple[int, callable]] = [
     (1, _migration_1_add_discount_rate),
     (2, _migration_2_add_belief_tables),
@@ -456,4 +497,5 @@ _MIGRATIONS: list[tuple[int, callable]] = [
     (8, _migration_8_add_quarantine_column),
     (9, _migration_9_add_beta_and_retired),
     (10, _migration_10_rename_shadow_votes_to_shadow_analyses),
+    (11, _migration_11_upgrade_cycle_checkpoints),
 ]

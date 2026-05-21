@@ -26,7 +26,7 @@ def e2e_db():
 
 @pytest.fixture
 def mother_with_shadows(e2e_db, settings):
-    """Create 15 expert + 8 daredevil shadows (no catfish — it's now an ecosystem auditor)."""
+    """Create 16 expert + 8 daredevil shadows (no catfish — it's now an ecosystem auditor)."""
     from marketmind.shadows.expert_shadows import create_expert_shadows
     from marketmind.shadows.daredevil_shadows import create_daredevil_shadows
 
@@ -35,10 +35,10 @@ def mother_with_shadows(e2e_db, settings):
     return ShadowMother(settings, e2e_db)
 
 
-def test_full_shadow_setup_23_shadows(mother_with_shadows, e2e_db):
-    """Verify 15 experts + 8 daredevils = 23 shadows registered (catfish is no longer a shadow)."""
+def test_full_shadow_setup_24_shadows(mother_with_shadows, e2e_db):
+    """Verify 16 experts + 8 daredevils = 24 shadows registered (catfish is no longer a shadow)."""
     visible = e2e_db.get_visible_shadows()
-    assert len(visible) == 23
+    assert len(visible) == 24
 
 
 @pytest.mark.asyncio
@@ -47,7 +47,7 @@ async def test_shadow_isolation_on_error(mother_with_shadows):
     result = await mother_with_shadows.orchestrate_daily_cycle(
         [{"headline": "Normal market day"}], {}
     )
-    assert result.active_shadows >= 15
+    assert result.active_shadows >= 16
     assert result.date is not None
 
 

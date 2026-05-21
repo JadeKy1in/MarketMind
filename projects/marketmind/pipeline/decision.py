@@ -102,6 +102,53 @@ Position size: never exceed 25% total heat limit. Combined stop-losses across al
 All prices must be verifiable. Never fabricate."""
 
 
+# ── SHARP dynamic prompt assembly (P3-2a) ────────────────────────────────────
+
+# Module-level cache: decompose once, reuse across calls. The cache is
+# invalidated only by explicit calls to _refresh_decision_prompt().
+_dynamic_prompt_cache: str | None = None
+_cached_rule_count: int = 0
+
+
+def _get_decision_prompt() -> str:
+    """Return the decision system prompt assembled from active SHARP rules.
+
+    On first call, decomposes the static DECISION_SYSTEM_PROMPT into
+    auditable rules and reassembles only the active ones. Subsequent
+    calls return the cached result for zero-overhead.
+
+    Call _refresh_decision_prompt() to invalidate the cache after
+    rule retirements or evolutions.
+    """
+    global _dynamic_prompt_cache, _cached_rule_count
+    if _dynamic_prompt_cache is not None:
+        return _dynamic_prompt_cache
+
+    from marketmind.pipeline.methodology_rules import RuleDecomposer
+
+    rules = RuleDecomposer.decompose(DECISION_SYSTEM_PROMPT)
+    active_rules = [r for r in rules if r.status == "active"]
+    _cached_rule_count = len(active_rules)
+    _dynamic_prompt_cache = RuleDecomposer.assemble(active_rules)
+    logger.debug(
+        "SHARP: assembled decision prompt from %d active rules "
+        "(out of %d decomposed)",
+        _cached_rule_count, len(rules),
+    )
+    return _dynamic_prompt_cache
+
+
+def _refresh_decision_prompt() -> str:
+    """Invalidate the SHARP prompt cache and rebuild from current rules.
+
+    Call after rule retirements or evolutions (P3-2b) to ensure the
+    decision prompt reflects the latest rule state.
+    """
+    global _dynamic_prompt_cache
+    _dynamic_prompt_cache = None
+    return _get_decision_prompt()
+
+
 async def generate_decision(
     l1: Layer1Result,
     l2: Layer2Result,
@@ -126,7 +173,7 @@ async def generate_decision(
     user_prompt = _build_decision_prompt(l1, l2, l3, red_team, resonance, hypotheses, fragility_report, cross_border_report)
     try:
         result = await chat_pro(
-            system_prompt=DECISION_SYSTEM_PROMPT,
+            system_prompt=_get_decision_prompt(),
             user_prompt=user_prompt,
             temperature=0.2,
             max_tokens=4096,

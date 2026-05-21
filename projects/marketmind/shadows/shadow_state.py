@@ -296,6 +296,99 @@ class ShadowStateDB:
         finally:
             conn.close()
 
+    def get_failure_patterns(self, shadow_id: str, days: int = 90) -> list[str]:
+        """Get failure patterns from AEL debriefs (P3-1).
+
+        Queries methodology_changes for debrief-type entries within the
+        specified day window. Each row's reason field contains one failure
+        pattern description.
+
+        Args:
+            shadow_id: The shadow whose debriefs to query.
+            days: Lookback window in days (default 90).
+
+        Returns:
+            List of failure pattern strings, most recent first. Empty if none.
+        """
+        conn = self._connect()
+        try:
+            from datetime import timedelta
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            rows = conn.execute(
+                """SELECT reason, new_prompt FROM methodology_changes
+                   WHERE shadow_id = ? AND change_type = 'debrief'
+                   AND changed_at >= ?
+                   ORDER BY changed_at DESC""",
+                (shadow_id, cutoff)
+            ).fetchall()
+
+            patterns = []
+            for row in rows:
+                reason = (row["reason"] or "").strip()
+                if reason:
+                    patterns.append(reason)
+
+            # Also extract from [FAILURE PATTERNS TO AVOID] block in new_prompt
+            for row in rows:
+                new_prompt = row["new_prompt"] or ""
+                if "[FAILURE PATTERNS TO AVOID" in new_prompt:
+                    section = new_prompt.split("[FAILURE PATTERNS TO AVOID")[1]
+                    section = section.split("\n\n")[0] if "\n\n" in section else section
+                    for line in section.split("\n"):
+                        line = line.strip().lstrip("-").strip()
+                        if line and not line.startswith("learned"):
+                            patterns.append(line)
+
+            return patterns
+        finally:
+            conn.close()
+
+    def get_retired_insights(self, shadow_id: str, days: int = 90) -> list[str]:
+        """Get retired insights from crystallization (P3-1).
+
+        Queries methodology_changes for crystallization_retire entries.
+        Retired insights are previously-validated insights that have been
+        invalidated by new evidence.
+
+        Args:
+            shadow_id: The shadow whose retired insights to query.
+            days: Lookback window in days (default 90).
+
+        Returns:
+            List of retired insight strings, most recent first. Empty if none.
+        """
+        conn = self._connect()
+        try:
+            from datetime import timedelta
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            rows = conn.execute(
+                """SELECT reason, new_prompt FROM methodology_changes
+                   WHERE shadow_id = ? AND change_type = 'crystallization_retire'
+                   AND changed_at >= ?
+                   ORDER BY changed_at DESC""",
+                (shadow_id, cutoff)
+            ).fetchall()
+
+            insights = []
+            for row in rows:
+                reason = (row["reason"] or "").strip()
+                if reason:
+                    insights.append(reason)
+
+            # Also extract from [RETIRED] block in new_prompt
+            for row in rows:
+                new_prompt = row["new_prompt"] or ""
+                if "[RETIRED:" in new_prompt:
+                    section = new_prompt.split("[RETIRED:")[1]
+                    section = section.split("]")[0] if "]" in section else section
+                    section = section.strip()
+                    if section:
+                        insights.append(section)
+
+            return insights
+        finally:
+            conn.close()
+
     @staticmethod
     def _row_to_config(row: sqlite3.Row) -> ShadowConfig:
         try:
@@ -577,6 +670,88 @@ class ShadowStateDB:
         finally:
             conn.close()
 
+    # ── Cycle checkpoints (P3-4 partial-state recovery) ────────────────────
+
+    def save_checkpoint(self, date: str, shadow_id: str, status: str,
+                        step: int, analysis_json: str | None = None,
+                        error_message: str | None = None) -> None:
+        """Save a per-shadow checkpoint for partial-state recovery (P3-4).
+
+        Called after each individual shadow analysis completes or fails.
+        If the DB write itself fails, logs a warning but does NOT raise —
+        checkpoint persistence failures must not crash the analysis loop.
+
+        Args:
+            date: ISO date string (YYYY-MM-DD).
+            shadow_id: Shadow identifier.
+            status: 'pending', 'completed', or 'failed'.
+            step: Pipeline step number (4 = analysis step).
+            analysis_json: Serialized analysis output (for completed checkpoints).
+            error_message: Exception message (for failed checkpoints).
+        """
+        conn = self._connect()
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            completed_at = now if status == 'completed' else None
+            started_at = now if status == 'pending' else None
+
+            conn.execute(
+                """INSERT OR REPLACE INTO cycle_checkpoints
+                   (date, shadow_id, status, step_completed, analysis_json,
+                    started_at, completed_at, error_message)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (date, shadow_id, status, step, analysis_json,
+                 started_at, completed_at, error_message)
+            )
+            conn.commit()
+        except Exception as e:
+            logger.warning(
+                "Failed to save checkpoint for %s/%s: %s", date, shadow_id, e
+            )
+        finally:
+            conn.close()
+
+    def get_checkpoint(self, date: str, shadow_id: str) -> dict | None:
+        """Get checkpoint for a specific shadow on a specific date (P3-4).
+
+        Returns None if no checkpoint exists for this (date, shadow_id) pair.
+        """
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM cycle_checkpoints WHERE date = ? AND shadow_id = ?",
+                (date, shadow_id)
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def get_incomplete_shadows(self, date: str) -> list[str]:
+        """Return shadow_ids with status='pending' or 'failed' for a date (P3-4).
+
+        Used at cycle start to determine which shadows need to be re-run
+        after a mid-cycle crash.
+        """
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT shadow_id FROM cycle_checkpoints "
+                "WHERE date = ? AND status IN ('pending', 'failed')",
+                (date,)
+            ).fetchall()
+            return [r["shadow_id"] for r in rows]
+        finally:
+            conn.close()
+
+    def clear_date_checkpoints(self, date: str) -> None:
+        """Delete all checkpoints for a date (cleanup after cycle completes, P3-4)."""
+        conn = self._connect()
+        try:
+            conn.execute("DELETE FROM cycle_checkpoints WHERE date = ?", (date,))
+            conn.commit()
+        finally:
+            conn.close()
+
     # ── Bulk operations ───────────────────────────────────────────────────
 
     def get_all_daily_snapshots(self, date: str) -> list[DailySnapshot]:
@@ -654,6 +829,68 @@ class ShadowStateDB:
         conn = self._connect()
         try:
             return get_analyses_by_date_range(conn, start_date, end_date)
+        finally:
+            conn.close()
+
+    # ── Market prices CRUD (P2-4) ─────────────────────────────────────
+
+    def insert_market_price(self, ticker: str, date: str, open_price: float,
+                            high: float, low: float, close: float, volume: int,
+                            next_day_return: float | None = None) -> None:
+        conn = self._connect()
+        try:
+            conn.execute(
+                """INSERT OR REPLACE INTO market_prices
+                   (ticker, date, open, high, low, close, volume, next_day_return)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (ticker, date, open_price, high, low, close, volume, next_day_return))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_market_prices(self, ticker: str, start_date: str | None = None,
+                          end_date: str | None = None) -> list[dict]:
+        conn = self._connect()
+        try:
+            if start_date and end_date:
+                rows = conn.execute(
+                    """SELECT * FROM market_prices WHERE ticker = ? AND date >= ? AND date <= ?
+                       ORDER BY date ASC""",
+                    (ticker, start_date, end_date)).fetchall()
+            elif start_date:
+                rows = conn.execute(
+                    """SELECT * FROM market_prices WHERE ticker = ? AND date >= ?
+                       ORDER BY date ASC""",
+                    (ticker, start_date)).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT * FROM market_prices WHERE ticker = ? ORDER BY date ASC""",
+                    (ticker,)).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_next_day_return(self, ticker: str, date: str) -> float | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT next_day_return FROM market_prices WHERE ticker = ? AND date = ?",
+                (ticker, date)).fetchone()
+            return row["next_day_return"] if row else None
+        finally:
+            conn.close()
+
+    def get_analyses_with_direction(self, shadow_id: str,
+                                     days: int = 90) -> list[dict]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """SELECT ticker, direction, date FROM shadow_analyses
+                   WHERE shadow_id = ? AND direction != 'abstain'
+                   ORDER BY date DESC LIMIT ?""",
+                (shadow_id, days)).fetchall()
+            return [{"ticker": r["ticker"], "direction": r["direction"],
+                     "date": r["date"]} for r in rows]
         finally:
             conn.close()
 
