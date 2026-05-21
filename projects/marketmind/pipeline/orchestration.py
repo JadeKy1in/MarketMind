@@ -273,38 +273,5 @@ async def run_gate1_mode(config: "MarketMindConfig", mock: bool = False,
 async def run_interactive(config: "MarketMindConfig", mock: bool = False,
                           verbose: bool = False, shadow_count: int | None = None) -> int:
     """Run the full interactive pipeline with CLI prompts at each stage."""
-    from marketmind.pipeline.session_context import SessionContext
-    from marketmind.pipeline.layer1_interactive import run_l1_interactive
-    from marketmind.pipeline.l2_interactive import run_l2_interactive
-    from marketmind.pipeline.l3_interactive import run_l3_interactive
-    from marketmind.pipeline.decision_interactive import run_decision_interactive
-
-    init_gateway(config.deepseek_api_key, config.deepseek_base_url)
-    ctx = SessionContext(config=config)
-
-    async def cli_handler(prompt: str) -> str:
-        if mock:
-            return "好"
-        print(prompt, end="")
-        return input()
-
-    # Stage 1: L1 narrative
-    l1_result, skip, _ = await run_l1_interactive(config, mock=mock, verbose=verbose,
-                                                   shadow_count=shadow_count)
-    ctx.l1_result = l1_result
-    if skip:
-        return 0
-
-    # Stage 2: L2 fundamental
-    if not await run_l2_interactive(ctx, cli_handler):
-        return 0
-
-    # Stage 3: L3 technical
-    if not await run_l3_interactive(ctx, cli_handler):
-        return 0
-
-    # Stage 4: Decision
-    if not await run_decision_interactive(ctx, cli_handler):
-        return 0
-
-    return 0
+    from marketmind.pipeline.interactive_orchestration import run_interactive as _run
+    return await _run(config, mock, verbose, shadow_count)
