@@ -116,7 +116,9 @@ async def _fetch_global_vol() -> dict:
     date_val = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     errors: list[str] = []
 
-    for name, ticker in tickers.items():
+    for i, (name, ticker) in enumerate(tickers.items()):
+        if i > 0:
+            await asyncio.sleep(2.0)  # rate-limit yfinance calls
         try:
             data = await _fetch_yfinance_raw(ticker)
             if data is not None:

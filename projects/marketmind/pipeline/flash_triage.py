@@ -62,12 +62,13 @@ class TriageResult:
     published_at: str
     scores: dict               # {market_impact, cross_source_corroboration,
                                #  contradicts_consensus, investigative_depth_needed, urgency}
-    classification: str        # macro | company | geopolitical | sentiment | technical
+    classification: str        # macro | company | geopolitical | sentiment | technical | figure
     affected_assets: list[str]  # ticker hints only (not full analysis)
     cluster_hints: list[str]    # keywords for later clustering (country, sector, event type)
     direction: str = "neutral"  # bullish | bearish | neutral — for Pre-Act HVR planner
     confidence: float = 0.5     # 0.0-1.0 directional confidence
     event_type: str = "unknown"  # earnings | economic_data | geopolitical | monetary_policy | etc.
+    content_type: str = "news"  # "news" | "figure_signal" — origin of this triage item
 
     # Event clustering context (NEW — Phase G)
     cluster_id: int | None = None
@@ -256,6 +257,7 @@ async def triage_batch(
                     direction=direction,
                     confidence=confidence,
                     event_type=event_type,
+                    content_type="news",
                 ))
 
             except Exception as exc:
@@ -353,3 +355,48 @@ def inject_cluster_context(
             result.causal_links = cluster_links.get(cluster.cluster_id, [])
 
     return triage_results
+
+
+def ingest_figure_signals(
+    figure_signals: list["FigureSignal"],
+) -> list[TriageResult]:
+    """Convert pre-scored FigureSignal objects into TriageResult pipeline items.
+
+    Figure signals arrive pre-scored from FigureSignalExtractor — they do NOT
+    go through Flash LLM triage. Instead, AWA scores are mapped to the 5-axis
+    triage scale and the signals flow into the same pipeline as regular news.
+
+    This is the integration point described in design doc §8.2:
+    "FigureSignal → 主管道 Flash Triage (作为额外信号类型 'figure_signal')"
+
+    Args:
+        figure_signals: List of FigureSignal from pipeline.figure_news_pusher.
+
+    Returns:
+        List of TriageResult with content_type="figure_signal", ready for
+        filter_for_pro_browse() and downstream pipeline stages.
+    """
+    from marketmind.pipeline.figure_news_pusher import FigureNewsPusher
+
+    pusher = FigureNewsPusher()
+    raw_dicts = pusher.push_to_pipeline(figure_signals)
+
+    results: list[TriageResult] = []
+    for d in raw_dicts:
+        results.append(TriageResult(
+            headline=d["headline"],
+            source_name=d["source_name"],
+            source_tier=d["source_tier"],
+            source_reliability=d["source_reliability"],
+            url=d["url"],
+            published_at=d["published_at"],
+            scores=d["scores"],
+            classification=d["classification"],
+            affected_assets=d["affected_assets"],
+            cluster_hints=d["cluster_hints"],
+            direction=d["direction"],
+            confidence=d["confidence"],
+            event_type=d["event_type"],
+            content_type="figure_signal",
+        ))
+    return results
