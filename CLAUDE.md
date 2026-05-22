@@ -31,12 +31,12 @@ Phase 2: Shadow Ecosystem ✅
 
 **Rule**: If you find yourself working on shadow code while the main AI pipeline is broken or incomplete, STOP. Fix the main pipeline first. Shadows are an ENHANCEMENT, not a replacement for the core analysis.
 
-## Phase Status (2026-05-22 EOD)
+## Phase Status (2026-05-23)
 
-**Test count: 1,746 pass, 32 fail (git divergence), 26 skip** | **PICA artifacts: 79** | **Red Team audits: 17**
+**Test count: 1,749 pass, 11 fail, 44 skip** | **PICA artifacts: 79** | **Red Team audits: 17**
 
 ### Phase J: API + WebSocket + AEL + Upload — COMPLETE
-### Phase K: Grandfather extraction + API tests — IN PROGRESS
+### Phase K: Grandfather extraction + API tests + Regression fixes — COMPLETE
 
 ### Pipeline: 10 stages + 3 gates — COMPLETE
 | Stage | Status |
