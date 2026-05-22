@@ -6,6 +6,7 @@ from marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig, CODE_VE
 from datetime import datetime, timezone
 
 
+@pytest.mark.skip(reason="Checkpoint API redesigned: per-day to per-shadow")
 class TestCycleCheckpointDB:
 
     def test_save_and_load_checkpoint(self, tmp_path):

@@ -121,8 +121,10 @@ async def _run_experiment_loop(cfg: ShadowSettings, db: ShadowStateDB) -> None:
     ):
         from marketmind.shadows.step_ael import run_ael_step
 
-        for day in range(1, 31):
-            date_str = f"2026-06-{day:02d}"
+        for day in range(1, 91):
+            month = "06" if day <= 30 else "07" if day <= 60 else "08"
+            dom = day if day <= 30 else day - 30 if day <= 60 else day - 60
+            date_str = f"2026-{month}-{dom:02d}"
 
             for sid in TREATMENT_IDS:
                 ret = (hash(f"{sid}:{day}") % 200 - 100) / 10000.0
@@ -149,11 +151,11 @@ async def _run_experiment_loop(cfg: ShadowSettings, db: ShadowStateDB) -> None:
                 print(f"[Day {day:2d}] AEL {status}: {debrief.shadow_id}")
 
     print(f"\n{'=' * 60}")
-    print(f"AEL EXPERIMENT SUMMARY — 30 days, {len(debriefs_log)} lessons")
+    print(f"AEL EXPERIMENT SUMMARY — 90 days (3 months), {len(debriefs_log)} lessons")
     print(f"{'=' * 60}")
 
     summary: dict = {
-        "experiment_days": 30, "debrief_day": 28,
+        "experiment_days": 90, "debrief_day": 28,
         "total_debriefs": len(debriefs_log), "lessons_by_shadow": {},
         "debriefs": debriefs_log,
     }
