@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from marketmind.shadows.shadow_data_types import ShadowConfig
 
 logger = logging.getLogger("marketmind.shadows.ael_evolution")
 
@@ -125,6 +126,37 @@ class AELEvolutionEngine:
         self._replica_pairs[treatment_id] = pair
         logger.info("AEL replica pair created: %s / %s", treatment_id, control_id)
         return pair
+
+    def ensure_control_replicas(self, state_db) -> list[ReplicaPair]:
+        created: list[ReplicaPair] = []
+        for treatment_id, _fallback_id in self.EXPERIMENT_PAIRS:
+            control_id = f"{treatment_id}:control"
+            if state_db.get_shadow(control_id) is not None:
+                continue
+            treatment_config = state_db.get_shadow(treatment_id)
+            if treatment_config is None:
+                continue
+            config = ShadowConfig(
+                shadow_id=control_id, shadow_type="beta",
+                display_name=f"{treatment_config.display_name} Control",
+                methodology_prompt=treatment_config.methodology_prompt,
+                virtual_capital=treatment_config.virtual_capital,
+                model=treatment_config.model,
+                temperature=treatment_config.temperature,
+                reasoning_effort=treatment_config.reasoning_effort,
+                domain=treatment_config.domain,
+                parent_shadow_id=treatment_id, status="beta",
+            )
+            state_db.create_shadow(config)
+            pair = ReplicaPair(
+                treatment_id=treatment_id, control_id=control_id,
+                base_shadow_id=treatment_id,
+                created_at=datetime.now(timezone.utc).isoformat(),
+            )
+            self._replica_pairs[treatment_id] = pair
+            created.append(pair)
+            logger.info("AEL control replica created: %s", control_id)
+        return created
 
     async def run_monthly_debrief(
         self, shadow_id: str, performances: dict, market_context: str = ""

@@ -117,8 +117,8 @@ class TestAccuracyGate:
 class TestMigration:
 
     def test_code_version_is_6(self):
-        """CODE_VERSION should be 7 after forecast scenarios migration."""
-        assert CODE_VERSION == 8
+        """CODE_VERSION should be 12 after Phase C independent tools migration."""
+        assert CODE_VERSION == 12
 
     def test_market_prices_table_exists(self, tmp_path):
         """Market prices table should be created during init_schema."""
@@ -126,7 +126,7 @@ class TestMigration:
         db = ShadowStateDB(db_path)
         db.init_schema()
         # Verify table exists by inserting and querying
-        db.save_market_prices("AAPL", {
+        db.get_market_prices("AAPL", {
             "2026-05-01": {"open": 100.0, "high": 101.0, "low": 99.0,
                           "close": 100.5, "volume": 1000}
         })

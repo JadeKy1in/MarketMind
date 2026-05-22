@@ -41,6 +41,7 @@ async def run_ael_step(
         from marketmind.shadows.methodology_injector import MethodologyInjector
 
         ael = AELEvolutionEngine(state_db=state_db)
+        ael.ensure_control_replicas(state_db)
         debrief_day = getattr(config, 'ael_debrief_day', 1)
         today_day = int(today.split("-")[2])
 

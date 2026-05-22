@@ -20,7 +20,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from marketmind.config.settings import ShadowSettings
-from marketmind.shadows.ael_evolution import AELDebriefResult
+from marketmind.shadows.ael_evolution import AELDebriefResult, AELEvolutionEngine
 from marketmind.shadows.ranking_engine import ShadowPerformance
 from marketmind.shadows.shadow_data_types import DailySnapshot
 from marketmind.shadows.shadow_mother import ShadowOrchestrationResult
@@ -88,6 +88,9 @@ async def _run_experiment_loop(cfg: ShadowSettings, db: ShadowStateDB) -> None:
     from marketmind.shadows.expert_shadows import create_expert_shadows
     create_expert_shadows(db, cfg)
     create_daredevil_shadows(db, cfg)
+    ae = AELEvolutionEngine()
+    control_pairs = ae.ensure_control_replicas(db)
+    print(f"Control replicas: {len(control_pairs)} created")
 
     debriefs_log: list[dict] = []
 

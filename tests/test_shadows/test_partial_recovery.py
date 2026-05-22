@@ -14,8 +14,8 @@ class TestCycleCheckpointDB:
         db.init_schema()
 
         today = "2026-05-13"
-        db.save_cycle_checkpoint(today, {"completed": ["s1", "s2"]}, step_completed=4)
-        cp = db.get_cycle_checkpoint(today)
+        db.save_checkpoint(today, {"completed": ["s1", "s2"]}, step_completed=4)
+        cp = db.get_checkpoint(today)
         assert cp is not None
         assert cp["status"] == "running"
         assert cp["step_completed"] == 4
@@ -28,9 +28,9 @@ class TestCycleCheckpointDB:
         db.init_schema()
 
         today = "2026-05-13"
-        db.save_cycle_checkpoint(today, {"completed": ["s1"]})
-        db.save_cycle_checkpoint(today, {"completed": ["s1", "s2", "s3"]})
-        cp = db.get_cycle_checkpoint(today)
+        db.save_checkpoint(today, {"completed": ["s1"]})
+        db.save_checkpoint(today, {"completed": ["s1", "s2", "s3"]})
+        cp = db.get_checkpoint(today)
         assert len(cp["shadow_states"]["completed"]) == 3
         db.close()
 
@@ -38,7 +38,7 @@ class TestCycleCheckpointDB:
         """Should return None for missing checkpoint."""
         db = ShadowStateDB(str(tmp_path / "test.db"))
         db.init_schema()
-        cp = db.get_cycle_checkpoint("2026-01-01")
+        cp = db.get_checkpoint("2026-01-01")
         assert cp is None
         db.close()
 
@@ -47,9 +47,9 @@ class TestCycleCheckpointDB:
         db = ShadowStateDB(str(tmp_path / "test.db"))
         db.init_schema()
 
-        db.save_cycle_checkpoint("2026-05-10", {"completed": ["s1"]}, status="completed")
-        db.save_cycle_checkpoint("2026-05-11", {"completed": []}, status="running")
-        db.save_cycle_checkpoint("2026-05-12", {"completed": ["s2"]}, status="crashed")
+        db.save_checkpoint("2026-05-10", {"completed": ["s1"]}, status="completed")
+        db.save_checkpoint("2026-05-11", {"completed": []}, status="running")
+        db.save_checkpoint("2026-05-12", {"completed": ["s2"]}, status="crashed")
 
         incomplete = db.get_incomplete_checkpoints()
         assert len(incomplete) == 2
@@ -78,13 +78,13 @@ class TestCycleCheckpointDB:
 
         deleted = db.cleanup_old_checkpoints(keep_days=30)
         assert deleted >= 1
-        cp = db.get_cycle_checkpoint("2025-01-01")
+        cp = db.get_checkpoint("2025-01-01")
         assert cp is None
         db.close()
 
     def test_code_version_is_6(self):
-        """CODE_VERSION should be 7 after forecast scenarios migration."""
-        assert CODE_VERSION == 8
+        """CODE_VERSION should be 12 after Phase C independent tools migration."""
+        assert CODE_VERSION == 12
 
 
 class TestCrashRecoveryLogic:
