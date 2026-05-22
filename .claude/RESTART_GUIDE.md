@@ -1,7 +1,7 @@
 # MarketMind Restart Guide — 2026-05-22 EOD
 
-**Last updated**: 2026-05-22 | **Branch**: master | **Tests**: 1,786 pass
-**All pushed to GitHub**: ⏸️ pending
+**Last updated**: 2026-05-22 | **Branch**: master | **Tests**: 1,746 pass, 32 fail (git divergence), 26 skip
+**All pushed to GitHub**: ⏸️ pending (network issue — retry next session)
 
 ---
 
@@ -9,7 +9,42 @@
 
 Type this exactly:
 
-> 继续 MarketMind 开发。阅读 `.claude/RESTART_GUIDE.md`。上次完成：Phase J 6任务并行（API重构、祖父提取、AEL实验、WebSocket、文件上传UI、PICA审计）。下一步：实盘测试、Red Team双审、GitHub push。
+> 继续 MarketMind 开发。阅读 `.claude/RESTART_GUIDE.md`。上次完成：Phase J+K+L（API重构、祖父提取、AEL实验+控制组+3月扩展、WebSocket、文件上传UI、PICA+Red Team双审、32/57回归修复）。下一步：git push、l1最终提取（722→440）、32回归修复收尾。
+
+---
+
+## Git Safety Protocol (MANDATORY — every session)
+
+**This rule prevents the 2026-05-22 git pull disaster (69 test regressions from remote divergence).**
+
+### Before ANY git pull:
+
+```bash
+# Step 1: Fetch without merging
+git fetch origin master
+
+# Step 2: Check what's coming
+git log HEAD..origin/master --oneline | wc -l  # count new commits
+git diff --stat HEAD..origin/master | tail -5   # see file changes
+
+# Step 3: Decide
+#   If new commits > 10 OR files changed > 50: STOP and evaluate
+#   If massive restructuring detected (files moved/renamed): STOP
+#   Otherwise: safe to pull
+```
+
+### Decision matrix:
+
+| Remote has | Local has unpushed? | Action |
+|------------|:--:|--------|
+| Few new commits | No | `git pull --rebase` — safe |
+| Few new commits | Yes | `git push` FIRST, then `git pull --rebase` |
+| Many new commits or restructuring | No | Evaluate: do local changes depend on remote? If not, skip pull |
+| Many new commits or restructuring | Yes | **STOP** — user must decide merge strategy |
+
+### Golden rule:
+
+**本地改动优先。** When in doubt, `git push` your local work first. Remote can always pull from you. Never let a remote restructure silently overwrite local code.
 
 ---
 
