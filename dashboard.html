@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MarketMind</title>
+<style>
+  :root {
+    --bg: #0a0c0f; --card: #111418; --elv: #181c23;
+    --bd: #252830; --bd2: #3a3f48;
+    --t1: #e8eaed; --t2: #9aa0b0; --t3: #6a7280;
+    --gr: #5cb878; --rd: #e0556a; --am: #c8a050; --bl: #5a8fd0; --pu: #8878c8;
+    --mono: 'SF Mono','Cascadia Code','JetBrains Mono','Consolas',monospace;
+    --sans: 'PingFang SC','SF Pro SC',-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; scrollbar-width:thin; scrollbar-color:var(--bd) transparent; }
+  body { background:var(--bg); color:var(--t1); font:14px/1.5 var(--sans); -webkit-font-smoothing:antialiased; height:100vh; overflow:hidden; }
+
+  .header { display:flex; align-items:center; justify-content:space-between; padding:6px 14px; border-bottom:1px solid var(--bd); background:var(--card); height:34px; }
+  .h-l { display:flex; align-items:center; gap:10px; }
+  .logo { font:12px var(--mono); font-weight:600; color:var(--am); letter-spacing:.5px; }
+  .logo span { color:var(--t2); font-weight:400; }
+  .dot { width:5px; height:5px; border-radius:50%; display:inline-block; }
+  .dot.ok { background:var(--gr); } .dot.warn { background:var(--am); animation:pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.2} }
+  .h-r { display:flex; align-items:center; gap:14px; font:11px var(--mono); color:var(--t3); }
+  .h-r .v { color:var(--t2); }
+  .alert-badge { background:var(--rd); color:#fff; font:10px var(--mono); padding:1px 6px; border-radius:8px; display:none; }
+
+  .layout { display:flex; height:calc(100vh - 34px); }
+
+  /* Progress bar — compact, always visible */
+  .pbar { display:flex; align-items:center; gap:8px; padding:5px 14px; background:var(--card); border-bottom:1px solid var(--bd); font:11px var(--mono); }
+  .pbar-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+  .pbar-dot.done { background:var(--gr); } .pbar-dot.run { background:var(--am); animation:pulse 1.2s infinite; } .pbar-dot.wait { background:var(--bd); }
+  .pbar-track { flex:1; height:2px; background:var(--bd); border-radius:1px; }
+  .pbar-fill { height:100%; border-radius:1px; background:var(--am); width:0%; transition:width .5s; }
+  .pbar-label { color:var(--t2); white-space:nowrap; font-size:10px; }
+  .pbar-pct { font:13px var(--mono); color:var(--t1); min-width:36px; text-align:right; }
+
+  /* Main */
+  .main { flex:1; display:flex; flex-direction:column; min-width:0; position:relative; }
+
+  /* AI Briefing (collapsible, post-pipeline shown) */
+  .briefing { padding:0 14px; border-bottom:1px solid var(--bd); background:var(--card); }
+  .briefing-header { display:flex; justify-content:space-between; align-items:center; padding:5px 0; font-size:10px; text-transform:uppercase; letter-spacing:1.2px; color:var(--t3); font-weight:600; cursor:pointer; }
+  .briefing-body { padding:10px 0 12px; font-size:14px; color:var(--t2); line-height:1.7; max-height:200px; overflow-y:auto; display:none; }
+  .briefing.open .briefing-body { display:block; }
+
+  /* Chat */
+  .chat-wrap { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+  .chat-msgs { flex:1; overflow-y:auto; padding:14px; }
+  .msg { margin-bottom:14px; }
+  .msg-meta { display:flex; justify-content:space-between; font:11px var(--mono); color:var(--t3); margin-bottom:2px; }
+  .msg-body { background:var(--card); border:1px solid var(--bd); border-radius:4px; padding:10px 14px; font-size:14px; color:var(--t1); line-height:1.65; white-space:pre-wrap; }
+  .msg-empty { color:var(--t3); font-size:14px; padding:60px 0; text-align:center; }
+  .chat-input-wrap { padding:8px 14px; border-top:1px solid var(--bd); background:var(--card); }
+  .chat-input { flex:1; background:var(--bg); border:1px solid var(--bd); color:var(--t1); padding:8px 10px; font:14px var(--sans); border-radius:3px; outline:none; resize:none; height:48px; }
+  .chat-input:focus { border-color:var(--am); }
+  .btn-attach { width:32px; height:32px; min-width:32px; background:var(--card); border:1px solid var(--bd); color:var(--t2); border-radius:3px; cursor:pointer; font-size:18px; display:flex; align-items:center; justify-content:center; }
+  .btn-attach:hover { border-color:var(--am); color:var(--am); }
+  .btn-send { background:var(--am); color:#000; border:none; padding:8px 18px; font:12px var(--sans); font-weight:600; border-radius:3px; cursor:pointer; white-space:nowrap; }
+
+  /* Shadow overlay (covers chat) */
+  .overlay { position:absolute; inset:0; background:var(--elv); display:none; flex-direction:column; z-index:10; }
+  .overlay.show { display:flex; }
+  .overlay-header { display:flex; justify-content:space-between; align-items:center; padding:8px 14px; border-bottom:1px solid var(--bd); }
+  .overlay-title { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:1.2px; color:var(--t3); }
+  .overlay-close { background:none; border:1px solid var(--bd); color:var(--t2); padding:2px 10px; font:12px var(--mono); border-radius:3px; cursor:pointer; }
+  .overlay-close:hover { border-color:var(--am); color:var(--am); }
+  .overlay-body { flex:1; overflow-y:auto; padding:14px; }
+
+  /* Shadow detail cards */
+  .shadow-card { background:var(--card); border:1px solid var(--bd); border-radius:4px; padding:12px 14px; margin-bottom:8px; }
+  .shadow-card-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+  .shadow-name { font:14px var(--sans); color:var(--t1); font-weight:500; }
+  .shadow-tier-tag { font:10px var(--mono); padding:2px 8px; border-radius:3px; }
+  .t-elite { color:var(--am); background:rgba(200,160,80,.12); }
+  .t-excel { color:var(--bl); background:rgba(90,143,208,.12); }
+  .t-normal { color:var(--t3); background:rgba(106,114,128,.1); }
+  .t-watch { color:var(--pu); background:rgba(136,120,200,.12); }
+  .shadow-stats { display:grid; grid-template-columns:1fr 1fr 1fr; gap:4px; font:11px var(--mono); }
+  .shadow-stat { display:flex; justify-content:space-between; padding:2px 0; color:var(--t3); }
+  .shadow-stat-val { color:var(--t2); }
+
+  /* Decision card */
+  .dec-card { background:var(--card); border:1px solid var(--am); border-radius:4px; padding:10px 14px; margin:8px 0; }
+  .dec-card-header { display:flex; justify-content:space-between; margin-bottom:4px; font:11px var(--mono); }
+  .dec-ticker { font:16px var(--mono); font-weight:600; }
+  .dec-dir-long { color:var(--gr); } .dec-dir-short { color:var(--rd); }
+  .dec-details { font:11px var(--mono); color:var(--t3); display:flex; gap:16px; margin-top:4px; }
+
+  /* Sidebar */
+  .sidebar { width:300px; border-right:1px solid var(--bd); background:var(--elv); overflow-y:auto; display:flex; flex-direction:column; order:-1; }
+  .side-section { border-bottom:1px solid var(--bd); }
+  .side-hdr { display:flex; justify-content:space-between; align-items:center; padding:6px 12px; cursor:pointer; user-select:none; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:1.2px; color:var(--t3); }
+  .side-hdr:hover { color:var(--t2); }
+  .side-hdr .arr { font:11px var(--mono); transition:transform .15s; }
+  .side-hdr.open .arr { transform:rotate(90deg); }
+  .side-body { display:none; }
+  .side-body.open { display:block; }
+
+  .pos-table { width:100%; border-collapse:collapse; }
+  .pos-table th { text-align:left; font:10px/1 var(--sans); font-weight:500; color:var(--t3); padding:4px 8px; border-bottom:1px solid var(--bd); }
+  .pos-table td { padding:5px 8px; font:12px var(--mono); border-bottom:1px solid rgba(37,40,48,.3); }
+  .up { color:var(--gr); } .dn { color:var(--rd); }
+
+  /* Elite panel for Gate 2 */
+  .elite-row { display:flex; align-items:center; gap:8px; padding:6px 0; font-size:12px; }
+  .elite-name { color:var(--t2); } .elite-domain { font:10px var(--mono); color:var(--t3); }
+  .elite-summon { background:var(--am); color:#000; border:none; padding:2px 8px; font:10px var(--mono); border-radius:3px; cursor:pointer; }
+
+  /* Log stream */
+  .log-line { font:11px var(--mono); padding:2px 8px; display:flex; gap:8px; color:var(--t3); }
+  .log-ok { color:var(--gr); } .log-warn { color:var(--am); } .log-err { color:var(--rd); }
+
+  /* Mini stats */
+  .mini-stat { display:flex; justify-content:space-between; padding:3px 0; font:11px var(--mono); }
+  .mini-stat-l { color:var(--t3); } .mini-stat-v { color:var(--t2); }
+  .mini-bar { height:2px; background:var(--bd); border-radius:1px; margin:2px 0 8px; }
+  .mini-bar-in { height:100%; border-radius:1px; }
+
+  .tier-row { display:flex; align-items:center; gap:6px; padding:2px 0; font:12px var(--mono); }
+  .tier-lbl { color:var(--t3); width:75px; flex-shrink:0; font-size:10px; }
+  .tier-cnt { color:var(--t1); min-width:18px; text-align:right; }
+  .tier-b { flex:1; height:3px; background:var(--bd); border-radius:1px; }
+  .tier-b-in { height:100%; border-radius:1px; }
+
+  .pad { padding:10px 12px; }
+  .muted { color:var(--t3); font-size:12px; text-align:center; padding:16px; }
+
+  .drop-overlay { position:fixed; inset:0; background:rgba(10,12,15,.85); display:none; align-items:center; justify-content:center; z-index:100; }
+  .drop-overlay.show { display:flex; }
+  .drop-overlay-inner { text-align:center; padding:50px 80px; border:2px dashed var(--am); border-radius:8px; }
+  .drop-overlay-inner span { font:15px var(--mono); color:var(--am); display:block; }
+  .drop-overlay-inner small { font:11px var(--sans); color:var(--t3); display:block; margin-top:6px; }
+  .file-chips { display:none; flex-wrap:wrap; gap:6px; padding:6px 0 0; }
+  .file-chips.show { display:flex; }
+  .file-chip { display:inline-flex; align-items:center; gap:5px; background:var(--bg); border:1px solid var(--bd); border-radius:3px; padding:2px 10px; font:11px var(--mono); color:var(--t2); }
+  .file-chip-remove { cursor:pointer; color:var(--t3); font-size:15px; line-height:1; }
+  .file-chip-remove:hover { color:var(--rd); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="h-l">
+    <span class="logo">MarketMind <span>v2.0</span></span>
+    <span class="dot ok" id="sysDot"></span>
+    <span style="font-size:11px;color:var(--t3)" id="sysMsg">Ready 就绪</span>
+    <span class="alert-badge" id="alertBadge">ALERT</span>
+  </div>
+  <div class="h-r">
+    <select id="tzSelect" onchange="tz=this.value;tick();localStorage.setItem('mktz',tz)"
+      style="background:var(--bg);border:1px solid var(--bd);color:var(--t2);font:11px var(--mono);padding:2px 6px;border-radius:3px;outline:none;cursor:pointer">
+      <option value="UTC">UTC  —  标准</option>
+      <option value="America/New_York">ET   —  美东</option>
+      <option value="America/Chicago">CT   —  美中</option>
+      <option value="America/Denver">MT   —  美山</option>
+      <option value="America/Los_Angeles">PT   —  美西</option>
+      <option value="Europe/London">GMT  —  英国</option>
+      <option value="Europe/Berlin">CET  —  中欧</option>
+      <option value="Europe/Moscow">MSK  —  莫斯科</option>
+      <option value="Asia/Shanghai">CST  —  北京</option>
+      <option value="Asia/Tokyo">JST  —  东京</option>
+      <option value="Asia/Hong_Kong">HKT  —  香港</option>
+      <option value="Asia/Singapore">SGT  —  新加坡</option>
+      <option value="Australia/Sydney">AEST —  悉尼</option>
+      <option value="Asia/Dubai">GST  —  迪拜</option>
+    </select>
+    <span id="clock" style="display:inline-flex;justify-content:space-between;width:120px;font-family:var(--mono);font-size:11px">--:--:--</span>
+    <span title="数据源连接状态">数据源 <span class="v" id="srcCnt">--</span></span>
+    <span title="已运行">运行: <span class="v" id="uptime">--</span></span>
+  </div>
+</div>
+
+<div class="layout">
+
+<!-- ===== MAIN ===== -->
+<div class="main">
+
+  <!-- Progress bar -->
+  <div class="pbar" id="pbar">
+    <span class="pbar-pct" id="pct">idle</span>
+    <div class="pbar-track"><div class="pbar-fill" id="pfill"></div></div>
+    <span class="pbar-label" id="pstage">Pipeline not running</span>
+  </div>
+
+  <!-- Briefing -->
+  <div class="briefing" id="briefing">
+    <div class="briefing-header" onclick="this.parentElement.classList.toggle('open')">Briefing <span style="font-size:10px;color:var(--t3);font-weight:400;text-transform:none;letter-spacing:0">· 简报 ·</span> <span id="bfTime"></span></div>
+    <div class="briefing-body" id="bfBody">Run daily analysis to generate briefing.</div>
+  </div>
+
+  <!-- Shadow overlay -->
+  <div class="overlay" id="shadowOverlay">
+    <div class="overlay-header">
+      <span class="overlay-title">Shadow Ecosystem · 影子生态</span>
+      <button class="overlay-close" onclick="document.getElementById('shadowOverlay').classList.remove('show')">Close</button>
+    </div>
+    <div class="overlay-body" id="shadowDetail"></div>
+  </div>
+
+  <!-- Decision overlay -->
+  <div class="overlay" id="reviewOverlay">
+    <div class="overlay-header">
+      <span class="overlay-title">Review · 复盘</span>
+      <button class="overlay-close" onclick="document.getElementById('reviewOverlay').classList.remove('show')">Close</button>
+    </div>
+    <div class="overlay-body" id="reviewDetail"></div>
+  </div>
+
+  <!-- Chat -->
+  <div class="chat-wrap">
+    <div class="chat-msgs" id="chatMsgs">
+      <div class="msg-empty">Pipeline idle. You can chat with the main AI here.<br><br>Paste external info or attach files to inject into analysis.<br>Shift+Enter to send.</div>
+    </div>
+    <div class="chat-input-wrap">
+      <div style="display:flex;gap:8px;align-items:center">
+        <label class="btn-attach" title="Attach file">+</label>
+        <input type="file" id="fileInput" multiple hidden accept=".png,.jpg,.jpeg,.gif,.bmp,.webp,.pdf,.txt,.md,.csv">
+        <textarea class="chat-input" id="chatInput" placeholder="Type message or paste info..."
+          onkeydown="if(event.key==='Enter'&&event.shiftKey){event.preventDefault();sendMsg()}"></textarea>
+        <button class="btn-send" onclick="sendMsg()">Send</button>
+      </div>
+      <div class="file-chips" id="fileChips"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SIDEBAR ===== -->
+<div class="sidebar">
+
+  <!-- Portfolio -->
+  <div class="side-section">
+    <div class="side-hdr" onclick="this.parentElement.querySelector('.side-body').classList.toggle('open');this.classList.toggle('open')">
+      <span class="arr">&#9654;</span> Portfolio · 持仓
+      <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px" id="cashPct">100% cash</span>
+    </div>
+    <div class="side-body open">
+      <table class="pos-table"><thead><tr><th>Ticker</th><th>Entry</th><th>P&amp;L</th></tr></thead>
+      <tbody id="posBody"><tr><td colspan="3" class="muted">No positions</td></tr></tbody></table>
+    </div>
+  </div>
+
+  <!-- Decision Card (shown when decision exists) -->
+  <div class="side-section" id="decSection" style="display:none">
+    <div class="side-hdr" style="cursor:default;color:var(--am)">Active Decision · 当前决策</div>
+    <div class="dec-card" id="decCard"></div>
+  </div>
+
+  <!-- Elite Shadows (shown during Gate 2) -->
+  <div class="side-section" id="eliteSection" style="display:none">
+    <div class="side-hdr" style="cursor:default;color:var(--bl)">Elite Shadows · 可召唤</div>
+    <div class="pad" id="eliteList"></div>
+  </div>
+
+  <!-- Shadow Ecosystem -->
+  <div class="side-section">
+    <div class="side-hdr" onclick="document.getElementById('shadowOverlay').classList.add('show');loadShadowDetail()">
+      <span>Shadow Ecosystem · 影子生态</span>
+      <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;color:var(--t3)" id="shadowCount">0</span>
+    </div>
+    <div class="pad" id="tierMini"></div>
+  </div>
+
+  <!-- Review -->
+  <div class="side-section">
+    <div class="side-hdr" onclick="document.getElementById('reviewOverlay').classList.add('show');loadReview()">
+      <span class="arr" style="visibility:hidden">&#9654;</span> Review · 复盘
+      <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;color:var(--t3)" id="reviewLabel">click to view</span>
+    </div>
+  </div>
+
+  <!-- Usage -->
+  <div class="side-section">
+    <div class="side-hdr" onclick="this.parentElement.querySelector('.side-body').classList.toggle('open');this.classList.toggle('open')">
+      <span class="arr">&#9654;</span> Usage · 用量
+    </div>
+    <div class="side-body">
+      <div class="pad">
+        <div class="mini-stat"><span class="mini-stat-l">Pro</span><span class="mini-stat-v" id="proCalls">0/50</span></div>
+        <div class="mini-bar"><div class="mini-bar-in" id="proBar" style="width:0%;background:var(--bl)"></div></div>
+        <div class="mini-stat"><span class="mini-stat-l">Flash</span><span class="mini-stat-v" id="flashCalls">0/100</span></div>
+        <div class="mini-bar"><div class="mini-bar-in" id="flashBar" style="width:0%;background:var(--pu)"></div></div>
+        <div class="mini-stat"><span class="mini-stat-l">Tokens</span><span class="mini-stat-v" id="tokenUse">0</span></div>
+        <div class="mini-stat"><span class="mini-stat-l">Est/mo</span><span style="color:var(--t2)" id="monthEst">$0</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- System Log -->
+  <div class="side-section">
+    <div class="side-hdr" onclick="this.parentElement.querySelector('.side-body').classList.toggle('open');this.classList.toggle('open')">
+      <span class="arr">&#9654;</span> System Log · 日志
+    </div>
+    <div class="side-body" style="max-height:160px;overflow-y:auto" id="logBody"></div>
+  </div>
+
+</div>
+</div>
+
+<script>
+// ── Clock ────────────────────────────────────────────────────────
+let tz = localStorage.getItem('mktz') || 'Asia/Shanghai';
+document.getElementById('tzSelect').value = tz;
+const tzLabel={UTC:'UTC','Asia/Shanghai':'Beijing','Asia/Hong_Kong':'HK','America/New_York':'NY','America/Chicago':'Chicago','America/Denver':'Denver','America/Los_Angeles':'LA','Europe/London':'London','Europe/Berlin':'Berlin','Europe/Moscow':'Moscow','Asia/Tokyo':'Tokyo','Asia/Singapore':'SG','Australia/Sydney':'Sydney','Asia/Dubai':'Dubai'};
+function tick(){
+  try {
+    const s = new Date().toLocaleString('en-US',{timeZone:tz,hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    document.getElementById('clock').innerHTML = `<span>${s}</span><span style="color:var(--t3)">${tzLabel[tz]||tz.split('/').pop()}</span>`;
+  } catch(e) { document.getElementById('clock').innerHTML = '<span>--:--:--</span><span style="color:var(--t3)">--</span>'; }
+}
+tick(); setInterval(tick,1000);
+function ts(){ try{const d=new Date();return d.toLocaleString('en-US',{timeZone:tz,hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'})+' '+ (tzLabel[tz]||'')}catch(e){return'--:--:--'}; }
+
+// ── Chat ─────────────────────────────────────────────────────────
+const msgs=[];
+document.querySelector('.btn-attach').addEventListener('click',()=>document.getElementById('fileInput').click());
+// Drag-and-drop overlay handlers
+let _dragC=0;
+document.addEventListener('dragenter',e=>{e.preventDefault();_dragC++;document.getElementById('dropOverlay').classList.add('show');});
+document.addEventListener('dragleave',e=>{e.preventDefault();_dragC--;if(_dragC<=0){_dragC=0;document.getElementById('dropOverlay').classList.remove('show');}});
+document.addEventListener('dragover',e=>{e.preventDefault();e.stopPropagation();});
+document.addEventListener('drop',e=>{
+  e.preventDefault();_dragC=0;
+  document.getElementById('dropOverlay').classList.remove('show');
+  if(!e.dataTransfer.files.length)return;
+  const dt=new DataTransfer();
+  for(const f of e.dataTransfer.files)dt.items.add(f);
+  document.getElementById('fileInput').files=dt.files;
+  updateFileChips();
+});
+
+// File chips (preview before send)
+function updateFileChips(){
+  const input=document.getElementById('fileInput'),chips=document.getElementById('fileChips');
+  if(!input.files.length){chips.classList.remove('show');chips.innerHTML='';return;}
+  chips.classList.add('show');
+  chips.innerHTML=Array.from(input.files).map((f,i)=>
+    '<span class="file-chip"><span>'+f.name.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</span><span class="file-chip-remove" onclick="removeFile('+i+')">&times;</span></span>'
+  ).join('');
+}
+function removeFile(idx){
+  const input=document.getElementById('fileInput'),dt=new DataTransfer();
+  Array.from(input.files).forEach((f,i)=>{if(i!==idx)dt.items.add(f);});
+  input.files=dt.files;updateFileChips();
+}
+document.getElementById('fileInput').addEventListener('change',updateFileChips);
+
+async function sendMsg(){
+  const input=document.getElementById('chatInput'),text=input.value.trim();
+  const fileInput=document.getElementById('fileInput'),files=fileInput.files;
+  if(!text&&!files.length)return;
+  const now=ts(),label=text||Array.from(files).map(f=>f.name).join(', ');
+  const fileNames=Array.from(files).map(f=>f.name);
+  msgs.push({time:now,text:label,status:'sending'});renderChat();
+  input.value='';fileInput.value='';updateFileChips();
+  try{
+    const r=await fetch('/api/info/inject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,files:fileNames})});
+    const d=await r.json();msgs[msgs.length-1].status='sent';msgs[msgs.length-1].chars=d.chars;
+  }catch(e){msgs[msgs.length-1].status='failed';}
+  renderChat();
+}
+function renderChat(){
+  const c=document.getElementById('chatMsgs');
+  if(!msgs.length){ c.innerHTML='<div class="msg-empty">Pipeline idle. You can chat with the main AI here.<br><br>Paste external info or attach files to inject into analysis.<br>Shift+Enter to send.</div>'; return; }
+  c.innerHTML=msgs.map(m=>{
+    const sc=m.status==='sent'?'var(--gr)':m.status==='failed'?'var(--rd)':'var(--am)';
+    return `<div class="msg"><div class="msg-meta"><span>${m.time}</span><span style="font-size:10px;color:${sc}">${m.status==='sent'?m.chars+'c':m.status}</span></div><div class="msg-body">${m.text.replace(/</g,"&lt;").replace(/>/g,"&gt;")}</div></div>`;
+  }).join(''); c.scrollTop=c.scrollHeight;
+}
+
+// ── Shadow detail (overlay) ───────────────────────────────────────
+async function loadShadowDetail(){
+  try{
+    const [overview,rankings]=await Promise.all([fetch('/api/shadows/overview').then(r=>r.json()),fetch('/api/shadows/rankings').then(r=>r.json())]);
+    const tiers=overview.tiers||{}, top5=rankings.top5||[];
+    let html='<div style="font-size:12px;margin-bottom:12px;display:flex;gap:20px">';
+    html+=`<span>Total: ${overview.total||0}</span><span>Graduates: ${overview.graduates||0}</span><span>Trials: ${overview.challenger_trials||0}</span><span>Evolutions: ${overview.evolutions_today||0}</span></div>`;
+    if(top5.length) html+='<div style="font-size:11px;color:var(--t3);margin-bottom:8px">TOP PERFORMERS</div>'+top5.map(s=>
+      `<div class="shadow-card"><div class="shadow-card-header"><span class="shadow-name">${s.name}</span><span class="shadow-tier-tag t-${s.tier}">${s.tier.toUpperCase()}</span></div><div class="shadow-stats"><div class="shadow-stat"><span>Composite</span><span class="shadow-stat-val">${s.score.toFixed(2)}</span></div></div></div>`
+    ).join('');
+    document.getElementById('shadowDetail').innerHTML=html||'<div class="muted">No shadow data available</div>';
+  }catch(e){}
+}
+
+// ── Review overlay ────────────────────────────────────────────────
+async function loadReview(){
+  try{
+    const history=await fetch('/api/history/decisions').then(r=>r.json());
+    const decs=history.decisions||[];
+    let html='<div style="font-size:11px;color:var(--t3);margin-bottom:8px">RECENT DECISIONS ('+decs.length+')</div>';
+    if(decs.length){
+      const wins=decs.filter(d=>(d.result||0)>0).length;
+      html+=`<div style="font-size:13px;margin-bottom:12px;display:flex;gap:20px"><span>Win rate: <b style="color:var(--gr)">${(wins/decs.length*100).toFixed(0)}%</b></span><span>Avg conf: <b style="color:var(--t2)">${(decs.reduce((s,d)=>s+(d.confidence||0),0)/decs.length*100).toFixed(0)}%</b></span></div>`;
+      html+=decs.map(d=>`<div style="display:flex;gap:12px;padding:4px 0;font:12px var(--mono);border-bottom:1px solid rgba(37,40,48,.2)"><span style="color:var(--t3)">${(d.date||'').slice(5)}</span><span style="color:var(--t2)">${d.ticker||'--'}</span><span style="color:${d.direction==='long'?'var(--gr)':'var(--rd)'}">${(d.direction||'').toUpperCase()}</span><span style="color:${(d.result||0)>0?'var(--gr)':'var(--rd)'}">${d.result?(d.result>0?'+':'')+d.result.toFixed(1)+'%':'--'}</span></div>`).join('');
+    } else { html+='<div class="muted">No decisions recorded yet</div>'; }
+    document.getElementById('reviewDetail').innerHTML=html;
+  }catch(e){}
+}
+
+// ── Periodic refresh ──────────────────────────────────────────────
+async function refresh(){
+  try{
+    const [health,cost,shadows,history]=await Promise.all([fetch('/api/health').then(r=>r.json()),fetch('/api/cost').then(r=>r.json()),fetch('/api/shadows/overview').then(r=>r.json()),fetch('/api/history/decisions').then(r=>r.json())]);
+    document.getElementById('sysMsg').textContent=health.status==='ok'?'Ready 就绪':'Degraded 降级';
+    document.getElementById('sysDot').className='dot '+(health.status==='ok'?'ok':'warn');
+    document.getElementById('sysDot').className='dot '+(health.status==='ok'?'ok':'warn');
+    document.getElementById('srcCnt').textContent=`${health.sources_ok}/${health.sources_total}`;
+    document.getElementById('uptime').textContent=health.uptime;
+
+    document.getElementById('proCalls').textContent=`${cost.pro_calls}/${cost.pro_limit}`;
+    document.getElementById('proBar').style.width=`${(cost.pro_calls/cost.pro_limit)*100}%`;
+    document.getElementById('flashCalls').textContent=`${cost.flash_calls}/${cost.flash_limit}`;
+    document.getElementById('flashBar').style.width=`${(cost.flash_calls/cost.flash_limit)*100}%`;
+    const tk=cost.tokens_used||0,tb=cost.token_budget||2e6;
+    document.getElementById('tokenUse').textContent=`${(tk/1e6).toFixed(1)}M/${(tb/1e6).toFixed(1)}M`;
+    document.getElementById('monthEst').textContent=`$${(cost.monthly_est||0).toFixed(2)}`;
+
+    const tiers=shadows.tiers||{},maxT=Math.max(...Object.values(tiers),24);
+    document.getElementById('tierMini').innerHTML=['elite','excellent','normal','watch','endangered'].map(t=>{
+      const cnt=tiers[t]||0,cls=t==='elite'?'elite':t==='excellent'?'excel':t==='normal'?'norm':t==='watch'?'watch':'end';
+      const colors={'elite':'var(--am)','excellent':'var(--bl)','normal':'var(--t3)','watch':'var(--pu)','endangered':'var(--rd)'};
+      return `<div class="tier-row"><span class="tier-lbl">${t.toUpperCase()}</span><span class="tier-cnt">${cnt}</span><div class="tier-b"><div class="tier-b-in" style="width:${maxT?cnt/maxT*100:0}%;background:${colors[t]}"></div></div></div>`;
+    }).join('');
+    document.getElementById('shadowCount').textContent=shadows.total||0;
+    document.getElementById('reviewLabel').textContent=shadows.total?'click to view':'no data';
+
+    // Check for decision
+    const decs=history.decisions||[];
+    if(decs.length>0){
+      const last=decs[decs.length-1];
+      document.getElementById('decSection').style.display='block';
+      document.getElementById('decCard').innerHTML=`<div class="dec-card-header"><span class="dec-ticker">${last.ticker||'--'}</span><span style="font:10px var(--mono);color:var(--t3)">${(last.date||'').slice(0,10)}</span></div><div style="font:14px var(--sans);color:var(--t2);margin-bottom:2px"><span class="dec-dir-${last.direction==='long'?'long':'short'}">${(last.direction||'').toUpperCase()}</span> @ ${last.confidence?(last.confidence*100).toFixed(0):'--'}% confidence</div><div class="dec-details"><span>Result: <b style="color:${(last.result||0)>0?'var(--gr)':'var(--rd)'}">${last.result?(last.result>0?'+':'')+last.result.toFixed(1)+'%':'pending'}</b></span></div>`;
+    } else {
+      document.getElementById('decSection').style.display='none';
+    }
+
+    // Log
+    try{
+      const log=await fetch('/api/log').then(r=>r.json());
+      const entries=log.entries||[];
+      if(entries.length) document.getElementById('logBody').innerHTML=entries.slice(-15).map(e=>`<div class="log-line"><span style="min-width:40px">${e.time.replace(/</g,"&lt;")}</span><span class="log-${e.level==='error'?'err':e.level==='warn'?'warn':'ok'}">${e.message.replace(/</g,"&lt;")}</span></div>`).join('');
+    }catch(e){}
+  }catch(e){}
+}
+refresh(); setInterval(refresh,5000);
+</script>
+<div class="drop-overlay" id="dropOverlay">
+  <div class="drop-overlay-inner">
+    <span>Drop files to inject into analysis</span>
+    <small>.png .jpg .pdf .txt .csv .md — 拖放文件以注入分析</small>
+  </div>
+</div>
+
+
+<script>
+// ── WebSocket live updates ─────────────────────────────────────────────
+(function(){
+  var ws, reconnectTimer;
+  function connect(){
+    if(ws&&ws.readyState===WebSocket.OPEN)return;
+    var proto=location.protocol==='https:'?'wss:':'ws:';
+    var host=location.host||'localhost:8520';
+    ws=new WebSocket(proto+'//'+host+'/ws');
+    ws.onopen=function(){
+      if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null;}
+    };
+    ws.onmessage=function(e){
+      try{
+        var d=JSON.parse(e.data);
+        if(d.type==='stage'){
+          var pctEl=document.getElementById('pct'),pfillEl=document.getElementById('pfill'),pstageEl=document.getElementById('pstage');
+          if(d.status==='done'){
+            pctEl.textContent='done';pctEl.style.color='var(--gr)';pstageEl.textContent=d.stage;
+            pfillEl.style.width='100%';pfillEl.style.background='var(--gr)';
+          }else if(d.status==='error'){
+            pctEl.textContent='err';pctEl.style.color='var(--rd)';pstageEl.textContent=d.stage+' FAILED';
+            pfillEl.style.width=d.pct+'%';pfillEl.style.background='var(--rd)';
+          }else{
+            pctEl.textContent=d.pct.toFixed(0)+'%';pctEl.style.color='var(--t1)';pstageEl.textContent=d.stage;
+            pfillEl.style.width=d.pct+'%';pfillEl.style.background='var(--am)';
+            var logSection=document.getElementById('logBody').parentElement;
+            if(!logSection.classList.contains('open'))logSection.classList.add('open');
+          }
+        }else if(d.type==='log'){
+          var logBody=document.getElementById('logBody'),cls=d.level==='error'?'log-err':d.level==='warn'?'log-warn':'log-ok';
+          var line=document.createElement('div');
+          line.className='log-line';
+          line.innerHTML='<span style="min-width:40px">'+d.ts.replace(/</g,'&lt;')+'</span><span class="'+cls+'">'+d.message.replace(/</g,'&lt;')+'</span>';
+          logBody.insertBefore(line,logBody.firstChild);
+          while(logBody.children.length>50)logBody.removeChild(logBody.lastChild);
+        }
+      }catch(ex){}
+    };
+    ws.onclose=function(){if(!reconnectTimer)reconnectTimer=setTimeout(connect,3000);};
+    ws.onerror=function(){ws.close();};
+  }
+  connect();
+})();
+</script>
+
+</body>
+</html>

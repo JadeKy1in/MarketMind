@@ -70,7 +70,7 @@ class AELEvolutionEngine:
     # Shadow pairs for initial AEL experiment (Phase 7)
     EXPERIMENT_PAIRS = [
         # Daredevils: range-bound and momentum
-        ("daredevil:range_bound:sideways_scout", "daredevil:momentum:trend_chaser"),
+        ("daredevil:range_bound:sideways_scout", "daredevil:weekly:trend_rider"),
         # Experts: tech and macro
         ("expert:tech:silicon_oracle", "expert:macro:cycle_reader"),
     ]
@@ -284,29 +284,29 @@ class AELEvolutionEngine:
     def compare_pair(self, pair: ReplicaPair,
                      treatment_perf: dict,
                      control_perf: dict) -> ExperimentResult:
-        """Compare treatment vs control after experiment period.
-
-        Red Team audit fix: uses Wilcoxon signed-rank (non-parametric, handles
-        fat tails) instead of z-test for proportions. Reuses implementation
-        from challenger_engine.py.
-        """
-        from marketmind.shadows.challenger_stats import compute_wilcoxon
+        """Compare treatment vs control after experiment period."""
+        import math
 
         t_wr = treatment_perf.get("win_rate", 0.0)
         c_wr = control_perf.get("win_rate", 0.0)
         t_ret = treatment_perf.get("cumulative_return", 0.0)
         c_ret = control_perf.get("cumulative_return", 0.0)
+        t_n = treatment_perf.get("total_trades", 0)
+        c_n = control_perf.get("total_trades", 0)
 
         diff = t_wr - c_wr
 
-        # Use Wilcoxon (non-parametric, handles fat tails)
-        t_returns = treatment_perf.get("daily_returns", [])
-        c_returns = control_perf.get("daily_returns", [])
-        p_value = 1.0
-        if len(t_returns) >= 5 and len(c_returns) >= 5:
-            p_value, _ = compute_wilcoxon(t_returns, c_returns)
-
-        significant = p_value < 0.10
+        # Simple z-test for proportions
+        p_value = None
+        significant = False
+        if t_n >= 10 and c_n >= 10:
+            p_pool = (t_wr * t_n + c_wr * c_n) / (t_n + c_n)
+            se = math.sqrt(p_pool * (1 - p_pool) * (1/t_n + 1/c_n))
+            if se > 0:
+                z = diff / se
+                # Approximate p-value from z-score
+                p_value = 2 * (1 - 0.5 * (1 + math.erf(abs(z) / math.sqrt(2))))
+                significant = p_value < 0.10  # alpha=0.10 per design spec
 
         recommendation = "CONTINUE"
         if significant and diff > 0:
@@ -327,81 +327,3 @@ class AELEvolutionEngine:
             significant=significant,
             recommendation=recommendation,
         )
-
-    # ── Quarterly systemic review (Phase B audit) ───────────────────────
-
-    async def run_quarterly_review(
-        self, ecosystem_summary: dict, collusion_summary: dict,
-        quarter: str
-    ) -> dict:
-        """Generate a quarterly systemic review using Flash LLM (not Pro).
-
-        Red Team audit fix: extends ael_evolution.py rather than creating
-        a separate module. Uses Flash to keep costs low (only 4x/year).
-
-        AAR 4-question framework:
-        1. What was expected vs. actual across all shadows?
-        2. Why did certain shadows under/over-perform?
-        3. Which systemic patterns emerged (herding, plateau, collusion)?
-        4. What methodology changes should be institutionalized?
-
-        Args:
-            ecosystem_summary: Dict with keys: active_shadows, avg_win_rate,
-                               avg_cum_return, plateau_count, reset_count
-            collusion_summary: Dict with keys: total_flags, herding_pct,
-                               convergence_pct, avg_agreement
-            quarter: e.g., "2026-Q2"
-
-        Returns:
-            Dict with keys: review_text, action_items, key_risks
-        """
-        from marketmind.gateway.async_client import chat_flash
-
-        system_prompt = (
-            "You are a strategic portfolio reviewer conducting a quarterly "
-            "systemic review of an AI shadow trading ecosystem. Use the AAR "
-            "(After Action Review) framework: What was expected? What actually "
-            "happened? Why the difference? What changes next quarter?\n\n"
-            "Output JSON: {\"review_text\": \"...\", \"action_items\": [\"...\"], "
-            "\"key_risks\": [\"...\"]}"
-        )
-
-        eco = ecosystem_summary
-        col = collusion_summary
-        user_prompt = (
-            f"Quarter: {quarter}\n"
-            f"Active Shadows: {eco.get('active_shadows', 'N/A')}\n"
-            f"Avg Win Rate: {eco.get('avg_win_rate', 0):.1%}\n"
-            f"Avg Cumulative Return: {eco.get('avg_cum_return', 0):+.2%}\n"
-            f"Plateau Flags: {eco.get('plateau_count', 0)}\n"
-            f"Reset Candidates: {eco.get('reset_count', 0)}\n"
-            f"Collusion Flags (total): {col.get('total_flags', 0)}\n"
-            f"Herding %: {col.get('herding_pct', 0):.1%}\n"
-            f"Convergence %: {col.get('convergence_pct', 0):.1%}\n"
-            f"Avg Agreement: {col.get('avg_agreement', 0):.1%}\n\n"
-            f"Analyze the ecosystem health, identify systemic patterns, "
-            f"and propose 2-3 concrete action items for next quarter."
-        )
-
-        try:
-            import json
-            result = await chat_flash(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                temperature=0.2,
-                max_tokens=2048,
-            )
-            content = result.get("content", "{}")
-            # Extract JSON from response
-            import re
-            match = re.search(r'\{[\s\S]*\}', content)
-            if match:
-                return json.loads(match.group())
-        except Exception as e:
-            logger.error("Quarterly review failed: %s", e)
-
-        return {
-            "review_text": "Quarterly review unavailable.",
-            "action_items": [],
-            "key_risks": ["Review generation failed"],
-        }

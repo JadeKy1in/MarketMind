@@ -1,7 +1,7 @@
-"""Statistical tests -- walk-forward validation, Sharpe estimation, reset eligibility checks.
+"""Statistical computations — ranking metrics, walk-forward validation, reset checks.
 
 Zero LLM calls. All computation is deterministic mathematical formulas.
-Extracted from ranking_engine.py to comply with 500-line hard ceiling.
+Extracted from ranking_engine.py per modular architecture rules.
 """
 from __future__ import annotations
 
@@ -12,6 +12,147 @@ from datetime import datetime, timezone, timedelta
 from scipy import stats as scipy_stats
 
 logger = logging.getLogger("marketmind.shadows.ranking_stats")
+
+
+# ── Ranking metrics (extracted from RankingEngine) ────────────────────
+
+
+def compute_mppm(returns: list[float], gamma: float = 3.0) -> float:
+    """Goetzmann et al. MPPM: (1/(1-gamma)) * ln((1/T) * sum((1+r_t)^(1-gamma)))."""
+    if not returns or gamma == 1.0:
+        return 0.0
+    T = len(returns)
+    exponent = 1.0 - gamma
+    powered = [(1.0 + r) ** exponent for r in returns]
+    avg = sum(powered) / T
+    if avg <= 0:
+        return float("-inf") if avg == 0 else float("nan")
+    return (1.0 / exponent) * math.log(avg)
+
+
+def compute_calmar(cumulative_return: float, max_drawdown: float) -> float:
+    """Calmar = cumulative_return / max(|MDD|, 0.001). Capped at 100."""
+    mdd_floor = max(max_drawdown, 0.001)
+    calmar = cumulative_return / mdd_floor
+    return min(calmar, 100.0)
+
+
+def compute_omega(returns: list[float], threshold: float = 0.0) -> float:
+    """Omega(L=0) = sum(gains) / sum(|losses|). Capped at 10."""
+    if not returns:
+        return 1.0
+    gains = sum(max(r - threshold, 0) for r in returns)
+    losses = sum(abs(min(r - threshold, 0)) for r in returns)
+    if losses == 0:
+        return 10.0
+    omega = gains / losses
+    return min(omega, 10.0)
+
+
+def compute_cagr(cumulative_return: float, days: int) -> float:
+    """Annualize cumulative return over N trading days."""
+    if days <= 0:
+        return 0.0
+    return cumulative_return * 252 / days
+
+
+def _mean_abs_correlation(daily_returns: dict[str, list[float]]) -> float | None:
+    """Mean absolute pairwise correlation of shadow returns."""
+    ids = list(daily_returns.keys())
+    if len(ids) < 2:
+        return None
+    min_len = min(len(r) for r in daily_returns.values())
+    if min_len < 5:
+        return None
+    corrs = []
+    for i in range(len(ids)):
+        for j in range(i + 1, len(ids)):
+            ri = daily_returns[ids[i]][-min_len:]
+            rj = daily_returns[ids[j]][-min_len:]
+            mean_i = sum(ri) / min_len
+            mean_j = sum(rj) / min_len
+            cov = sum((a - mean_i) * (b - mean_j) for a, b in zip(ri, rj)) / min_len
+            std_i = (sum((a - mean_i) ** 2 for a in ri) / min_len) ** 0.5
+            std_j = (sum((b - mean_j) ** 2 for b in rj) / min_len) ** 0.5
+            if std_i > 0 and std_j > 0:
+                corrs.append(abs(cov / (std_i * std_j)))
+    return sum(corrs) / len(corrs) if corrs else None
+
+
+def compute_haircut(n_shadows: int, evaluation_days: int,
+                    daily_returns: dict[str, list[float]] | None = None) -> float:
+    """Witzany (2021) Bayesian overfitting haircut with Effective-N correction.
+
+    If daily_returns is provided, estimates effective N from correlation matrix:
+        Neff = N / (1 + (N-1) * mean_abs_corr)
+    """
+    if n_shadows < 1:
+        n_shadows = 1
+    n_eff = float(n_shadows)
+    if daily_returns and len(daily_returns) >= 3:
+        mean_corr = _mean_abs_correlation(daily_returns)
+        if mean_corr is not None:
+            n_eff = n_shadows / (1.0 + (n_shadows - 1) * mean_corr)
+            n_eff = max(1.5, min(n_eff, float(n_shadows)))
+    return evaluation_days / (evaluation_days + 8.0 + 24.0 * math.log(max(n_eff, 1.5)))
+
+
+def apply_bayesian_haircut(composite_score: float, n_shadows: int,
+                           evaluation_days: int) -> float:
+    """C_deflated = C_raw * h(N,T)."""
+    return composite_score * compute_haircut(n_shadows, evaluation_days)
+
+
+def _empirical_percentiles(score_list: list[float]) -> dict[float, float]:
+    """Fraction of scores <= x (with continuity correction)."""
+    n = len(score_list)
+    sorted_scores = sorted(score_list)
+    result = {}
+    for score in score_list:
+        count_le = sum(1 for s in sorted_scores if s <= score)
+        result[score] = (count_le - 0.5) / n
+    return result
+
+
+def _parametric_percentiles(score_list: list[float]) -> dict[float, float]:
+    """Logistic-normal parametric percentile estimation for small N."""
+    n = len(score_list)
+    sorted_scores = sorted(score_list)
+    result = {}
+    for score in score_list:
+        rank = sum(1 for s in sorted_scores if s <= score)
+        p = (rank - 0.5) / n
+        result[score] = 1.0 / (1.0 + math.exp(-2.0 * (p - 0.5) * math.sqrt(n)))
+    return result
+
+
+def compute_percentile_ranks(scores: dict[str, float],
+                              parametric_threshold_n: int = 30) -> dict[str, float]:
+    """Map each shadow_id to its percentile rank (0-1) within the cohort.
+
+    Hybrid: parametric for N <= 15, empirical for N >= threshold, blend between.
+    """
+    if not scores:
+        return {}
+    n = len(scores)
+    score_list = list(scores.values())
+    if n >= parametric_threshold_n:
+        pct_map = _empirical_percentiles(score_list)
+        return {sid: pct_map[scores[sid]] for sid in scores}
+    elif n <= 15:
+        pct_map = _parametric_percentiles(score_list)
+        return {sid: pct_map[scores[sid]] for sid in scores}
+    else:
+        alpha = n / parametric_threshold_n
+        emp = _empirical_percentiles(score_list)
+        par = _parametric_percentiles(score_list)
+        return {
+            sid: alpha * emp[scores[sid]] + (1 - alpha) * par[scores[sid]]
+            for sid in scores
+        }
+
+
+# ── Sharpe estimation ────────────────────────────────────────────────
 
 
 @dataclass
