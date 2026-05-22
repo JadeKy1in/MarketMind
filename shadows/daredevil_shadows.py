@@ -221,7 +221,7 @@ def create_daredevil_shadows(state_db: ShadowStateDB,
     """Instantiate all 8 daredevil shadows (7+1) from configs."""
     shadows = []
     for config in DAREDEVIL_SHADOW_CONFIGS:
-        if state_db.get_shadow(config.shadow_id, caller_id="system") is None:
+        if state_db.get_shadow(config.shadow_id) is None:
             state_db.create_shadow(config)
         shadows.append(DaredevilShadow(config, state_db, settings))
     return shadows

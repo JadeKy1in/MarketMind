@@ -95,7 +95,7 @@ class ChallengerEngine:
         Returns:
             EliminationStage with current stage, consecutive count, and challenger_id if active.
         """
-        snapshots = self.state_db.get_snapshot_history(shadow_id, caller_id="system", days=365)
+        snapshots = self.state_db.get_snapshot_history(shadow_id, days=365)
         if not snapshots:
             return EliminationStage(
                 shadow_id=shadow_id,
@@ -119,7 +119,7 @@ class ChallengerEngine:
 
             # Check if already in comparison phase (challenger has enough snapshots)
             if challenger_id:
-                challenger_snaps = self.state_db.get_snapshot_history(challenger_id, caller_id="system", days=365)
+                challenger_snaps = self.state_db.get_snapshot_history(challenger_id, days=365)
                 trial_snaps = [s for s in challenger_snaps if s.daily_return_pct is not None]
                 if len(trial_snaps) >= self.TRIAL_DAYS:
                     return EliminationStage(
@@ -159,7 +159,7 @@ class ChallengerEngine:
 
         Returns None if the target shadow doesn't exist in the DB.
         """
-        target = self.state_db.get_shadow(target_shadow_id, caller_id="system")
+        target = self.state_db.get_shadow(target_shadow_id)
         if target is None:
             logger.warning("Cannot create challenger: target shadow '%s' not found", target_shadow_id)
             return None
@@ -188,7 +188,7 @@ class ChallengerEngine:
         Raises:
             ValueError: If target shadow does not exist.
         """
-        target = self.state_db.get_shadow(target_shadow_id, caller_id="system")
+        target = self.state_db.get_shadow(target_shadow_id)
         if target is None:
             raise ValueError(f"Target shadow '{target_shadow_id}' does not exist")
 
@@ -337,8 +337,8 @@ class ChallengerEngine:
             ChallengerTrialResult with full statistics and verdict.
         """
         # Fetch recent snapshots for both shadows
-        target_snaps = self.state_db.get_snapshot_history(target_id, caller_id="system", days=90)
-        challenger_snaps = self.state_db.get_snapshot_history(challenger_id, caller_id="system", days=90)
+        target_snaps = self.state_db.get_snapshot_history(target_id, days=90)
+        challenger_snaps = self.state_db.get_snapshot_history(challenger_id, days=90)
 
         # Filter to trial period: use the overlapping dates
         target_dates = {s.date for s in target_snaps if s.daily_return_pct is not None}

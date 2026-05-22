@@ -202,7 +202,7 @@ class ShadowMother:
                 today, len(completed_shadows), len(visible)
             )
             for sid in completed_shadows:
-                cached_output = self.state_db.get_raw_output(sid, today, caller_id="system")
+                cached_output = self.state_db.get_raw_output(sid, today)
                 if cached_output:
                     logger.debug("Replaying cached output for %s", sid)
 
@@ -213,7 +213,7 @@ class ShadowMother:
         async def _run_one(config):
             sid = config.shadow_id
             if sid in completed_shadows:
-                cached_output = self.state_db.get_raw_output(sid, today, caller_id="system")
+                cached_output = self.state_db.get_raw_output(sid, today)
                 if cached_output:
                     return sid, None, None
 
@@ -232,7 +232,7 @@ class ShadowMother:
                         except Exception as e:
                             logger.error("Failed to save votes for %s: %s", sid, e)
                     try:
-                        latest = self.state_db.get_latest_snapshot(sid, caller_id="system")
+                        latest = self.state_db.get_latest_snapshot(sid)
                         if latest and latest.date == today:
                             self.state_db.update_snapshot_fields(
                                 sid, today,
@@ -270,7 +270,7 @@ class ShadowMother:
                 result.votes_collected += len(output.votes)
                 all_votes.extend(output.votes)
             elif err is None and sid in completed_shadows:
-                cached_raw = self.state_db.get_raw_output(sid, today, caller_id="system")
+                cached_raw = self.state_db.get_raw_output(sid, today)
                 if cached_raw:
                     logger.info("Replaying cached analysis for %s", sid)
 
@@ -302,7 +302,7 @@ class ShadowMother:
                     if prices:
                         self.state_db.save_market_prices(ticker, prices)
                 all_saved_votes = self.state_db.get_votes_by_date_range(
-                    lookback_start, today, caller_id="system"
+                    lookback_start, today
                 )
                 votes_by_shadow: dict[str, list[dict]] = {}
                 from collections import Counter
@@ -338,7 +338,7 @@ class ShadowMother:
             performances: dict[str, ShadowPerformance] = {}
             for config in visible:
                 snapshots = self.state_db.get_snapshot_history(
-                    config.shadow_id, caller_id="system", days=self.config.evaluation_window_days
+                    config.shadow_id, days=self.config.evaluation_window_days
                 )
                 if snapshots:
                     returns = [s.daily_return_pct or 0.0 for s in snapshots
@@ -376,7 +376,7 @@ class ShadowMother:
                                                 wfe_results=None)
                 result.rankings = rankings
                 for rr in rankings:
-                    agent_config = self.state_db.get_shadow(rr.shadow_id, caller_id="system")
+                    agent_config = self.state_db.get_shadow(rr.shadow_id)
                     if agent_config:
                         agent = ShadowAgent(agent_config, self.state_db, self.config)
                         agent.apply_ranking_to_snapshot(rr)
@@ -423,7 +423,7 @@ class ShadowMother:
                     wf_validator = WalkForwardValidator()
                     for config in visible:
                         snapshots = self.state_db.get_snapshot_history(
-                            config.shadow_id, caller_id="system", days=max(365, wf_validator.min_career_days)
+                            config.shadow_id, days=max(365, wf_validator.min_career_days)
                         )
                         if not snapshots:
                             continue
@@ -461,7 +461,7 @@ class ShadowMother:
             from marketmind.shadows.paper_live_gap import PaperLiveGapManager
             gap_manager = PaperLiveGapManager(self.state_db, self.config)
             for config in visible:
-                trades = self.state_db.get_trade_history(config.shadow_id, caller_id="system", limit=100)
+                trades = self.state_db.get_trade_history(config.shadow_id, limit=100)
                 if not trades:
                     continue
                 from collections import Counter
@@ -489,7 +489,7 @@ class ShadowMother:
             from marketmind.shadows.shadow_health_monitor import ShadowHealthMonitor
             health_monitor = ShadowHealthMonitor(state_db=self.state_db)
             for sid, output in result.shadow_analyses.items():
-                raw_text = self.state_db.get_raw_output(sid, today, caller_id="system") or ""
+                raw_text = self.state_db.get_raw_output(sid, today) or ""
                 snapshot = health_monitor.run_daily_check(
                     sid, raw_text, len(output.insights), today
                 )
@@ -802,8 +802,8 @@ class ShadowMother:
             if not target_id:
                 continue
 
-            ch_snaps = self.state_db.get_snapshot_history(ch_config.shadow_id, caller_id="system", days=90)
-            tg_snaps = self.state_db.get_snapshot_history(target_id, caller_id="system", days=90)
+            ch_snaps = self.state_db.get_snapshot_history(ch_config.shadow_id, days=90)
+            tg_snaps = self.state_db.get_snapshot_history(target_id, days=90)
             if len(ch_snaps) < 10 or len(tg_snaps) < 10:
                 continue
 
@@ -811,10 +811,10 @@ class ShadowMother:
             verdict = trial.verdict
 
             if verdict == "REPLACE_TARGET":
-                target_config = self.state_db.get_shadow(target_id, caller_id="system")
+                target_config = self.state_db.get_shadow(target_id)
                 if target_config:
                     self.state_db.eliminate_shadow(target_id, "challenger_replaced")
-                    ch_config_new = self.state_db.get_shadow(ch_config.shadow_id, caller_id="system")
+                    ch_config_new = self.state_db.get_shadow(ch_config.shadow_id)
                     if ch_config_new:
                         self.state_db.update_shadow_type(
                             ch_config.shadow_id,

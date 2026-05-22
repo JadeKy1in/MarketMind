@@ -126,7 +126,7 @@ class BacktestRunner:
             "consensus_return": None,
         }
 
-        votes = self.state_db.get_votes_by_date_range(date_str, date_str, caller_id="backtest_runner")
+        votes = self.state_db.get_votes_by_date_range(date_str, date_str)
         if not votes:
             return result  # No vote data for this date — skip
 

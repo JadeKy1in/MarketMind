@@ -41,7 +41,7 @@ def test_agent_stores_config(temp_shadow_db, agent_config, settings):
 
 
 def test_agent_created_in_db(agent, temp_shadow_db):
-    retrieved = temp_shadow_db.get_shadow("expert:gold:test_agent", caller_id="system")
+    retrieved = temp_shadow_db.get_shadow("expert:gold:test_agent")
     assert retrieved is not None
     assert retrieved.display_name == "Test Gold Agent"
 
@@ -96,7 +96,7 @@ async def test_analyze_returns_output_with_mock_llm(agent):
 @pytest.mark.asyncio
 async def test_save_daily_snapshot_persists(agent):
     await agent.save_daily_snapshot()
-    snap = agent.state_db.get_latest_snapshot(agent.shadow_id, caller_id="system")
+    snap = agent.state_db.get_latest_snapshot(agent.shadow_id)
     assert snap is not None
     assert snap.date is not None
 
@@ -225,7 +225,7 @@ def test_apply_ranking_to_snapshot_backfills_all_fields(agent):
 
     agent.apply_ranking_to_snapshot(ranking_result)
 
-    snap = agent.state_db.get_latest_snapshot(agent.shadow_id, caller_id="system")
+    snap = agent.state_db.get_latest_snapshot(agent.shadow_id)
     assert snap is not None
     assert snap.composite_score == 0.85
     assert snap.deflated_score == 0.72

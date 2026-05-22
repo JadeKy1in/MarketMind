@@ -117,7 +117,7 @@ async def test_ael_debrief_day_triggers(ael_config, temp_shadow_db):
         engine_instance.inject_lesson.return_value = True
         engine_instance.get_active_lessons.return_value = ["Reduce position size during trend reversals."]
 
-        with patch("marketmind.shadows.methodology_evolver.MethodologyInjector") as MockInjector:
+        with patch("marketmind.shadows.methodology_injector.MethodologyInjector") as MockInjector:
             injector_instance = MockInjector.return_value
             injector_instance.inject_lessons.return_value = None
 

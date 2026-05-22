@@ -38,7 +38,7 @@ async def run_ael_step(
 
     try:
         from marketmind.shadows.ael_evolution import AELEvolutionEngine
-        from marketmind.shadows.methodology_evolver import MethodologyInjector
+        from marketmind.shadows.methodology_injector import MethodologyInjector
 
         ael = AELEvolutionEngine(state_db=state_db)
         debrief_day = getattr(config, 'ael_debrief_day', 1)

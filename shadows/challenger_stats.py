@@ -118,7 +118,7 @@ def compute_calmar_from_snapshots(
 
     Calmar = cumulative_return / max(|MDD|, 0.001), capped at 100.
     """
-    snaps = state_db.get_snapshot_history(shadow_id, caller_id="system", days=days)
+    snaps = state_db.get_snapshot_history(shadow_id, days=days)
     if not snaps:
         return 0.0
 

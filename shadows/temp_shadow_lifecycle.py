@@ -90,7 +90,7 @@ class TempShadowLifecycle:
         return created_ids
 
     def check_destruction_conditions(self, shadow_id: str) -> bool:
-        config = self.state_db.get_shadow(shadow_id, caller_id="system")
+        config = self.state_db.get_shadow(shadow_id)
         if config is None:
             return False
         if config.shadow_type != "temp_event":
@@ -99,7 +99,7 @@ class TempShadowLifecycle:
         days_alive = (datetime.now(timezone.utc) - created).days
         if days_alive >= 30:
             return True
-        snapshots = self.state_db.get_snapshot_history(shadow_id, caller_id="system", days=5)
+        snapshots = self.state_db.get_snapshot_history(shadow_id, days=5)
         if len(snapshots) < 1:
             return False
         if days_alive >= 5 and len(snapshots) < days_alive:
@@ -117,7 +117,7 @@ class TempShadowLifecycle:
         """Returns "active" | "resolved" | "decayed" | "unknown"."""
         for shadow_id in self.get_active_temp_shadows():
             if event_id in shadow_id:
-                shadow = self.state_db.get_shadow(shadow_id, caller_id="system")
+                shadow = self.state_db.get_shadow(shadow_id)
                 if shadow is None:
                     return "resolved"
                 created = datetime.fromisoformat(shadow.created_at.replace("Z", "+00:00"))

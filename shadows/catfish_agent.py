@@ -130,6 +130,6 @@ CATFISH_CONFIG = ShadowConfig(
 def create_catfish_agent(state_db: ShadowStateDB,
                           settings: ShadowSettings) -> CatfishAgent:
     """Create the singleton catfish agent."""
-    if state_db.get_shadow(CATFISH_CONFIG.shadow_id, caller_id="system") is None:
+    if state_db.get_shadow(CATFISH_CONFIG.shadow_id) is None:
         state_db.create_shadow(CATFISH_CONFIG)
     return CatfishAgent(CATFISH_CONFIG, state_db, settings)

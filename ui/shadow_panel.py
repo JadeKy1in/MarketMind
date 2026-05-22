@@ -138,7 +138,7 @@ class ShadowPanel(ctk.CTkFrame):
         if self._state_db is None:
             return
         try:
-            snapshots = self._state_db.get_snapshot_history(shadow_id, caller_id="system", days=90)
+            snapshots = self._state_db.get_snapshot_history(shadow_id, days=90)
             self._ranking_chart.clear()
             self._ranking_chart.load_data(shadow_id, snapshots)
             self._discount_chart.clear()

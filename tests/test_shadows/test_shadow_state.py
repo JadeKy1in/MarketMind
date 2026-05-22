@@ -44,7 +44,7 @@ def test_create_and_get_shadow(temp_db):
     )
     shadow_id = temp_db.create_shadow(config)
     assert shadow_id == "expert:gold:test_01"
-    retrieved = temp_db.get_shadow(shadow_id, caller_id="system")
+    retrieved = temp_db.get_shadow(shadow_id)
     assert retrieved is not None
     assert retrieved.display_name == "Test Gold Bug"
     assert retrieved.virtual_capital == 50000.0
@@ -105,7 +105,7 @@ def test_record_and_get_trades(temp_db):
     trade_id = temp_db.record_trade_open("test", trade)
     assert trade_id > 0
     temp_db.record_trade_close(trade_id, 160.0, "target", 0.0667)
-    history = temp_db.get_trade_history("test", caller_id="system", limit=90)
+    history = temp_db.get_trade_history("test", limit=90)
     assert len(history) == 1
     assert history[0].ticker == "AAPL"
     assert history[0].pnl_pct == pytest.approx(0.0667, rel=0.01)
@@ -126,7 +126,7 @@ def test_save_and_get_snapshot(temp_db):
         insights_generated=1
     )
     temp_db.save_snapshot("test", snap)
-    history = temp_db.get_snapshot_history("test", caller_id="system", days=90)
+    history = temp_db.get_snapshot_history("test", days=90)
     assert len(history) == 1
     assert history[0].achievement_tier == "elite"
 
@@ -153,7 +153,7 @@ def test_eliminate_shadow_marks_eliminated_at(temp_db):
                           display_name="T", methodology_prompt="...", virtual_capital=10000)
     temp_db.create_shadow(config)
     temp_db.eliminate_shadow("test", "Failed challenger comparison")
-    shadow = temp_db.get_shadow("test", caller_id="system")
+    shadow = temp_db.get_shadow("test")
     assert shadow.status == "eliminated"
     assert shadow.eliminated_at is not None
 

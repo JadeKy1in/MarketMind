@@ -1,7 +1,7 @@
 """Tests for Crystallization Engine and Methodology Evolver.
 
 Covers:
-- CrystallizationEngine inner loop with mock shadow_votes
+- CrystallizationEngine inner loop with mock shadow_analyses
 - Promote path: high enough validation_score → promoted to semantic
 - Retire path: low validation_score → retired
 - Cold start: < min_samples votes → skipped (hold action)
@@ -94,7 +94,7 @@ def _seed_shadow_and_votes(temp_db, shadow_id, ticker, vote_data):
     try:
         for date_str, direction, confidence in vote_data:
             conn.execute(
-                """INSERT INTO shadow_votes
+                """INSERT INTO shadow_analyses
                    (shadow_id, date, ticker, direction, confidence, thesis, risk_note, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (shadow_id, date_str, ticker, direction, confidence,
@@ -287,7 +287,7 @@ class TestMethodologyEvolver:
 # ── Crystallization Engine Tests ────────────────────────────────────────────
 
 class TestCrystallizationEngine:
-    """Tests for knowledge crystallization with shadow_votes backtest."""
+    """Tests for knowledge crystallization with shadow_analyses backtest."""
 
     def test_engine_initialization(self, engine):
         """Engine initializes with correct parameters."""
@@ -450,7 +450,7 @@ class TestCrystallizationEngine:
                 date_str = f"2026-05-{i+1:02d}"
                 # Insert vote
                 conn.execute(
-                    """INSERT INTO shadow_votes
+                    """INSERT INTO shadow_analyses
                        (shadow_id, date, ticker, direction, confidence, thesis, risk_note, created_at)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (shadow_id, date_str, ticker, "short", 0.75,

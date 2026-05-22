@@ -104,7 +104,7 @@ def test_patterns_injected(engine, temp_shadow_db):
     )
 
     challenger_id = engine.create_challenger("expert:test:p3_1_e2e")
-    challenger = temp_shadow_db.get_shadow(challenger_id, caller_id="system")
+    challenger = temp_shadow_db.get_shadow(challenger_id)
     assert challenger is not None
     assert "[FAILURE PATTERNS TO AVOID" in challenger.methodology_prompt
     assert "Position sizing too aggressive in choppy markets" in challenger.methodology_prompt
@@ -122,7 +122,7 @@ def test_no_ael_data_graceful_degradation(engine, temp_shadow_db):
 
     # create_challenger must succeed without error
     challenger_id = engine.create_challenger("expert:test:p3_1_noael")
-    challenger = temp_shadow_db.get_shadow(challenger_id, caller_id="system")
+    challenger = temp_shadow_db.get_shadow(challenger_id)
     assert challenger is not None
     assert challenger.shadow_type == "challenger"
     assert challenger.parent_shadow_id == "expert:test:p3_1_noael"
@@ -179,7 +179,7 @@ def test_crystallization_retirements_pulled_in(engine, temp_shadow_db):
 
     # End-to-end: create_challenger injects these into the methodology prompt
     challenger_id = engine.create_challenger("expert:test:p3_1_crystal")
-    challenger = temp_shadow_db.get_shadow(challenger_id, caller_id="system")
+    challenger = temp_shadow_db.get_shadow(challenger_id)
     assert challenger is not None
     assert "[FAILURE PATTERNS TO AVOID" in challenger.methodology_prompt
     for insight in insights:

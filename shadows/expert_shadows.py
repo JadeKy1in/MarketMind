@@ -177,7 +177,7 @@ def create_expert_shadows(state_db: ShadowStateDB,
     shadows = []
     for config in EXPERT_SHADOW_CONFIGS:
         # Register in DB if not exists
-        if state_db.get_shadow(config.shadow_id, caller_id="system") is None:
+        if state_db.get_shadow(config.shadow_id) is None:
             state_db.create_shadow(config)
         shadows.append(ExpertShadow(config, state_db, settings))
     return shadows

@@ -248,7 +248,7 @@ async def test_position_exit_integration(temp_shadow_db):
     assert len(open_positions) == 0
 
     # Verify trade history shows closed trade
-    trade_history = temp_shadow_db.get_trade_history(agent.shadow_id, caller_id="system", limit=10)
+    trade_history = temp_shadow_db.get_trade_history(agent.shadow_id, limit=10)
     closed = [t for t in trade_history if t.trade_id == results[0].trade_id]
     assert len(closed) == 1
     assert closed[0].exit_price == 200.0

@@ -123,7 +123,7 @@ async def test_interactive_full_flow_confirm():
     mock_archivist.init_fts.return_value = None
     mock_archivist.index_document.return_value = None
 
-    with patch("marketmind.app._setup_logging"):  # skip log dir creation
+    with patch("marketmind.pipeline.interactive_orchestration._setup_logging"):  # skip log dir creation
         with patch("marketmind.gateway.async_client.init_gateway"):  # skip API key validation
             with patch("marketmind.pipeline.scout.fetch_all_sources",
                        AsyncMock(return_value=[])):
@@ -145,7 +145,7 @@ async def test_interactive_full_flow_confirm():
                                         ):
                                             with patch("marketmind.storage.archivist.get_archivist",
                                                        return_value=mock_archivist):
-                                                from marketmind.app import run_interactive
+                                                from marketmind.pipeline.interactive_orchestration import run_interactive
                                                 rc = await run_interactive(
                                                     config, mock=True, verbose=False,
                                                     shadow_count=None,

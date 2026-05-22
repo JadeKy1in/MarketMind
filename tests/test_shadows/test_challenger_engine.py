@@ -109,7 +109,7 @@ def test_stage2_challenger_created_3_consecutive_bottom(engine, temp_shadow_db):
     assert "challenger" in stage.challenger_id
 
     # Verify challenger exists in DB
-    challenger = temp_shadow_db.get_shadow(stage.challenger_id, caller_id="system")
+    challenger = temp_shadow_db.get_shadow(stage.challenger_id)
     assert challenger is not None
     assert challenger.shadow_type == "challenger"
     assert challenger.parent_shadow_id == "expert:test:s2_challenger"
@@ -333,7 +333,7 @@ def test_challenger_created_from_existing_config(engine, temp_shadow_db):
     assert challenger_id is not None
     assert "challenger" in challenger_id
 
-    challenger = temp_shadow_db.get_shadow(challenger_id, caller_id="system")
+    challenger = temp_shadow_db.get_shadow(challenger_id)
     assert challenger.shadow_type == "challenger"
     assert challenger.parent_shadow_id == "expert:test:manual"
 
@@ -357,7 +357,7 @@ def test_challenger_config_inherits_parent(temp_shadow_db):
     challenger_id = engine.create_challenger("expert:gold:parent_test")
 
     assert challenger_id is not None
-    challenger = temp_shadow_db.get_shadow(challenger_id, caller_id="system")
+    challenger = temp_shadow_db.get_shadow(challenger_id)
     assert challenger is not None
     assert challenger.parent_shadow_id == "expert:gold:parent_test"
     assert challenger.generation == 3  # parent=2 -> challenger=3

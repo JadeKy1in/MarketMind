@@ -138,7 +138,7 @@ class PaperLiveGapManager:
         - 1.0 = 100% deviation from median
         - Large values = extreme deviation
         """
-        trades = self.state_db.get_trade_history(shadow_id, caller_id="system", limit=500)
+        trades = self.state_db.get_trade_history(shadow_id, limit=500)
         own_pnls = [
             t.pnl_pct for t in trades
             if t.ticker == ticker and t.pnl_pct is not None
@@ -154,7 +154,7 @@ class PaperLiveGapManager:
         for other in all_active:
             if other.shadow_id == shadow_id:
                 continue
-            other_trades = self.state_db.get_trade_history(other.shadow_id, caller_id="system", limit=500)
+            other_trades = self.state_db.get_trade_history(other.shadow_id, limit=500)
             for t in other_trades:
                 if t.ticker == ticker and t.pnl_pct is not None:
                     other_pnls.append(t.pnl_pct)
@@ -201,7 +201,7 @@ class PaperLiveGapManager:
                                              default, floor, factor, benchmark)
 
         # Aggregate mode — use gap-based adjustment (backward compatible)
-        trades = self.state_db.get_trade_history(shadow_id, caller_id="system", limit=100)
+        trades = self.state_db.get_trade_history(shadow_id, limit=100)
         if not trades:
             return current_rate
 
@@ -232,12 +232,12 @@ class PaperLiveGapManager:
                               current_rate: float, default: float, floor: float,
                               factor: float, benchmark: float) -> float:
         """Calibrate discount rate for a specific asset using PnL dispersion."""
-        trades = self.state_db.get_trade_history(shadow_id, caller_id="system", limit=200)
+        trades = self.state_db.get_trade_history(shadow_id, limit=200)
         own_pnls = [t.pnl_pct for t in trades
                      if t.ticker == ticker and t.pnl_pct is not None]
         if len(own_pnls) < 10:
             # Cold start: use domain peer CV as Bayesian prior if available
-            config = self.state_db.get_shadow(shadow_id, caller_id="system")
+            config = self.state_db.get_shadow(shadow_id)
             domain = config.domain if config else None
             if domain:
                 peer_pnls = self.state_db.get_pnl_by_domain(domain)
@@ -263,7 +263,7 @@ class PaperLiveGapManager:
         cv = own_std / abs(own_mean) if abs(own_mean) > 0.001 else 2.0
 
         # Get domain peer PnL for this ticker from config
-        config = self.state_db.get_shadow(shadow_id, caller_id="system")
+        config = self.state_db.get_shadow(shadow_id)
         domain = config.domain if config else None
         if domain:
             peer_pnls = self.state_db.get_pnl_by_domain(domain)
@@ -306,7 +306,7 @@ class PaperLiveGapManager:
 
         Returns (is_ready, reason_string).
         """
-        config = self.state_db.get_shadow(shadow_id, caller_id="system")
+        config = self.state_db.get_shadow(shadow_id)
         if config is None:
             return False, f"Shadow '{shadow_id}' not found"
 
@@ -314,7 +314,7 @@ class PaperLiveGapManager:
         mdd_limit = 0.35 if is_daredevil else 0.25
         pbo_limit = 0.10 if is_daredevil else 0.05
 
-        trades = self.state_db.get_trade_history(shadow_id, caller_id="system", limit=500)
+        trades = self.state_db.get_trade_history(shadow_id, limit=500)
         closed_trades = [t for t in trades if t.exit_price is not None]
 
         # Criterion 1: >= 10 paired trades
@@ -347,7 +347,7 @@ class PaperLiveGapManager:
             return False, f"PBO {pbo:.3f} >= {pbo_limit}"
 
         # Criterion 6: MDD check
-        latest = self.state_db.get_latest_snapshot(shadow_id, caller_id="system")
+        latest = self.state_db.get_latest_snapshot(shadow_id)
         if latest and latest.max_drawdown_pct is not None:
             if latest.max_drawdown_pct >= mdd_limit:
                 return False, f"MDD {latest.max_drawdown_pct:.1%} >= {mdd_limit:.0%}"
@@ -386,7 +386,7 @@ class PaperLiveGapManager:
 
     def get_gap_metrics(self, shadow_id: str) -> GapMetrics:
         """Produce a comprehensive GapMetrics snapshot for a shadow."""
-        trades = self.state_db.get_trade_history(shadow_id, caller_id="system", limit=500)
+        trades = self.state_db.get_trade_history(shadow_id, limit=500)
         closed_trades = [t for t in trades if t.exit_price is not None]
 
         discount = self._get_discount_rate(shadow_id)

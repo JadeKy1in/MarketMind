@@ -76,7 +76,7 @@ class ShadowAgent:
         self.settings = settings
 
         # Ensure shadow exists in DB (idempotent)
-        existing = state_db.get_shadow(config.shadow_id, caller_id=f"shadow:{config.shadow_id}")
+        existing = state_db.get_shadow(config.shadow_id)
         if existing is None:
             state_db.create_shadow(config)
         elif existing.status == "eliminated":
@@ -90,7 +90,7 @@ class ShadowAgent:
 
     async def receive_status_card(self) -> dict:
         """Get today's ranking, tier, quota, promotion requirements."""
-        latest = self.state_db.get_latest_snapshot(self.shadow_id, caller_id=f"shadow:{self.shadow_id}")
+        latest = self.state_db.get_latest_snapshot(self.shadow_id)
         return {
             "shadow_id": self.shadow_id,
             "display_name": self.config.display_name,
@@ -361,7 +361,7 @@ class ShadowAgent:
     async def close_virtual_position(self, trade_id: int, exit_price: float,
                                       reason: str) -> None:
         # Calculate PnL from trade history
-        trades = self.state_db.get_trade_history(self.shadow_id, caller_id=f"shadow:{self.shadow_id}", limit=1)
+        trades = self.state_db.get_trade_history(self.shadow_id, limit=1)
         entry = None
         for t in trades:
             if t.trade_id == trade_id:
@@ -404,7 +404,7 @@ class ShadowAgent:
     }
 
     def get_daily_quota(self) -> int:
-        latest = self.state_db.get_latest_snapshot(self.shadow_id, caller_id=f"shadow:{self.shadow_id}")
+        latest = self.state_db.get_latest_snapshot(self.shadow_id)
         if latest and latest.achievement_tier:
             return self._TIER_QUOTA.get(latest.achievement_tier, self.settings.shadow_flash_quota_default)
         return self.settings.shadow_flash_quota_default
@@ -419,7 +419,7 @@ class ShadowAgent:
         Emergency quota is only available after base quota is fully used.
         """
         base_quota_total = self.get_daily_quota()
-        latest = self.state_db.get_latest_snapshot(self.shadow_id, caller_id=f"shadow:{self.shadow_id}")
+        latest = self.state_db.get_latest_snapshot(self.shadow_id)
         base_quota_used = latest.flash_quota_used if latest else 0
 
         from marketmind.shadows.emergency_quota import EmergencyQuotaAuditor

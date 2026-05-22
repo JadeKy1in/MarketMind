@@ -44,7 +44,7 @@ class MissedPathAgent(ShadowAgent):
 
     def generate_report(self, days_tracked: int = 30) -> MissedPathReport:
         """Generate counterfactual performance report with survivorship bias warning."""
-        snapshots = self.state_db.get_snapshot_history(self.shadow_id, caller_id=f"shadow:{self.shadow_id}", days=days_tracked)
+        snapshots = self.state_db.get_snapshot_history(self.shadow_id, days=days_tracked)
         if not snapshots:
             return MissedPathReport(
                 shadow_id=self.shadow_id,

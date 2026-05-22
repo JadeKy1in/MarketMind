@@ -351,7 +351,7 @@ class BackgroundScheduler:
                 if not positions:
                     continue
                 snapshots = self._state_db.get_snapshot_history(
-                    shadow.shadow_id, caller_id="system", days=5
+                    shadow.shadow_id, days=5
                 )
                 if snapshots:
                     re_evaluated += 1

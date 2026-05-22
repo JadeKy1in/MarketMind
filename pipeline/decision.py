@@ -20,6 +20,63 @@ from marketmind.shadows.shadow_agent import defang_text
 _rule_registry = None
 
 
+@dataclass
+class SignalConflict:
+    """Detected signal conflict between two analytical dimensions."""
+    signal_a: tuple[str, float]   # (source_name, value)
+    signal_b: tuple[str, float]   # (source_name, value)
+    divergence: float             # absolute difference
+    description: str              # Chinese-language conflict description
+
+
+def _detect_signal_conflicts(hypotheses: list) -> list[SignalConflict]:
+    """Detect signal conflicts across analytical dimensions.
+
+    Checks two conflict types:
+    1. Causal net_directional_force vs Flow flow_imbalance (divergence > 0.4)
+    2. Scenario base confidence vs Fragility score (divergence > 0.4)
+    """
+    conflicts: list[SignalConflict] = []
+    for h in hypotheses:
+        if h is None:
+            continue
+
+        # Check 1: causal vs flow divergence
+        causal = getattr(h, 'causal', None)
+        flow = getattr(h, 'flow', None)
+        if causal is not None and flow is not None:
+            c_force = getattr(causal, 'net_directional_force', 0) or 0
+            f_imb = getattr(flow, 'flow_imbalance', 0) or 0
+            divergence = abs(c_force - f_imb)
+            if divergence > 0.4:
+                conflicts.append(SignalConflict(
+                    signal_a=("causal_decomposition", c_force),
+                    signal_b=("flow_decomposition", f_imb),
+                    divergence=divergence,
+                    description=f"因果分解与资金流分解信号背离 (divergence={divergence:.2f})，"
+                                f"因果分解方向力={c_force:.2f}，资金流失衡={f_imb:.2f}",
+                ))
+
+        # Check 2: scenario confidence vs fragility
+        scenario = getattr(h, 'scenario_tree', None)
+        fragility = getattr(h, 'fragility_score', None)
+        if scenario is not None and fragility is not None:
+            base = getattr(scenario, 'base_case', None)
+            if base is not None:
+                sc_conf = getattr(base, 'confidence', 0) or 0
+                fg_score = 1.0 - fragility  # invert: high fragility = low confidence
+                divergence = abs(sc_conf - fg_score)
+                if divergence > 0.4:
+                    conflicts.append(SignalConflict(
+                        signal_a=("scenario_forecaster", sc_conf),
+                        signal_b=("fragility_scanner", fg_score),
+                        divergence=divergence,
+                        description=f"情景预测置信度与脆弱性评分矛盾 (divergence={divergence:.2f})，"
+                                    f"情景预测置信={sc_conf:.2f}，脆弱性调整={fg_score:.2f}",
+                    ))
+    return conflicts
+
+
 def _get_decision_prompt() -> str:
     """Get the current decision system prompt, dynamically assembled from active rules."""
     global _rule_registry

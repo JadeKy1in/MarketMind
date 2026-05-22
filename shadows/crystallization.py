@@ -1,7 +1,7 @@
 """Crystallization Engine -- Knowledge crystallization: insight → hypothesis → validate → promote/retire.
 
 Inner loop: Collect insights from shadow memory → formalize hypothesis →
-            tweak methodology → backtest validate against shadow_votes
+            tweak methodology → backtest validate against shadow_analyses
 Outer loop: Track methodology performance → significance gate →
             promote to semantic memory or retire
 """
@@ -32,7 +32,7 @@ class CrystallizationEngine:
     """Knowledge crystallization engine for the shadow ecosystem.
 
     Inner loop: Collect insights from episodic memory → formalize hypothesis →
-                tweak methodology → backtest validate against shadow_votes.
+                tweak methodology → backtest validate against shadow_analyses.
 
     Outer loop: Track methodology performance → significance gate →
                 promote to semantic memory or retire.
@@ -118,7 +118,7 @@ class CrystallizationEngine:
         # Formalize hypothesis from the belief
         hypothesis = self._formalize_hypothesis(proposition, expectation, uncertainty)
 
-        # Backtest validate against shadow_votes
+        # Backtest validate against shadow_analyses
         validation_score, sample_count, evidence_lines = self._backtest_validate(
             shadow_id, ticker, expectation
         )
@@ -287,9 +287,9 @@ class CrystallizationEngine:
     def _backtest_validate(
         self, shadow_id: str, ticker: str, expectation: float
     ) -> tuple[float, int, list[str]]:
-        """Backtest validate a hypothesis against historical shadow_votes.
+        """Backtest validate a hypothesis against historical shadow_analyses.
 
-        Queries the shadow_votes table for this shadow on this ticker,
+        Queries the shadow_analyses table for this shadow on this ticker,
         compares vote direction against actual outcomes (from virtual_trades PnL).
 
         Args:
@@ -304,10 +304,10 @@ class CrystallizationEngine:
         try:
             # Get all votes for this shadow on this ticker
             votes = conn.execute(
-                """SELECT sv.date, sv.direction, sv.confidence
-                   FROM shadow_votes sv
-                   WHERE sv.shadow_id = ? AND sv.ticker = ?
-                   ORDER BY sv.date ASC""",
+                """SELECT sa.date, sa.direction, sa.confidence
+                   FROM shadow_analyses sa
+                   WHERE sa.shadow_id = ? AND sa.ticker = ?
+                   ORDER BY sa.date ASC""",
                 (shadow_id, ticker),
             ).fetchall()
 
@@ -409,7 +409,7 @@ class CrystallizationEngine:
         return (
             f"Hypothesis: Assets linked to '{proposition}' will {direction} "
             f"the market (E[belief]={expectation:.2f}, uncertainty={uncertainty:.2f}, "
-            f"confidence={confidence_label}). Testable via shadow_votes backtest."
+            f"confidence={confidence_label}). Testable via shadow_analyses backtest."
         )
 
     @staticmethod

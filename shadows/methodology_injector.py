@@ -43,7 +43,7 @@ class MethodologyInjector:
 
         Used by AEL slow layer (Phase 7) to persist monthly debrief findings.
         """
-        config = self._state_db.get_shadow(shadow_id, caller_id="system")
+        config = self._state_db.get_shadow(shadow_id)
         if config is None:
             return False
 
@@ -61,7 +61,7 @@ class MethodologyInjector:
 
     def inject_validated_insight(self, shadow_id: str, insight: str) -> bool:
         """Add a [VALIDATED INSIGHT] block from crystallization (P1-2)."""
-        config = self._state_db.get_shadow(shadow_id, caller_id="system")
+        config = self._state_db.get_shadow(shadow_id)
         if config is None:
             return False
 
@@ -79,7 +79,7 @@ class MethodologyInjector:
 
     def inject_retired_insight(self, shadow_id: str, insight: str) -> bool:
         """Add a [RETIRED] note when a previously-validated insight is invalidated."""
-        config = self._state_db.get_shadow(shadow_id, caller_id="system")
+        config = self._state_db.get_shadow(shadow_id)
         if config is None:
             return False
 
@@ -98,7 +98,7 @@ class MethodologyInjector:
         Used when a challenger replaces a target — the challenger learns
         from the predecessor's documented failures.
         """
-        config = self._state_db.get_shadow(shadow_id, caller_id="system")
+        config = self._state_db.get_shadow(shadow_id)
         if config is None:
             return False
 
@@ -124,9 +124,9 @@ class MethodologyInjector:
         The original methodology is recovered from the first entry in
         the methodology_changes audit table, or from config_json.
         """
-        original = self._state_db.get_original_methodology(shadow_id, caller_id="system")
+        original = self._state_db.get_original_methodology(shadow_id)
         if original is None:
-            config = self._state_db.get_shadow(shadow_id, caller_id="system")
+            config = self._state_db.get_shadow(shadow_id)
             if config is None:
                 return False
             original = config.methodology_prompt
