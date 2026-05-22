@@ -154,6 +154,7 @@ After extraction, verify:
 5. **Commit after each sub-phase**: `git add` + `git commit` after every sub-phase completes with passing tests. Never accumulate multiple sub-phases in the working directory without version control. [IMMUTABLE]
 6. **Red Team before completion**: Independent Red Team audit produces `.claude/audits/phase-X-red-team.md` BEFORE the phase is marked complete. Completion is never self-declared without external audit confirmation. [IMMUTABLE]
 7. **Memory after milestone**: Save key decisions and state to auto-memory [OVERRIDABLE]
+8. **Git Safety Protocol (pre-pull/push)**: [IMMUTABLE] Before ANY `git pull` or `git push`, verify authentication and assess remote divergence. Steps: (a) `git fetch origin master` first to see what's coming, (b) `git log HEAD..origin/master --oneline | wc -l` — if >10 new commits, STOP and evaluate before pulling, (c) if local has unpushed commits, push FIRST before pulling, (d) if large restructuring detected (>50 files changed), do NOT pull — ask user. Rationale: 2026-05-22 git pull caused 69 test regressions from massive remote divergence. See `.claude/RESTART_GUIDE.md` §Git Safety Protocol for the full decision matrix. [IMMUTABLE]
 
 ### 4. PICA Protocol: Pre-Integration Code Audit (MANDATORY) [IMMUTABLE]
 
