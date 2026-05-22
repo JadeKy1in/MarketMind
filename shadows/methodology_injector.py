@@ -38,6 +38,24 @@ class MethodologyInjector:
     def __init__(self, state_db):
         self._state_db = state_db
 
+
+    @staticmethod
+    def format_failure_patterns(prompt: str, failures: list[str]) -> str:
+        """Format failure patterns into prompt without DB write (for test isolation)."""
+        if not failures:
+            return prompt
+        deduped = []
+        seen = set()
+        for f in failures:
+            s = f.strip()
+            if s and s not in seen:
+                seen.add(s)
+                deduped.append(s)
+        if not deduped:
+            return prompt
+        ft = "\n".join(f"- {f}" for f in deduped[:5])
+        return f"[FAILURE PATTERNS TO AVOID]\n{ft}\n\n{prompt}"
+
     def inject_lessons(self, shadow_id: str, lessons: list[str]) -> bool:
         """Append [LESSONS LEARNED] block to a shadow's methodology prompt.
 
