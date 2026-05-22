@@ -4,7 +4,9 @@
 
 **Project-specific instructions:** Each project has its own `projects/<name>/CLAUDE.md`. When working inside a project directory, load that project's CLAUDE.md FIRST, then fall back to this file for global rules. The project CLAUDE.md takes precedence for architecture, commands, and file paths; this file governs workflow, methodology, and cross-project standards.
 
-**Active project:** MarketMind (Phase H complete, Phase I complete, 1272 tests, Gate 2/3 COMPLETE). See `projects/marketmind/CLAUDE.md`.
+**Active project:** MarketMind (Phase J+K complete, 1746 tests). See `projects/marketmind/CLAUDE.md` for project-specific architecture and commands.
+
+**IMPORTANT — Dual CLAUDE.md files**: This workspace has TWO CLAUDE.md files that must NOT be confused. (a) Workspace root `CLAUDE.md` (this file) — global conventions and workflow rules. (b) `projects/marketmind/CLAUDE.md` — MarketMind-specific architecture, pipeline stages, testing commands. During git operations, NEVER let one overwrite the other. If a merge conflict deletes either file, restore from git history immediately (2026-05-22 incident: marketmind CLAUDE.md overwritten by workspace copy during pull conflict).
 
 **Archived projects:** `projects/robinhood/` and `projects/command_center/` have been removed locally and archived on GitHub. Do not reference them.
 
