@@ -1,0 +1,62 @@
+{
+  "phase": "phase-j",
+  "level": "security",
+  "timestamp": "2026-05-22T01:55:00Z",
+  "auditor": "code-reviewer agent",
+  "summary": "3 High, 2 Medium issues found. All High resolved. 1 Medium resolved. 1 Low resolved.",
+  "findings": [
+    {
+      "id": "SEC-01",
+      "severity": "high",
+      "title": "Stored XSS via WebSocket log broadcast",
+      "file": "dashboard.html",
+      "status": "FIXED",
+      "fix": "Escaped d.ts and d.message with .replace(/</g,'&lt;') before innerHTML"
+    },
+    {
+      "id": "SEC-02",
+      "severity": "high",
+      "title": "Self-XSS via chat message rendering",
+      "file": "dashboard.html",
+      "status": "FIXED",
+      "fix": "Escaped m.text with .replace(/</g,'&lt;').replace(/>/g,'&gt;') before innerHTML"
+    },
+    {
+      "id": "SEC-03",
+      "severity": "high",
+      "title": "innerHTML for server-sourced log data",
+      "file": "dashboard.html",
+      "status": "FIXED",
+      "fix": "Escaped e.time and e.message in REST log refresh innerHTML"
+    },
+    {
+      "id": "SEC-04",
+      "severity": "medium",
+      "title": "Server binds to all interfaces",
+      "file": "api_server.py",
+      "status": "FIXED",
+      "fix": "Changed default host from 0.0.0.0 to 127.0.0.1, overridable via MARKETMIND_HOST env var"
+    },
+    {
+      "id": "SEC-05",
+      "severity": "medium",
+      "title": "No input validation on POST /api/info/inject",
+      "file": "api/routes.py",
+      "status": "ACCEPTED",
+      "rationale": "info_injector.py already validates internally. Add size limits if needed later."
+    },
+    {
+      "id": "SEC-06",
+      "severity": "low",
+      "title": "Temp file leak on exception in ael_experiment.py",
+      "file": "scripts/ael_experiment.py",
+      "status": "FIXED",
+      "fix": "Wrapped main logic in try/finally with db.close() and os.unlink(tmp_path)"
+    }
+  ],
+  "files_cleared": [
+    "api/websocket.py — Clean JSON broadcast, no injection, proper ping/pong keep-alive",
+    "api/data_providers.py — No raw SQL (uses ORM), no path traversal from user input",
+    "api/routes.py — All endpoints return JSONResponse, no HTML injection possible"
+  ]
+}

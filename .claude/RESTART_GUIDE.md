@@ -1,7 +1,7 @@
-# MarketMind Restart Guide — 2026-05-22 更新
+# MarketMind Restart Guide — 2026-05-22 EOD
 
-**Last updated**: 2026-05-22 | **Branch**: master | **Tests**: 1,744 pass
-**All pushed to GitHub**: ✅
+**Last updated**: 2026-05-22 | **Branch**: master | **Tests**: 1,786 pass
+**All pushed to GitHub**: ⏸️ pending
 
 ---
 
@@ -9,13 +9,21 @@
 
 Type this exactly:
 
-> 继续 MarketMind 开发。阅读 `.claude/RESTART_GUIDE.md`。上次完成：RESTART_GUIDE 6/6、影子 Phase A-F、信息源 5 Phase、市场人物模块、祖父文件合规、Web 仪表盘。下一步：AEL 受控实验、UI 接真实数据、WebSocket 实时推送。
+> 继续 MarketMind 开发。阅读 `.claude/RESTART_GUIDE.md`。上次完成：Phase J 6任务并行（API重构、祖父提取、AEL实验、WebSocket、文件上传UI、PICA审计）。下一步：实盘测试、Red Team双审、GitHub push。
 
 ---
 
-## Current State (2026-05-22)
+## Current State (2026-05-22 EOD)
 
-### ✅ All Completed
+### ✅ Phase J Complete (2026-05-22)
+- **T2 API Layer Refactor**: `api/` module (routes + data_providers + websocket), `api_server.py` 211→25 lines
+- **T5 Grandfather Extraction**: `ranking_engine.py` 495→379, `shadow_state.py` 333→303, `ranking_stats.py` +140 lines
+- **T1 AEL Experiment**: 7 integration tests, `scripts/ael_experiment.py` (30-day simulation, 3/4 lessons injected)
+- **T3 WebSocket**: `/ws` endpoint, `api/websocket.py`, JS client with auto-reconnect, progress bar + log live updates
+- **T4 File Upload UI**: Drag-and-drop overlay, file chip previews, XSS-safe rendering
+- **PICA Audit**: All 4 levels complete (Unit/Security/Integration/Regression), 3 High XSS fixed
+
+### ✅ Previously Completed
 - **RESTART_GUIDE 6/6**: P2-2 Walk-Forward, P2-4 Market Anchor, P3-1 Challenger Learning, P3-3 Circuit Breaker, P3-4 Partial Recovery, P3-2a+b SHARP
 - **Shadow Phase A-F**: Data foundation → Type system → Tools → Middleware → Integration → Graduation
 - **Info Sources 5 Phase**: 10 fetchers (FRED 32 series, sentiment, commodities, crypto, volatility surface)
@@ -30,12 +38,11 @@ Type this exactly:
 
 | Priority | Task | Detail |
 |:--:|------|------|
-| 1 | AEL Controlled Experiment | Set `ael_experiment_enabled=True`, run 2-3 months |
-| 2 | UI Real Data Wiring | API endpoints pull from live pipeline |
-| 3 | WebSocket Progress | Real-time pipeline stage updates |
-| 4 | File Upload UI | Drag-drop images/PDFs in dashboard |
-| 5 | Live Trading Test | Full daily cycle with real positions |
-| 6 | Remaining Grandfather Extraction | ranking_engine 495→400, shadow_state 333→300 |
+| 1 | Red Team Dual Audit | Code + Logic review for Phase J (6 new/modified modules) |
+| 2 | Live Trading Test | Full daily cycle with WebSocket + real positions |
+| 3 | AEL 3-Month Expansion | Extend from 1-month to 2-3 months (after validation) |
+| 4 | Portfolio Real Data | Fix `get_all_open_trades` → wire real portfolio endpoint |
+| 5 | GitHub Push | Commit Phase J + push to remote |
 
 ---
 
