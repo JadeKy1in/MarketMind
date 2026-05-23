@@ -86,7 +86,7 @@ async def analyze_layer1(signals: list[FlashSignal], news_items: list[NewsItem])
             system_prompt=LAYER1_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             temperature=0.3,
-            max_tokens=16384,
+            max_tokens=32768,
         )
         content = result["content"]
         return _parse_layer1_response(content)

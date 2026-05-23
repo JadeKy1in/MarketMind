@@ -301,7 +301,7 @@ async def chat_pro(
     system_prompt: str,
     user_prompt: str,
     temperature: float = 0.3,
-    max_tokens: int = 8192,
+    max_tokens: int = 32768,
     reasoning_effort: str = "max",
 ) -> dict[str, Any]:
     """Internal: raw Pro call without integrity protocol injection.
