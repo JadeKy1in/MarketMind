@@ -122,10 +122,31 @@ Each gate is silent unless violated — no manual confirmation, no prompts, no s
 {"gate":"review", "date":"2026-05-23", "reviewer":"self or agent", "findings":"...", "files_checked":{}}
 ```
 
-**Judgment calls** (no mechanical enforcement — self-discipline):
-- **Brainstorming**: invoke `superpowers:brainstorming` before any new feature/architecture. If you're thinking "let me just start coding", STOP — brainstorm first.
-- **TDD**: invoke `superpowers:test-driven-development` before implementing any new function. Test file exists → then write code. Not after.
-- **Verification**: invoke `superpowers:verification-before-completion` before claiming "done". Evidence before assertion.
+**Session Frontload Pattern — sync-first, then async:**
+
+Every session starts with a FLASH quick-scan (cheap, fast) to classify work:
+1. Flash scans the RESTART_GUIDE + task list → identifies decision points
+2. If any task needs user direction → present immediately while user is watching
+3. For complex decisions: Red-Blue debate (two Flash agents argue → present synthesis to user)
+4. Complete ALL sync steps while user is engaged:
+   - Direction confirmation
+   - Architecture decisions
+   - Brainstorming (if new feature)
+   - "What can I ignore while this runs?"
+5. User confirms → then launch async work (agents, tests, audits, PICA)
+6. User can walk away — everything runs autonomously
+
+**Key rule**: NEVER launch background work before sync decisions are done. The user should leave the session knowing exactly what will happen and what decisions were made. No surprise prompts when they come back.
+
+**Flash vs Pro routing for frontload:**
+- Flash: quick task classification, decision-point identification, Red-Blue debate
+- Pro: actual implementation, deep analysis, code generation
+
+**Red-Blue Debate Protocol** (for complex decisions):
+1. Red Agent: attacks the proposal, finds risks, argues against
+2. Blue Agent: defends, finds evidence, argues for
+3. Synthesis: present both sides + recommendation to user
+4. User makes final call
 
 ## Testing
 

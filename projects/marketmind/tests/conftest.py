@@ -15,6 +15,10 @@ def pytest_configure(config):
         "markers",
         "vcr: mark test as using VCR.py cassette (may require network for first recording)",
     )
+    config.addinivalue_line(
+        "markers",
+        "slow: mark test as slow (real API calls, skipped in CI by default)",
+    )
 
 
 @pytest.fixture

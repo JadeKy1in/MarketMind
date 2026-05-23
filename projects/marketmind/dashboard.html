@@ -54,7 +54,7 @@
   .msg-meta { display:flex; justify-content:space-between; font:11px var(--mono); color:var(--t3); margin-bottom:2px; }
   .msg-body { background:var(--card); border:1px solid var(--bd); border-radius:4px; padding:10px 14px; font-size:14px; color:var(--t1); line-height:1.65; white-space:pre-wrap; }
   .msg-empty { color:var(--t3); font-size:14px; padding:60px 0; text-align:center; }
-  .chat-input-wrap { padding:8px 14px; border-top:1px solid var(--bd); background:var(--card); display:flex; gap:8px; align-items:center; }
+  .chat-input-wrap { padding:8px 14px; border-top:1px solid var(--bd); background:var(--card); }
   .chat-input { flex:1; background:var(--bg); border:1px solid var(--bd); color:var(--t1); padding:8px 10px; font:14px var(--sans); border-radius:3px; outline:none; resize:none; height:48px; }
   .chat-input:focus { border-color:var(--am); }
   .btn-attach { width:32px; height:32px; min-width:32px; background:var(--card); border:1px solid var(--bd); color:var(--t2); border-radius:3px; cursor:pointer; font-size:18px; display:flex; align-items:center; justify-content:center; }
@@ -128,6 +128,42 @@
 
   .pad { padding:10px 12px; }
   .muted { color:var(--t3); font-size:12px; text-align:center; padding:16px; }
+
+  .drop-overlay { position:fixed; inset:0; background:rgba(10,12,15,.85); display:none; align-items:center; justify-content:center; z-index:100; }
+  .drop-overlay.show { display:flex; }
+  .drop-overlay-inner { text-align:center; padding:50px 80px; border:2px dashed var(--am); border-radius:8px; }
+  .drop-overlay-inner span { font:15px var(--mono); color:var(--am); display:block; }
+  .drop-overlay-inner small { font:11px var(--sans); color:var(--t3); display:block; margin-top:6px; }
+  .file-chips { display:none; flex-wrap:wrap; gap:6px; padding:6px 0 0; }
+  .file-chips.show { display:flex; }
+  .file-chip { display:inline-flex; align-items:center; gap:5px; background:var(--bg); border:1px solid var(--bd); border-radius:3px; padding:2px 10px; font:11px var(--mono); color:var(--t2); }
+  .file-chip-remove { cursor:pointer; color:var(--t3); font-size:15px; line-height:1; }
+  .file-chip-remove:hover { color:var(--rd); }
+
+  /* Individual shadow detail (inside overlay) */
+  .shadow-detail-header { display:flex; align-items:center; gap:12px; margin-bottom:14px; }
+  .shadow-detail-back { background:none; border:1px solid var(--bd); color:var(--t2); padding:4px 12px; font:11px var(--mono); border-radius:3px; cursor:pointer; }
+  .shadow-detail-back:hover { border-color:var(--am); color:var(--am); }
+  .shadow-detail-title { font:16px var(--sans); color:var(--t1); font-weight:500; }
+  .shadow-detail-sub { font:11px var(--mono); color:var(--t3); }
+  .sd-section { margin-bottom:16px; }
+  .sd-section-title { font:10px var(--sans); font-weight:600; text-transform:uppercase; letter-spacing:1.2px; color:var(--t3); margin-bottom:6px; padding-bottom:4px; border-bottom:1px solid var(--bd); }
+  .sd-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; }
+  .sd-metric { background:var(--elv); padding:8px 10px; border-radius:3px; border:1px solid var(--bd); }
+  .sd-metric-lbl { font:9px var(--mono); color:var(--t3); text-transform:uppercase; }
+  .sd-metric-val { font:14px var(--mono); color:var(--t1); margin-top:2px; }
+  .sd-table { width:100%; border-collapse:collapse; font:11px var(--mono); }
+  .sd-table th { text-align:left; font:9px var(--mono); font-weight:500; color:var(--t3); padding:4px 8px; border-bottom:1px solid var(--bd); text-transform:uppercase; }
+  .sd-table td { padding:5px 8px; color:var(--t2); border-bottom:1px solid rgba(37,40,48,.3); }
+  .sd-prompt { background:var(--elv); border:1px solid var(--bd); border-radius:3px; padding:10px 14px; font:12px var(--mono); color:var(--t2); line-height:1.6; max-height:120px; overflow-y:auto; white-space:pre-wrap; }
+  .sd-empty { color:var(--t3); font-size:11px; padding:12px 0; font-style:italic; }
+  .sd-dir-long { color:var(--gr); } .sd-dir-short { color:var(--rd); } .sd-dir-abstain { color:var(--t3); }
+  .sd-badge { display:inline-block; font:10px var(--mono); padding:1px 6px; border-radius:3px; }
+  .sd-badge.elite { background:rgba(200,160,80,.15); color:var(--am); }
+  .sd-badge.excellent { background:rgba(90,143,208,.15); color:var(--bl); }
+  .sd-badge.normal { background:rgba(106,114,128,.1); color:var(--t3); }
+  .sd-badge.watch { background:rgba(136,120,200,.15); color:var(--pu); }
+  .sd-badge.endangered { background:rgba(224,85,106,.15); color:var(--rd); }
 </style>
 </head>
 <body>
@@ -205,11 +241,14 @@
       <div class="msg-empty">Pipeline idle. You can chat with the main AI here.<br><br>Paste external info or attach files to inject into analysis.<br>Shift+Enter to send.</div>
     </div>
     <div class="chat-input-wrap">
-      <label class="btn-attach" title="Attach file">+</label>
-      <input type="file" id="fileInput" multiple hidden accept=".png,.jpg,.jpeg,.gif,.bmp,.webp,.pdf,.txt,.md,.csv">
-      <textarea class="chat-input" id="chatInput" placeholder="Type message or paste info..."
-        onkeydown="if(event.key==='Enter'&&event.shiftKey){event.preventDefault();sendMsg()}"></textarea>
-      <button class="btn-send" onclick="sendMsg()">Send</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <label class="btn-attach" title="Attach file">+</label>
+        <input type="file" id="fileInput" multiple hidden accept=".png,.jpg,.jpeg,.gif,.bmp,.webp,.pdf,.txt,.md,.csv">
+        <textarea class="chat-input" id="chatInput" placeholder="Type message or paste info..."
+          onkeydown="if(event.key==='Enter'&&event.shiftKey){event.preventDefault();sendMsg()}"></textarea>
+        <button class="btn-send" onclick="sendMsg()">Send</button>
+      </div>
+      <div class="file-chips" id="fileChips"></div>
     </div>
   </div>
 </div>
@@ -303,15 +342,49 @@ function ts(){ try{const d=new Date();return d.toLocaleString('en-US',{timeZone:
 // ── Chat ─────────────────────────────────────────────────────────
 const msgs=[];
 document.querySelector('.btn-attach').addEventListener('click',()=>document.getElementById('fileInput').click());
+// Drag-and-drop overlay handlers
+let _dragC=0;
+document.addEventListener('dragenter',e=>{e.preventDefault();_dragC++;document.getElementById('dropOverlay').classList.add('show');});
+document.addEventListener('dragleave',e=>{e.preventDefault();_dragC--;if(_dragC<=0){_dragC=0;document.getElementById('dropOverlay').classList.remove('show');}});
+document.addEventListener('dragover',e=>{e.preventDefault();e.stopPropagation();});
+document.addEventListener('drop',e=>{
+  e.preventDefault();_dragC=0;
+  document.getElementById('dropOverlay').classList.remove('show');
+  if(!e.dataTransfer.files.length)return;
+  const dt=new DataTransfer();
+  for(const f of e.dataTransfer.files)dt.items.add(f);
+  document.getElementById('fileInput').files=dt.files;
+  updateFileChips();
+});
+
+// File chips (preview before send)
+function updateFileChips(){
+  const input=document.getElementById('fileInput'),chips=document.getElementById('fileChips');
+  if(!input.files.length){chips.classList.remove('show');chips.innerHTML='';return;}
+  chips.classList.add('show');
+  chips.innerHTML=Array.from(input.files).map((f,i)=>
+    '<span class="file-chip"><span>'+f.name.replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</span><span class="file-chip-remove" onclick="removeFile('+i+')">&times;</span></span>'
+  ).join('');
+}
+function removeFile(idx){
+  const input=document.getElementById('fileInput'),dt=new DataTransfer();
+  Array.from(input.files).forEach((f,i)=>{if(i!==idx)dt.items.add(f);});
+  input.files=dt.files;updateFileChips();
+}
+document.getElementById('fileInput').addEventListener('change',updateFileChips);
+
 async function sendMsg(){
-  const input=document.getElementById('chatInput'), text=input.value.trim(), files=document.getElementById('fileInput').files;
+  const input=document.getElementById('chatInput'),text=input.value.trim();
+  const fileInput=document.getElementById('fileInput'),files=fileInput.files;
   if(!text&&!files.length)return;
-  const now=ts(), label=text||Array.from(files).map(f=>f.name).join(', ');
-  msgs.push({time:now,text:label,status:'sending'}); renderChat(); input.value=''; document.getElementById('fileInput').value='';
+  const now=ts(),label=text||Array.from(files).map(f=>f.name).join(', ');
+  const fileNames=Array.from(files).map(f=>f.name);
+  msgs.push({time:now,text:label,status:'sending'});renderChat();
+  input.value='';fileInput.value='';updateFileChips();
   try{
-    const r=await fetch('/api/info/inject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,files:[]})});
-    const d=await r.json(); msgs[msgs.length-1].status='sent'; msgs[msgs.length-1].chars=d.chars;
-  }catch(e){ msgs[msgs.length-1].status='failed'; }
+    const r=await fetch('/api/info/inject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,files:fileNames})});
+    const d=await r.json();msgs[msgs.length-1].status='sent';msgs[msgs.length-1].chars=d.chars;
+  }catch(e){msgs[msgs.length-1].status='failed';}
   renderChat();
 }
 function renderChat(){
@@ -319,7 +392,7 @@ function renderChat(){
   if(!msgs.length){ c.innerHTML='<div class="msg-empty">Pipeline idle. You can chat with the main AI here.<br><br>Paste external info or attach files to inject into analysis.<br>Shift+Enter to send.</div>'; return; }
   c.innerHTML=msgs.map(m=>{
     const sc=m.status==='sent'?'var(--gr)':m.status==='failed'?'var(--rd)':'var(--am)';
-    return `<div class="msg"><div class="msg-meta"><span>${m.time}</span><span style="font-size:10px;color:${sc}">${m.status==='sent'?m.chars+'c':m.status}</span></div><div class="msg-body">${m.text}</div></div>`;
+    return `<div class="msg"><div class="msg-meta"><span>${m.time}</span><span style="font-size:10px;color:${sc}">${m.status==='sent'?m.chars+'c':m.status}</span></div><div class="msg-body">${m.text.replace(/</g,"&lt;").replace(/>/g,"&gt;")}</div></div>`;
   }).join(''); c.scrollTop=c.scrollHeight;
 }
 
@@ -331,10 +404,116 @@ async function loadShadowDetail(){
     let html='<div style="font-size:12px;margin-bottom:12px;display:flex;gap:20px">';
     html+=`<span>Total: ${overview.total||0}</span><span>Graduates: ${overview.graduates||0}</span><span>Trials: ${overview.challenger_trials||0}</span><span>Evolutions: ${overview.evolutions_today||0}</span></div>`;
     if(top5.length) html+='<div style="font-size:11px;color:var(--t3);margin-bottom:8px">TOP PERFORMERS</div>'+top5.map(s=>
-      `<div class="shadow-card"><div class="shadow-card-header"><span class="shadow-name">${s.name}</span><span class="shadow-tier-tag t-${s.tier}">${s.tier.toUpperCase()}</span></div><div class="shadow-stats"><div class="shadow-stat"><span>Composite</span><span class="shadow-stat-val">${s.score.toFixed(2)}</span></div></div></div>`
+      `<div class="shadow-card"><div class="shadow-card-header"><span class="shadow-name" style="cursor:pointer;text-decoration:underline" onclick="event.stopPropagation();loadIndividualShadow('${s.shadow_id||''}')">${s.name}</span><span class="shadow-tier-tag t-${s.tier}">${s.tier.toUpperCase()}</span></div><div class="shadow-stats"><div class="shadow-stat"><span>Composite</span><span class="shadow-stat-val">${s.score.toFixed(2)}</span></div></div></div>`
     ).join('');
     document.getElementById('shadowDetail').innerHTML=html||'<div class="muted">No shadow data available</div>';
   }catch(e){}
+}
+
+async function loadIndividualShadow(shadowId){
+  if(!shadowId){ document.getElementById('shadowDetail').innerHTML='<div class="muted">No shadow selected</div>'; return; }
+  document.getElementById('shadowDetail').innerHTML='<div class="muted">Loading...</div>';
+  try{
+    const d=await fetch('/api/shadows/'+encodeURIComponent(shadowId)).then(r=>r.json());
+    if(d.error){ document.getElementById('shadowDetail').innerHTML='<div class="muted">Error: '+d.error.replace(/</g,'&lt;')+'</div>'; return; }
+
+    const fn=v=>v!=null?v:'--';
+    const fpct=v=>v!=null?(v>0?'+':'')+v.toFixed(2)+'%':'--';
+    const tierClass={'elite':'elite','excellent':'excellent','normal':'normal','watch':'watch','endangered':'endangered'};
+
+    let html='<div class="shadow-detail-header">';
+    html+='<button class="shadow-detail-back" onclick="event.stopPropagation();loadShadowDetail()">← Back</button>';
+    html+=`<span class="shadow-detail-title">${fn(d.display_name)}</span>`;
+    html+=`<span class="shadow-detail-sub">${fn(d.shadow_type)} / ${fn(d.domain||'unassigned')}</span>`;
+    if(d.latest_snapshot&&d.latest_snapshot.achievement_tier){
+      const t=d.latest_snapshot.achievement_tier;
+      html+=`<span class="sd-badge ${tierClass[t]||'normal'}">${t.toUpperCase()}</span>`;
+    }
+    html+='</div>';
+
+    // Methodology prompt
+    if(d.methodology_prompt){
+      html+='<div class="sd-section"><div class="sd-section-title">Methodology</div>';
+      html+=`<div class="sd-prompt">${d.methodology_prompt.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div></div>`;
+    }
+
+    // Config summary
+    html+='<div class="sd-section"><div class="sd-section-title">Config</div>';
+    html+='<div class="sd-grid">';
+    html+=`<div class="sd-metric"><div class="sd-metric-lbl">Status</div><div class="sd-metric-val">${fn(d.status)}</div></div>`;
+    html+=`<div class="sd-metric"><div class="sd-metric-lbl">Model</div><div class="sd-metric-val">${fn(d.model)}</div></div>`;
+    html+=`<div class="sd-metric"><div class="sd-metric-lbl">Generation</div><div class="sd-metric-val">${fn(d.generation)}</div></div>`;
+    html+=`<div class="sd-metric"><div class="sd-metric-lbl">Virtual Capital</div><div class="sd-metric-val">$${fn(typeof d.virtual_capital==='number'?d.virtual_capital.toFixed(0):d.virtual_capital)}</div></div>`;
+    html+=`<div class="sd-metric"><div class="sd-metric-lbl">Max Positions</div><div class="sd-metric-val">${fn(d.max_positions)}</div></div>`;
+    html+=`<div class="sd-metric"><div class="sd-metric-lbl">Created</div><div class="sd-metric-val" style="font-size:11px">${fn((d.created_at||'').slice(0,10))}</div></div>`;
+    html+='</div></div>';
+
+    // Performance
+    if(d.latest_snapshot){
+      const sn=d.latest_snapshot;
+      html+='<div class="sd-section"><div class="sd-section-title">Latest Performance</div>';
+      html+='<div class="sd-grid">';
+      html+=`<div class="sd-metric"><div class="sd-metric-lbl">Daily Return</div><div class="sd-metric-val" style="color:${(sn.daily_return_pct||0)>=0?'var(--gr)':'var(--rd)'}">${fpct(sn.daily_return_pct)}</div></div>`;
+      html+=`<div class="sd-metric"><div class="sd-metric-lbl">Cumulative Return</div><div class="sd-metric-val" style="color:${(sn.cumulative_return_pct||0)>=0?'var(--gr)':'var(--rd)'}">${fpct(sn.cumulative_return_pct)}</div></div>`;
+      html+=`<div class="sd-metric"><div class="sd-metric-lbl">Max Drawdown</div><div class="sd-metric-val" style="color:var(--rd)">${fn(sn.max_drawdown_pct!=null?sn.max_drawdown_pct.toFixed(2)+'%':'--')}</div></div>`;
+      html+=`<div class="sd-metric"><div class="sd-metric-lbl">Win Rate</div><div class="sd-metric-val">${fn(sn.win_rate_pct!=null?sn.win_rate_pct.toFixed(1)+'%':'--')}</div></div>`;
+      html+=`<div class="sd-metric"><div class="sd-metric-lbl">Sharpe</div><div class="sd-metric-val">${fn(sn.sharpe_ratio!=null?sn.sharpe_ratio.toFixed(2):'--')}</div></div>`;
+      html+=`<div class="sd-metric"><div class="sd-metric-lbl">Composite</div><div class="sd-metric-val">${fn(sn.composite_score!=null?sn.composite_score.toFixed(2):'--')}</div></div>`;
+      html+='</div></div>';
+    }
+
+    // Recent analyses
+    html+='<div class="sd-section"><div class="sd-section-title">Recent Analyses</div>';
+    if(d.recent_analyses&&d.recent_analyses.length){
+      html+='<table class="sd-table"><thead><tr><th>Date</th><th>Ticker</th><th>Direction</th></tr></thead><tbody>';
+      html+=d.recent_analyses.map(a=>{
+        const dirCls={'long':'sd-dir-long','short':'sd-dir-short'}[a.direction]||'sd-dir-abstain';
+        return `<tr><td>${fn(a.date)}</td><td style="color:var(--t1);font-weight:500">${fn(a.ticker)}</td><td class="${dirCls}">${fn(a.direction).toUpperCase()}</td></tr>`;
+      }).join('');
+      html+='</tbody></table>';
+    }else{html+='<div class="sd-empty">No analyses recorded</div>';}
+    html+='</div>';
+
+    // Tier history
+    html+='<div class="sd-section"><div class="sd-section-title">Tier History</div>';
+    if(d.tier_history&&d.tier_history.length){
+      html+='<table class="sd-table"><thead><tr><th>Date</th><th>Tier</th></tr></thead><tbody>';
+      html+=d.tier_history.slice(0,15).map(t=>{
+        const bcls=tierClass[t.tier]||'normal';
+        return `<tr><td>${fn(t.date)}</td><td><span class="sd-badge ${bcls}">${fn(t.tier).toUpperCase()}</span></td></tr>`;
+      }).join('');
+      html+='</tbody></table>';
+    }else{html+='<div class="sd-empty">No tier history</div>';}
+    html+='</div>';
+
+    // Open positions
+    html+='<div class="sd-section"><div class="sd-section-title">Open Positions</div>';
+    if(d.open_trades&&d.open_trades.length){
+      html+='<table class="sd-table"><thead><tr><th>Ticker</th><th>Direction</th><th>Entry</th><th>P&L</th><th>Entry Date</th></tr></thead><tbody>';
+      html+=d.open_trades.map(t=>{
+        const dirCls=t.direction==='long'?'sd-dir-long':'sd-dir-short';
+        const pnlCls=(t.pnl_pct||0)>=0?'var(--gr)':'var(--rd)';
+        return `<tr><td style="color:var(--t1);font-weight:500">${fn(t.ticker)}</td><td class="${dirCls}">${fn(t.direction).toUpperCase()}</td><td>$${fn(typeof t.entry_price==='number'?t.entry_price.toFixed(2):t.entry_price)}</td><td style="color:${pnlCls}">${fpct(t.pnl_pct)}</td><td>${fn(t.entry_date)}</td></tr>`;
+      }).join('');
+      html+='</tbody></table>';
+    }else{html+='<div class="sd-empty">No open positions</div>';}
+    html+='</div>';
+
+    // Snapshot history
+    html+='<div class="sd-section"><div class="sd-section-title">Snapshot History (Last 60 Days)</div>';
+    if(d.snapshots&&d.snapshots.length){
+      html+='<table class="sd-table"><thead><tr><th>Date</th><th>Return</th><th>Cumul</th><th>DD</th><th>WR</th><th>Tier</th></tr></thead><tbody>';
+      html+=d.snapshots.slice(0,20).map(s=>{
+        const t=s.achievement_tier||'--';
+        const bcls=tierClass[t]||'normal';
+        return `<tr><td>${fn(s.date)}</td><td style="color:${(s.daily_return_pct||0)>=0?'var(--gr)':'var(--rd)'}">${fpct(s.daily_return_pct)}</td><td style="color:${(s.cumulative_return_pct||0)>=0?'var(--gr)':'var(--rd)'}">${fpct(s.cumulative_return_pct)}</td><td style="color:var(--rd)">${fn(s.max_drawdown_pct!=null?s.max_drawdown_pct.toFixed(2)+'%':'--')}</td><td>${fn(s.win_rate_pct!=null?s.win_rate_pct.toFixed(1)+'%':'--')}</td><td><span class="sd-badge ${bcls}">${t.toUpperCase()}</span></td></tr>`;
+      }).join('');
+      html+='</tbody></table>';
+    }else{html+='<div class="sd-empty">No snapshot history</div>';}
+    html+='</div>';
+
+    document.getElementById('shadowDetail').innerHTML=html;
+  }catch(e){ document.getElementById('shadowDetail').innerHTML='<div class="muted">Failed to load shadow details</div>'; }
 }
 
 // ── Review overlay ────────────────────────────────────────────────
@@ -393,11 +572,65 @@ async function refresh(){
     try{
       const log=await fetch('/api/log').then(r=>r.json());
       const entries=log.entries||[];
-      if(entries.length) document.getElementById('logBody').innerHTML=entries.slice(-15).map(e=>`<div class="log-line"><span style="min-width:40px">${e.time}</span><span class="log-${e.level==='error'?'err':e.level==='warn'?'warn':'ok'}">${e.message}</span></div>`).join('');
+      if(entries.length) document.getElementById('logBody').innerHTML=entries.slice(-15).map(e=>`<div class="log-line"><span style="min-width:40px">${e.time.replace(/</g,"&lt;")}</span><span class="log-${e.level==='error'?'err':e.level==='warn'?'warn':'ok'}">${e.message.replace(/</g,"&lt;")}</span></div>`).join('');
     }catch(e){}
   }catch(e){}
 }
 refresh(); setInterval(refresh,5000);
 </script>
+<div class="drop-overlay" id="dropOverlay">
+  <div class="drop-overlay-inner">
+    <span>Drop files to inject into analysis</span>
+    <small>.png .jpg .pdf .txt .csv .md — 拖放文件以注入分析</small>
+  </div>
+</div>
+
+
+<script>
+// ── WebSocket live updates ─────────────────────────────────────────────
+(function(){
+  var ws, reconnectTimer;
+  function connect(){
+    if(ws&&ws.readyState===WebSocket.OPEN)return;
+    var proto=location.protocol==='https:'?'wss:':'ws:';
+    var host=location.host||'localhost:8520';
+    ws=new WebSocket(proto+'//'+host+'/ws');
+    ws.onopen=function(){
+      if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null;}
+    };
+    ws.onmessage=function(e){
+      try{
+        var d=JSON.parse(e.data);
+        if(d.type==='stage'){
+          var pctEl=document.getElementById('pct'),pfillEl=document.getElementById('pfill'),pstageEl=document.getElementById('pstage');
+          if(d.status==='done'){
+            pctEl.textContent='done';pctEl.style.color='var(--gr)';pstageEl.textContent=d.stage;
+            pfillEl.style.width='100%';pfillEl.style.background='var(--gr)';
+          }else if(d.status==='error'){
+            pctEl.textContent='err';pctEl.style.color='var(--rd)';pstageEl.textContent=d.stage+' FAILED';
+            pfillEl.style.width=d.pct+'%';pfillEl.style.background='var(--rd)';
+          }else{
+            pctEl.textContent=d.pct.toFixed(0)+'%';pctEl.style.color='var(--t1)';pstageEl.textContent=d.stage;
+            pfillEl.style.width=d.pct+'%';pfillEl.style.background='var(--am)';
+            var logSection=document.getElementById('logBody').parentElement;
+            if(!logSection.classList.contains('open'))logSection.classList.add('open');
+          }
+        }else if(d.type==='log'){
+          var logBody=document.getElementById('logBody'),cls=d.level==='error'?'log-err':d.level==='warn'?'log-warn':'log-ok';
+          var line=document.createElement('div');
+          line.className='log-line';
+          line.innerHTML='<span style="min-width:40px">'+d.ts.replace(/</g,'&lt;')+'</span><span class="'+cls+'">'+d.message.replace(/</g,'&lt;')+'</span>';
+          logBody.insertBefore(line,logBody.firstChild);
+          while(logBody.children.length>50)logBody.removeChild(logBody.lastChild);
+        }
+      }catch(ex){}
+    };
+    ws.onclose=function(){if(!reconnectTimer)reconnectTimer=setTimeout(connect,3000);};
+    ws.onerror=function(){ws.close();};
+  }
+  connect();
+})();
+</script>
+
 </body>
 </html>
