@@ -196,7 +196,7 @@ async def _run_sector_drilldown(ctx: SessionContext, l2_result: Layer2Result, ch
         resp = await chat_pro(
             system_prompt=LAYER2_SECTOR_DRILLDOWN_PROMPT,
             user_prompt=user_prompt,
-            temperature=0.3, max_tokens=3072, reasoning_effort="minimal",
+            temperature=0.3, max_tokens=8192, reasoning_effort="minimal",
         )
         content = strip_markdown_fences(resp.get("content", ""))
         result = _json.loads(content)

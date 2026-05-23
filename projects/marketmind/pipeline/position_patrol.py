@@ -82,7 +82,7 @@ async def patrol_positions(positions: list[dict], config: MarketMindConfig | Non
             system_prompt=PATROL_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             temperature=0.2,
-            max_tokens=4096,
+            max_tokens=8192,
         )
         parsed = _parse_patrol_response(result["content"], positions, config)
         validated = _apply_protection_veto(parsed, config.position_protection_days)

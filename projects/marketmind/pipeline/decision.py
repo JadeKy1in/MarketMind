@@ -218,7 +218,7 @@ async def generate_contrarian_challenges(decision: DecisionOutput) -> list[dict]
             system_prompt=CONTRARIAN_PROMPT,
             user_prompt=user_prompt,
             temperature=0.3,
-            max_tokens=1024,
+            max_tokens=8192,
             reasoning_effort="minimal",
         )
         content = strip_markdown_fences(result.get("content", ""))

@@ -146,7 +146,7 @@ async def _generate_layer_narratives(result: HypothesisResult) -> HypothesisResu
             system_prompt="You are a financial editor. Write concise, specific Chinese narratives. Return JSON only.",
             user_prompt=prompt,
             temperature=0.3,
-            max_tokens=1024,
+            max_tokens=4096,
         )
         content = response.get("content", "")
         parsed = _parse_json_strict(content)
@@ -267,7 +267,7 @@ async def _expectation_gap_check(
             system_prompt=system,
             user_prompt=f"Assess how much of this hypothesis is priced in: {hypothesis[:1000]}",
             temperature=0.2,
-            max_tokens=1024,
+            max_tokens=4096,
         )
         if pro_calls_counter is not None:
             pro_calls_counter[0] += 1
@@ -342,7 +342,7 @@ async def _adversarial_bear_check(
             system_prompt=system,
             user_prompt=f"Challenge this hypothesis as a skeptical short-seller:\n{result.refined_hypothesis}",
             temperature=0.5,
-            max_tokens=1536,
+            max_tokens=4096,
         )
         if pro_calls_counter is not None:
             pro_calls_counter[0] += 1
