@@ -231,7 +231,7 @@ def skewness(returns: list[float]) -> float:
     m2 = sum((r - mean) ** 2 for r in returns) / n
     m3 = sum((r - mean) ** 3 for r in returns) / n
 
-    if m2 <= 0:
+    if m2 < 1e-12:
         return 0.0
 
     # Sample skewness (adjusted for bias)
@@ -259,7 +259,7 @@ def kurtosis(returns: list[float]) -> float:
     m2 = sum((r - mean) ** 2 for r in returns) / n
     m4 = sum((r - mean) ** 4 for r in returns) / n
 
-    if m2 <= 0:
+    if m2 < 1e-12:
         return 3.0
 
     # Sample kurtosis (pearson, NOT excess)

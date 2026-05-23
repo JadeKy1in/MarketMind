@@ -146,9 +146,9 @@ def test_skewness_kurtosis():
     # Kurtosis of normal-like data
     import random
     random.seed(42)
-    normal_data = [random.gauss(0, 1) for _ in range(10000)]
+    normal_data = [random.gauss(0, 1) for _ in range(1000)]
     k = kurtosis(normal_data)
-    assert k > 0, f"Kurtosis should be positive, got {k}"
+    assert 2.0 < k < 4.0, f"Kurtosis of normal data ≈ 3.0, got {k}"
 
     # Edge cases
     assert skewness([]) == 0.0
