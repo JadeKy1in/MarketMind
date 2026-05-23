@@ -46,7 +46,7 @@ python -m pytest tests/ -v -m "not slow" -p no:warnings  # 快速测试
 
 | # | 任务 | 说明 |
 |:--:|------|------|
-| **1** | **通知/报错系统** | 最高优先级——所有降级、fallback、异常必须通过 Dashboard 通知用户。包括：思考溢出(content空)、JSON回退、float解析失败、API错误、预算耗尽。需设计统一的 AlertManager + Dashboard 通知面板 |
+| **1** | **通知/报错系统** | 最高优先级。先查外网资料（金融/数据平台的通知系统设计、Prometheus AlertManager 模式、Bloomberg 终端错误分级），然后设计 MarketMind 专属的 AlertManager + Dashboard 通知面板。覆盖所有降级场景：思考溢出(content空→JSON回退)、float解析失败、API 429/预算耗尽、stage 返回空、影子超时、文件缺失。每个警告需有级别(INFO/WARN/ERROR/CRITICAL)、来源模块、时间戳、可操作建议。UI 上：Dashboard 右上角通知铃铛 + 底部滚动日志 + 严重问题弹窗 |
 | 2 | UI 优化 | Dashboard 使用体验——你自己用的时候觉得哪里不好 |
 | 3 | User Proxy Agent 实战 | 首次启用代理系统，走一遍冷启动引导 |
 | 4 | A/B 测试 AEL | `scripts/ael_experiment.py` 已跑通，可以调参实验 |
