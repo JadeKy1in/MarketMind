@@ -122,41 +122,54 @@ Each gate is silent unless violated — no manual confirmation, no prompts, no s
 {"gate":"review", "date":"2026-05-23", "reviewer":"self or agent", "findings":"...", "files_checked":{}}
 ```
 
-**Session Frontload Pattern — sync-first, then async:**
+**Session Frontload — sync decisions first, async after:**
 
-Every session starts with a FLASH quick-scan (cheap, fast) to classify work:
-1. Flash scans the RESTART_GUIDE + task list → identifies decision points
-2. If any task needs user direction → present immediately while user is watching
-3. For complex decisions: Red-Blue debate (two Flash agents argue → present synthesis to user)
-4. Complete ALL sync steps while user is engaged:
-   - Direction confirmation
-   - Architecture decisions
-   - Brainstorming (if new feature)
-   - "What can I ignore while this runs?"
-5. User confirms → then launch async work (agents, tests, audits, PICA)
-6. User can walk away — everything runs autonomously
+1. Flash scans RESTART_GUIDE + task list (cheap, <10s) → lists decision points
+2. If complex: inform user "需要 Pro 分析 X 分钟", let user decide to wait or delegate
+3. User present → complete all sync decisions. User away → User Proxy Agent handles per confidence tiers
+4. Sync done → launch async work. User can leave.
 
-**Key rule**: NEVER launch background work before sync decisions are done. The user should leave the session knowing exactly what will happen and what decisions were made. No surprise prompts when they come back.
+**Key rule**: NEVER launch async work before sync decisions are resolved. User should know exactly what will run and what was decided.
 
-**Flash vs Pro routing for frontload:**
-- Flash: quick task classification, decision-point identification, Red-Blue debate
-- Pro: actual implementation, deep analysis, code generation
+**Flash vs Pro routing:**
+- Flash: task classification, decision-point identification, confidence estimation
+- Pro: deep analysis, code generation, architecture planning
 
-**Red-Blue Debate Protocol** (for complex decisions):
-1. Red Agent: attacks the proposal, finds risks, argues against
-2. Blue Agent: defends, finds evidence, argues for
-3. User Proxy Agent: represents user interests — loaded from auto-memory, CLAUDE.md preferences, past decisions. Participates as a third voice in the debate. Can make autonomous decisions when user is unavailable.
-4. Synthesis: present all sides + recommendation
-5. User makes final call (if present) or Proxy decides with confidence score
+**User Proxy Agent** (autonomous decision delegate + active advisor):
 
-**User Proxy Agent** (autonomous decision delegate):
-- Source of truth: `C:\Users\Administrator\.claude\projects\E--AI-Studio-Workspace\memory\` (auto-memory), this CLAUDE.md, project history
-- Decision confidence levels:
-  - HIGH (>90%): matches known preferences, past similar decisions exist → act immediately
-  - MEDIUM (60-90%): reasonable inference, but no exact precedent → act + flag for review
-  - LOW (<60%): no clear signal from memory → defer, escalate to user with context
-- All proxy decisions logged to `.claude/decisions/proxy_decisions.jsonl` with full deliberation transcript
-- User can review and override any proxy decision retroactively
+*Design doc:* `.claude/state/user_proxy_design.json`
+
+*Dual role:*
+- **Advisor mode** (user IS present, confidence < 0.85): presents analysis + recommendation, does NOT act
+- **Delegate mode** (user NOT present): acts per confidence tiers, logs all decisions
+
+*Confidence tiers (calibrated, not raw probabilities):*
+| Score | Action |
+|:--:|------|
+| >0.85 | Auto-execute |
+| 0.70-0.85 | Execute, flag for review |
+| 0.50-0.70 | Request user clarification |
+| <0.50 | Escalate — defer entirely |
+
+*Decision mechanism:*
+- Routine decisions: single Proxy Agent
+- High-stakes (confidence < 0.50 or critical file): 3-4 agent council (proxy + risk + quality + devil's advocate)
+
+*Learning (anti-overfitting):*
+- EMA low-alpha (0.1-0.2) — single corrections nudge, don't flip
+- 3+ consistent signals across distinct contexts → promote to rule
+- Single corrections decay with 7-day half-life unless reinforced
+- Corrections scoped by context fingerprint (project + domain + decision type)
+
+*Three-tier preference store (transferable across projects):*
+- Universal: style invariants (naming, commits, language)
+- Domain: per-domain patterns (Python→FastAPI, DB→Postgres)
+- Project: project-specific overrides (highest priority on lookup)
+
+*Audit:*
+- All decisions logged to `.claude/decisions/proxy_decisions.jsonl`
+- User can review/override any decision retroactively
+- Audit corrections feed back into preference learning
 
 ## Testing
 

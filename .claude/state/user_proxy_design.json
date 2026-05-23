@@ -1,0 +1,71 @@
+{
+  "name": "User Proxy Agent",
+  "version": "1.0",
+  "date": "2026-05-23",
+
+  "architecture": {
+    "model": "RAG + three-tier preference store + calibrated confidence",
+    "tiers": {
+      "universal": "Style invariants (naming, commits, language). Minimal, manual curated.",
+      "domain": "Per-domain patterns (Python→FastAPI, DB→Postgres). Shared across same-domain projects.",
+      "project": "Project-specific overrides. Highest lookup priority."
+    },
+    "decision_mode": {
+      "routine": "Single proxy agent",
+      "high_stakes": "Council of 3-4 (proxy + risk-agent + quality-agent + devil's-advocate)",
+      "trigger": "Confidence < 0.50 OR project marked as 'critical'"
+    }
+  },
+
+  "confidence_tiers": {
+    ">0.85": {"action": "auto_execute", "disclosure": "none"},
+    "0.70-0.85": {"action": "execute_with_note", "disclosure": "logged as MEDIUM confidence"},
+    "0.50-0.70": {"action": "request_clarification", "disclosure": "present to user with context"},
+    "<0.50": {"action": "escalate", "disclosure": "defer entirely, flag for user"}
+  },
+
+  "learning": {
+    "update_strategy": "EMA low-alpha (0.1-0.2)",
+    "promotion_threshold": "3+ consistent signals across distinct contexts",
+    "decay": {
+      "uncorroborated": "7-day half-life",
+      "reinforced": "persist indefinitely",
+      "active_rules": "FSRS-6 spaced repetition"
+    },
+    "correction_handling": {
+      "strong_preference": "3+ corrections in same direction → promote to rule",
+      "situational": "1-2 corrections → soft hint, context-scoped",
+      "one_off": "logged, no weight change"
+    }
+  },
+
+  "anti_overfitting": [
+    "Corrections scoped by context fingerprint (project + domain + decision type)",
+    "Single corrections decay unless reinforced",
+    "Supersede contradicting preferences rather than accumulating",
+    "Periodic distillation: review proxy_decisions.jsonl monthly → prune weak signals"
+  ],
+
+  "dual_role": {
+    "advisor_mode": {
+      "trigger": "user IS present AND decision confidence < 0.85",
+      "behavior": "present analysis + recommendation, do NOT act"
+    },
+    "delegate_mode": {
+      "trigger": "user NOT present OR explicitly delegated",
+      "behavior": "act per confidence tiers, log all decisions"
+    }
+  },
+
+  "storage": {
+    "preferences": ".claude/state/user_preferences.json",
+    "decisions_log": ".claude/decisions/proxy_decisions.jsonl",
+    "context_fingerprints": ".claude/state/decision_contexts.json",
+    "audit_queue": ".claude/state/proxy_audit_queue.json"
+  },
+
+  "transferability": {
+    "mechanism": "Universal + Domain tiers follow user. Project tier stays with project.",
+    "onboarding": "New project inherits universal/domain, starts empty project tier. First 5 decisions are always escalated to user to establish baseline."
+  }
+}

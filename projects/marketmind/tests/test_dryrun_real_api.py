@@ -132,3 +132,139 @@ async def test_stage5_shadows_real():
     finally:
         db.close()
         _os.unlink(tmp)
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_stage6_red_team_real():
+    """Stage 6: Red Team — adversarial challenge with real LLM."""
+    from marketmind.config.settings import MarketMindConfig
+    from marketmind.pipeline.scout import fetch_all_sources
+    from marketmind.pipeline.flash_preprocessor import preprocess_batch
+    from marketmind.pipeline.layer1_narrative import analyze_layer1
+    from marketmind.pipeline.layer2_fundamental import analyze_layer2
+    from marketmind.pipeline.red_team import run_red_team
+
+    config = MarketMindConfig.from_env()
+    items = await fetch_all_sources(config, use_cross_run_cache=False)
+    signals = await preprocess_batch(items[:10])
+    l1 = await analyze_layer1(signals[:5], items[:10])
+    l2 = await analyze_layer2(l1)
+    tickers = l2.ticker_candidates[:5] if l2.ticker_candidates else ["SPY", "QQQ"]
+
+    t0 = time.time()
+    report = await run_red_team(
+        l1_raw=l1.raw_analysis,
+        l2_raw=l2.raw_analysis,
+        tickers=tickers,
+    )
+    elapsed = time.time() - t0
+
+    assert isinstance(report.challenges, list), "Red Team report must have challenges list"
+    assert report.a_grade_count >= 0, "a_grade_count must be >= 0"
+    print(f"PASS: {len(report.challenges)} challenges, {report.a_grade_count} A-grade in {elapsed:.1f}s")
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_stage7_resonance_real():
+    """Stage 7: Resonance — statistical validation with DSR/CSCV framework."""
+    from marketmind.pipeline.resonance import evaluate_resonance
+    import random, math
+
+    random.seed(42)
+    signal_returns = {
+        "momentum": [random.gauss(0.001, 0.015) for _ in range(100)],
+        "value": [random.gauss(0.0005, 0.01) for _ in range(100)],
+        "sentiment": [random.gauss(0.0008, 0.012) for _ in range(100)],
+    }
+    dimensions = ["momentum", "value", "sentiment"]
+    all_rets = [r for rets in signal_returns.values() for r in rets]
+    mean_ret = sum(all_rets) / len(all_rets)
+    variance = sum((r - mean_ret) ** 2 for r in all_rets) / (len(all_rets) - 1)
+    observed_sharpe = (mean_ret / math.sqrt(variance)) * math.sqrt(252)
+
+    t0 = time.time()
+    result = evaluate_resonance(signal_returns, dimensions, observed_sharpe)
+    elapsed = time.time() - t0
+
+    assert result.verdict, "Resonance verdict must be non-empty string"
+    assert result.verdict in ("STRONG_SIGNAL", "WEAK_SIGNAL", "NO_SIGNAL"), \
+        f"Unexpected verdict: {result.verdict}"
+    print(f"PASS: verdict={result.verdict}, DSR={result.dsr}, PBO={result.pbo} in {elapsed:.3f}s")
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_stage8_decision_real():
+    """Stage 8: Decision — synthesis with real LLM."""
+    from marketmind.config.settings import MarketMindConfig
+    from marketmind.pipeline.scout import fetch_all_sources
+    from marketmind.pipeline.flash_preprocessor import preprocess_batch
+    from marketmind.pipeline.layer1_narrative import analyze_layer1
+    from marketmind.pipeline.layer2_fundamental import analyze_layer2
+    from marketmind.pipeline.layer3_technical import analyze_layer3
+    from marketmind.pipeline.red_team import run_red_team
+    from marketmind.pipeline.resonance import evaluate_resonance
+    from marketmind.pipeline.decision import generate_decision
+    import random, math
+
+    config = MarketMindConfig.from_env()
+    items = await fetch_all_sources(config, use_cross_run_cache=False)
+    signals = await preprocess_batch(items[:10])
+    l1 = await analyze_layer1(signals[:5], items[:10])
+    l2 = await analyze_layer2(l1)
+    tickers = l2.ticker_candidates[:5] if l2.ticker_candidates else ["SPY", "QQQ"]
+    l3 = await analyze_layer3(tickers, {})
+
+    red_team = await run_red_team(
+        l1_raw=l1.raw_analysis,
+        l2_raw=l2.raw_analysis,
+        tickers=tickers,
+    )
+
+    random.seed(42)
+    signal_returns = {
+        "momentum": [random.gauss(0.001, 0.015) for _ in range(100)],
+        "value": [random.gauss(0.0005, 0.01) for _ in range(100)],
+    }
+    dimensions = ["momentum", "value"]
+    all_rets = [r for rets in signal_returns.values() for r in rets]
+    mean_ret = sum(all_rets) / len(all_rets)
+    variance = sum((r - mean_ret) ** 2 for r in all_rets) / (len(all_rets) - 1)
+    observed_sharpe = (mean_ret / math.sqrt(variance)) * math.sqrt(252)
+    resonance = evaluate_resonance(signal_returns, dimensions, observed_sharpe)
+
+    t0 = time.time()
+    decision = await generate_decision(l1, l2, l3, red_team, resonance)
+    elapsed = time.time() - t0
+
+    assert decision.decision_cards or decision.no_trade_card, \
+        "Decision must have either decision_cards or no_trade_card"
+    print(f"PASS: {len(decision.decision_cards)} cards, "
+          f"no_trade={'yes' if decision.no_trade_card else 'no'} in {elapsed:.1f}s")
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_stage9_archive_real():
+    """Stage 9: Archive — save session using MarketMindArchive."""
+    from marketmind.storage.archivist import get_archivist
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        t0 = time.time()
+        archivist = get_archivist(tmp)
+        try:
+            archivist.ensure_dirs()
+            filepath = archivist.save_json("analysis", "test_session", {
+                "event_grade": "B",
+                "matrix_quadrant": "core_opportunity",
+                "timestamp": time.time(),
+            })
+            elapsed = time.time() - t0
+
+            assert filepath.exists(), f"Archive file not created: {filepath}"
+            print(f"PASS: archived to {filepath} in {elapsed:.1f}s")
+        finally:
+            archivist.close()
