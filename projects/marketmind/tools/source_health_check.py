@@ -7,14 +7,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-# Load .env so API keys are available to os.environ
-try:
-    from dotenv import load_dotenv
-    _env_path = Path(__file__).resolve().parent.parent / ".env"
-    load_dotenv(_env_path)
-except ImportError:
-    pass
-
 import httpx
 import feedparser
 
@@ -23,7 +15,7 @@ from marketmind.config.source_authority import SOURCES, Source, SourceTier, Sour
 TIER_NAMES = {1: "PRIMARY", 2: "RELIABLE", 3: "FRAGILE", 4: "BEST_EFFORT"}
 
 HEADERS = {
-    "User-Agent": "MarketMind/0.1 (contact@marketmind.dev)",
+    "User-Agent": "Mozilla/5.0 (compatible; MarketMind/0.1; Financial Research Bot)",
     "Accept": "application/rss+xml, application/xml, text/xml, */*",
 }
 SEC_HEADERS = {"User-Agent": "MarketMind/0.1 (contact@marketmind.dev)"}
@@ -57,7 +49,7 @@ async def test_api(source: Source) -> tuple[int, str]:
         return 0, "No NEWSAPI_KEY configured"
     if source.name == "GNews" and not config.gnews_key:
         return 0, "No GNEWS_KEY configured"
-    if source.name in ("Bluesky", "Bluesky Social"):
+    if source.name == "Bluesky Social":
         # Try OAuth with env credentials (same as production code)
         import os as _os
         username = _os.environ.get("BLUESKY_USERNAME", "")
@@ -169,43 +161,6 @@ async def test_apewisdom() -> tuple[int, str]:
         return 0, str(e)[:100]
 
 
-async def test_bls_api(source: Source) -> tuple[int, str]:
-    """Test BLS Public Data API v2 — fetch latest CPI, unemployment, PPI."""
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            from datetime import datetime, timezone
-            current_year = datetime.now(timezone.utc).year
-            req_body = {
-                "seriesid": ["CUUR0000SA0", "LNS14000000"],
-                "startyear": str(current_year - 1),
-                "endyear": str(current_year),
-                "registrationkey": "",
-            }
-            body_str = __import__("json").dumps(req_body)
-            resp = await client.post(
-                source.url,
-                content=body_str,
-                headers={
-                    "Content-Type": "application/json",
-                    "User-Agent": "MarketMind/0.1 (contact@marketmind.dev)",
-                },
-            )
-            if resp.status_code != 200:
-                return 0, f"HTTP {resp.status_code}"
-            data = resp.json()
-            if data.get("status") != "REQUEST_SUCCEEDED":
-                return 0, "; ".join(data.get("message", ["Unknown error"]))
-            results = data.get("Results", {}).get("series", [])
-            if not results:
-                return 0, "No series returned"
-            total_observations = sum(len(s.get("data", [])) for s in results)
-            return total_observations, f"({len(results)} series)"
-    except httpx.TimeoutException:
-        return 0, "Timeout"
-    except Exception as e:
-        return 0, str(e)[:100]
-
-
 async def main():
     print("=" * 72)
     print("  MarketMind Source Health Check")
@@ -230,11 +185,6 @@ async def main():
         if source.status == SourceStatus.DEAD:
             count = 0
             error = "Pre-marked DEAD"
-        elif source.name == "CFTC COT":
-            count = -1
-            error = "SKIPPED (handled by macro_data.py)"
-        elif source.feed_type == "bls_api":
-            count, error = await test_bls_api(source)
         elif source.feed_type == "rss":
             count, error = await test_rss(source)
         elif source.feed_type in ("sec_api", "sec_form4", "sec_13f"):
@@ -243,7 +193,7 @@ async def main():
             count, error = await test_congress_api(source)
         elif source.name == "ApeWisdom":
             count, error = await test_apewisdom()
-        elif source.feed_type in ("api", "bluesky"):
+        elif source.feed_type == "api":
             count, error = await test_api(source)
         else:
             count = 0

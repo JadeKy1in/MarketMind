@@ -29,29 +29,45 @@ class MarketMindArchive:
             self._db.close()
             self._db = None
 
+    def __enter__(self) -> "MarketMindArchive":
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close()
+        return False
+
     def __del__(self) -> None:
-        try:
-            self.close()
-        except Exception:
-            pass
+        if self._db is not None:
+            logger.warning(
+                "MarketMindArchive was garbage collected without explicit close(). "
+                "Use 'with MarketMindArchive(...) as archive:' or call archive.close() "
+                "to ensure deterministic cleanup."
+            )
+            try:
+                self.close()
+            except Exception:
+                pass
 
     def today_path(self) -> Path:
         now = datetime.now(timezone.utc)
         return self.base_dir / str(now.year) / f"{now.month:02d}" / f"{now.day:02d}"
 
     def ensure_dirs(self) -> Path:
-        for sub in ("raw", "analysis", "decisions", "review", "gates"):
+        for sub in ("raw", "analysis", "decisions", "review"):
             (self.today_path() / sub).mkdir(parents=True, exist_ok=True)
         return self.today_path()
 
-    def save_json(self, subdir: str, filename: str, data: Any) -> Path:
+    def save_json(self, subdir: str, filename: str, data: Any,
+                  ai_generated: bool = True) -> Path:
         dir_path = self.today_path() / subdir
         dir_path.mkdir(parents=True, exist_ok=True)
         filepath = dir_path / f"{filename}.json"
-        # Atomic write: temp file → rename, prevents corruption on crash
-        tmp = filepath.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
-        tmp.replace(filepath)
+        payload = data
+        if ai_generated and isinstance(data, dict):
+            payload = {**data, "ai_generated": True}
+        elif ai_generated and isinstance(data, list):
+            payload = [{"ai_generated": True, **item} if isinstance(item, dict) else item for item in data]
+        filepath.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
         return filepath
 
     def load_json(self, subdir: str, filename: str) -> Any:
@@ -72,9 +88,10 @@ class MarketMindArchive:
 
     def index_document(self, date: str, category: str, title: str, content: str) -> None:
         db = self._get_db()
+        labeled_content = f"[AI-GENERATED] {content}"
         db.execute(
             "INSERT INTO archive_fts (date, category, title, content) VALUES (?, ?, ?, ?)",
-            (date, category, title, content)
+            (date, category, title, labeled_content)
         )
         db.commit()
 
@@ -135,24 +152,15 @@ class MarketMindArchive:
         ).fetchall()
         return [{"date": r[0], "category": r[1], "title": r[2], "snippet": r[3]} for r in results]
 
-    # ── SHARP rule audit (P3-2a) ──────────────────────────────────────────
+    # ── SHARP rule audit (P3-2a) ──────────────────────────────────────
 
-    def save_rule_audit(self, rule_id: str, audit_data: dict) -> None:
-        """Save attribution hypothesis and backtest result for a rule.
-
-        Each audit entry is appended to a daily JSONL file under
-        <base_dir>/rule_audit/. This provides an append-only audit trail
-        for walk-forward backtest validation.
-
-        Args:
-            rule_id: The rule being audited (e.g. "RRSK-A1B2C3D4").
-            audit_data: Dict with event type, hypothesis, outcome, etc.
-                        Must include an 'event' key describing what happened.
-        """
+    def save_rule_audit(self, rule_id: str, event: str, details: dict) -> None:
+        """Log a rule lifecycle event (decompose, review, retire, evolve)."""
         entry = {
             "rule_id": rule_id,
+            "event": event,
+            "details": details,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            **audit_data,
         }
         audit_dir = self.base_dir / "rule_audit"
         audit_dir.mkdir(parents=True, exist_ok=True)
@@ -160,50 +168,31 @@ class MarketMindArchive:
         with open(audit_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    def get_rule_audit_history(
-        self, rule_id: str, days: int = 90
-    ) -> list[dict]:
-        """Get audit history for a rule for WFA backtest.
-
-        Scans daily JSONL files in <base_dir>/rule_audit/ and returns
-        all entries matching the given rule_id within the time window.
-
-        Args:
-            rule_id: The rule to retrieve history for.
-            days: Number of days to look back (default 90).
-
-        Returns:
-            List of audit entry dicts, newest first.
-        """
+    def get_rule_audit(self, rule_id: str | None = None,
+                       days: int = 30) -> list[dict]:
+        """Retrieve rule audit entries, optionally filtered by rule_id."""
         from datetime import timedelta
-
         audit_dir = self.base_dir / "rule_audit"
         if not audit_dir.exists():
             return []
-
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-        entries: list[dict] = []
-
+        entries = []
         for f in sorted(audit_dir.glob("*.jsonl"), reverse=True):
-            try:
-                with open(f, "r", encoding="utf-8") as fh:
-                    for line in fh:
-                        line = line.strip()
-                        if not line:
+            with open(f, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                        ts = datetime.fromisoformat(entry["timestamp"])
+                        if ts < cutoff:
                             continue
-                        try:
-                            entry = json.loads(line)
-                            ts = datetime.fromisoformat(entry.get("timestamp", ""))
-                            if ts < cutoff:
-                                continue
-                            if entry.get("rule_id") != rule_id:
-                                continue
-                            entries.append(entry)
-                        except (json.JSONDecodeError, KeyError, ValueError):
+                        if rule_id and entry.get("rule_id") != rule_id:
                             continue
-            except OSError:
-                continue
-
+                        entries.append(entry)
+                    except (json.JSONDecodeError, KeyError, ValueError):
+                        continue
         return entries
 
 

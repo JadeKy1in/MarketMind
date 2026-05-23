@@ -31,11 +31,7 @@ def load_shadow_prompts(path: str | None = None, reload: bool = False,
 
     if not reload and _prompt_cache is not None:
         if stale_after_seconds > 0:
-            try:
-                file_mtime = Path(path).stat().st_mtime
-                if time.time() - file_mtime < stale_after_seconds:
-                    return _prompt_cache
-            except OSError:
+            if time.time() - _prompt_cache_mtime < stale_after_seconds:
                 return _prompt_cache
         else:
             return _prompt_cache

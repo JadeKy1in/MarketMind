@@ -4,10 +4,6 @@
 **Status**: COMPLETE
 **Tests**: 339 passed (from 339 baseline, 0 regressions)
 
-> **NOTE**: `shadow_votes` table was renamed to `shadow_analyses` on 2026-05-18.
-> Shadows do not vote on decisions — they produce independent analyses for
-> internal competition ranking only.
-
 ## Summary
 
 Phase D addressed all 5 known limitations identified in Phase C:

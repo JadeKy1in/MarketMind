@@ -136,7 +136,7 @@ def print_battle_report(
     # -- 战报标题 --
     print(f"\n{'#' * 72}")
     print(f"##  AUTOMATED PATROL DRY RUN -- BATTLE REPORT          ##")
-    now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"##  {now_str} UTC+8  ##")
     print(f"{'#' * 72}")
 

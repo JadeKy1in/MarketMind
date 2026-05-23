@@ -150,23 +150,24 @@ async def test_stage3_replacement_when_challenger_outperforms(engine, temp_shado
     challenger_id = stage.challenger_id
     assert challenger_id is not None
 
-    # Manually add snapshots for the challenger to simulate a 2-week trial
-    # Challenger consistently outperforms target with higher daily returns
-    # Slight noise avoids scipy precision-loss warning on uniform data
-    for i in range(10):
+    # Manually add snapshots for the challenger to simulate a full trial period.
+    # Use 25 days (>= TRIAL_DAYS) with large separation to ensure statistical
+    # significance even in parallel test runs with system load variance.
+    import random; rng = random.Random(42)
+    for i in range(25):
         date = f"2026-05-{10 + i:02d}"
-        # Target: low returns (~0.001 per day with noise)
+        noise_t = rng.uniform(-0.0005, 0.0005) if i > 0 else 0
+        noise_c = rng.uniform(-0.002, 0.002) if i > 0 else 0
         _add_snapshot(temp_shadow_db, target_id, date,
                       composite_score=0.2 + i * 0.005, percentile_rank=0.1,
-                      daily_return_pct=0.001 + i * 0.0001,
+                      daily_return_pct=0.001 + noise_t,
                       cumulative_return_pct=0.01 + i * 0.001,
                       calmar_ratio=0.2)
-        # Challenger: higher returns (~0.03 per day with noise)
         _add_snapshot(temp_shadow_db, challenger_id, date,
                       composite_score=0.5 + i * 0.01, percentile_rank=0.5,
-                      daily_return_pct=0.03 + i * 0.0001,
+                      daily_return_pct=0.05 + noise_c,
                       cumulative_return_pct=0.10 + i * 0.03,
-                      max_drawdown_pct=0.05,
+                      max_drawdown_pct=0.03,
                       calmar_ratio=0.8)
 
     # Run comparison trial
@@ -196,19 +197,22 @@ async def test_stage3_restore_when_challenger_underperforms(engine, temp_shadow_
     stage = engine.check_elimination_stage(target_id)
     challenger_id = stage.challenger_id
 
-    # Add trial snapshots: target performs well, challenger does poorly
-    # Slight noise avoids scipy precision-loss warning on uniform data
-    for i in range(10):
+    # Add trial snapshots: target performs well, challenger does poorly.
+    # Use 25 days with clear separation for statistical reliability.
+    import random; rng = random.Random(84)
+    for i in range(25):
         date = f"2026-06-{10 + i:02d}"
+        noise_t = rng.uniform(-0.001, 0.001) if i > 0 else 0
+        noise_c = rng.uniform(-0.001, 0.001) if i > 0 else 0
         _add_snapshot(temp_shadow_db, target_id, date,
                       composite_score=0.7, percentile_rank=0.7,
-                      daily_return_pct=0.02 + i * 0.0001,
+                      daily_return_pct=0.03 + noise_t,
                       cumulative_return_pct=0.15 + i * 0.02,
                       calmar_ratio=0.8)
         _add_snapshot(temp_shadow_db, challenger_id, date,
                       composite_score=0.15, percentile_rank=0.05,
-                      daily_return_pct=-0.01 - i * 0.0001,
-                      cumulative_return_pct=-0.05 - i * 0.01,
+                      daily_return_pct=-0.03 + noise_c,
+                      cumulative_return_pct=-0.05 - i * 0.03,
                       max_drawdown_pct=0.20,
                       calmar_ratio=-0.1)
 
@@ -272,24 +276,17 @@ def test_challenger_calmar_gate_enforced(engine, temp_shadow_db):
     target_id = "expert:test:s3_calmar"
     _create_shadow(temp_shadow_db, target_id, "expert", "gold")
 
-    # Create a challenger with poor Calmar
     challenger_id = engine.create_challenger(target_id)
 
-    # Compute Calmar from snapshots
-    # Low cumulative return, high drawdown -> low Calmar
-    for i in range(10):
+    # Add snapshots with poor Calmar: low return + high drawdown
+    for i in range(25):
         date = f"2026-08-{10 + i:02d}"
-        snap = DailySnapshot(
-            shadow_id=challenger_id, date=date, virtual_capital=50000.0,
-            daily_return_pct=-0.005,
-            cumulative_return_pct=-0.05,
-            max_drawdown_pct=0.30,
-            win_rate_pct=30.0,
-            sharpe_ratio=-0.5, calmar_ratio=-0.05 / 0.30, omega_ratio=0.5,
-            mppm_score=-0.5, composite_score=0.1, deflated_score=0.09,
-            percentile_rank=0.05, achievement_tier="endangered",
-        )
-        temp_shadow_db.save_snapshot(challenger_id, snap)
+        _add_snapshot(temp_shadow_db, challenger_id, date,
+                      composite_score=0.1, percentile_rank=0.05,
+                      daily_return_pct=-0.005,
+                      cumulative_return_pct=-0.05,
+                      max_drawdown_pct=0.30,
+                      calmar_ratio=-0.17)
 
     # Calmar from these snapshots would be -0.05 / 0.30 ≈ -0.17, which is < 0.3
     calmar = engine._compute_calmar_from_snapshots(temp_shadow_db, challenger_id, 10)

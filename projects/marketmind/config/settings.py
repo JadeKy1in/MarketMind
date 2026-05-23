@@ -1,8 +1,25 @@
-"""MarketMind configuration loaded from environment variables."""
+"""MarketMind configuration loaded from environment variables and .env file."""
 from __future__ import annotations
 import os
 from pathlib import Path
 from dataclasses import dataclass, field
+
+# Load .env file if present (no dependency on python-dotenv)
+def _load_dotenv() -> None:
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if not env_path.exists():
+        return
+    with open(env_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key, val = key.strip(), val.strip()
+            if key and val and key not in os.environ:
+                os.environ[key] = val
+
+_load_dotenv()
 
 
 @dataclass
@@ -14,6 +31,8 @@ class ShadowSettings:
     max_concurrent_shadows: int = 5
     shadow_flash_quota_default: int = 5
     shadow_pro_quota_default: int = 1
+    shadow_consensus_timeout_s: int = 60  # D: max wait for shadow results before Decision
+    shadow_analysis_timeout_s: int = 120  # M9: per-shadow wall-clock cap; covers primary + retry chain within 120s. httpx transport timeout is 120s per HTTP request
 
     # Ranking
     evaluation_window_days: int = 90
@@ -89,7 +108,7 @@ class ShadowSettings:
     max_concurrent_tasks: int = 3
 
     # Gemini Flash settings
-    gemini_api_key: str = ""
+    gemini_api_key: str = field(default_factory=lambda: os.getenv("GEMINI_API_KEY", ""), repr=False)
     gemini_flash_enabled: bool = False
 
     # Missed paths
@@ -110,32 +129,39 @@ class ShadowSettings:
     crystallization_significance_threshold: float = 0.6
     crystallization_min_samples: int = 10
 
+    # Circuit breaker (P3-3)
+    fallback_provider_url: str = ""
+    fallback_model: str = ""
+    fallback_api_key: str = field(default="", repr=False)
+    circuit_breaker_threshold: int = 3
+    circuit_breaker_timeout_s: int = 30
+    proxy_url: str = ""  # HTTP(S) proxy for outbound requests (e.g., VPN local proxy)
+
 
 @dataclass
 class MarketMindConfig:
-    deepseek_api_key: str = field(default_factory=lambda: os.getenv("DEEPSEEK_API_KEY", ""))
+    deepseek_api_key: str = field(default_factory=lambda: os.getenv("DEEPSEEK_API_KEY", ""), repr=False)
     deepseek_api_keys: list[str] = field(default_factory=lambda: [
         k.strip() for k in os.getenv("DEEPSEEK_API_KEYS", "").split(",") if k.strip()
-    ])
+    ], repr=False)
     deepseek_base_url: str = field(default_factory=lambda: os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"))
     newsapi_key: str | None = field(default_factory=lambda: os.getenv("NEWSAPI_KEY"))
     gnews_key: str | None = field(default_factory=lambda: os.getenv("GNEWS_API_KEY"))
+    fred_key: str = field(default_factory=lambda: os.getenv("FRED_KEY", ""), repr=False)
+    eia_key: str = field(default_factory=lambda: os.getenv("EIA_KEY", ""), repr=False)
     data_dir: Path = field(default_factory=lambda: Path(os.getenv("MARKETMIND_DATA_DIR", "data")))
+    event_confidence_discount_enabled: bool = True
     max_position_count: int = 6
     max_total_heat_pct: float = 0.25
     daily_token_budget: int = 2_000_000
     daily_pro_limit: int = 30
     daily_flash_limit: int = 100
     cache_ttl_seconds: int = 300
+    proxy_url: str = field(default_factory=lambda: os.getenv("HTTP_PROXY", os.getenv("HTTPS_PROXY", "")))
     session_checkpoint_dir: Path | None = None
     position_protection_days: int = 60
+    market_open_utc: str = "13:30"  # US equity market open in UTC (9:30 AM ET during EDT Mar-Nov; 14:30 during EST Nov-Mar)
     shadow: ShadowSettings = field(default_factory=ShadowSettings)
-    # P3-3: Circuit breaker
-    fallback_provider_url: str | None = None
-    fallback_model: str | None = None
-    fallback_api_key: str | None = field(default_factory=lambda: os.getenv("FALLBACK_API_KEY"))
-    circuit_breaker_threshold: int = 3
-    circuit_breaker_timeout_s: int = 30
 
     def __post_init__(self):
         self.data_dir = Path(self.data_dir)

@@ -5,7 +5,7 @@
     "jest": "^30.3.0",
     "ts-jest": "^29.4.9",
     "tsx": "^4.21.0",
-    "typescript": "^5.8.2"
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
