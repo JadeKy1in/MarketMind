@@ -46,8 +46,13 @@ python -m pytest tests/ -v -m "not slow" -p no:warnings  # 快速测试
 
 | # | 任务 | 说明 |
 |:--:|------|------|
-| 1 | UI 优化 | Dashboard 使用体验——你自己用的时候觉得哪里不好 |
-| 2 | 其他问题 | 你自己跑起来发现的问题 |
-| 3 | L1 JSON 解析 | 真实 LLM 偶尔返回非 JSON，regex fallback 已增强但可再优化 |
-| 4 | User Proxy Agent 实战 | 首次启用代理系统，走一遍冷启动引导 |
-| 5 | A/B 测试 AEL | `scripts/ael_experiment.py` 已跑通，可以调参实验 |
+| **1** | **通知/报错系统** | 最高优先级——所有降级、fallback、异常必须通过 Dashboard 通知用户。包括：思考溢出(content空)、JSON回退、float解析失败、API错误、预算耗尽。需设计统一的 AlertManager + Dashboard 通知面板 |
+| 2 | UI 优化 | Dashboard 使用体验——你自己用的时候觉得哪里不好 |
+| 3 | User Proxy Agent 实战 | 首次启用代理系统，走一遍冷启动引导 |
+| 4 | A/B 测试 AEL | `scripts/ael_experiment.py` 已跑通，可以调参实验 |
+
+## 最近修复
+
+- **LLM JSON 可靠性**: 思考模式 token 竞争修复——max_tokens 从 4K→32K(Pro默认)、_extract_json_from_reasoning 兜底
+- **全量审计**: 20 问题修完（8 HIGH + 5 MED + 7 LOW）
+- **一致性检查**: Stop hook 每次会话结束自动扫描
