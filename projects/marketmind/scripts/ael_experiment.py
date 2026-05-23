@@ -88,6 +88,27 @@ async def _run_experiment_loop(cfg: ShadowSettings, db: ShadowStateDB) -> None:
     from marketmind.shadows.expert_shadows import create_expert_shadows
     create_expert_shadows(db, cfg)
     create_daredevil_shadows(db, cfg)
+
+    # Ensure all treatment shadow IDs exist in the DB before snapshot save.
+    # Some TREATMENT_IDS may reference legacy shadow IDs not in current config
+    # lists — if so, create a minimal ShadowConfig and register it.
+    from marketmind.shadows.shadow_state import ShadowConfig as _ShadowConfig
+    for _sid in TREATMENT_IDS:
+        if db.get_shadow(_sid) is None:
+            _cfg = _ShadowConfig(
+                shadow_id=_sid,
+                shadow_type=_sid.split(":")[0],
+                display_name=_sid.rsplit(":", 1)[-1].replace("_", " ").title(),
+                methodology_prompt=(
+                    f"AEL treatment shadow '{_sid}' — auto-generated for "
+                    f"experiment debrief tracking."
+                ),
+                virtual_capital=25000.0,
+                domain=_sid.split(":")[1] if ":" in _sid else "macro",
+            )
+            db.create_shadow(_cfg)
+            print(f"Created missing treatment shadow: {_sid}")
+
     ae = AELEvolutionEngine()
     control_pairs = ae.ensure_control_replicas(db)
     print(f"Control replicas: {len(control_pairs)} created")

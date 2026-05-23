@@ -125,6 +125,17 @@ def _format_signals(signals: list[FlashSignal], news_items: list[NewsItem],
     return "\n".join(lines)
 
 
+def _safe_float(val, default=0.0):
+    """Parse float from possibly-prefixed string like 'EST:0.7' or '~0.5'."""
+    if isinstance(val, (int, float)):
+        return float(val)
+    if not isinstance(val, str):
+        return default
+    import re
+    m = re.search(r'[-]?\d+\.?\d*', str(val))
+    return float(m.group()) if m else default
+
+
 def _parse_layer1_response(content: str) -> Layer1Result:
     content = strip_markdown_fences(content)
     try:
@@ -176,11 +187,11 @@ def _parse_layer1_response(content: str) -> Layer1Result:
         surprise_level=data.get("surprise_level", "low"),
         market_size=data.get("market_size", "small"),
         matrix_quadrant=data.get("matrix_quadrant", "observe_skip"),
-        price_in_score=float(data.get("price_in_score", 0.5)),
+        price_in_score=_safe_float(data.get("price_in_score"), 0.5),
         cascade_rank=int(data.get("cascade_rank", 1)),
         cascade_hub=bool(data.get("cascade_hub", False)),
         sentiment_direction=data.get("sentiment_direction", "neutral"),
-        sentiment_intensity=float(data.get("sentiment_intensity", 0.0)),
+        sentiment_intensity=_safe_float(data.get("sentiment_intensity"), 0.0),
         sentiment_vs_attention=data.get("sentiment_vs_attention", "neither"),
         expert_signals=data.get("expert_signals", []),
         institutional_surprise=data.get("institutional_surprise", ""),
