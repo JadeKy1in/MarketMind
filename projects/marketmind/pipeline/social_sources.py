@@ -8,11 +8,9 @@ Extracted from pipeline/scout.py for modular architecture compliance
 (scout.py hard ceiling: 500 lines).
 """
 from __future__ import annotations
+
 import hashlib
 import logging
-
-logger = logging.getLogger("marketmind.pipeline.social_sources")
-
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -22,6 +20,8 @@ if TYPE_CHECKING:
     from marketmind.config.source_authority import Source
     from marketmind.config.settings import MarketMindConfig
     from marketmind.pipeline.scout import NewsItem
+
+logger = logging.getLogger("marketmind.pipeline.social_sources")
 
 
 # One-time warning flag for dead sources (module-level, persists for process lifetime)

@@ -118,9 +118,46 @@
       "Bash(mkdir -p \"E:/AI_Studio_Workspace/.claude/backups/hooks\")",
       "Read(//c/Users/Administrator/.claude/plugins/**)",
       "Read(//c/Users/Administrator/.claude/plugins/cache/**)",
-      "Read(//c/Users/Administrator/.claude/plugins/marketplaces/**)"
+      "Read(//c/Users/Administrator/.claude/plugins/marketplaces/**)",
+      "Read(//mnt/c/Users/Administrator/**)",
+      "Read(//c/Users/Administrator/Desktop/**)",
+      "WebFetch(domain:arxiv.org)",
+      "WebFetch(domain:skillsmp.com)",
+      "Bash(mkdir -p E:/AI_Studio_Workspace/projects/marketmind/.claude/plans/archive)",
+      "Bash(mv E:/AI_Studio_Workspace/projects/marketmind/.claude/plans/final-plan-*.md E:/AI_Studio_Workspace/projects/marketmind/.claude/plans/archive/)",
+      "Bash(mv E:/AI_Studio_Workspace/projects/marketmind/.claude/plans/shadow-type-redesign-v2.md E:/AI_Studio_Workspace/projects/marketmind/.claude/plans/archive/)",
+      "Bash(mv E:/AI_Studio_Workspace/projects/marketmind/.claude/plans/shadow-type-redesign-v3.md E:/AI_Studio_Workspace/projects/marketmind/.claude/plans/archive/)",
+      "Bash(mv E:/AI_Studio_Workspace/projects/marketmind/.claude/plans/shadow-lifecycle-framework.md E:/AI_Studio_Workspace/projects/marketmind/.claude/plans/archive/)",
+      "Bash(mv E:/AI_Studio_Workspace/projects/marketmind/.claude/plans/phase-audit-remediation-plan.md E:/AI_Studio_Workspace/projects/marketmind/.claude/plans/archive/)",
+      "Bash(mv E:/AI_Studio_Workspace/projects/marketmind/.claude/plans/phase-e-infrastructure-fixes.md E:/AI_Studio_Workspace/projects/marketmind/.claude/plans/archive/)",
+      "Bash(mv E:/AI_Studio_Workspace/projects/marketmind/.claude/plans/_t4.md E:/AI_Studio_Workspace/projects/marketmind/.claude/plans/archive/)",
+      "Bash(FRED_KEY=8c3487a5503526687a8ba652027d5e59 python -c ' *)",
+      "Bash(awk '{print $2}')",
+      "Bash(FRED_KEY=8c3487a5503526687a8ba652027d5e59 EIA_KEY=test python -c ' *)",
+      "Bash(start /B python api_server.py)",
+      "Bash(start \"\" http://localhost:8520)",
+      "Bash(start *)",
+      "Bash(taskkill /F /IM python.exe /FI \"WINDOWTITLE eq *api_server*\")",
+      "Bash(taskkill /F /FI \"IMAGENAME eq python.exe\")",
+      "Bash(netstat -ano)",
+      "Bash(findstr 8520)",
+      "Bash(taskkill /F /PID 7408)",
+      "Bash(rm -f \"E:/AI_Studio_Workspace/.git/index.lock\")",
+      "Bash(rm -f \"E:/AI_Studio_Workspace/projects/marketmind/.git/index.lock\")",
+      "Bash(nslookup github.com)",
+      "Bash(ping -c 2 github.com)",
+      "Bash(rm -f E:/AI_Studio_Workspace/projects/marketmind/.git/index.lock)",
+      "Bash(rm -f pipeline/l1_tool_executor.py pipeline/l1_display.py _extract_l1.py)",
+      "Bash(sqlite3 E:/AI_Studio_Workspace/projects/marketmind/data/shadows/shadows.db \".schema methodology_changes\")",
+      "Bash(tasklist)",
+      "Read(//c//**)",
+      "Read(//cygdrive/c/**)"
     ]
   },
+  "disabledMcpjsonServers": [
+    "context7",
+    "capitol-trades"
+  ],
   "hooks": {
     "SessionStart": [
       {
@@ -165,6 +202,15 @@
           {
             "type": "command",
             "command": "python \"E:/AI_Studio_Workspace/.claude/hooks/startup_report.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"E:/AI_Studio_Workspace/.claude/hooks/cleanup_worktrees.py\""
           }
         ]
       }

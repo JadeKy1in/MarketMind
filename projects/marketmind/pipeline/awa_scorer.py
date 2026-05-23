@@ -10,6 +10,23 @@ Design: .claude/plans/market-figure-intelligence-module.md §3
 
 from __future__ import annotations
 
+# ── Authority weighting constants (ability dimension) ──────────────────────
+_ABILITY_INFO_ADVANTAGE_WEIGHT = 0.40
+_ABILITY_HISTORICAL_ACCURACY_WEIGHT = 0.35
+_ABILITY_INSTITUTIONAL_STATUS_WEIGHT = 0.25
+_DEFAULT_HISTORICAL_ACCURACY = 0.50
+_DEFAULT_UNKNOWN_ABILITY = 0.30
+_DEFAULT_UNKNOWN_INSTITUTIONAL = 0.25
+
+# ── Acknowledgment content-type weights ────────────────────────────────────
+_ACKNOWLEDGMENT_IMPACT_WEIGHT = 0.40
+_ACKNOWLEDGMENT_AGENCY_WEIGHT = 0.30
+_ACKNOWLEDGMENT_URGENCY_WEIGHT = 0.30
+
+# ── Willingness modifiers ──────────────────────────────────────────────────
+AUTHORITY_DECAY_MULTIPLIER = 0.90
+_DEFAULT_UNKNOWN_SIGNAL_COST = 0.30
+
 
 class AWAScorer:
     """Compute AWA score for a market figure's statement/action.
@@ -177,15 +194,17 @@ class AWAScorer:
             Float in [0, 1].
         """
         role = self._infer_role(person)
-        info_advantage = self.DEFAULT_ABILITY.get(role, 0.30)
+        info_advantage = self.DEFAULT_ABILITY.get(role, _DEFAULT_UNKNOWN_ABILITY)
         hist_acc = (
             historical_accuracy
             if historical_accuracy is not None
-            else 0.50
+            else _DEFAULT_HISTORICAL_ACCURACY
         )
-        institutional = self._INSTITUTIONAL_STATUS.get(role, 0.25)
+        institutional = self._INSTITUTIONAL_STATUS.get(role, _DEFAULT_UNKNOWN_INSTITUTIONAL)
 
-        return 0.40 * info_advantage + 0.35 * hist_acc + 0.25 * institutional
+        return (_ABILITY_INFO_ADVANTAGE_WEIGHT * info_advantage
+                + _ABILITY_HISTORICAL_ACCURACY_WEIGHT * hist_acc
+                + _ABILITY_INSTITUTIONAL_STATUS_WEIGHT * institutional)
 
     def _compute_willingness(self, person, event_type: str) -> float:
         """Willingness based on signal cost hierarchy.
@@ -199,11 +218,11 @@ class AWAScorer:
         Contrarian figures receive a 10 % discount — they benefit from
         engagement regardless of accuracy.
         """
-        base = self._SIGNAL_COST.get(event_type, 0.30)
+        base = self._SIGNAL_COST.get(event_type, _DEFAULT_UNKNOWN_SIGNAL_COST)
 
         signal_dir = self._get_attr(person, "signal_direction", "")
         if signal_dir == "contrarian":
-            base *= 0.90
+            base *= AUTHORITY_DECAY_MULTIPLIER
 
         return max(0.0, min(1.0, base))
 
@@ -234,7 +253,9 @@ class AWAScorer:
         urgency_count = sum(1 for w in self._URGENCY_MARKERS if w in text_lower)
         urgency_score = min(urgency_count / 2.0, 1.0)
 
-        return 0.40 * impact_score + 0.30 * agency_score + 0.30 * urgency_score
+        return (_ACKNOWLEDGMENT_IMPACT_WEIGHT * impact_score
+                + _ACKNOWLEDGMENT_AGENCY_WEIGHT * agency_score
+                + _ACKNOWLEDGMENT_URGENCY_WEIGHT * urgency_score)
 
     # ── Helpers ─────────────────────────────────────────────────────────
 

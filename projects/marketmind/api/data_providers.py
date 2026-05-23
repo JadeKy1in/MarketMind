@@ -56,7 +56,7 @@ def _get_shadow_db():
     try:
         db.init_schema()
     except Exception:
-        pass
+        logger.warning("shadow DB schema init failed", exc_info=True)
     return db
 
 
@@ -82,6 +82,7 @@ def get_cost() -> dict:
         from marketmind.gateway.async_client import get_budget_report
         budget = get_budget_report()
     except Exception:
+        logger.warning("budget report fetch failed", exc_info=True)
         budget = {"status": "error"}
     return {
         "pro_calls": budget.get("pro_calls_today", 0),
@@ -107,7 +108,7 @@ def get_source_status() -> list[dict]:
                 "tier": cfg.get("tier", 3),
             })
     except Exception:
-        pass
+        logger.warning("SOURCE_AUTHORITY source status lookup failed", exc_info=True)
     # Fallback: hardcoded list from config
     if not sources:
         for name, url, has_key in [

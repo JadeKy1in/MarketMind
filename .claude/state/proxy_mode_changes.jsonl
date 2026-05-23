@@ -1,0 +1,1 @@
+{"timestamp": "2026-05-23T00:00:00Z", "from_mode": "unknown", "to_mode": "advisor", "reason": "Session start — no prior mode file existed. Defaulting to Advisor (safe).", "changed_by": "session_start"}

@@ -1,71 +1,198 @@
 {
   "name": "User Proxy Agent",
-  "version": "1.0",
+  "version": "1.1",
   "date": "2026-05-23",
+  "red_team_audited": true,
+  "audit_date": "2026-05-23",
+  "auditors": ["technical_red_team", "ux_red_team"],
+  "findings_total": 19,
+  "findings_critical": 7,
+  "status": "P0 fixes in progress",
 
   "architecture": {
-    "model": "RAG + three-tier preference store + calibrated confidence",
-    "tiers": {
-      "universal": "Style invariants (naming, commits, language). Minimal, manual curated.",
-      "domain": "Per-domain patterns (Python→FastAPI, DB→Postgres). Shared across same-domain projects.",
-      "project": "Project-specific overrides. Highest lookup priority."
-    },
-    "decision_mode": {
+    "model": "RAG + three-tier preference store + Platt-calibrated confidence + consequence weighting",
+    "decision_mechanism": {
       "routine": "Single proxy agent",
-      "high_stakes": "Council of 3-4 (proxy + risk-agent + quality-agent + devil's-advocate)",
-      "trigger": "Confidence < 0.50 OR project marked as 'critical'"
+      "high_stakes": "Council of 3-4 agents (confidence < 0.50 OR consequence=critical)",
+      "trigger": "Automatic based on calibrated confidence + consequence weight"
     }
   },
 
-  "confidence_tiers": {
-    ">0.85": {"action": "auto_execute", "disclosure": "none"},
-    "0.70-0.85": {"action": "execute_with_note", "disclosure": "logged as MEDIUM confidence"},
-    "0.50-0.70": {"action": "request_clarification", "disclosure": "present to user with context"},
-    "<0.50": {"action": "escalate", "disclosure": "defer entirely, flag for user"}
+  "mode_system": {
+    "storage": ".claude/state/proxy_mode.json",
+    "change_log": ".claude/state/proxy_mode_changes.jsonl",
+    "modes": {
+      "advisor": {
+        "trigger": "User present (explicit, not timeout-based)",
+        "behavior": "NEVER auto-execute. Present analysis + recommendation. User decides.",
+        "indicator": "[Advisor]"
+      },
+      "delegate": {
+        "trigger": "User explicitly delegates via /delegate command",
+        "behavior": "Act per calibrated confidence tiers. Always log rationale.",
+        "indicator": "[Delegate]"
+      }
+    },
+    "explicit_only": "No implicit mode switching. No timeout-based delegation. User must consciously transfer control.",
+    "indicator_visible": "Mode indicator always displayed in prompt: [Advisor] > or [Delegate] >",
+    "mode_transition_notification": "On mode change, emit clear summary of what the new mode will and won't do."
+  },
+
+  "confidence_system": {
+    "calibration": {
+      "module": ".claude/hooks/confidence_calibrator.py",
+      "mechanism": "Platt scaling per decision_type via sklearn LogisticRegression",
+      "warmup_period": "First 50 decisions (global): clamp max confidence to 0.70",
+      "recalibration_trigger": "Every 50 decisions OR Brier score drift > 0.05",
+      "storage": ".claude/state/calibration_curves.json",
+      "brier_tracking": true,
+      "limitation": "Statistical calibration does not capture epistemic uncertainty. LLM may output 'calibrated 0.90' for novel situations."
+    },
+    "consequence_weighting": {
+      "cosmetic": {"multiplier": 1.5, "description": "Single-file, reversible, style-only"},
+      "moderate": {"multiplier": 1.0, "description": "Standard change"},
+      "significant": {"multiplier": 0.7, "description": "Multi-file, architectural impact"},
+      "critical": {"multiplier": 0.5, "ceiling": "request_clarification", "description": "Data, security, irreversible"}
+    },
+    "decision_matrix": {
+      "advisor_mode": {
+        "confidence_>0.85": "NOTIFY — present analysis, user confirms or rejects",
+        "confidence_0.70-0.85": "PRESENT — show recommendation, user decides",
+        "confidence_0.50-0.70": "ASK — request user clarification",
+        "confidence_<0.50": "ESCALATE — user must decide"
+      },
+      "delegate_mode": {
+        "confidence_>0.85": "AUTO_EXECUTE — with mandatory one-line rationale logged",
+        "confidence_0.70-0.85": "EXECUTE_WITH_FLAG — execute, flag for user review",
+        "confidence_0.50-0.70": "QUEUE — add to user's pending review queue, do not block",
+        "confidence_<0.50": "QUEUE_WITH_ESCALATION — queue + notify user at next interaction"
+      }
+    },
+    "mandatory_rationale": "Every auto-executed decision MUST include a one-line human-readable rationale. Example: 'Renamed get_data to fetch_portfolio — matched 7 prior naming conventions in this project.'"
   },
 
   "learning": {
     "update_strategy": "EMA low-alpha (0.1-0.2)",
-    "promotion_threshold": "3+ consistent signals across distinct contexts",
-    "decay": {
-      "uncorroborated": "7-day half-life",
-      "reinforced": "persist indefinitely",
-      "active_rules": "FSRS-6 spaced repetition"
+    "promotion_threshold": "3+ consistent signals across distinct contexts (different context hashes)",
+    "signal_types": {
+      "explicit_approval": {"weight": 2.0, "persistence": "indefinite", "description": "User confirmed via review CLI"},
+      "implicit_acceptance": {"weight": 0.2, "persistence": "14-day half-life", "description": "User saw but didn't correct"},
+      "correction": {"weight": -1.0, "promotion": "3+ in same direction → rule", "description": "User actively overrode"},
+      "retroactive_veto": {"weight": -2.0, "action": "immediately demote associated preferences", "description": "User reviewed old decision and marked as bad"},
+      "no_signal": {"weight": 0.0, "description": "Decision never presented to user"}
     },
-    "correction_handling": {
-      "strong_preference": "3+ corrections in same direction → promote to rule",
-      "situational": "1-2 corrections → soft hint, context-scoped",
-      "one_off": "logged, no weight change"
+    "anti_overfitting": [
+      "EMA low-alpha (0.1-0.2) — single corrections nudge, don't flip",
+      "3+ consistent signals across distinct contexts → promote to rule",
+      "Single corrections decay with 7-day half-life unless reinforced",
+      "Corrections scoped by context fingerprint (project + domain + decision_class + impact_scope)",
+      "Supersede contradicting preferences rather than accumulating",
+      "Confirmation gate: first correction of new pattern → 'tentative' for 48h",
+      "Contradiction detection: if new correction contradicts existing preference → escalate to user"
+    ],
+    "review_engagement_tracking": {
+      "mechanism": "Track user audit review rate",
+      "alert_threshold": "Review rate < 10% of decisions → downgrade implicit_acceptance to no_signal",
+      "notification": "'You haven't reviewed proxy decisions in 2 weeks. Confidence scores may be inflated.'"
     }
   },
 
-  "anti_overfitting": [
-    "Corrections scoped by context fingerprint (project + domain + decision type)",
-    "Single corrections decay unless reinforced",
-    "Supersede contradicting preferences rather than accumulating",
-    "Periodic distillation: review proxy_decisions.jsonl monthly → prune weak signals"
-  ],
-
-  "dual_role": {
-    "advisor_mode": {
-      "trigger": "user IS present AND decision confidence < 0.85",
-      "behavior": "present analysis + recommendation, do NOT act"
+  "context_fingerprint": {
+    "dimensions": {
+      "project": "string (marketmind, singoo, etc.)",
+      "domain": "string (pipeline, shadows, api, etc.)",
+      "decision_class": "enum {naming, architecture, tool_choice, code_style, dependency, testing, deployment, security}",
+      "impact_scope": "enum {single_file, module, cross_module, project_wide}",
+      "file_language": "string (python, json, markdown, etc.)",
+      "semantic_hash": "sha256 of structured summary of decision context"
     },
-    "delegate_mode": {
-      "trigger": "user NOT present OR explicitly delegated",
-      "behavior": "act per confidence tiers, log all decisions"
+    "matching": "Exact match on (project, domain, decision_class). Soft match (cosine > 0.85) on semantic_hash. No match → match on (project, domain, decision_class) alone with 0.5x weight."
+  },
+
+  "preference_store": {
+    "tiers": {
+      "universal": {"scope": "Style invariants across all projects", "curation": "manual"},
+      "domain": {"scope": "Per-domain patterns (Python→FastAPI, DB→Postgres)", "curation": "semi-automatic"},
+      "project": {"scope": "Project-specific overrides", "curation": "automatic", "priority": "highest"}
+    },
+    "storage": {
+      "preferences": ".claude/state/user_preferences.json",
+      "decisions_log": ".claude/decisions/proxy_decisions.jsonl",
+      "context_fingerprints": ".claude/state/decision_contexts.json",
+      "audit_queue": ".claude/state/proxy_audit_queue.json",
+      "calibration_curves": ".claude/state/calibration_curves.json"
+    },
+    "initialization": {
+      "on_first_load": "Initialize all storage files with valid empty structures + schema version tags",
+      "pre_seed": "Parse CLAUDE.md for explicit conventions → seed as universal-tier with confidence 0.95",
+      "wizard": "5-10 question onboarding before accepting autonomous decisions if no pre-seeded preferences"
+    },
+    "integrity": {
+      "preferences_file": "SHA-256 hash chain in .claude/state/.preferences.hash. Keep last 3 known-good backups.",
+      "decisions_log": "Append-only with per-line HMAC (session-derived key)",
+      "critical_preferences": "Tag 'critical_security' → require 2 explicit user confirmations before promotion. Cannot be auto-learned.",
+      "limitation": "No defense against agent with normal file write access. Cryptographic integrity only catches corruption and naive tampering."
     }
   },
 
-  "storage": {
-    "preferences": ".claude/state/user_preferences.json",
-    "decisions_log": ".claude/decisions/proxy_decisions.jsonl",
-    "context_fingerprints": ".claude/state/decision_contexts.json",
-    "audit_queue": ".claude/state/proxy_audit_queue.json"
+  "audit_system": {
+    "cli": ".claude/tools/proxy_cli.py",
+    "commands": {
+      "review": "Display decisions in readable table format",
+      "review --pending": "Only show flagged/unreviewed",
+      "approve <id>": "Explicit approval → trains preference with weight 2.0",
+      "override <id> --reason": "Mark as overridden → feeds back to learning",
+      "digest": "Summary statistics: total, by tier, correction rate, top-3 corrected types"
+    },
+    "auto_triage": {
+      "auto_cleared": "Confidence > 0.85 AND consequence=cosmetic AND not overturned within 30 days → archive with count",
+      "spot_check": "Confidence 0.70-0.85 → random 5% sample for review",
+      "mandatory_review": "Confidence < 0.70 OR consequence=critical OR was overturned OR user-flagged"
+    },
+    "monthly_digest": "Summary only. No line-item list unless user requests. Include: total decisions, breakdown, correction rate, new/demoted preferences.",
+    "spot_check_nudges": "Every 20 decisions, randomly select one borderline (0.70-0.80) → ask user 'Correct? Y/N' — one keystroke."
+  },
+
+  "cold_start": {
+    "wizard": "10-15 explicit preferences seeded via onboarding questionnaire before first session",
+    "batch_escalations": "Present first 5 decisions as a batch, not sequential interruptions",
+    "calibration_progress_visible": true,
+    "training_phase": "First 50 decisions deliberately chosen to maximize signal per interruption",
+    "passthrough_fast_path": "Single-file, single-operation commands skip frontload entirely",
+    "frontload_trigger": "Only activates on: multi-file changes, new module creation, API surface changes, config changes, architecture keywords"
+  },
+
+  "reversibility": {
+    "decision_atomization": "Each proxy decision that changes code = discrete git commit with decision ID in message",
+    "undo": "claude proxy undo <id> → git revert associated commit + mark overridden + feed back to learning",
+    "granularity_requirement": "Decisions must be granular enough to revert individually"
+  },
+
+  "retrospective_auditor": {
+    "identity": "Separate agent, different model temperature (1.0+), different system prompt",
+    "trigger": "Runs AFTER decisions execute. Reviews previous session's decisions.",
+    "scope": "Spot-check 10% of auto-executed. Review 100% of council decisions.",
+    "criteria": ["Outcome matches intent?", "Reasonable developer agree?", "Created technical debt?", "Confidence justified by outcome?"],
+    "output": ".claude/audits/proxy_retrospective_{date}.json",
+    "limitation": "Still an LLM. Recursion terminates only at human review."
+  },
+
+  "compounding_detection": {
+    "periodic_impact": "Every 10 decisions, generate holistic assessment: net effect, module count delta, complexity trend",
+    "architectural_drift": "Baseline metrics (module count, avg file size, import graph depth) → alert if proxy decisions push beyond thresholds",
+    "chain_detection": "3+ consecutive same-type decisions in same module → flag for review"
   },
 
   "transferability": {
     "mechanism": "Universal + Domain tiers follow user. Project tier stays with project.",
-    "onboarding": "New project inherits universal/domain, starts empty project tier. First 5 decisions are always escalated to user to establish baseline."
-  }
+    "onboarding": "New project inherits universal/domain, starts empty project tier. First 5 decisions always escalated."
+  },
+
+  "admitted_limitations": [
+    "Confidence calibration is statistical, not epistemic. Novel situations may get falsely high confidence scores.",
+    "Retrospective auditor is still an LLM — true accountability terminates at human review.",
+    "No defense against agent with normal file write access to preference store. Critical security preferences require explicit confirmation.",
+    "Preference contamination: 'user didn't complain' ≠ 'user approved'. Mitigated by explicit approval signals and review engagement tracking, but not fully solved.",
+    "Silence bias: if user stops reviewing, confidence inflates. Mitigated by review rate tracking and auto-downgrade to Advisor mode."
+  ]
 }

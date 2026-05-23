@@ -1,0 +1,65 @@
+{
+  "_schema_version": "1.0",
+  "_created": "2026-05-23T11:00:00Z",
+  "_description": "User proxy preference store — three-tier (universal, domain, project). See user_proxy_design.json for semantics.",
+
+  "tags": {
+    "CRITICAL_SECURITY": {
+      "description": "Security, data access, credential handling, or irreversible-operation preferences. Require 2 explicit user confirmations before promotion from tentative to active. CANNOT be auto-learned from implicit behavior (implicit_acceptance, no_signal). Only explicit_approval signals count.",
+      "confirmations_required": 2,
+      "auto_learnable": false,
+      "promotion_gate": "Two independent explicit_approval signals from distinct sessions, separated by at least 24 hours."
+    },
+    "HIGH_STAKES": {
+      "description": "Architecture decisions, multi-file refactors, cross-module changes, or new dependency introductions. Require 1 explicit confirmation. Auto-learning disabled during warmup period (first 50 decisions).",
+      "confirmations_required": 1,
+      "auto_learnable": true,
+      "promotion_gate": "Single explicit_approval signal, or 3+ consistent implicit_acceptance signals across distinct contexts (post-warmup)."
+    },
+    "STANDARD": {
+      "description": "Style conventions, naming patterns, single-file formatting, or cosmetic changes. Single implicit signal sufficient for promotion. Fully auto-learnable.",
+      "confirmations_required": 0,
+      "auto_learnable": true,
+      "promotion_gate": "Single explicit_approval, or 1+ implicit_acceptance with no corrections within 14 days."
+    }
+  },
+
+  "tiers": {
+    "universal": {
+      "scope": "Style invariants across all projects — applied before project/domain tiers.",
+      "curation": "manual",
+      "priority": 1,
+      "entries": []
+    },
+    "domain": {
+      "scope": "Per-domain patterns (Python project conventions, TypeScript/react patterns, database/sql conventions).",
+      "curation": "semi-automatic",
+      "priority": 2,
+      "entries": []
+    },
+    "project": {
+      "scope": "Project-specific overrides. Highest priority — supersedes universal and domain tiers for conflicting preferences.",
+      "curation": "automatic",
+      "priority": 3,
+      "entries": []
+    }
+  },
+
+  "pending_promotions": [],
+
+  "_entry_schema": {
+    "id": "string — unique identifier within tier (e.g. 'naming_function_verb_first')",
+    "tag": "enum — one of CRITICAL_SECURITY, HIGH_STAKES, STANDARD",
+    "description": "string — human-readable description of the preference",
+    "rule": "string — machine-actionable rule (e.g. 'function names MUST start with a verb')",
+    "confidence": "float 0.0-1.0 — calibrated confidence in this preference",
+    "source": "enum — explicit_approval, implicit_acceptance, correction, seeded_from_claudemd",
+    "signals": "list of signal records: [{type, timestamp, context_fingerprint, session_id}]",
+    "confirmations_received": "int — number of explicit user confirmations (for CRITICAL_SECURITY gate)",
+    "status": "enum — tentative, active, deprecated, superseded",
+    "created_at": "ISO-8601 timestamp",
+    "updated_at": "ISO-8601 timestamp",
+    "supersedes": "string or null — id of preference this one replaces",
+    "context_fingerprint": "object — {project, domain, decision_class, impact_scope}"
+  }
+}

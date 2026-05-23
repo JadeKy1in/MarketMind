@@ -154,29 +154,91 @@ def _parse_layer1_response(content: str) -> Layer1Result:
     if data is None:
         import re
         logger.warning("Layer1 response has no parseable JSON — %d chars, extracting from text", len(content))
-        # Map free-text keywords to formal quadrant values
-        # core_opportunity | trend_opportunity | arbitrage | observe_skip
-        quadrant = "observe_skip"
-        has_surprise = bool(re.search(r'surprise|shock|unexpected|breaking|crash|surge', content, re.IGNORECASE))
-        has_big = bool(re.search(r'broad|systemic|global|sector.wide|contagion|spillover', content, re.IGNORECASE))
-        if has_surprise and has_big:
-            quadrant = "core_opportunity"
-        elif not has_surprise and has_big:
-            quadrant = "trend_opportunity"
-        elif has_surprise and not has_big:
-            quadrant = "arbitrage"
+
+        def _re_field(pattern, text, default=None):
+            """Return group(1) if regex matches, else default."""
+            m = re.search(pattern, text)
+            return m.group(1) if m else default
+
+        # ── Grade: try "event_grade: X", then "grade: X" ──
         grade = "D"
         m = re.search(r'event.grade[:\s]*["\']?([A-Ea-e])', content)
         if m:
             grade = m.group(1).upper()
+        else:
+            m = re.search(r'\bgrade[:\s]*["\']?([A-Ea-e])\b', content, re.IGNORECASE)
+            if m:
+                grade = m.group(1).upper()
+
+        # ── Quadrant: try direct extraction, then keyword heuristic ──
+        quadrant = "observe_skip"
+        m = re.search(r'(?:matrix_)?quadrant[:\s]*["\']?([a-z_]+\s*(?:\w+\s*)*)', content, re.IGNORECASE)
+        if m:
+            raw_q = m.group(1).strip().lower().replace(" ", "_")
+            # Normalize: LLM may output "core opportunity" (with space)
+            if "core" in raw_q and "opportunity" in raw_q:
+                quadrant = "core_opportunity"
+            elif "trend" in raw_q and "opportunity" in raw_q:
+                quadrant = "trend_opportunity"
+            elif "arbitrage" in raw_q:
+                quadrant = "arbitrage"
+            elif "observe" in raw_q or "skip" in raw_q:
+                quadrant = "observe_skip"
+        if quadrant == "observe_skip":
+            # Heuristic fallback from keyword intensity
+            has_surprise = bool(re.search(r'surprise|shock|unexpected|breaking|crash|surge', content, re.IGNORECASE))
+            has_big = bool(re.search(r'broad|systemic|global|sector.wide|contagion|spillover', content, re.IGNORECASE))
+            if has_surprise and has_big:
+                quadrant = "core_opportunity"
+            elif not has_surprise and has_big:
+                quadrant = "trend_opportunity"
+            elif has_surprise and not has_big:
+                quadrant = "arbitrage"
+
+        # ── Direction ──
         direction = "neutral"
-        if re.search(r'bullish|看多|做多|long', content):
+        if re.search(r'bullish|看多|做多|long\b', content):
             direction = "bullish"
-        elif re.search(r'bearish|看空|做空|short', content):
+        elif re.search(r'bearish|看空|做空|short\b', content):
             direction = "bearish"
+
+        # ── Surprise level ──
+        surprise_level = _re_field(r'surprise_level[:\s]*["\']?(high|low)', content, "low")
+
+        # ── Market size ──
+        market_size = _re_field(r'market_size[:\s]*["\']?(big|small)', content, "small")
+
+        # ── Numeric fields from free-form text ──
+        price_in_score = _safe_float(
+            _re_field(r'price_in_score[:\s]*([-]?\d+\.?\d*)', content), 0.5
+        )
+        sentiment_intensity = _safe_float(
+            _re_field(r'sentiment_intensity[:\s]*([-]?\d+\.?\d*)', content), 0.0
+        )
+        cascade_rank_raw = _re_field(r'cascade_rank[:\s]*(\d+)', content)
+        cascade_rank = int(cascade_rank_raw) if cascade_rank_raw is not None else 1
+
+        # ── Cascade hub ──
+        cascade_hub_raw = _re_field(r'cascade_hub[:\s]*(true|false|yes|no)', content)
+        cascade_hub = cascade_hub_raw.lower() in ("true", "yes") if cascade_hub_raw else False
+
+        # ── Sentiment vs attention ──
+        sentiment_vs_attention = _re_field(
+            r'sentiment_vs_attention[:\s]*["\']?(high_sentiment|high_attention|both|neither)',
+            content, "neither"
+        )
+
         data = {
-            "event_grade": grade, "matrix_quadrant": quadrant,
+            "event_grade": grade,
+            "surprise_level": surprise_level,
+            "market_size": market_size,
+            "matrix_quadrant": quadrant,
+            "price_in_score": price_in_score,
+            "cascade_rank": cascade_rank,
+            "cascade_hub": cascade_hub,
             "sentiment_direction": direction,
+            "sentiment_intensity": sentiment_intensity,
+            "sentiment_vs_attention": sentiment_vs_attention,
             "raw_analysis": content,
         }
     # Always preserve raw analysis text
@@ -188,7 +250,7 @@ def _parse_layer1_response(content: str) -> Layer1Result:
         market_size=data.get("market_size", "small"),
         matrix_quadrant=data.get("matrix_quadrant", "observe_skip"),
         price_in_score=_safe_float(data.get("price_in_score"), 0.5),
-        cascade_rank=int(data.get("cascade_rank", 1)),
+        cascade_rank=int(_safe_float(data.get("cascade_rank"), 1)),
         cascade_hub=bool(data.get("cascade_hub", False)),
         sentiment_direction=data.get("sentiment_direction", "neutral"),
         sentiment_intensity=_safe_float(data.get("sentiment_intensity"), 0.0),

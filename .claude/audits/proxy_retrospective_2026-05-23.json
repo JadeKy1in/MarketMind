@@ -1,0 +1,106 @@
+{
+  "audit_id": "audit-2026-05-23-111926",
+  "audit_date": "2026-05-23T11:19:26Z",
+  "scope": "last 7 day(s)",
+  "decisions_in_scope": 7,
+  "decisions_reviewed": 5,
+  "sampling_note": "Auto-executed: 3 total, 1 sampled (10% spot-check). Council/Advisor: 4 total, 4 reviewed (100%).",
+  "findings": [
+    {
+      "decision_id": "proxy-2026-05-23-002",
+      "passes": false,
+      "criteria_results": {
+        "outcome_matches_intent": true,
+        "reasonable_developer_agree": true,
+        "created_technical_debt": false,
+        "confidence_justified": true
+      },
+      "auditor_notes": "[created_technical_debt] Extraction without corresponding test — untested abstraction is technical debt.",
+      "severity": "minor",
+      "decision_summary": "Extract parser function from 120-line method",
+      "confidence_raw": 0.78,
+      "confidence_calibrated": 0.76,
+      "consequence": "cosmetic",
+      "decision_type": "code_style"
+    },
+    {
+      "decision_id": "proxy-2026-05-23-003",
+      "passes": false,
+      "criteria_results": {
+        "outcome_matches_intent": true,
+        "reasonable_developer_agree": false,
+        "created_technical_debt": true,
+        "confidence_justified": true
+      },
+      "auditor_notes": "[reasonable_developer_agree] Architecture decision with short rationale (50 chars) — lacks context for developer buy-in.",
+      "severity": "minor",
+      "decision_summary": "Split gate1 into interaction + display modules",
+      "confidence_raw": 0.85,
+      "confidence_calibrated": 0.82,
+      "consequence": "moderate",
+      "decision_type": "architecture"
+    },
+    {
+      "decision_id": "proxy-2026-05-23-004",
+      "passes": true,
+      "criteria_results": {
+        "outcome_matches_intent": true,
+        "reasonable_developer_agree": true,
+        "created_technical_debt": true,
+        "confidence_justified": true
+      },
+      "auditor_notes": "All criteria pass.",
+      "severity": "clean",
+      "decision_summary": "Pin httpx to >=0.27, <0.29",
+      "confidence_raw": 0.65,
+      "confidence_calibrated": 0.62,
+      "consequence": "significant",
+      "decision_type": "dependency"
+    },
+    {
+      "decision_id": "proxy-2026-05-23-005",
+      "passes": false,
+      "criteria_results": {
+        "outcome_matches_intent": true,
+        "reasonable_developer_agree": false,
+        "created_technical_debt": true,
+        "confidence_justified": true
+      },
+      "auditor_notes": "[reasonable_developer_agree] Critical decision with only one-line rationale — insufficient justification.",
+      "severity": "minor",
+      "decision_summary": "Move API key to environment variable",
+      "confidence_raw": 0.48,
+      "confidence_calibrated": 0.45,
+      "consequence": "critical",
+      "decision_type": "security"
+    },
+    {
+      "decision_id": "proxy-2026-05-23-007",
+      "passes": false,
+      "criteria_results": {
+        "outcome_matches_intent": true,
+        "reasonable_developer_agree": false,
+        "created_technical_debt": true,
+        "confidence_justified": false
+      },
+      "auditor_notes": "[reasonable_developer_agree] Developer overrode this decision: Name too long; use 'LiqRatShadow' instead | [confidence_justified] Confidence 0.85 on an overridden decision — overconfidence in action.",
+      "severity": "warning",
+      "decision_summary": "Rename shadow 'LiquidityRat' to 'LiquidityRatProxy'",
+      "confidence_raw": 0.88,
+      "confidence_calibrated": 0.85,
+      "consequence": "cosmetic",
+      "decision_type": "naming"
+    }
+  ],
+  "summary": {
+    "passed": 1,
+    "flagged": 4,
+    "by_severity": {
+      "clean": 1,
+      "minor": 3,
+      "warning": 1,
+      "critical": 0
+    }
+  },
+  "auditor_persona_note": "Skeptical, outcome-focused auditor. High confidence scores do not constitute evidence. Review flagged findings and confirm or dismiss."
+}

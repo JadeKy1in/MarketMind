@@ -101,7 +101,7 @@ class BroadcastWriter:
             try:
                 tmp_path.unlink(missing_ok=True)
             except Exception:
-                pass
+                logger.warning("broadcast temp file cleanup failed", exc_info=True)
             return None
 
     def write_chat_history(self, user_ideas: list[str], ai_responses: list[str],

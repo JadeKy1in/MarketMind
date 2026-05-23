@@ -1,9 +1,13 @@
 """FastAPI route definitions — thin handlers, all logic in data_providers."""
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 from pathlib import Path
+
+logger = logging.getLogger("marketmind.api.routes")
 
 from marketmind.api.data_providers import (
     add_log_entry,
@@ -24,9 +28,19 @@ app.websocket("/ws")(ws_endpoint)
 DASHBOARD_PATH = Path(__file__).parent.parent / "dashboard.html"
 
 
+_CACHE_PREVENT_HEADERS = {
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
-    return DASHBOARD_PATH.read_text(encoding="utf-8")
+    content = DASHBOARD_PATH.read_text(encoding="utf-8")
+    headers = dict(_CACHE_PREVENT_HEADERS)
+    headers["ETag"] = f'"{int(DASHBOARD_PATH.stat().st_mtime)}"'
+    return HTMLResponse(content=content, headers=headers)
 
 
 @app.get("/api/portfolio")
@@ -34,6 +48,7 @@ async def portfolio():
     try:
         return JSONResponse(get_portfolio())
     except Exception:
+        logger.warning("portfolio endpoint failed", exc_info=True)
         return JSONResponse({"positions": [], "total_value": 0, "cash_pct": 100, "patrol_status": "db_unavailable"})
 
 
@@ -42,6 +57,7 @@ async def cost():
     try:
         return JSONResponse(get_cost())
     except Exception:
+        logger.warning("cost endpoint failed", exc_info=True)
         return JSONResponse({"status": "error"})
 
 
@@ -55,6 +71,7 @@ async def shadow_overview():
     try:
         return JSONResponse(get_shadow_overview())
     except Exception:
+        logger.warning("shadow_overview endpoint failed", exc_info=True)
         return JSONResponse({"tiers": {}, "total": 0, "graduates": 0})
 
 
@@ -63,6 +80,7 @@ async def shadow_rankings():
     try:
         return JSONResponse(get_shadow_rankings())
     except Exception:
+        logger.warning("shadow_rankings endpoint failed", exc_info=True)
         return JSONResponse({"top5": []})
 
 
@@ -81,6 +99,7 @@ async def decision_history():
     try:
         return JSONResponse(get_decision_history())
     except Exception:
+        logger.warning("decision_history endpoint failed", exc_info=True)
         return JSONResponse({"decisions": []})
 
 

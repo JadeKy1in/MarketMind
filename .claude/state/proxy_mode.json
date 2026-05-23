@@ -1,0 +1,7 @@
+{
+  "mode": "advisor",
+  "changed_at": "2026-05-23T00:00:00Z",
+  "changed_by": "session_start",
+  "delegate_confidence_floor": 0.50,
+  "auto_notify_threshold": 0.85
+}

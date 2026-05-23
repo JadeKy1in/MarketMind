@@ -1,0 +1,1 @@
+{"_schema_version": "1.0", "_initialized": "2026-05-23T00:00:00Z", "_description": "User Proxy Agent decisions log — append-only, each line is a valid JSON object. Schema version header must be the first line. Do not edit lines in place; append correction entries for modifications."}

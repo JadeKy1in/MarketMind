@@ -103,7 +103,7 @@ class AELEvolutionEngine:
                 if len(self._active_lessons[sid]) < self.MAX_ACTIVE_LESSONS:
                     self._active_lessons[sid].append(lesson)
         except Exception:
-            pass
+            logger.warning("failed to load persisted AEL lessons from DB", exc_info=True)
         finally:
             if conn:
                 conn.close()
@@ -285,7 +285,7 @@ class AELEvolutionEngine:
                         reason=f"AEL lesson: {lesson[:100]}"
                     )
                 except Exception:
-                    pass
+                    logger.warning("failed to persist AEL lesson for %s", shadow_id, exc_info=True)
             return True
 
         # Cap reached: reject silently (no head-to-head test infrastructure yet)

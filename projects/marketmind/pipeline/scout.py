@@ -1,17 +1,12 @@
 """Multi-source news collection with 3-tier degradation strategy."""
 from __future__ import annotations
+
 import hashlib
 import logging
-
-logger = logging.getLogger("marketmind.pipeline.scout")
-import time
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from typing import Any
-
-import json
-import os
-import re
 
 import feedparser
 import httpx
@@ -32,6 +27,16 @@ from marketmind.pipeline.scout_content import (
 # ── Monitoring report extracted to pipeline/scout_report.py ─────────────
 from marketmind.pipeline.scout_report import record_z0_metrics, print_scout_report
 
+logger = logging.getLogger("marketmind.pipeline.scout")
+
+# ── Default field values (extracted as named constants) ─────────────────────
+DEFAULT_SOURCE_RELIABILITY = 0.5
+DEFAULT_SALIENCE_MULTIPLIER = 1.0
+DEFAULT_PRIORITY_SCORE = 0.0
+
+# ── Dedup threshold ─────────────────────────────────────────────────────────
+TITLE_SIMILARITY_THRESHOLD = 0.80
+
 
 @dataclass
 class NewsItem:
@@ -46,9 +51,9 @@ class NewsItem:
     fetched_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     # Z1: content-aware fields for priority rebalance + two-layer dedup
     content_hash: str | None = None
-    source_reliability: float = 0.5
-    salience_multiplier: float = 1.0
-    priority_score: float = 0.0
+    source_reliability: float = DEFAULT_SOURCE_RELIABILITY
+    salience_multiplier: float = DEFAULT_SALIENCE_MULTIPLIER
+    priority_score: float = DEFAULT_PRIORITY_SCORE
     # Social media routing: content_type distinguishes news from social for Flash bypass
     content_type: str = "news_article"  # "news_article" | "social_mention" | "sec_filing"
 
@@ -63,7 +68,7 @@ class NewsItem:
         try:
             reliability = float(source.reliability)
         except (TypeError, ValueError):
-            reliability = 0.5
+            reliability = DEFAULT_SOURCE_RELIABILITY
         return cls(
             id=item_id,
             title=title,
@@ -182,7 +187,7 @@ async def _fetch_api_source(source: Source, config: MarketMindConfig) -> list[Ne
             try:
                 reliability = float(source.reliability)
             except (TypeError, ValueError):
-                reliability = 0.5
+                reliability = DEFAULT_SOURCE_RELIABILITY
             items.append(NewsItem(
                 id=item_id, title=title, url=link,
                 source_name=source.name, source_tier=int(source.tier),
@@ -372,7 +377,7 @@ async def fetch_all_sources(config: MarketMindConfig, use_cross_run_cache: bool 
             if item.content_hash is None:
                 item.content_hash = compute_content_hash(item.title, item.summary)
         except Exception:
-            pass
+            logger.warning("content_hash computation failed for item", exc_info=True)
 
     deduped = deduplicate(all_items, content_hash_cache)
 
@@ -390,7 +395,7 @@ async def fetch_all_sources(config: MarketMindConfig, use_cross_run_cache: bool 
         try:
             item.salience_multiplier = compute_salience_multiplier(item.title, item.summary)
         except Exception:
-            pass
+            logger.warning("salience_multiplier computation failed for item", exc_info=True)
 
     # Phase G Layer 4: Insider cluster detection multiplies salience by 1.5x for cluster items
     detect_insider_clusters(deduped)
@@ -401,28 +406,28 @@ async def fetch_all_sources(config: MarketMindConfig, use_cross_run_cache: bool 
         try:
             item.priority_score = compute_priority(item, now_utc)
         except Exception:
-            pass
+            logger.warning("priority_score computation failed for item", exc_info=True)
         # Update cache with surviving item (only if cross-run cache is active)
         if use_cross_run_cache and content_hash_cache is not None:
             try:
                 if item.content_hash:
                     content_hash_cache[item.content_hash] = now_utc.isoformat()
             except Exception:
-                pass
+                logger.warning("content_hash cache update failed", exc_info=True)
 
     # Sort by priority_score descending (preserved invariant I13: only output sort changes,
     # deduplicate() internal tier-sort is unchanged)
     try:
         deduped.sort(key=lambda x: getattr(x, "priority_score", 0.0), reverse=True)
     except Exception:
-        pass
+        logger.warning("deduplicated items sort failed", exc_info=True)
 
     # Z1: Persist updated cache (pruned of >72h entries) — only if cross-run cache is active
     if use_cross_run_cache and content_hash_cache is not None:
         try:
             save_content_hash_cache(_CACHE_PATH, content_hash_cache)
         except Exception:
-            pass
+            logger.warning("content_hash cache save failed", exc_info=True)
 
     return deduped
 
@@ -441,7 +446,7 @@ def deduplicate(items: list[NewsItem], content_hash_cache: dict | None = None) -
             continue
         is_dup = False
         for existing in result:
-            if _title_similarity(item.title, existing.title) > 0.80:
+            if _title_similarity(item.title, existing.title) > TITLE_SIMILARITY_THRESHOLD:
                 is_dup = True
                 break
         # Z1: Cross-run dedup via content_hash cache
@@ -454,7 +459,7 @@ def deduplicate(items: list[NewsItem], content_hash_cache: dict | None = None) -
                 if ch and ch in content_hash_cache:
                     is_dup = True
             except Exception:
-                pass  # Hash failure → don't dedup (conservative)
+                logger.warning("content_hash dedup check failed", exc_info=True)  # Hash failure → don't dedup (conservative)
         if not is_dup:
             seen_urls.add(item.url)
             result.append(item)

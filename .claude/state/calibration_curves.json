@@ -1,0 +1,8 @@
+{
+  "schema_version": "1.0",
+  "curves": {},
+  "decision_counts": {},
+  "warmup": true,
+  "warmup_decisions_remaining": 49,
+  "max_confidence_during_warmup": 0.7
+}
