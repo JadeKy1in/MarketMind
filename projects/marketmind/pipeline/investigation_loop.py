@@ -213,7 +213,7 @@ async def _pre_act_planning(
             system_prompt=system,
             user_prompt=user_prompt,
             temperature=0.4,
-            max_tokens=4096,
+            max_tokens=16384,
         )
         if pro_calls_counter is not None:
             pro_calls_counter[0] += 1

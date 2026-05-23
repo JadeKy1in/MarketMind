@@ -267,7 +267,7 @@ async def generate_decision(
             system_prompt=dynamic_prompt,
             user_prompt=user_prompt,
             temperature=0.2,
-            max_tokens=4096,
+            max_tokens=16384,
         )
         decision = _parse_decision_response(result["content"])
         decision.contrarian_challenges = await generate_contrarian_challenges(decision)

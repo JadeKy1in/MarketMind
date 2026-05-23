@@ -237,7 +237,7 @@ async def run_l1_interactive(
                 system_prompt=mining_prompt + date_context,
                 user_prompt=f"Search results:\n{search_results}\n\nOriginal hypothesis: {defang_text(user_text)}\n\nAnalyze:",
                 temperature=0.3,
-                max_tokens=4096,
+                max_tokens=16384,
             ) if not mock else {"content": MOCK_MINING_RESPONSE}
             ai_response = analysis.get("content", "Analysis unavailable.")
             if response_looks_truncated(ai_response):
@@ -269,7 +269,7 @@ async def run_l1_interactive(
                 system_prompt=L1_DISCUSSION_PROMPT + date_context,
                 user_prompt=discussion_prompt,
                 temperature=0.3,
-                max_tokens=4096,
+                max_tokens=16384,
             ) if not mock else {"content": MOCK_DISCUSSION_RESPONSE}
             ai_response = ai_response_result.get("content", "")
             ai_response = strip_meta_commentary(ai_response)
@@ -308,7 +308,7 @@ async def run_l1_interactive(
                     system_prompt=L1_DISCUSSION_PROMPT + date_context,
                     user_prompt=second_prompt,
                     temperature=0.3,
-                    max_tokens=4096,
+                    max_tokens=16384,
                 ) if not mock else {"content": MOCK_DISCUSSION_RESPONSE}
                 ai_response = ai_response_result.get("content", "")
                 ai_response = strip_meta_commentary(ai_response)

@@ -145,7 +145,7 @@ async def analyze_layer2(l1: Layer1Result, market_context: dict | None = None,
             system_prompt=LAYER2_SYSTEM_PROMPT + date_note,
             user_prompt=user_prompt,
             temperature=0.3,
-            max_tokens=4096,
+            max_tokens=16384,
         )
         return _parse_layer2_response(result["content"])
     except Exception as e:

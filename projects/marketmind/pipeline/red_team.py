@@ -79,7 +79,7 @@ Find every legitimate objection. At least 1 critical-level challenge is expected
             system_prompt=RED_TEAM_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             temperature=0.5,  # slightly higher for adversarial creativity
-            max_tokens=4096,
+            max_tokens=16384,
         )
         return _parse_red_team_response(result["content"])
     except Exception as e:
