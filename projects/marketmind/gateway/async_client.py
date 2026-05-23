@@ -35,6 +35,51 @@ class RateLimitError(Exception):
         super().__init__(f"Rate limited. Retry after {retry_after}s")
 
 
+def _extract_json_from_reasoning(text: str) -> str:
+    """Extract the likely JSON output from the end of a reasoning chain.
+
+    When DeepSeek thinking is enabled, the final structured answer sometimes
+    appears at the tail of reasoning_content rather than in a separate content
+    field. This extracts it without losing the thinking quality.
+    """
+    import json as _json
+    # Try to find JSON after the last markdown code fence
+    last_fence = text.rfind("```json")
+    if last_fence != -1:
+        after = text[last_fence + 7:]
+        end_fence = after.find("```")
+        if end_fence != -1:
+            candidate = after[:end_fence].strip()
+            try:
+                _json.loads(candidate)
+                return candidate
+            except (_json.JSONDecodeError, ValueError):
+                pass
+    # Try last balanced {...} block
+    last_open = text.rfind("{")
+    if last_open != -1:
+        candidate = text[last_open:]
+        try:
+            _json.loads(candidate)
+            return candidate
+        except (_json.JSONDecodeError, ValueError):
+            # Try to find the balanced closing brace
+            depth = 0
+            for i, ch in enumerate(candidate):
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        candidate = candidate[:i + 1]
+                        try:
+                            _json.loads(candidate)
+                            return candidate
+                        except (_json.JSONDecodeError, ValueError):
+                            break
+    return ""
+
+
 class DeepSeekGateway:
     def __init__(
         self,
@@ -91,6 +136,7 @@ class DeepSeekGateway:
         temperature: float,
         max_tokens: int,
         reasoning_effort: str = "max",
+        response_format: dict | None = None,
     ) -> dict[str, Any]:
         payload = {
             "model": model,
@@ -108,6 +154,8 @@ class DeepSeekGateway:
             payload["reasoning_effort"] = reasoning_effort
         if "pro" in model.lower() and reasoning_effort:
             payload["thinking"] = {"type": "enabled"}
+        if response_format:
+            payload["response_format"] = response_format
         headers = {"Authorization": f"Bearer {self.key_rotator.current()}"}
 
         t0 = time.perf_counter()
@@ -134,13 +182,21 @@ class DeepSeekGateway:
         data = resp.json()
         msg = data["choices"][0]["message"]
         # DeepSeek V4 Pro with thinking=enabled may put output in reasoning_content
-        # and leave content empty/None. Fall back to reasoning_content when content is absent.
+        # and leave content empty/None.
         reasoning_content = msg.get("reasoning_content", "") or ""
         raw_content = msg.get("content") or ""
+        # When content is empty but reasoning exists, try to extract the final
+        # structured output from the end of the reasoning chain. Never use raw
+        # reasoning as the final answer — it's chain-of-thought, not output.
         if not raw_content.strip() and reasoning_content.strip():
-            raw_content = reasoning_content
-            logger.debug("DeepSeek: content empty, fell back to reasoning_content (%d chars)",
-                        len(reasoning_content))
+            extracted = _extract_json_from_reasoning(reasoning_content)
+            if extracted:
+                raw_content = extracted
+                logger.debug("DeepSeek: extracted JSON from reasoning_content tail (%d chars)",
+                            len(raw_content))
+            else:
+                logger.warning("DeepSeek: content empty, reasoning_content=%d chars — no JSON found",
+                            len(reasoning_content))
         elif reasoning_content.strip():
             logger.debug("DeepSeek reasoning_content received: %d chars (effort=%s)",
                         len(reasoning_content), reasoning_effort)
