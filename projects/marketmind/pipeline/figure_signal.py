@@ -11,6 +11,7 @@ Design spec: market-figure-intelligence-module.md §8
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -266,6 +267,13 @@ class FigureSignalExtractor:
                     timestamp=timestamp,
                 )
                 signals.append(signal)
+
+                # Fire-and-forget WebSocket broadcast (follows add_log_entry pattern)
+                try:
+                    from marketmind.api.websocket import broadcast_person_signal
+                    asyncio.create_task(broadcast_person_signal(signal))
+                except Exception:
+                    pass  # Graceful degradation — signal storage is primary
 
         return signals
 

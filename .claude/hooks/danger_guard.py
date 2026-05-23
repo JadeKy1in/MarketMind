@@ -14,7 +14,9 @@ Uses fast string matching — no file I/O in hot path.
 """
 
 import json
+import os
 import sys
+from pathlib import Path
 
 # Fast substring matches — no regex for speed
 FORBIDDEN_PATTERNS = [
@@ -92,8 +94,69 @@ def check_forbidden(command):
     return None
 
 
+def _get_task_file_paths():
+    """Return list of (label, path) tuples to check for current_task.json.
+
+    Checks three locations to handle the CWD ambiguity:
+      1. Relative to CWD (backward compatible — could be workspace or project)
+      2. Workspace-level: derived from this hook file's own location
+      3. Project-level: projects/marketmind/.claude/state/current_task.json
+         (explicit, so both locations are checked even when CWD == workspace root)
+    """
+    paths = []
+
+    # 1. Relative to CWD (backward compatible)
+    cwd_path = os.path.join(os.getcwd(), ".claude", "state", "current_task.json")
+    paths.append(("cwd", cwd_path))
+
+    # 2. Workspace-level (derived from hook location)
+    # This file: E:/AI_Studio_Workspace/.claude/hooks/danger_guard.py
+    # parent.parent.parent -> workspace root
+    workspace_root = Path(__file__).resolve().parent.parent.parent
+    workspace_path = str(workspace_root / ".claude" / "state" / "current_task.json")
+    paths.append(("workspace", workspace_path))
+
+    # 3. Project-level (explicit, covers the case where CWD == workspace root
+    #    but a separate project-level file exists)
+    project_path = str(workspace_root / "projects" / "marketmind" / ".claude" / "state" / "current_task.json")
+    paths.append(("project", project_path))
+
+    return paths
+
+
+def _load_task_file(path):
+    """Load and validate a current_task.json. Returns dict or None."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            task = json.loads(f.read())
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    task_type = task.get("type", "")
+    task_files = task.get("files", [])
+    if not task_type or not task_files:
+        return None
+    return task
+
+
+def _is_file_covered(task, file_path_norm):
+    """Check if a task declaration covers the given file."""
+    task_files = task.get("files", [])
+    file_basename = file_path_norm.split("/")[-1]
+    return any(file_basename in tf or tf in file_path_norm for tf in task_files)
+
+
 def check_task_declaration(file_path):
     """Verify current_task.json exists and is fresh before code changes.
+
+    Checks THREE locations to handle the CWD ambiguity:
+      1. .claude/state/current_task.json relative to CWD (backward compat)
+      2. Workspace-level (derived from this hook file's location via __file__)
+      3. Project-level (projects/marketmind/.claude/state/current_task.json)
+
+    If ANY location has a valid declaration covering the target file,
+    the check passes. Each location is independent — no sync is performed
+    (they may serve different scopes/tasks).
+
     Returns (ok, error_msg). ok=True means proceed, ok=False means block.
     """
     if not file_path or not file_path.endswith(".py"):
@@ -103,28 +166,27 @@ def check_task_declaration(file_path):
     if "/tests/" in fp_norm or "/.claude/" in fp_norm:
         return True, ""
 
-    task_file = ".claude/state/current_task.json"
-    try:
-        with open(task_file, "r") as f:
-            task = json.loads(f.read())
-    except (OSError, json.JSONDecodeError):
-        return False, f"current_task.json missing or invalid — declare task before editing {file_path}"
+    paths = _get_task_file_paths()
 
-    task_type = task.get("type", "")
-    task_files = task.get("files", [])
-    if not task_type or not task_files:
-        return False, f"current_task.json incomplete (need type + files) — update before editing {file_path}"
+    # Try each path; allow if ANY covers the target
+    seen_paths = set()
+    for label, task_path in paths:
+        if task_path in seen_paths:
+            continue
+        seen_paths.add(task_path)
+        task = _load_task_file(task_path)
+        if task is None:
+            continue
+        if _is_file_covered(task, fp_norm):
+            return True, ""
 
-    # Check if the edited file is covered by the task declaration
+    # Neither location had a valid covering declaration
+    tried = " or ".join(p for _, p in paths)
     file_basename = fp_norm.split("/")[-1]
-    covered = any(file_basename in tf or tf in fp_norm for tf in task_files)
-    if not covered:
-        return False, (
-            f"File '{file_basename}' not in current_task.json files list. "
-            f"Update task declaration before editing."
-        )
-
-    return True, ""
+    return False, (
+        f"File '{file_basename}' not covered by current_task.json at any location ({tried}). "
+        f"Update task declaration before editing."
+    )
 
 
 def main():
