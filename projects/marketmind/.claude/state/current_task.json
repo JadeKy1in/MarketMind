@@ -1,1 +1,1 @@
-{"type": "architect", "files": ["shadows/psr_math.py", "tests/test_shadows/test_psr_math.py", ".claude/state/current_task.json", "CLAUDE.md", "README.md"], "risk": "low", "description": "2026-05-23 EOD: CI floating-point fix, bilingual README, workspace CLAUDE.md rewrite, proxy audit"}
+{"type": "enhance", "files": ["gateway/async_client.py", "pipeline/layer1_narrative.py", ".claude/state/current_task.json"], "risk": "low", "description": "Fix LLM JSON reliability: chat_pro_json with disabled thinking + JSON mode + retry"}
