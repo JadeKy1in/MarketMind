@@ -12,7 +12,8 @@ from pathlib import Path
 import pytest
 
 # Ensure the hooks directory is in the import path
-HOOKS_DIR = Path(__file__).resolve().parent.parent / ".claude" / "hooks"
+# Go up 4 levels: tests/ -> marketmind/ -> projects/ -> workspace-root/ -> .claude/hooks
+HOOKS_DIR = Path(__file__).resolve().parent.parent.parent.parent / ".claude" / "hooks"
 if str(HOOKS_DIR) not in sys.path:
     sys.path.insert(0, str(HOOKS_DIR))
 

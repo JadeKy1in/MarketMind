@@ -13,7 +13,8 @@ from pathlib import Path
 import pytest
 
 # Add the hooks directory to path so we can import the hook module
-HOOKS_DIR = Path(__file__).resolve().parent.parent / ".claude" / "hooks"
+# Go up 4 levels: tests/ -> marketmind/ -> projects/ -> workspace-root/ -> .claude/hooks
+HOOKS_DIR = Path(__file__).resolve().parent.parent.parent.parent / ".claude" / "hooks"
 sys.path.insert(0, str(HOOKS_DIR))
 
 import time_anchor  # noqa: E402
