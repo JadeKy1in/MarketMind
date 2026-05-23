@@ -40,7 +40,7 @@
 
   "confidence_system": {
     "calibration": {
-      "module": ".claude/hooks/confidence_calibrator.py",
+      "module": ".claude/tools/confidence_calibrator.py",
       "mechanism": "Platt scaling per decision_type via sklearn LogisticRegression",
       "warmup_period": "First 50 decisions (global): clamp max confidence to 0.70",
       "recalibration_trigger": "Every 50 decisions OR Brier score drift > 0.05",

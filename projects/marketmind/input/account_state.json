@@ -1,0 +1,12 @@
+{
+  "account": {
+    "cash_balance": 100000.00,
+    "currency": "USD",
+    "margin_enabled": false,
+    "day_trades_remaining": 3
+  },
+  "positions": [],
+  "watchlist": [],
+  "last_updated": null,
+  "_note": "Design constraint: Account state from input/account_state.json -- no brokerage API. Edit positions/cash manually."
+}

@@ -30,7 +30,7 @@ def log(msg):
     sys.stderr.flush()
 
 
-WORKSPACE = Path("E:/AI_Studio_Workspace")
+WORKSPACE = Path(__file__).resolve().parent.parent
 STATE_DIR = WORKSPACE / ".claude" / "state"
 AUDITS_DIR = WORKSPACE / ".claude" / "audits"
 TASK_FILE = STATE_DIR / "current_task.json"

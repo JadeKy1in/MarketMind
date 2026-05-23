@@ -82,7 +82,6 @@ class NewsItem:
 
 
 def _strip_html(text: str) -> str:
-    import re
     return re.sub(r"<[^>]+>", "", text).strip()
 
 
@@ -135,10 +134,7 @@ async def _fetch_sec_edgar() -> list[NewsItem]:
         logger.warning("SEC EDGAR API fetch failed: %s", e)
     return items
 
-
-
-# ── Phase G Layer 4: Insider sources ─────────────────────────────────────────
-# Extracted to pipeline/insider_sources.py for modular architecture compliance.
+# ── Phase G Layer 4: Insider sources → pipeline/insider_sources.py
 from marketmind.pipeline.insider_sources import (
     fetch_congress_trades,
     fetch_form4_insider,
@@ -146,8 +142,7 @@ from marketmind.pipeline.insider_sources import (
     detect_insider_clusters,
 )
 
-# ── Social media sources ────────────────────────────────────────────────────
-# Extracted to pipeline/social_sources.py for modular architecture compliance.
+# ── Social media sources → pipeline/social_sources.py
 from marketmind.pipeline.social_sources import fetch_apewisdom, fetch_bluesky_posts
 
 async def _fetch_api_source(source: Source, config: MarketMindConfig) -> list[NewsItem]:
