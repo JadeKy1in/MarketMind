@@ -31,7 +31,8 @@ class MissedPathAgent(ShadowAgent):
         super().__init__(config, state_db, settings)
 
     async def _analyze(self, news_items: list,
-                        market_data: dict) -> ShadowAnalysisOutput:
+                        market_data: dict,
+                        broadcast_messages: list | None = None) -> ShadowAnalysisOutput:
         """Missed path only records, never votes."""
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         return ShadowAnalysisOutput(

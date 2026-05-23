@@ -119,12 +119,12 @@ def test_all_16_configs_valid_domains():
     domains = {c.domain for c in EXPERT_SHADOW_CONFIGS}
     expected = {"gold", "crypto", "energy", "bonds", "volatility", "emerging",
                 "tech", "financials", "healthcare", "consumer", "industrials",
-                "metals", "real_estate", "fx", "macro", "agriculture"}
+                "metals", "real_estate", "fx", "macro", "short"}
     assert domains == expected
 
 
 def test_factory_creates_16_shadows(temp_shadow_db):
-    """Factory creates 16 expert shadows without errors."""
+    """Factory creates 16 shadows without errors."""
     settings = ShadowSettings()
     shadows = create_expert_shadows(temp_shadow_db, settings)
     assert len(shadows) == 16

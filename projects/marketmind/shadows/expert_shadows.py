@@ -1,8 +1,4 @@
-﻿"""Expert shadows — 16 domain-specific analysts with structured vote output + factory.
-
-Each expert uses indicator confirmation thresholds from the canonical design.
-See .claude/research/shadow-ecosystem-full-design.md §1.1 for the source of truth.
-"""
+﻿"""Expert shadows — domain-specific methodologies, structured vote output, factory."""
 from __future__ import annotations
 
 import json
@@ -10,7 +6,7 @@ import logging
 from datetime import datetime, timezone
 
 from marketmind.shadows.shadow_agent import (
-    ShadowAgent, ShadowAnalysisOutput, ShadowVote
+    ShadowAgent, ShadowAnalysisOutput, ShadowVote, defang_text
 )
 from marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
 from marketmind.config.settings import ShadowSettings
@@ -63,10 +59,6 @@ class ExpertShadow(ShadowAgent):
             "metals": ["steel", "copper", "iron", "LME", "mining", "DBB", "XME"],
             "real_estate": ["REIT", "real estate", "housing", "mortgage", "VNQ"],
             "fx": ["forex", "FX", "dollar", "euro", "yen", "carry", "UUP", "FXE"],
-            "agriculture": ["agriculture", "grain", "wheat", "corn", "soybean",
-                          "livestock", "fertilizer", "harvest", "DBA", "CORN",
-                          "WEAT", "SOYB", "USDA", "crop", "coffee", "sugar",
-                          "cotton", "cocoa", "农产品", "粮食", "农业"],
             "macro": [],  # Macro sees everything
         }
         keywords = domain_keywords.get(self.config.domain or "macro", [])
@@ -81,19 +73,21 @@ class ExpertShadow(ShadowAgent):
         return filtered[:20] if filtered else news_items[:5]
 
     async def _analyze(self, news_items: list[dict],
-                        market_data: dict) -> ShadowAnalysisOutput:
+                        market_data: dict,
+                        broadcast_messages: list | None = None) -> ShadowAnalysisOutput:
         """Domain-filtered analysis using the base LLM call."""
         filtered = self._filter_news_by_domain(news_items)
         return await super()._analyze(filtered, market_data)
 
-    def _build_user_prompt(self, news_items: list[dict], market_data: dict) -> str:
+    def _build_user_prompt(self, news_items: list[dict], market_data: dict,
+                           broadcast_messages: list | None = None) -> str:
         """Expert-specific prompt: domain context, structured vote expectations."""
         filtered = self._filter_news_by_domain(news_items)
         headlines = []
         for item in filtered[:20]:
             h = self._safe_headline(item)
             if h and h not in headlines:
-                headlines.append(h[:200])
+                headlines.append(defang_text(h[:200]))
         news_context = "\n".join(f"- {h}" for h in headlines[:15]) if headlines else "No domain-relevant news"
 
         return (
@@ -148,9 +142,6 @@ EXPERT_SHADOW_CONFIGS: list[ShadowConfig] = [
     ShadowConfig(shadow_id="expert:metals:steel_trader", shadow_type="expert",
                  display_name="Steel Trader", methodology_prompt=_EXPERT_PROMPTS["metals"],
                  virtual_capital=42000.0, domain="metals", temperature=0.35),
-    ShadowConfig(shadow_id="expert:agriculture:harvest_seer", shadow_type="expert",
-                 display_name="Harvest Seer", methodology_prompt=_EXPERT_PROMPTS["agriculture"],
-                 virtual_capital=42000.0, domain="agriculture", temperature=0.35),
     ShadowConfig(shadow_id="expert:realestate:reit_analyst", shadow_type="expert",
                  display_name="REIT Analyst", methodology_prompt=_EXPERT_PROMPTS["real_estate"],
                  virtual_capital=48000.0, domain="real_estate", temperature=0.3),
@@ -160,12 +151,29 @@ EXPERT_SHADOW_CONFIGS: list[ShadowConfig] = [
     ShadowConfig(shadow_id="expert:macro:cycle_reader", shadow_type="expert",
                  display_name="Cycle Reader", methodology_prompt=_EXPERT_PROMPTS["macro"],
                  virtual_capital=60000.0, domain="macro", temperature=0.3),
+    # Phase 5: Short Specialist — dedicated short-biased expert (Item 16)
+    ShadowConfig(shadow_id="expert:short:bear_tracker", shadow_type="expert",
+                 display_name="Bear Tracker",
+                 methodology_prompt=(
+                     "You are the Bear Tracker, a dedicated short-selling specialist. "
+                     "Your expertise: identifying overvalued assets, deteriorating "
+                     "fundamentals, accounting irregularities, peaked momentum, and "
+                     "crowded consensus ripe for reversal. You scan across ALL domains "
+                     "for short targets. Core skills: forensic financial analysis, "
+                     "short-interest tracking, put/call ratio interpretation, insider "
+                     "selling pattern detection, and technical breakdown confirmation. "
+                     "You are BIASED toward finding short opportunities. Your default "
+                     "vote direction is 'short'. Analyze: news → fundamentals → "
+                     "technicals → sentiment → insider activity. "
+                     "Output VOTE_START/VOTE_END blocks."
+                 ),
+                 virtual_capital=40000.0, domain="short", temperature=0.35),
 ]
 
 
 def create_expert_shadows(state_db: ShadowStateDB,
                            settings: ShadowSettings) -> list[ExpertShadow]:
-    """Instantiate all 16 expert shadows from configs."""
+    """Instantiate all 15 expert shadows from configs."""
     shadows = []
     for config in EXPERT_SHADOW_CONFIGS:
         # Register in DB if not exists

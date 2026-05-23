@@ -2,7 +2,7 @@
 
 These tests use HTTP cassette replay to exercise the real parsing pipeline
 (feedparser, JSON, NewsItem.from_entry, deduplication, priority scoring)
-against recorded responses from all configured sources.
+against recorded responses from all 28 sources.
 
 First run requires network access to record the cassette. Subsequent runs
 replay from the cassette with no network required.
@@ -30,22 +30,21 @@ from marketmind.config.source_authority import SourceStatus
 @pytest.mark.vcr
 @pytest.mark.asyncio
 async def test_fetch_all_sources_with_cassette(vcr_news):
-    """Full pipeline integration: fetch from all configured sources via VCR replay.
+    """Full pipeline integration: fetch from all 28 sources via VCR replay.
 
     Verifies the entire parse chain runs: HTTP response → feedparser/JSON →
     NewsItem.from_entry → deduplicate → priority scoring.
+
+    Uses use_cross_run_cache=False to avoid cross-run dedup interfering with
+    deterministic VCR cassette replay (same articles every run).
     """
     config = MarketMindConfig.from_env()
-    items = await fetch_all_sources(config)
+    items = await fetch_all_sources(config, use_cross_run_cache=False)
 
-    # Verify we got at least 1 article (proof the cassette replay + parsing pipeline works).
-    # The exact count depends on which sources are currently alive — many RSS endpoints
-    # return 404/403 or redirect, so a low threshold validates the pipeline without
-    # coupling to external source availability.
-    assert len(items) >= 1, (
-        f"Expected >=1 article from cassette replay, got {len(items)}. "
-        "Cassette may need refresh: delete tests/fixtures/vcr/news_daily.yml and re-run "
-        "with network access to re-record."
+    # With 28 sources, even partial success should yield 50+ articles
+    assert len(items) > 50, (
+        f"Expected >50 articles from 28 sources, got {len(items)}. "
+        "Cassette may need refresh: delete tests/fixtures/vcr/news_daily.yml and re-run."
     )
 
     # Verify the parsing pipeline ran: every item should be a proper NewsItem
@@ -54,6 +53,9 @@ async def test_fetch_all_sources_with_cassette(vcr_news):
         assert item.url, f"NewsItem missing URL: {item.title}"
         assert item.source_name, f"NewsItem missing source_name: {item.title}"
         assert len(item.id) == 16, f"NewsItem ID wrong length: {item.id}"
+        # Priority score should be computed (non-zero for non-empty items)
+        assert item.priority_score >= 0.0, f"priority_score negative: {item.title}"
+        assert item.salience_multiplier > 0.0, f"salience_multiplier invalid: {item.title}"
 
 
 @pytest.mark.vcr
@@ -64,12 +66,11 @@ async def test_fetch_all_sources_offline_requires_cassette(vcr_news_offline):
     Use this in CI to guarantee that news tests never make real HTTP calls.
     """
     config = MarketMindConfig.from_env()
-    items = await fetch_all_sources(config)
+    items = await fetch_all_sources(config, use_cross_run_cache=False)
 
-    assert len(items) >= 1, (
-        f"Expected >=1 article from cassette replay, got {len(items)}. "
-        "Cassette may need refresh: delete tests/fixtures/vcr/news_daily.yml and re-run "
-        "with network access to re-record."
+    assert len(items) > 50, (
+        f"Expected >50 articles from 28 sources, got {len(items)}. "
+        "Cassette may need refresh: delete tests/fixtures/vcr/news_daily.yml and re-run."
     )
 
     for item in items:
@@ -77,6 +78,7 @@ async def test_fetch_all_sources_offline_requires_cassette(vcr_news_offline):
         assert item.url
         assert item.source_name
         assert len(item.id) == 16
+        assert item.priority_score >= 0.0
 
 
 @pytest.mark.vcr
@@ -84,10 +86,13 @@ async def test_fetch_all_sources_offline_requires_cassette(vcr_news_offline):
 async def test_deduplicate_with_vcr_data(vcr_news):
     """Verify deduplication pipeline works on real data from cassette."""
     config = MarketMindConfig.from_env()
-    items = await fetch_all_sources(config)
+    items = await fetch_all_sources(config, use_cross_run_cache=False)
 
-    # Need at least 1 item to meaningfully test deduplication
-    assert len(items) >= 1, f"No items to deduplicate, cassette may need refresh"
+    # Must have retrieved articles from the cassette
+    assert len(items) > 50, (
+        f"Expected >50 articles from VCR cassette, got {len(items)}. "
+        "Cross-run content hash cache may have filtered all items."
+    )
 
     # Re-run deduplication explicitly to verify idempotency
     deduped_again = deduplicate(items)

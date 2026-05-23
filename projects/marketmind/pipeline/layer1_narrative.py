@@ -1,4 +1,4 @@
-﻿"""Layer 1: Narrative analysis — event grading, 2x2 matrix, price-in, cascade, sentiment."""
+"""Layer 1: Narrative analysis — event grading, 2x2 matrix, price-in, cascade, sentiment."""
 from __future__ import annotations
 import json
 import logging
@@ -8,8 +8,10 @@ from typing import Any
 logger = logging.getLogger("marketmind.pipeline.layer1")
 
 from marketmind.gateway.async_client import chat_pro
+from marketmind.gateway.response_parser import strip_markdown_fences
 from marketmind.pipeline.flash_preprocessor import FlashSignal
 from marketmind.pipeline.scout import NewsItem
+from marketmind.shadows.shadow_agent import defang_text
 
 
 @dataclass
@@ -29,6 +31,17 @@ class Layer1Result:
     key_characters: list[dict]     # [{"name": str, "capability": str, "will": str, "market_trust": str}]
     tail_risk_flags: list[str]     # triggered tail risk indicators
     raw_analysis: str = ""
+
+    @classmethod
+    def empty_default(cls) -> "Layer1Result":
+        """Return a default Layer1Result representing no-signal / error state."""
+        return cls(
+            event_grade="E", surprise_level="low", market_size="small",
+            matrix_quadrant="observe_skip", price_in_score=0.5, cascade_rank=1,
+            cascade_hub=False, sentiment_direction="neutral", sentiment_intensity=0.0,
+            sentiment_vs_attention="neither", expert_signals=[],
+            institutional_surprise="", key_characters=[], tail_risk_flags=[]
+        )
 
 
 LAYER1_SYSTEM_PROMPT = """You are a financial narrative analyst specializing in event-driven macro analysis.
@@ -65,13 +78,7 @@ IMPORTANT: All numeric values must cite a verifiable source or be marked EST:. N
 async def analyze_layer1(signals: list[FlashSignal], news_items: list[NewsItem]) -> Layer1Result:
     """Run Layer 1 narrative analysis on preprocessed signals."""
     if not signals:
-        return Layer1Result(
-            event_grade="E", surprise_level="low", market_size="small",
-            matrix_quadrant="observe_skip", price_in_score=0.5, cascade_rank=1,
-            cascade_hub=False, sentiment_direction="neutral", sentiment_intensity=0.0,
-            sentiment_vs_attention="neither", expert_signals=[],
-            institutional_surprise="", key_characters=[], tail_risk_flags=[]
-        )
+        return Layer1Result.empty_default()
     signal_text = _format_signals(signals, news_items)
     user_prompt = f"Analyze these market signals for narrative structure:\n\n{signal_text}"
     try:
@@ -85,92 +92,95 @@ async def analyze_layer1(signals: list[FlashSignal], news_items: list[NewsItem])
         return _parse_layer1_response(content)
     except Exception as e:
         logger.warning("Layer 1 analysis failed: %s", e)
-        return Layer1Result(
-            event_grade="E", surprise_level="low", market_size="small",
-            matrix_quadrant="observe_skip", price_in_score=0.5, cascade_rank=1,
-            cascade_hub=False, sentiment_direction="neutral", sentiment_intensity=0.0,
-            sentiment_vs_attention="neither", expert_signals=[],
-            institutional_surprise="", key_characters=[], tail_risk_flags=[]
-        )
+        return Layer1Result.empty_default()
 
 
-def _format_signals(signals, news_items: list[NewsItem]) -> str:
-    """Format signals for L1 narrative prompt.
+def _format_signals(signals: list[FlashSignal], news_items: list[NewsItem],
+                    insider_items: list[NewsItem] | None = None,
+                    social_items: list[NewsItem] | None = None) -> str:
+    """Format signals and news for L1 narrative analysis.
 
-    Accepts both FlashSignal (from flash_preprocessor) and TriageResult
-    (from flash_triage). Uses getattr for backward compatibility — TriageResult
-    has classification instead of event_type, scores dict instead of flat
-    confidence, and headline instead of source_headline.
+    CRITICAL-2 fix: insider_signal and social_mention items bypass Flash preprocessing
+    and are appended as structured context data with appropriate caveats.
     """
     lines = ["## Preprocessed Signals"]
     for s in signals:
-        event_grade = getattr(s, "event_grade", "E")
-        event_type = getattr(s, "event_type", None) or getattr(s, "classification", "unknown")
-        direction = getattr(s, "direction", "neutral")
-        confidence = getattr(s, "confidence", None)
-        if confidence is None:
-            scores = getattr(s, "scores", {})
-            confidence = scores.get("market_impact", 5) / 10.0
-        source = getattr(s, "source_headline", None) or getattr(s, "headline", "")
-        lines.append(
-            f"- [{event_grade}] {event_type} | {direction} "
-            f"(conf={confidence:.2f}) | {source[:120]}"
-        )
+        lines.append(f"- [{s.event_grade}] {s.event_type} | {s.direction} (conf={s.confidence}) | {defang_text(s.source_headline)}")
     if news_items:
         lines.append("\n## Raw Headlines")
         for item in news_items[:20]:
-            lines.append(f"- [{item.source_name}] {item.title}")
+            lines.append(f"- [{item.source_name}] {defang_text(item.title)}")
+    # Insider signals: legally-mandated public disclosures, bypass Flash preprocessing
+    if insider_items:
+        lines.append("\n## Insider Signal Data (Public Disclosures)")
+        lines.append("NOTE: These are legally-mandated SEC/Congressional filings — treat as context enrichment, not real-time trading signals.")
+        for item in insider_items[:15]:
+            lines.append(f"- [{item.source_name}] {defang_text(item.title)} | {defang_text(item.summary[:200])}")
+    # Social media mentions: retail sentiment, subject to manipulation — contrarian indicator
+    if social_items:
+        lines.append("\n## Social Media Mentions (Retail Sentiment)")
+        lines.append("NOTE: Social media sentiment is a CONTRARIAN INDICATOR. Extreme retail bullishness often precedes pullbacks; extreme panic can signal bottoms. Treat as positioning/crowding context, not directional signal.")
+        for item in social_items[:10]:
+            lines.append(f"- [{item.source_name}] {defang_text(item.title)} | {defang_text(item.summary[:200])}")
     return "\n".join(lines)
 
 
 def _parse_layer1_response(content: str) -> Layer1Result:
-    content = content.strip()
-    if content.startswith("```"):
-        lines = content.split("\n")
-        content = "\n".join(lines[1:])
-        if content.endswith("```"):
-            content = content[:-3]
+    content = strip_markdown_fences(content)
     try:
         data = json.loads(content)
     except json.JSONDecodeError:
         start = content.find("{")
         end = content.rfind("}")
         if start != -1 and end != -1:
-            data = json.loads(content[start:end + 1])
+            try:
+                data = json.loads(content[start:end + 1])
+            except json.JSONDecodeError:
+                data = None
         else:
-            raise
-    # Safe numeric parser: strips "EST:" prefix and other non-numeric noise
-    def _safe_float(val, default=0.0):
-        if isinstance(val, (int, float)):
-            return float(val)
-        if isinstance(val, str):
-            val = val.strip().removeprefix("EST:").removeprefix("est:").strip()
-            try:
-                return float(val)
-            except (ValueError, TypeError):
-                return default
-        return default
-
-    def _safe_int(val, default=1):
-        if isinstance(val, int):
-            return val
-        if isinstance(val, (float, str)):
-            try:
-                return int(float(str(val).strip().removeprefix("EST:").removeprefix("est:")))
-            except (ValueError, TypeError):
-                return default
-        return default
-
+            data = None
+    # If JSON parse failed, extract fields from free-form text via regex
+    if data is None:
+        import re
+        logger.warning("Layer1 response has no parseable JSON — %d chars, extracting from text", len(content))
+        # Map free-text keywords to formal quadrant values
+        # core_opportunity | trend_opportunity | arbitrage | observe_skip
+        quadrant = "observe_skip"
+        has_surprise = bool(re.search(r'surprise|shock|unexpected|breaking|crash|surge', content, re.IGNORECASE))
+        has_big = bool(re.search(r'broad|systemic|global|sector.wide|contagion|spillover', content, re.IGNORECASE))
+        if has_surprise and has_big:
+            quadrant = "core_opportunity"
+        elif not has_surprise and has_big:
+            quadrant = "trend_opportunity"
+        elif has_surprise and not has_big:
+            quadrant = "arbitrage"
+        grade = "D"
+        m = re.search(r'event.grade[:\s]*["\']?([A-Ea-e])', content)
+        if m:
+            grade = m.group(1).upper()
+        direction = "neutral"
+        if re.search(r'bullish|看多|做多|long', content):
+            direction = "bullish"
+        elif re.search(r'bearish|看空|做空|short', content):
+            direction = "bearish"
+        data = {
+            "event_grade": grade, "matrix_quadrant": quadrant,
+            "sentiment_direction": direction,
+            "raw_analysis": content,
+        }
+    # Always preserve raw analysis text
+    if "raw_analysis" not in data:
+        data["raw_analysis"] = content
     return Layer1Result(
         event_grade=data.get("event_grade", "E"),
         surprise_level=data.get("surprise_level", "low"),
         market_size=data.get("market_size", "small"),
         matrix_quadrant=data.get("matrix_quadrant", "observe_skip"),
-        price_in_score=_safe_float(data.get("price_in_score"), 0.5),
-        cascade_rank=_safe_int(data.get("cascade_rank"), 1),
+        price_in_score=float(data.get("price_in_score", 0.5)),
+        cascade_rank=int(data.get("cascade_rank", 1)),
         cascade_hub=bool(data.get("cascade_hub", False)),
         sentiment_direction=data.get("sentiment_direction", "neutral"),
-        sentiment_intensity=_safe_float(data.get("sentiment_intensity"), 0.0),
+        sentiment_intensity=float(data.get("sentiment_intensity", 0.0)),
         sentiment_vs_attention=data.get("sentiment_vs_attention", "neither"),
         expert_signals=data.get("expert_signals", []),
         institutional_surprise=data.get("institutional_surprise", ""),

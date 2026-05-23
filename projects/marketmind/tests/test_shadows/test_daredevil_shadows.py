@@ -1,4 +1,4 @@
-"""Tests for Daredevil shadows — 5 active + 2 env-locked + 1 short-biased."""
+﻿"""Tests for Daredevil shadows."""
 import pytest
 from unittest.mock import AsyncMock, patch
 
@@ -15,7 +15,7 @@ def settings():
 
 
 @pytest.fixture
-def active_config():
+def scalper_config():
     return ShadowConfig(
         shadow_id="daredevil:intraday:test_scalper",
         shadow_type="daredevil",
@@ -27,13 +27,13 @@ def active_config():
 
 
 @pytest.fixture
-def active_daredevil(active_config, temp_shadow_db, settings):
-    return DaredevilShadow(active_config, temp_shadow_db, settings)
+def scalper(scalper_config, temp_shadow_db, settings):
+    return DaredevilShadow(scalper_config, temp_shadow_db, settings)
 
 
 class TestDaredevilShadow:
     @pytest.mark.asyncio
-    async def test_daredevil_produces_analysis(self, active_daredevil):
+    async def test_daredevil_produces_analysis(self, scalper):
         news = [{"headline": "Market volatility spikes"}]
         mock_result = {
             "content": (
@@ -46,116 +46,41 @@ class TestDaredevilShadow:
         }
         with patch("marketmind.gateway.async_client.chat_with_integrity",
                    new_callable=AsyncMock, return_value=mock_result):
-            output = await active_daredevil.run_daily_analysis(news, {})
+            output = await scalper.run_daily_analysis(news, {})
         assert output.shadow_id == "daredevil:intraday:test_scalper"
         assert output.date is not None
 
     @pytest.mark.asyncio
-    async def test_daredevil_higher_risk_tolerance(self, active_daredevil):
-        assert active_daredevil.config.max_drawdown_limit == 0.35
-        assert active_daredevil.config.min_trades_for_ranking == 50
+    async def test_daredevil_higher_risk_tolerance(self, scalper):
+        assert scalper.config.max_drawdown_limit == 0.35
+        assert scalper.config.min_trades_for_ranking == 50
 
 
 def test_all_8_daredevil_configs_unique():
     ids = [c.shadow_id for c in DAREDEVIL_SHADOW_CONFIGS]
-    assert len(ids) == len(set(ids)) == 8
+    assert len(ids) == len(set(ids)) == 8  # Phase 6: 7+1
 
 
-def test_all_8_config_types():
-    """5 active + 2 env-locked + 1 short-biased = 8."""
-    types = {c.shadow_id.split(":")[2] for c in DAREDEVIL_SHADOW_CONFIGS}
-    assert types == {
-        "scalper", "trend_rider", "news_hound", "fade_master", "rotation_engine",
-        "sideways_scout", "vol_surfer", "hunter"
+def test_all_7_env_types_present():
+    env_types = {c.shadow_id.split(":")[2] for c in DAREDEVIL_SHADOW_CONFIGS}
+    assert env_types == {
+        "sideways_scout", "vol_surfer", "lever_hunter", "herd_fader",
+        "trend_chaser", "sector_spinner", "depth_diver", "hunter"
     }
 
 
 def test_factory_creates_8_daredevils(temp_shadow_db):
     settings = ShadowSettings()
     shadows = create_daredevil_shadows(temp_shadow_db, settings)
-    assert len(shadows) == 8
+    assert len(shadows) == 8  # Phase 6: 7+1
     assert all(isinstance(s, DaredevilShadow) for s in shadows)
 
 
-def test_5_active_daredevil_ids():
-    """Verify the 5 active daredevils exist in configs."""
-    active_ids = [c.shadow_id for c in DAREDEVIL_SHADOW_CONFIGS
-                  if c.shadow_id.split(":")[1] in ("intraday", "weekly", "event", "contrarian", "sector")]
-    assert len(active_ids) == 5
-
-
-def test_2_env_locked_daredevil_ids():
-    """Verify the 2 environment-locked daredevils."""
-    env_ids = [c.shadow_id for c in DAREDEVIL_SHADOW_CONFIGS
-               if "environment locked" in c.methodology_prompt.lower()
-               or "environment locked" in c.shadow_id]
-    # Range-Bound and Panic are env-locked
-    env_by_id = [c for c in DAREDEVIL_SHADOW_CONFIGS
-                 if "range_bound" in c.shadow_id or "panic" in c.shadow_id]
-    assert len(env_by_id) == 2
-
-
-def test_1_short_biased_crash_hunter():
-    """Verify the crash hunter is short-biased."""
-    crash = [c for c in DAREDEVIL_SHADOW_CONFIGS if "crash" in c.shadow_id]
-    assert len(crash) == 1
-    assert "SHORT-BIASED" in crash[0].methodology_prompt
-
-
-# ── Active daredevils always produce votes ──────────────────────────────
-
-@pytest.mark.asyncio
-async def test_active_daredevils_produce_daily_votes():
-    """Verify 5 active daredevils always produce output regardless of environment."""
-    from marketmind.shadows.shadow_state import ShadowStateDB
-    import tempfile, os
-    from pathlib import Path
-
-    with tempfile.TemporaryDirectory() as td:
-        db_path = Path(td) / "test_active.db"
-        db = ShadowStateDB(str(db_path))
-        db.init_schema()
-
-        settings = ShadowSettings()
-        shadows = create_daredevil_shadows(db, settings)
-
-        mock_result = {
-            "content": (
-                "VOTE_START\n"
-                "ticker: SPY\ndirection: long\nconfidence: 0.60\n"
-                "thesis: Active daredevil test thesis\n"
-                "risk_note: Test risk note\n"
-                "VOTE_END"
-            ),
-            "latency_ms": 400,
-        }
-
-        active_count = 0
-        with patch("marketmind.gateway.async_client.chat_with_integrity",
-                   new_callable=AsyncMock, return_value=mock_result):
-            for shadow in shadows:
-                shadow_id = shadow.shadow_id
-                # Active daredevils: intraday, weekly, event, contrarian, sector
-                if any(k in shadow_id for k in ("intraday", "weekly", "event", "contrarian", "sector")):
-                    output = await shadow.run_daily_analysis(
-                        [{"headline": "Normal market day"}], {}
-                    )
-                    assert output is not None
-                    assert output.shadow_id == shadow_id
-                    assert len(output.votes) > 0, (
-                        f"Active daredevil {shadow_id} produced no votes"
-                    )
-                    active_count += 1
-
-        assert active_count == 5, f"Expected 5 active daredevils, got {active_count}"
-        db.close()
-
-
-# ── LLM integration tests ──────────────────────────────────────────────
+# ── C.7 LLM integration tests ────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_daredevil_analyze_with_mock_llm(temp_shadow_db):
-    """DaredevilShadow._analyze() calls mock LLM and parses results."""
+    """DaredevilShadow._analyze() 调用mock LLM并解析结果"""
     from marketmind.shadows.daredevil_shadows import DaredevilShadow
     from marketmind.shadows.shadow_state import ShadowConfig
 
@@ -189,7 +114,7 @@ async def test_daredevil_analyze_with_mock_llm(temp_shadow_db):
 
 @pytest.mark.asyncio
 async def test_range_bound_mode(temp_shadow_db):
-    """Range-Bound constraint: _build_user_prompt includes ENVIRONMENT LOCKED."""
+    """Range-Bound约束: _build_user_prompt 包含 RANGE-BOUND MODE"""
     from marketmind.shadows.daredevil_shadows import DaredevilShadow
     from marketmind.shadows.shadow_state import ShadowConfig
 
@@ -203,45 +128,23 @@ async def test_range_bound_mode(temp_shadow_db):
     prompt = agent._build_user_prompt(
         [{"headline": "Market flat"}], {"SPY": 450.0}
     )
-    assert "ENVIRONMENT LOCKED" in prompt
-    assert "Range-bound" in prompt
+    assert "RANGE-BOUND MODE" in prompt
 
 
 @pytest.mark.asyncio
-async def test_crash_hunter_mode(temp_shadow_db):
-    """Crash Hunter constraint: _build_user_prompt includes SHORT-BIASED."""
+async def test_contrarian_mode(temp_shadow_db):
+    """Contrarian约束: _build_user_prompt 包含 CONTRARIAN MODE"""
     from marketmind.shadows.daredevil_shadows import DaredevilShadow
     from marketmind.shadows.shadow_state import ShadowConfig
 
     config = ShadowConfig(
-        shadow_id="daredevil:crash:hunter_test", shadow_type="daredevil",
-        display_name="Test Crash Hunter", methodology_prompt="You hunt crash signals.",
-        virtual_capital=30000.0, temperature=0.5,
+        shadow_id="daredevil:contrarian:herd_test", shadow_type="daredevil",
+        display_name="Test Herd Fader", methodology_prompt="You fade consensus.",
+        virtual_capital=20000.0, temperature=0.55,
     )
     agent = DaredevilShadow(config, temp_shadow_db, ShadowSettings())
 
     prompt = agent._build_user_prompt(
-        [{"headline": "Market at all-time highs"}], {"SPY": 500.0}
+        [{"headline": "Everyone is bullish"}], {"SPY": 450.0}
     )
-    assert "SHORT-BIASED" in prompt
-    assert "Crash Hunter" in prompt
-
-
-@pytest.mark.asyncio
-async def test_active_daredevil_no_env_lock_in_prompt(temp_shadow_db):
-    """Active daredevil prompts do NOT contain environment-locked language."""
-    from marketmind.shadows.daredevil_shadows import DaredevilShadow
-    from marketmind.shadows.shadow_state import ShadowConfig
-
-    config = ShadowConfig(
-        shadow_id="daredevil:intraday:test_active", shadow_type="daredevil",
-        display_name="Test Active", methodology_prompt="You find trades daily.",
-        virtual_capital=25000.0, temperature=0.5,
-    )
-    agent = DaredevilShadow(config, temp_shadow_db, ShadowSettings())
-
-    prompt = agent._build_user_prompt(
-        [{"headline": "Normal market day"}], {"SPY": 450.0}
-    )
-    assert "ENVIRONMENT LOCKED" not in prompt
-    assert "SHORT-BIASED" not in prompt
+    assert "CONTRARIAN MODE" in prompt

@@ -3,81 +3,87 @@ import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from marketmind.shadows.event_detector import EventDetector
+from marketmind.shadows.event_detector import EventDetector, DetectedEvent
 from marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
-from marketmind.shadows.shadow_mother import ShadowMother
-from marketmind.config.settings import ShadowSettings
 
 
 # ── Keyword trigger detection ──────────────────────────────────────────────
 
 class TestKeywordTriggerDetection:
-    """detect_keyword_triggers: session-level keyword frequency counter."""
+    """EventDetector._detect_by_keywords: multi-keyword event detection per event type."""
 
-    def test_no_threshold_not_triggered(self):
+    def test_detect_by_keywords_no_match(self):
+        """Headlines with <2 keyword matches return empty list."""
         detector = EventDetector()
-        result = detector.detect_keyword_triggers("bitcoin is interesting")
+        keywords = [r'(?:bitcoin|crypto)\s', r'(?:rally|surge)\s']
+        news = [{"headline": "Markets are stable today"}]
+        result = detector._detect_by_keywords(news, "test_type", keywords, 0.5)
         assert result == []
-        # One mention does not cross threshold of 3
-        assert detector._keyword_counter.get("crypto", 0) < 3
 
-    def test_crosses_threshold_triggers_domain(self):
+    def test_detect_by_keywords_detects_event(self):
+        """Headlines with 2+ keyword matches return DetectedEvent."""
         detector = EventDetector()
-        # 3 separate turns mentioning crypto keywords, each with one distinct keyword
-        r1 = detector.detect_keyword_triggers("bitcoin price is volatile")
-        assert r1 == []  # 1 mention, below threshold
-        r2 = detector.detect_keyword_triggers("ethereum gas fees are dropping")
-        assert r2 == []  # 2 mentions, still below threshold
-        r3 = detector.detect_keyword_triggers("defi protocols gaining traction")
-        assert "crypto" in r3  # 3rd mention crosses threshold
+        keywords = [
+            r'(?:Fed|Federal Reserve|central bank)\s',
+            r'(?:rate|hike|cut)\s',
+        ]
+        news = [{"headline": "Fed rate hike surprises markets"}]
+        events = detector._detect_by_keywords(news, "cb_shock", keywords, 0.6)
+        assert len(events) == 1
+        event = events[0]
+        assert event.event_type == "cb_shock"
+        assert event.impact_score >= 0.7  # base 0.6 + 2*0.1 = 0.8
+        assert isinstance(event.event_id, str) and len(event.event_id) == 16
 
-    def test_multiple_keywords_in_one_turn_count_correctly(self):
+    def test_detect_cb_shock_realistic_headline(self):
+        """CB shock detection: Fed + rate terms should trigger."""
         detector = EventDetector()
-        # "bitcoin", "crypto", "ethereum" all in same text → 3 hits
-        detector.detect_keyword_triggers("bitcoin and ethereum are both crypto assets")
-        assert detector._keyword_counter.get("crypto", 0) == 3
+        news = [{"headline": "Fed rate cut shocks markets as Powell signals more easing"}]
+        events = detector.detect_cb_shock(news)
+        assert len(events) >= 1
+        assert events[0].event_type == "cb_shock"
 
-    def test_domain_triggers_only_once_per_session(self):
+    def test_detect_geopolitical_realistic_headline(self):
+        """Geopolitical detection: conflict + sanctions keywords trigger event."""
         detector = EventDetector()
-        detector.detect_keyword_triggers("bitcoin up 5%")
-        r2 = detector.detect_keyword_triggers("ethereum rally continues")
-        assert r2 == []  # 2 mentions, still below threshold
-        r3 = detector.detect_keyword_triggers("defi ecosystem expanding")
-        assert "crypto" in r3
-        # Fourth mention — domain already triggered, should not return again
-        r4 = detector.detect_keyword_triggers("bitcoin hits new all time high")
-        assert "crypto" not in r4
+        news = [{"headline": "Military conflict escalates: missile attack triggers sanctions"}]
+        events = detector.detect_geopolitical(news)
+        assert len(events) >= 1
+        assert events[0].event_type == "geopolitical"
 
-    def test_reset_keyword_state_clears_counters(self):
+    def test_detect_vol_shock_from_market_data(self):
+        """Vol shock detection requires zscore >= 5.0 for each ticker."""
         detector = EventDetector()
-        detector.detect_keyword_triggers("bitcoin is volatile")
-        detector.detect_keyword_triggers("bitcoin hits resistance")
-        detector.detect_keyword_triggers("bitcoin might correct")
-        assert "crypto" in detector._triggered_domains
-        detector.reset_keyword_state()
-        assert detector._keyword_counter == {}
-        assert detector._triggered_domains == set()
+        market_data = {"AAPL": 6.2, "NVDA": 3.1, "SPY": 5.5}
+        events = detector.detect_vol_shock(market_data)
+        tickers = {e.affected_assets[0] for e in events}
+        assert "AAPL" in tickers
+        assert "SPY" in tickers
+        assert "NVDA" not in tickers
+        for e in events:
+            assert e.event_type == "vol_shock"
+            assert 0.0 < e.impact_score <= 1.0
 
-    def test_multiple_domains_independent_counters(self):
+    def test_prioritize_events_by_impact(self):
+        """Events are sorted by impact score descending, truncated to max_shadows."""
         detector = EventDetector()
-        detector.detect_keyword_triggers("bitcoin surges on etf inflows")  # crypto: 1
-        detector.detect_keyword_triggers("gold rallies on fed rate cut expectations")  # gold: 1
-        r3 = detector.detect_keyword_triggers("bitcoin adoption growing")  # crypto: 1 (now 2)
-        assert r3 == []
-        r4 = detector.detect_keyword_triggers("crypto market cap hits 3 trillion")  # crypto: 1 (now 3)
-        assert "crypto" in r4
-        # gold only mentioned once so far
-        assert "gold" not in r4
+        events = [
+            DetectedEvent("e1", "cb_shock", "low", [], 0.3, "2026-05-23T00:00:00"),
+            DetectedEvent("e2", "cb_shock", "high", [], 0.9, "2026-05-23T00:00:00"),
+            DetectedEvent("e3", "geopolitical", "mid", [], 0.5, "2026-05-23T00:00:00"),
+            DetectedEvent("e4", "vol_shock", "mid_high", [], 0.7, "2026-05-23T00:00:00"),
+        ]
+        result = detector.prioritize_events(events, max_shadows=3)
+        assert len(result) == 3
+        assert result[0].impact_score == 0.9
+        assert result[1].impact_score == 0.7
+        assert result[2].impact_score == 0.5
 
 
 # ── Beta shadow creation and isolation ───────────────────────────────────
 
 class TestBetaShadowLifecycle:
     """Beta shadows: sandboxed methodology testing with isolated output."""
-
-    @pytest.fixture
-    def settings(self):
-        return ShadowSettings()
 
     @pytest.fixture
     def db(self, temp_shadow_db):
@@ -94,10 +100,11 @@ class TestBetaShadowLifecycle:
         return temp_shadow_db
 
     @pytest.mark.asyncio
-    async def test_create_beta_shadow_from_template(self, db, settings):
-        mother = ShadowMother(settings, db)
+    async def test_create_beta_shadow_from_template(self, db):
+        from marketmind.shadows.beta_lifecycle import create_beta_shadow
+
         variant = {"risk_aversion": "low", "momentum_weight": "0.4"}
-        shadow_id = await mother.create_beta_shadow("expert:tech:silicon_oracle", variant)
+        shadow_id = await create_beta_shadow(db, "expert:tech:silicon_oracle", variant)
 
         shadow = db.get_shadow(shadow_id)
         assert shadow is not None
@@ -108,17 +115,19 @@ class TestBetaShadowLifecycle:
         assert "risk_aversion: low" in shadow.methodology_prompt
 
     @pytest.mark.asyncio
-    async def test_create_beta_shadow_missing_template_raises(self, db, settings):
-        mother = ShadowMother(settings, db)
+    async def test_create_beta_shadow_missing_template_raises(self, db):
+        from marketmind.shadows.beta_lifecycle import create_beta_shadow
+
         with pytest.raises(ValueError, match="not found"):
-            await mother.create_beta_shadow("nonexistent:shadow", {})
+            await create_beta_shadow(db, "nonexistent:shadow", {})
 
     @pytest.mark.asyncio
-    async def test_beta_shadow_excluded_from_ranking_eligible(self, db, settings):
+    async def test_beta_shadow_excluded_from_ranking_eligible(self, db):
         """Beta shadows should not appear in ranking-eligible list."""
-        mother = ShadowMother(settings, db)
+        from marketmind.shadows.beta_lifecycle import create_beta_shadow
+
         variant = {"test": "variant"}
-        beta_id = await mother.create_beta_shadow("expert:tech:silicon_oracle", variant)
+        beta_id = await create_beta_shadow(db, "expert:tech:silicon_oracle", variant)
 
         eligible = db.get_ranking_eligible_shadows()
         beta_ids = [s.shadow_id for s in eligible]
@@ -127,10 +136,11 @@ class TestBetaShadowLifecycle:
         assert "expert:tech:silicon_oracle" in beta_ids
 
     @pytest.mark.asyncio
-    async def test_beta_shadow_visible_for_analysis(self, db, settings):
+    async def test_beta_shadow_visible_for_analysis(self, db):
         """Beta shadows should appear in visible list (for analysis) but not ranking."""
-        mother = ShadowMother(settings, db)
-        beta_id = await mother.create_beta_shadow("expert:tech:silicon_oracle", {"test": "v"})
+        from marketmind.shadows.beta_lifecycle import create_beta_shadow
+
+        beta_id = await create_beta_shadow(db, "expert:tech:silicon_oracle", {"test": "v"})
 
         visible = db.get_visible_shadows()
         visible_ids = [s.shadow_id for s in visible]
@@ -141,20 +151,22 @@ class TestBetaShadowLifecycle:
         assert beta_id not in eligible_ids
 
     @pytest.mark.asyncio
-    async def test_promote_beta_shadow_insufficient_days(self, db, settings):
+    async def test_promote_beta_shadow_insufficient_days(self, db):
         """Promotion requires 20 days of history."""
-        mother = ShadowMother(settings, db)
-        beta_id = await mother.create_beta_shadow("expert:tech:silicon_oracle", {"test": "v"})
+        from marketmind.shadows.beta_lifecycle import create_beta_shadow, promote_beta_shadow
+
+        beta_id = await create_beta_shadow(db, "expert:tech:silicon_oracle", {"test": "v"})
 
         # No snapshot history → promotion should fail
-        result = await mother.promote_beta_shadow(beta_id)
+        result = await promote_beta_shadow(db, beta_id)
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_promote_beta_shadow_not_beta_status(self, db, settings):
+    async def test_promote_beta_shadow_not_beta_status(self, db):
         """Cannot promote a shadow that isn't beta."""
-        mother = ShadowMother(settings, db)
-        result = await mother.promote_beta_shadow("expert:tech:silicon_oracle")
+        from marketmind.shadows.beta_lifecycle import promote_beta_shadow
+
+        result = await promote_beta_shadow(db, "expert:tech:silicon_oracle")
         assert result is False
 
 

@@ -44,10 +44,12 @@ class ContrarianShadow(ShadowAgent):
         super().__init__(config, state_db, settings)
 
     async def _analyze(self, news_items: list[dict],
-                       market_data: dict) -> ShadowAnalysisOutput:
-        return await super()._analyze(news_items, market_data)
+                       market_data: dict,
+                   broadcast_messages: list | None = None) -> ShadowAnalysisOutput:
+        return await super()._analyze(news_items, market_data, broadcast_messages)
 
-    def _build_user_prompt(self, news_items: list[dict], market_data: dict) -> str:
+    def _build_user_prompt(self, news_items: list[dict], market_data: dict,
+                       broadcast_messages: list | None = None) -> str:
         """Contrarian-specific prompt: extreme detection, mean-reversion signals."""
         headlines = []
         for item in news_items[:30]:

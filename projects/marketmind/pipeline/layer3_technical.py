@@ -1,4 +1,4 @@
-﻿"""Layer 3: Technical review — 3-light review + entry/exit calculation (INDEPENDENT from L1-L2)."""
+"""Layer 3: Technical review — 3-light review + entry/exit calculation (INDEPENDENT from L1-L2)."""
 from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
@@ -8,6 +8,7 @@ import json
 from typing import Any
 
 from marketmind.gateway.async_client import chat_pro
+from marketmind.gateway.response_parser import strip_markdown_fences
 
 
 @dataclass
@@ -29,6 +30,7 @@ class Layer3Result:
     max_hold_days: int
     reward_risk_ratio: float
     recommendation: str            # enter | wait | avoid
+    daily_return_pct: float | None = None  # daily return % from market data
     raw_analysis: str = ""
 
 
@@ -99,9 +101,17 @@ async def analyze_layer3(tickers: list[str], market_data: dict | None = None) ->
         return Layer3BatchResult()
     data_str = _format_market_data(market_data)
     user_prompt = f"Review these tickers independently. Do NOT consider any fundamental thesis.\n\nTickers: {', '.join(tickers)}\n\nMarket Data:\n{data_str}"
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc).strftime("%Y年%m月%d日")
+    yr = today[:4]
+    date_note = (
+        f"\n\n[TODAY: {today}. All support/resistance/entry levels must be current ({yr}) levels. "
+        f"Do NOT use {int(yr)-2}-{int(yr)-1} price levels as current. "
+        f"If you lack current price data, flag it and estimate from provided market context.]"
+    )
     try:
         result = await chat_pro(
-            system_prompt=LAYER3_SYSTEM_PROMPT,
+            system_prompt=LAYER3_SYSTEM_PROMPT + date_note,
             user_prompt=user_prompt,
             temperature=0.2,
             max_tokens=8192,
@@ -136,12 +146,7 @@ def _format_market_data(data: dict | None) -> str:
 
 
 def _parse_layer3_response(content: str) -> list[Layer3Result]:
-    content = content.strip()
-    if content.startswith("```"):
-        lines = content.split("\n")
-        content = "\n".join(lines[1:])
-        if content.endswith("```"):
-            content = content[:-3]
+    content = strip_markdown_fences(content)
     try:
         data = json.loads(content)
         if isinstance(data, dict):
@@ -161,18 +166,19 @@ def _parse_layer3_response(content: str) -> list[Layer3Result]:
             above_200wma=d.get("above_200wma", False),
             daily_structure_intact=d.get("daily_structure_intact", False),
             near_key_resistance=d.get("near_key_resistance", True),
-            resistance_distance_pct=float(d.get("resistance_distance_pct") or 0),
-            support_zone_low=float(d.get("support_zone_low") or 0),
-            support_zone_high=float(d.get("support_zone_high") or 0),
-            resistance_zone_low=float(d.get("resistance_zone_low") or 0),
-            resistance_zone_high=float(d.get("resistance_zone_high") or 0),
-            entry_zone_low=float(d.get("entry_zone_low") or 0),
-            entry_zone_high=float(d.get("entry_zone_high") or 0),
-            stop_loss=float(d.get("stop_loss") or 0),
-            target_price=float(d.get("target_price") or 0),
-            max_hold_days=int(d.get("max_hold_days") or 0),
-            reward_risk_ratio=float(d.get("reward_risk_ratio") or 0),
+            resistance_distance_pct=float(d.get("resistance_distance_pct", 0)),
+            support_zone_low=float(d.get("support_zone_low", 0)),
+            support_zone_high=float(d.get("support_zone_high", 0)),
+            resistance_zone_low=float(d.get("resistance_zone_low", 0)),
+            resistance_zone_high=float(d.get("resistance_zone_high", 0)),
+            entry_zone_low=float(d.get("entry_zone_low", 0)),
+            entry_zone_high=float(d.get("entry_zone_high", 0)),
+            stop_loss=float(d.get("stop_loss", 0)),
+            target_price=float(d.get("target_price", 0)),
+            max_hold_days=int(d.get("max_hold_days", 0)),
+            reward_risk_ratio=float(d.get("reward_risk_ratio", 0)),
             recommendation=d.get("recommendation", "avoid"),
+            daily_return_pct=float(d["daily_return_pct"]) if d.get("daily_return_pct") is not None else None,
             raw_analysis=content,
         ))
     return results

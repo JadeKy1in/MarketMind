@@ -1,11 +1,9 @@
-﻿"""Position patrol: daily health check, buy archive comparison, cash reframing."""
+"""Position patrol: daily health check, buy archive comparison, cash reframing."""
 from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Any
-
+from datetime import datetime, timezone, timedelta
 from marketmind.gateway.async_client import chat_pro
 from marketmind.config.settings import MarketMindConfig
 

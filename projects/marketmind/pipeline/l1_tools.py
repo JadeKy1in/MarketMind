@@ -92,7 +92,10 @@ class ToolResult:
             for i, item in enumerate(data[:10]):
                 if isinstance(item, dict):
                     title = item.get("title", "")[:150]
-                    source = item.get("source_name", item.get("source", {}).get("name", ""))
+                    src = item.get("source", "")
+                    source = item.get("source_name", "")
+                    if not source and src:
+                        source = src.get("name", "") if isinstance(src, dict) else str(src)
                     if source:
                         lines.append(f"[{i+1}] ({source}) {title}")
                     else:

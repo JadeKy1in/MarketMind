@@ -38,12 +38,30 @@ class MethodologyInjector:
     def __init__(self, state_db):
         self._state_db = state_db
 
+
+    @staticmethod
+    def format_failure_patterns(prompt: str, failures: list[str]) -> str:
+        """Format failure patterns into prompt without DB write (for test isolation)."""
+        if not failures:
+            return prompt
+        deduped = []
+        seen = set()
+        for f in failures:
+            s = f.strip()
+            if s and s not in seen:
+                seen.add(s)
+                deduped.append(s)
+        if not deduped:
+            return prompt
+        ft = "\n".join(f"- {f}" for f in deduped[:5])
+        return f"[FAILURE PATTERNS TO AVOID]\n{ft}\n\n{prompt}"
+
     def inject_lessons(self, shadow_id: str, lessons: list[str]) -> bool:
         """Append [LESSONS LEARNED] block to a shadow's methodology prompt.
 
         Used by AEL slow layer (Phase 7) to persist monthly debrief findings.
         """
-        config = self._state_db.get_shadow(shadow_id, caller_id="system")
+        config = self._state_db.get_shadow(shadow_id)
         if config is None:
             return False
 
@@ -61,7 +79,7 @@ class MethodologyInjector:
 
     def inject_validated_insight(self, shadow_id: str, insight: str) -> bool:
         """Add a [VALIDATED INSIGHT] block from crystallization (P1-2)."""
-        config = self._state_db.get_shadow(shadow_id, caller_id="system")
+        config = self._state_db.get_shadow(shadow_id)
         if config is None:
             return False
 
@@ -79,7 +97,7 @@ class MethodologyInjector:
 
     def inject_retired_insight(self, shadow_id: str, insight: str) -> bool:
         """Add a [RETIRED] note when a previously-validated insight is invalidated."""
-        config = self._state_db.get_shadow(shadow_id, caller_id="system")
+        config = self._state_db.get_shadow(shadow_id)
         if config is None:
             return False
 
@@ -98,52 +116,23 @@ class MethodologyInjector:
         Used when a challenger replaces a target — the challenger learns
         from the predecessor's documented failures.
         """
-        config = self._state_db.get_shadow(shadow_id, caller_id="system")
+        config = self._state_db.get_shadow(shadow_id)
         if config is None:
             return False
 
         old_prompt = config.methodology_prompt
-        new_prompt = self.format_failure_patterns(old_prompt, failures)
+        # Remove any previous [FAILURE PATTERNS] section
+        base = old_prompt.split("[FAILURE PATTERNS TO AVOID]")[0].strip()
+
+        failures_text = "\n".join(f"- {f}" for f in failures)
+        new_prompt = (
+            f"[FAILURE PATTERNS TO AVOID — learned from predecessor]\n"
+            f"{failures_text}\n\n{base}"
+        )
 
         return self._state_db.update_methodology_prompt(
             shadow_id, new_prompt,
             reason=f"Injected {len(failures)} predecessor failure patterns"
-        )
-
-    @staticmethod
-    def format_failure_patterns(prompt: str, failures: list[str]) -> str:
-        """Format a methodology prompt with failure patterns prepended (P3-1).
-
-        Pure text-formatting method — no DB required. Used during challenger
-        creation before the shadow exists in the DB, and by inject_failure_patterns()
-        for the DB-backed path.
-
-        Args:
-            prompt: The methodology prompt text to augment.
-            failures: List of failure pattern strings to prepend.
-
-        Returns:
-            Modified prompt with [FAILURE PATTERNS TO AVOID] block prepended.
-            Returns prompt unchanged if failures list is empty after dedup.
-        """
-        # Deduplicate while preserving order
-        seen = set()
-        unique_failures = []
-        for f in failures:
-            if f and f.strip() and f.strip() not in seen:
-                unique_failures.append(f.strip())
-                seen.add(f.strip())
-
-        if not unique_failures:
-            return prompt
-
-        # Remove any previous [FAILURE PATTERNS] section
-        base = prompt.split("[FAILURE PATTERNS TO AVOID]")[0].strip()
-
-        failures_text = "\n".join(f"- {f}" for f in unique_failures)
-        return (
-            f"[FAILURE PATTERNS TO AVOID — learned from predecessor]\n"
-            f"{failures_text}\n\n{base}"
         )
 
     def reset_to_baseline(self, shadow_id: str) -> bool:
@@ -153,9 +142,9 @@ class MethodologyInjector:
         The original methodology is recovered from the first entry in
         the methodology_changes audit table, or from config_json.
         """
-        original = self._state_db.get_original_methodology(shadow_id, caller_id="system")
+        original = self._state_db.get_original_methodology(shadow_id)
         if original is None:
-            config = self._state_db.get_shadow(shadow_id, caller_id="system")
+            config = self._state_db.get_shadow(shadow_id)
             if config is None:
                 return False
             original = config.methodology_prompt

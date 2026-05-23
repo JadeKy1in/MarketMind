@@ -290,7 +290,7 @@ class CrystallizationEngine:
         """Backtest validate a hypothesis against historical shadow_analyses.
 
         Queries the shadow_analyses table for this shadow on this ticker,
-        compares analysis direction against actual outcomes (from virtual_trades PnL).
+        compares vote direction against actual outcomes (from virtual_trades PnL).
 
         Args:
             shadow_id: The shadow that generated the insight.
@@ -302,8 +302,8 @@ class CrystallizationEngine:
         """
         conn = self._db._connect()
         try:
-            # Get all analyses for this shadow on this ticker
-            analyses = conn.execute(
+            # Get all votes for this shadow on this ticker
+            votes = conn.execute(
                 """SELECT sa.date, sa.direction, sa.confidence
                    FROM shadow_analyses sa
                    WHERE sa.shadow_id = ? AND sa.ticker = ?
@@ -313,42 +313,42 @@ class CrystallizationEngine:
 
             from marketmind.shadows.belief_math import confidence_score
 
-            sample_count = len(analyses)
+            sample_count = len(votes)
             if sample_count == 0:
-                return 0.0, 0, ["No analysis data available for backtest"]
+                return 0.0, 0, ["No vote data available for backtest"]
 
             hits = 0
             evidence_lines: list[str] = []
 
-            for analysis in analyses:
-                analysis_date = analysis["date"]
-                direction = analysis["direction"]
-                analysis_confidence = analysis["confidence"]
+            for vote in votes:
+                vote_date = vote["date"]
+                direction = vote["direction"]
+                vote_confidence = vote["confidence"]
 
                 if direction == "abstain":
                     continue
 
                 # Get actual next-day return sign for this ticker
-                actual_sign = self._db.get_next_day_return_sign(ticker, analysis_date)
+                actual_sign = self._db.get_next_day_return_sign(ticker, vote_date)
 
                 if actual_sign is None:
                     continue
 
-                # An analysis is correct if:
-                # - long analysis + positive return → hit
-                # - short analysis + negative return → hit
-                analysis_correct = (
+                # A vote is correct if:
+                # - long vote + positive return → hit
+                # - short vote + negative return → hit
+                vote_correct = (
                     (direction == "long" and actual_sign == 1) or
                     (direction == "short" and actual_sign == -1)
                 )
-                if analysis_correct:
+                if vote_correct:
                     hits += 1
                 evidence_lines.append(
-                    f"{analysis_date}: {direction} analysis (conf={analysis_confidence:.2f}) "
-                    f"→ {'CORRECT' if analysis_correct else 'wrong'} (actual={'up' if actual_sign == 1 else 'down'})"
+                    f"{vote_date}: {direction} vote (conf={vote_confidence:.2f}) "
+                    f"→ {'CORRECT' if vote_correct else 'wrong'} (actual={'up' if actual_sign == 1 else 'down'})"
                 )
 
-            valid_samples = sum(1 for a in analyses if a["direction"] != "abstain")
+            valid_samples = sum(1 for v in votes if v["direction"] != "abstain")
             hit_rate = hits / valid_samples if valid_samples > 0 else 0.0
 
             return hit_rate, valid_samples, evidence_lines

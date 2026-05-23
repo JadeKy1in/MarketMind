@@ -33,7 +33,10 @@ def test_save_and_load_json():
         filepath = archive.save_json("analysis", "test_analysis", data)
         assert filepath.exists()
         loaded = archive.load_json("analysis", "test_analysis")
-        assert loaded == data
+        # ai_generated is auto-injected by save_json()
+        assert loaded.get("key") == "value"
+        assert loaded.get("number") == 42
+        assert loaded.get("ai_generated") is True
         archive.close()
 
 

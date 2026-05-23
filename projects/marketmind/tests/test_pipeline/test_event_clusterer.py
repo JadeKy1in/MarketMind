@@ -403,7 +403,12 @@ class TestTfidfClustering:
 
     def test_silhouette_computes(self):
         cl = _TfidfClustering()
-        matrix = cl.fit_transform(["a b c", "a b d", "x y z", "x y w"])
+        matrix = cl.fit_transform([
+            "market rally gold",
+            "market rally silver",
+            "bond yield treasury",
+            "bond yield inflation",
+        ])
         s = cl.compute_silhouette(matrix, [0, 0, 1, 1])
         assert isinstance(s, float)
         assert -1.0 <= s <= 1.0

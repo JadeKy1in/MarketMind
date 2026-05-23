@@ -1,13 +1,14 @@
-﻿"""Red Team: Adversarial challenge engine — structurally independent from main analysis."""
+"""Red Team: Adversarial challenge engine — structurally independent from main analysis."""
 from __future__ import annotations
 import json
 import logging
-import re
 
 logger = logging.getLogger("marketmind.pipeline.red_team")
 from dataclasses import dataclass, field
 
 from marketmind.gateway.async_client import chat_pro
+from marketmind.gateway.response_parser import strip_markdown_fences
+from marketmind.shadows.shadow_agent import defang_text
 
 
 @dataclass
@@ -64,10 +65,10 @@ async def run_red_team(l1_raw: str, l2_raw: str, tickers: list[str]) -> RedTeamR
     user_prompt = f"""Review the following analysis for flaws, biases, and unsupported claims.
 
 ## Layer 1 Narrative Analysis
-{l1_raw if l1_raw else 'No L1 analysis available'}
+{defang_text(l1_raw) if l1_raw else 'No L1 analysis available'}
 
 ## Layer 2 Fundamental Analysis
-{l2_raw if l2_raw else 'No L2 analysis available'}
+{defang_text(l2_raw) if l2_raw else 'No L2 analysis available'}
 
 ## Tickers Under Consideration
 {', '.join(tickers) if tickers else 'None'}
@@ -87,26 +88,32 @@ Find every legitimate objection. At least 1 critical-level challenge is expected
 
 
 def _parse_red_team_response(content: str) -> RedTeamReport:
-    content = content.strip()
-    if content.startswith("```"):
-        lines = content.split("\n")
-        content = "\n".join(lines[1:])
-        if content.endswith("```"):
-            content = content[:-3]
-    content = re.sub(r",\s*([}\]])", r"\1", content)
-    try:
-        data = json.loads(content)
-    except json.JSONDecodeError as e:
-        logger.debug("Red Team JSON decode error (pos %d): %s", e.pos, str(e)[:120])
-        start = content.find("{")
-        end = content.rfind("}")
-        if start != -1 and end != -1:
+    import re
+    content = strip_markdown_fences(content)
+
+    def _try_parse(text: str) -> dict | None:
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            block = text[start:end + 1]
             try:
-                data = json.loads(content[start:end + 1])
+                return json.loads(block)
             except json.JSONDecodeError:
-                return RedTeamReport(overall_assessment="Failed to parse Red Team output")
-        else:
-            return RedTeamReport(overall_assessment="Failed to parse Red Team output")
+                pass
+            repaired = re.sub(r",\s*([}\]])", r"\1", block)
+            try:
+                return json.loads(repaired)
+            except json.JSONDecodeError:
+                pass
+        return None
+
+    data = _try_parse(content)
+    if data is None:
+        return RedTeamReport(overall_assessment="Failed to parse Red Team output")
     challenges = []
     for c in data.get("challenges", []):
         challenges.append(RedTeamChallenge(
@@ -124,3 +131,131 @@ def _parse_red_team_response(content: str) -> RedTeamReport:
         overall_assessment=data.get("overall_assessment", ""),
         no_valid_objection=data.get("no_valid_objection", False),
     )
+
+
+# ── H8: Red Team Background Observer (Phase C PMV) ──────────────────────────
+
+@dataclass
+class BiasObservation:
+    """A single bias observation logged during a session."""
+    observation_type: str  # confirmation_bias|recency_bias|causal_error|...
+    target_context: str    # L1_narrative|user_interaction|decision_finalization
+    description: str
+    severity: str = "minor"
+    evidence: str = ""
+
+
+class RedTeamObserver:
+    """Background observer that logs interaction patterns and generates daily bias scorecards.
+
+    H8 Phase C PMV: captures user+AI interaction patterns during L1 dialogue
+    and logs them to red_team_observations table. A daily scorecard is
+    generated after the session completes.
+    """
+
+    def __init__(self, state_db=None):
+        self.state_db = state_db
+        self.session_observations: list[BiasObservation] = []
+
+    def observe(self, observation_type: str, target_context: str,
+                description: str, severity: str = "minor", evidence: str = "") -> None:
+        """Record an observation during the session (in-memory)."""
+        self.session_observations.append(BiasObservation(
+            observation_type=observation_type,
+            target_context=target_context,
+            description=description,
+            severity=severity,
+            evidence=evidence,
+        ))
+
+    def check_interaction_patterns(self, user_ideas: list[str],
+                                   ai_responses: list[str],
+                                   final_direction: str) -> list[BiasObservation]:
+        """Analyze L1 interaction for systematic bias patterns (no LLM call needed)."""
+        findings: list[BiasObservation] = []
+
+        # 1. Confirmation-seeking: user proposes direction, AI agrees without sufficient challenge
+        if user_ideas and ai_responses:
+            # Count agreement signals in AI responses when user proposed ideas
+            agree_markers = ["同意", "支持", "合理", "有道理", "agree", "correct", "valid", "right"]
+            agree_count = sum(
+                1 for resp in ai_responses
+                if any(m in resp.lower() for m in agree_markers)
+            )
+            agree_ratio = agree_count / max(len(ai_responses), 1)
+            if agree_ratio > 0.8 and len(user_ideas) >= 2:
+                findings.append(BiasObservation(
+                    observation_type="confirmation_bias",
+                    target_context="user_interaction",
+                    description=f"High agreement ratio ({agree_ratio:.0%}) — AI may be sycophantic",
+                    severity="major" if agree_ratio > 0.9 else "minor",
+                ))
+
+        # 2. Recency bias: last question dominates final direction
+        if len(user_ideas) >= 3 and final_direction:
+            findings.append(BiasObservation(
+                observation_type="recency_bias",
+                target_context="L1_narrative",
+                description=f"Multiple ({len(user_ideas)}) discussion topics — verify recency didn't dominate",
+                severity="minor",
+            ))
+
+        # 3. Missing counterfactual: if user never asked "what if"
+        counterfactual_phrases = ["如果", "万一", "反过来", "what if", "相反", "要是"]
+        has_counterfactual = any(
+            any(p in idea for p in counterfactual_phrases)
+            for idea in user_ideas
+        )
+        if not has_counterfactual and len(user_ideas) >= 2:
+            findings.append(BiasObservation(
+                observation_type="missing_counterfactual",
+                target_context="user_interaction",
+                description="No counterfactual exploration during multi-turn discussion",
+                severity="minor",
+            ))
+
+        return findings
+
+    async def generate_daily_scorecard(self, session_date: str) -> str:
+        """Generate a daily bias scorecard from all session observations."""
+        if not self.session_observations:
+            return "No bias observations recorded today."
+
+        critical = sum(1 for o in self.session_observations if o.severity == "critical")
+        major = sum(1 for o in self.session_observations if o.severity == "major")
+        minor = sum(1 for o in self.session_observations if o.severity == "minor")
+
+        lines = [
+            "## Red Team Daily Bias Scorecard",
+            f"Date: {session_date}",
+            f"Total observations: {len(self.session_observations)}",
+            f"  Critical: {critical}",
+            f"  Major: {major}",
+            f"  Minor: {minor}",
+            "",
+            "### Observations:",
+        ]
+        for obs in self.session_observations:
+            lines.append(f"- [{obs.severity.upper()}] [{obs.target_context}] {obs.observation_type}: {obs.description}")
+
+        scorecard = "\n".join(lines)
+
+        # Persist to DB if available
+        if self.state_db:
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc).isoformat()
+            conn = self.state_db._connect()
+            try:
+                for obs in self.session_observations:
+                    conn.execute(
+                        """INSERT INTO red_team_observations
+                           (session_date, observation_type, target_context, description, severity, evidence, created_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                        (session_date, obs.observation_type, obs.target_context,
+                         obs.description, obs.severity, obs.evidence, now)
+                    )
+                conn.commit()
+            finally:
+                conn.close()
+
+        return scorecard

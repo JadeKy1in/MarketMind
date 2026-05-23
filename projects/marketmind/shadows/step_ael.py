@@ -38,9 +38,10 @@ async def run_ael_step(
 
     try:
         from marketmind.shadows.ael_evolution import AELEvolutionEngine
-        from marketmind.shadows.methodology_evolver import MethodologyInjector
+        from marketmind.shadows.methodology_injector import MethodologyInjector
 
         ael = AELEvolutionEngine(state_db=state_db)
+        ael.ensure_control_replicas(state_db)
         debrief_day = getattr(config, 'ael_debrief_day', 1)
         today_day = int(today.split("-")[2])
 
@@ -50,7 +51,7 @@ async def run_ael_step(
         # Build performance dicts for treatment shadows
         treatment_ids = {
             "daredevil:range_bound:sideways_scout",
-            "daredevil:momentum:trend_chaser",
+            "daredevil:weekly:trend_rider",
             "expert:tech:silicon_oracle",
             "expert:macro:cycle_reader",
         }

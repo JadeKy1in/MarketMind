@@ -13,6 +13,8 @@ from marketmind.gateway.multimodal_adapter import (
     _make_observation_id,
     _now_iso,
     _error_observation,
+)
+from marketmind.gateway.ocr_helpers import (
     _tesseract_ocr,
     _pil_metadata,
     _pdfplumber_extract,
@@ -191,8 +193,9 @@ async def test_gemini_flash_extract_vision_returns_none_on_error():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_extract_text_from_screenshot_no_api_key():
+async def test_extract_text_from_screenshot_no_api_key(monkeypatch):
     """Without API key, screenshot returns metadata note."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     adapter = MultimodalAdapter(gemini_api_key="")
     dummy_b64 = base64.b64encode(b"fake-screenshot-data").decode()
     obs = await adapter.extract_text_from_screenshot(dummy_b64)

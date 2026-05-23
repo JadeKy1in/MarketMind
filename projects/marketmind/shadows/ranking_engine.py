@@ -13,6 +13,16 @@ logger = logging.getLogger("marketmind.shadows.ranking_engine")
 from marketmind.config.settings import ShadowSettings
 from marketmind.shadows.composite_scoring import CompositeScoring
 from marketmind.shadows.plateau_detector import PlateauDetector
+from marketmind.shadows.ranking_stats import (
+    apply_bayesian_haircut,
+    compute_cagr,
+    compute_calmar,
+    compute_haircut,
+    compute_mppm,
+    compute_omega,
+    compute_percentile_ranks,
+    estimate_sharpe,
+)
 
 
 @dataclass
@@ -62,43 +72,19 @@ class RankingEngine:
         self._composite = CompositeScoring(config)
         self._plateau = PlateauDetector(config)
 
-    # ── Core metrics ─────────────────────────────────────────────────────
+    # ── Core metrics (delegated to ranking_stats) ──────────────────────
 
     def compute_mppm(self, returns: list[float], gamma: float = 3.0) -> float:
-        """Goetzmann et al. MPPM: (1/(1-gamma)) * ln((1/T) * sum((1+r_t)^(1-gamma)))."""
-        if not returns or gamma == 1.0:
-            return 0.0
-        T = len(returns)
-        exponent = 1.0 - gamma
-        powered = [(1.0 + r) ** exponent for r in returns]
-        avg = sum(powered) / T
-        if avg <= 0:
-            return float("-inf") if avg == 0 else float("nan")
-        return (1.0 / exponent) * math.log(avg)
+        return compute_mppm(returns, gamma)
 
     def compute_calmar(self, cumulative_return: float, max_drawdown: float) -> float:
-        """Calmar = CAGR / max(|MDD|, floor). Capped at 100."""
-        mdd_floor = max(max_drawdown, 0.001)
-        cagr = cumulative_return
-        calmar = cagr / mdd_floor
-        return min(calmar, 100.0)
+        return compute_calmar(cumulative_return, max_drawdown)
 
     def compute_omega(self, returns: list[float], threshold: float = 0.0) -> float:
-        """Omega(L=0) = sum(gains) / sum(|losses|). Capped at 10."""
-        if not returns:
-            return 1.0
-        gains = sum(max(r - threshold, 0) for r in returns)
-        losses = sum(abs(min(r - threshold, 0)) for r in returns)
-        if losses == 0:
-            return 10.0
-        omega = gains / losses
-        return min(omega, 10.0)
+        return compute_omega(returns, threshold)
 
     def compute_cagr(self, cumulative_return: float, days: int) -> float:
-        """Annualize cumulative return over N trading days."""
-        if days <= 0:
-            return 0.0
-        return cumulative_return * 252 / days
+        return compute_cagr(cumulative_return, days)
 
     # ── Composite scoring (delegated to CompositeScoring) ────────────────
 
@@ -115,111 +101,20 @@ class RankingEngine:
             self.compute_omega, self.compute_calmar, self.compute_mppm,
         )
 
-    # ── Bayesian overfitting haircut ──────────────────────────────────────
+    # ── Bayesian overfitting haircut (delegated to ranking_stats) ───────
 
     def compute_haircut(self, n_shadows: int, evaluation_days: int,
                          daily_returns: dict[str, list[float]] | None = None) -> float:
-        """Witzany (2021) with Effective-N correction (P2-1).
-
-        If daily_returns is provided, computes the correlation matrix of
-        shadow returns and estimates effective N via:
-            Neff = N / (1 + (N-1) * mean_abs_corr)
-
-        This prevents the haircut from over-penalizing uncorrelated shadows
-        or under-penalizing tightly correlated ones.
-        """
-        if n_shadows < 1:
-            n_shadows = 1
-
-        n_eff = float(n_shadows)
-        if daily_returns and len(daily_returns) >= 3:
-            mean_corr = self._mean_abs_correlation(daily_returns)
-            if mean_corr is not None:
-                n_eff = n_shadows / (1.0 + (n_shadows - 1) * mean_corr)
-                n_eff = max(1.5, min(n_eff, float(n_shadows)))  # clamp
-
-        return evaluation_days / (evaluation_days + 8.0 + 24.0 * math.log(max(n_eff, 1.5)))
-
-    @staticmethod
-    def _mean_abs_correlation(daily_returns: dict[str, list[float]]) -> float | None:
-        """Compute mean absolute pairwise correlation of shadow returns."""
-        ids = list(daily_returns.keys())
-        if len(ids) < 2:
-            return None
-        min_len = min(len(r) for r in daily_returns.values())
-        if min_len < 5:
-            return None
-        corrs = []
-        for i in range(len(ids)):
-            for j in range(i + 1, len(ids)):
-                ri = daily_returns[ids[i]][-min_len:]
-                rj = daily_returns[ids[j]][-min_len:]
-                mean_i = sum(ri) / min_len
-                mean_j = sum(rj) / min_len
-                cov = sum((a - mean_i) * (b - mean_j) for a, b in zip(ri, rj)) / min_len
-                std_i = (sum((a - mean_i) ** 2 for a in ri) / min_len) ** 0.5
-                std_j = (sum((b - mean_j) ** 2 for b in rj) / min_len) ** 0.5
-                if std_i > 0 and std_j > 0:
-                    corrs.append(abs(cov / (std_i * std_j)))
-        return sum(corrs) / len(corrs) if corrs else None
+        return compute_haircut(n_shadows, evaluation_days, daily_returns)
 
     def apply_bayesian_haircut(self, composite_score: float, n_shadows: int,
                                 evaluation_days: int) -> float:
-        """C_deflated = C_raw * h(N,T)."""
-        return composite_score * self.compute_haircut(n_shadows, evaluation_days)
+        return apply_bayesian_haircut(composite_score, n_shadows, evaluation_days)
 
-    # ── Percentile computation ───────────────────────────────────────────
+    # ── Percentile computation (delegated to ranking_stats) ────────────
 
     def compute_percentile_ranks(self, scores: dict[str, float]) -> dict[str, float]:
-        """Map each shadow_id to its percentile rank (0-1) within the cohort.
-        Hybrid parametric/empirical approach.
-        """
-        if not scores:
-            return {}
-        n = len(scores)
-        score_list = list(scores.values())
-
-        if n >= self.config.parametric_threshold_n:
-            return self._empirical_percentiles(scores, score_list)
-        elif n <= 15:
-            return self._parametric_percentiles(scores, score_list)
-        else:
-            alpha = n / self.config.parametric_threshold_n
-            emp = self._empirical_percentiles(scores, score_list)
-            par = self._parametric_percentiles(scores, score_list)
-            return {
-                sid: alpha * emp.get(sid, 0.5) + (1 - alpha) * par.get(sid, 0.5)
-                for sid in scores
-            }
-
-    @staticmethod
-    def _empirical_percentiles(scores: dict[str, float],
-                                score_list: list[float]) -> dict[str, float]:
-        """Fraction of scores <= x (with continuity correction)."""
-        n = len(score_list)
-        sorted_scores = sorted(score_list)
-        result = {}
-        for sid, score in scores.items():
-            count_le = sum(1 for s in sorted_scores if s <= score)
-            result[sid] = (count_le - 0.5) / n
-        return result
-
-    @staticmethod
-    def _parametric_percentiles(scores: dict[str, float],
-                                 score_list: list[float]) -> dict[str, float]:
-        """Logistic-normal parametric percentile estimation for small N."""
-        n = len(score_list)
-        # Fit logistic-normal: first map scores to (0,1) via logit, fit normal
-        # Simplified: use rank-based logistic approximation
-        sorted_scores = sorted(score_list)
-        result = {}
-        for sid, score in scores.items():
-            rank = sum(1 for s in sorted_scores if s <= score)
-            # Logistic percentile: smooth interpolation
-            p = (rank - 0.5) / n
-            # Apply logistic smoothing for small N
-            result[sid] = 1.0 / (1.0 + math.exp(-2.0 * (p - 0.5) * math.sqrt(n)))
-        return result
+        return compute_percentile_ranks(scores, self.config.parametric_threshold_n)
 
     # ── Achievement ladder ────────────────────────────────────────────────
 
@@ -411,7 +306,7 @@ class RankingEngine:
             perf = performances[sid]
             score_hist = score_histories.get(sid, [])
 
-            deflated_sharpe = self._estimate_sharpe(perf.daily_returns)
+            deflated_sharpe = estimate_sharpe(perf.daily_returns)
             shadow_ma = market_accuracies.get(sid) if market_accuracies else None
             tier = self.determine_achievement_tier(
                 [(h["date"], h.get("deflated_score", 0)) for h in score_hist],
@@ -452,17 +347,6 @@ class RankingEngine:
         """Apply Holm-Bonferroni correction. Delegated to CompositeScoring."""
         CompositeScoring.apply_holm_bonferroni(results)
 
-    @staticmethod
-    def _estimate_sharpe(returns: list[float]) -> float:
-        """Estimate annualized Sharpe from daily returns."""
-        if len(returns) < 2:
-            return 0.0
-        mean = sum(returns) / len(returns)
-        variance = sum((r - mean) ** 2 for r in returns) / (len(returns) - 1)
-        if variance <= 0:
-            return 0.0
-        daily_sharpe = mean / math.sqrt(variance)
-        return daily_sharpe * math.sqrt(252)
 
     # ── Reset eligibility (delegated to PlateauDetector) ──────────────────
 

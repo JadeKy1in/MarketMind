@@ -1,257 +1,359 @@
-"""Tests for CircuitBreaker (P3-3) — LLM gateway resilience."""
-from __future__ import annotations
+"""Tests for P3-3: LLM Gateway Redundancy — CircuitBreaker + fallback routing."""
 import time
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
+from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
-from marketmind.gateway.async_client import (
+from marketmind.gateway.circuit_breaker import (
     CircuitBreaker,
     CircuitState,
-    CircuitBreakerOpenError,
-    QuotaExhaustedError,
-    RateLimitError,
-    _backoff_delay,
+    CircuitOpenError,
+)
+from marketmind.gateway.async_client import (
     DeepSeekGateway,
     init_gateway,
-    infer_error_type,
+    _call_with_retry,
+    RateLimitError,
 )
+from marketmind.config.settings import ShadowSettings
 
 
-# ── Test 1: CLOSED → OPEN transition ──────────────────────────────────
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-def test_closed_to_open_transition():
-    cb = CircuitBreaker(failure_threshold=3, timeout_seconds=30.0)
-    assert cb.state == CircuitState.CLOSED
-
-    cb._record_failure("5xx")
-    assert cb.state == CircuitState.CLOSED
-    assert cb.failure_count == 1
-
-    cb._record_failure("5xx")
-    assert cb.state == CircuitState.CLOSED
-    assert cb.failure_count == 2
-
-    cb._record_failure("5xx")
-    assert cb.state == CircuitState.OPEN
-    assert cb.failure_count == 0  # reset on transition
+def _mock_response(data, status_code=200, headers=None):
+    """Build a MagicMock HTTP response."""
+    resp = MagicMock()
+    resp.json.return_value = data
+    resp.status_code = status_code
+    resp.headers = headers or {}
+    resp.raise_for_status.return_value = None
+    return resp
 
 
-# ── Test 2: Fallback routing when OPEN ─────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_fallback_routing():
-    cb = CircuitBreaker(
-        failure_threshold=1, timeout_seconds=30.0,
-        fallback_provider_url="https://api.openai.com/v1",
-        fallback_model="gpt-4o-mini",
-    )
-    cb._record_failure("5xx")
-    assert cb.state == CircuitState.OPEN
-
-    primary = AsyncMock(return_value={"content": "primary"})
-    fallback = AsyncMock(return_value={"content": "fallback", "fallback": True})
-
-    result = await cb.call(primary, fallback)
-    primary.assert_not_called()  # circuit OPEN
-    fallback.assert_awaited_once()
-    assert result["content"] == "fallback"
+def _mock_client(mock_response):
+    """Build a mock httpx.AsyncClient whose .post is an AsyncMock."""
+    client = MagicMock()
+    client.post = AsyncMock(return_value=mock_response)
+    return client
 
 
-# ── Test 3: HALF_OPEN probe success → CLOSED ──────────────────────────
-
-@pytest.mark.asyncio
-async def test_half_open_probe_success():
-    cb = CircuitBreaker(failure_threshold=1, timeout_seconds=0.01)
-    cb._record_failure("5xx")
-    assert cb.state == CircuitState.OPEN
-
-    await asyncio.sleep(0.05)
-    assert cb._should_attempt_probe() is True
-
-    primary = AsyncMock(return_value={"content": "ok"})
-    result = await cb.call(primary)
-    primary.assert_awaited_once()
-    assert result["content"] == "ok"
-    assert cb.state == CircuitState.CLOSED
-    assert cb.failure_count == 0
+def _sleep_zero():
+    """Fast-forward time for OPEN→HALF_OPEN transitions."""
+    time.sleep(0)
 
 
-# ── Test 4: HALF_OPEN probe fails → back to OPEN ──────────────────────
+# ---------------------------------------------------------------------------
+# Test 1: CLOSED → OPEN transition after threshold failures
+# ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
-async def test_half_open_probe_failure():
-    cb = CircuitBreaker(failure_threshold=1, timeout_seconds=0.01)
-    cb._record_failure("5xx")
-    assert cb.state == CircuitState.OPEN
+class TestClosedToOpenTransition:
+    """Circuit breaker must transition CLOSED → OPEN after *threshold* failures."""
 
-    await asyncio.sleep(0.05)
-    assert cb._should_attempt_probe() is True
+    def test_three_failures_open_circuit(self):
+        cb = CircuitBreaker(threshold=3, timeout_s=30)
+        assert cb.state == CircuitState.CLOSED
+        assert cb.failure_count == 0
 
-    cb.state = CircuitState.HALF_OPEN  # simulate probe attempt
-    cb._record_failure("5xx")
-    assert cb.state == CircuitState.OPEN
-    assert cb._consecutive_open_count >= 1
+        cb.record_failure(status_code=500)
+        assert cb.state == CircuitState.CLOSED
+        assert cb.failure_count == 1
+
+        cb.record_failure(status_code=503)
+        assert cb.state == CircuitState.CLOSED
+        assert cb.failure_count == 2
+
+        cb.record_failure(status_code=502)
+        assert cb.state == CircuitState.OPEN
+        assert cb.is_open is True
+
+    def test_success_resets_counter_in_closed(self):
+        cb = CircuitBreaker(threshold=3, timeout_s=30)
+        cb.record_failure(status_code=500)
+        cb.record_failure(status_code=500)
+        cb.record_success()
+        assert cb.state == CircuitState.CLOSED
+        assert cb.failure_count == 0
+
+    def test_threshold_1_opens_immediately(self):
+        cb = CircuitBreaker(threshold=1, timeout_s=30)
+        cb.record_failure(status_code=500)
+        assert cb.state == CircuitState.OPEN
+
+    def test_threshold_must_be_positive(self):
+        with pytest.raises(ValueError):
+            CircuitBreaker(threshold=0)
+        with pytest.raises(ValueError):
+            CircuitBreaker(timeout_s=0)
 
 
-# ── Test 5: 429 Retry-After logic ─────────────────────────────────────
-
-def test_429_retry_after():
-    cb = CircuitBreaker(failure_threshold=1, timeout_seconds=30.0)
-    cb._record_failure("429")
-    assert cb.state == CircuitState.OPEN
-    assert cb._last_error_type == "429"
-    assert cb._should_attempt_probe() is False  # 60s default for 429
-
-    rate_limit_exc = RateLimitError(retry_after=10)
-    assert infer_error_type(rate_limit_exc) == "429"
-
-
-# ── Test 6: Backoff jitter — multiple values differ ───────────────────
-
-def test_backoff_jitter():
-    delays = [_backoff_delay(1, base=1.0, max_delay=60.0) for _ in range(20)]
-    unique = len(set(round(d, 4) for d in delays))
-    assert unique >= 2, f"Expected >=2 unique delays, got {unique}"
-    for d in delays:
-        assert 0.0 <= d <= 2.0, f"Delay {d} out of [0, 2]"
-
-
-# ── Test 7: Fallback output format ────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Test 2: Fallback routing when circuit OPEN
+# ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_fallback_output_format():
-    cb = CircuitBreaker(
-        failure_threshold=1, timeout_seconds=30.0,
-        fallback_provider_url="https://api.openai.com/v1",
-        fallback_model="gpt-4o-mini",
-    )
-    cb._record_failure("5xx")
+class TestFallbackRouting:
+    """When the circuit is OPEN, calls must route to the fallback provider URL/model."""
 
-    fb_response = {
-        "content": "Fallback analysis",
-        "usage": {"total_tokens": 100},
-        "latency_ms": 250,
-        "fallback": True,
-    }
-    primary = AsyncMock()
-    fallback = AsyncMock(return_value=fb_response)
+    async def test_open_routes_to_fallback_url(self):
+        """Circuit OPEN → request goes to fallback_url instead of primary."""
+        fallback_response_data = {
+            "choices": [{"message": {"content": "Fallback response"}}],
+            "usage": {"total_tokens": 10},
+        }
 
-    result = await cb.call(primary, fallback)
-    assert "content" in result
-    assert result.get("fallback") is True
+        # Build mock for fallback client
+        mock_fb = _mock_client(_mock_response(fallback_response_data))
 
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            # First call: primary client; second call: fallback client
+            mock_client_cls.side_effect = [
+                MagicMock(),  # primary (unused in this test path)
+                mock_fb,
+            ]
 
-# ── Test 8: Config ordering (settings → CircuitBreaker) ───────────────
+            init_gateway(
+                "test-key",
+                fallback_url="https://fallback.api.example.com/v1",
+                fallback_model="fallback-model-v1",
+                circuit_breaker_threshold=1,
+            )
 
-def test_config_ordering():
-    from marketmind.config.settings import MarketMindConfig
+            from marketmind.gateway.async_client import _gateway
+            # Force circuit OPEN
+            _gateway.circuit_breaker.record_failure(status_code=500)
+            _gateway.circuit_breaker.record_failure(status_code=500)
+            assert _gateway.circuit_breaker.is_open is True
 
-    cfg = MarketMindConfig(
-        circuit_breaker_threshold=5,
-        circuit_breaker_timeout_s=60,
-        fallback_provider_url="https://api.openai.com/v1",
-        fallback_model="gpt-4o-mini",
-        fallback_api_key="sk-test",
-    )
-    assert cfg.circuit_breaker_threshold == 5
-    assert cfg.circuit_breaker_timeout_s == 60
-    assert cfg.fallback_provider_url == "https://api.openai.com/v1"
+            from marketmind.gateway.async_client import chat_flash
+            result = await chat_flash("system", "user")
+            assert result["content"] == "Fallback response"
+            assert "usage" in result
+            assert "latency_ms" in result
 
-    cb = CircuitBreaker(
-        failure_threshold=cfg.circuit_breaker_threshold,
-        timeout_seconds=float(cfg.circuit_breaker_timeout_s),
-        fallback_provider_url=cfg.fallback_provider_url,
-        fallback_model=cfg.fallback_model,
-        fallback_api_key=cfg.fallback_api_key,
-    )
-    assert cb.failure_threshold == 5
-    assert cb.timeout_seconds == 60.0
-    assert cb.state == CircuitState.CLOSED
+            # Verify the request went to the fallback URL
+            post_call = mock_fb.post.call_args
+            assert "fallback.api.example.com" in str(post_call)
+            sent_payload = post_call[1]["json"]
+            assert sent_payload["model"] == "fallback-model-v1"
 
+    async def test_open_no_fallback_raises_circuit_open_error(self):
+        """Circuit OPEN + no fallback → CircuitOpenError."""
+        with patch("httpx.AsyncClient", return_value=MagicMock()):
+            init_gateway("test-key", circuit_breaker_threshold=1)
+            from marketmind.gateway.async_client import _gateway
+            _gateway.circuit_breaker.record_failure(status_code=500)
+            _gateway.circuit_breaker.record_failure(status_code=500)
+            assert _gateway.circuit_breaker.is_open is True
 
-# ── Test 9: Gateway with circuit breaker enabled ──────────────────────
-
-def test_gateway_with_circuit_breaker_enabled():
-    gw = DeepSeekGateway(
-        keys=["test-key"],
-        circuit_breaker_enabled=True,
-        circuit_breaker_threshold=3,
-        circuit_breaker_timeout_s=30,
-        fallback_provider_url="https://api.openai.com/v1",
-        fallback_model="gpt-4o-mini",
-        fallback_api_key="sk-fallback",
-    )
-    assert gw.circuit_breaker is not None
-    assert gw.circuit_breaker.state == CircuitState.CLOSED
-    assert gw.circuit_breaker.failure_threshold == 3
-
-
-# ── Test 10: Gateway without circuit breaker ──────────────────────────
-
-def test_gateway_without_circuit_breaker():
-    gw = DeepSeekGateway(keys=["test-key"])
-    assert gw.circuit_breaker is None
-    assert gw._fallback_circuit_breaker is None
+            from marketmind.gateway.async_client import chat_flash
+            # chat_flash reserves budget then calls _call_with_retry
+            # The circuit is open and no fallback → CircuitOpenError
+            # But chat_flash would call _call_with_retry which raises
+            # We test _call_with_retry directly
+            with pytest.raises(CircuitOpenError):
+                await _call_with_retry(
+                    _gateway, "test-model", "system", "user",
+                    0.3, 100, "max",
+                )
 
 
-# ── Test 11: Quota exhausted skips HALF_OPEN ──────────────────────────
+# ---------------------------------------------------------------------------
+# Test 3: HALF_OPEN probe success → CLOSED
+# ---------------------------------------------------------------------------
 
-def test_quota_exhausted_skips_half_open():
-    cb = CircuitBreaker(failure_threshold=1)
-    cb._record_failure("quota_exceeded")
-    assert cb.state == CircuitState.OPEN
-    assert cb._last_error_type == "quota_exceeded"
-    assert cb._should_attempt_probe() is False
-    assert cb._probe_interval() == float("inf")
+class TestHalfOpenSuccess:
+    """A successful probe in HALF_OPEN must transition to CLOSED and reset counter."""
 
+    def test_half_open_success_goes_closed(self):
+        cb = CircuitBreaker(threshold=1, timeout_s=30)
+        cb.record_failure(status_code=500)
+        assert cb.state == CircuitState.OPEN
 
-# ── Test 12: CircuitBreakerOpenError when OPEN and no fallback ─────────
+        # Manually transition to HALF_OPEN to simulate timeout expiry
+        cb.state = CircuitState.HALF_OPEN
+        cb.failure_count = 1  # preserved from before
 
-@pytest.mark.asyncio
-async def test_circuit_open_raises_without_fallback():
-    cb = CircuitBreaker(failure_threshold=1)
-    cb._record_failure("5xx")
-    assert cb.state == CircuitState.OPEN
-
-    with pytest.raises(CircuitBreakerOpenError, match="Circuit breaker is OPEN"):
-        await cb.call(AsyncMock())
+        cb.record_success()
+        assert cb.state == CircuitState.CLOSED
+        assert cb.failure_count == 0
 
 
-# ── Test 13: reset() forces CLOSED ────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Test 4: HALF_OPEN probe failure → back to OPEN
+# ---------------------------------------------------------------------------
 
-def test_reset_forces_closed():
-    cb = CircuitBreaker(failure_threshold=1)
-    cb._record_failure("5xx")
-    assert cb.state == CircuitState.OPEN
-    cb.reset()
-    assert cb.state == CircuitState.CLOSED
-    assert cb.failure_count == 0
-    assert cb._consecutive_open_count == 0
+class TestHalfOpenFailure:
+    """A failed probe in HALF_OPEN must transition back to OPEN."""
 
+    def test_half_open_failure_goes_open(self):
+        cb = CircuitBreaker(threshold=1, timeout_s=30)
+        cb.record_failure(status_code=500)
+        assert cb.state == CircuitState.OPEN
 
-# ── Test 14: infer_error_type mappings ────────────────────────────────
+        # Manually transition to HALF_OPEN
+        cb.state = CircuitState.HALF_OPEN
 
-def test_infer_error_type():
-    assert infer_error_type(RateLimitError(5)) == "429"
-    assert infer_error_type(QuotaExhaustedError()) == "quota_exceeded"
-    # 5xx via httpx
-    import httpx
-    exc_500 = httpx.HTTPStatusError("err", request=MagicMock(), response=MagicMock(status_code=500))
-    assert infer_error_type(exc_500) == "5xx"
-    exc_503 = httpx.HTTPStatusError("err", request=MagicMock(), response=MagicMock(status_code=503))
-    assert infer_error_type(exc_503) == "5xx"
-    # Unknown
-    assert infer_error_type(ValueError("random")) == "unknown"
+        cb.record_failure(status_code=503)
+        assert cb.state == CircuitState.OPEN
+        assert cb.is_open is True
 
 
-# ── Test 15: Exponential backoff increases with attempts ──────────────
+# ---------------------------------------------------------------------------
+# Test 5: 429 Retry-After respected
+# ---------------------------------------------------------------------------
 
-def test_backoff_increases_with_attempts():
-    d1 = _backoff_delay(1, base=1.0, max_delay=60.0)
-    d3 = _backoff_delay(3, base=1.0, max_delay=60.0)
-    # d3's max possible is higher (8.0 vs 2.0)
-    # But due to jitter they can overlap; check max_delay cap
-    d_capped = _backoff_delay(10, base=1.0, max_delay=5.0)
-    assert d_capped <= 5.0
+class Test429RetryAfter:
+    """When a 429 with Retry-After is recorded, the OPEN timeout must use that value."""
+
+    def test_429_uses_retry_after_as_timeout(self):
+        cb = CircuitBreaker(threshold=1, timeout_s=30)
+        cb.record_failure(status_code=429, retry_after=15)
+        assert cb.state == CircuitState.OPEN
+
+        # OPEN timeout should be approximately 15 s (with jitter on non-429 errors,
+        # but 429 with retry_after *disables* jitter).
+        remaining = cb._open_until - time.monotonic()
+        # Should be close to 15 (within a small delta for execution time)
+        assert 14.0 <= remaining <= 16.0, f"Expected ~15s timeout, got {remaining:.1f}s"
+
+    def test_429_without_retry_after_defaults(self):
+        """429 without explicit Retry-After header — should still work."""
+        cb = CircuitBreaker(threshold=1, timeout_s=30)
+        # If retry_after is None but status is 429, it uses normal backoff
+        cb.record_failure(status_code=429, retry_after=None)
+        assert cb.state == CircuitState.OPEN
+        # Uses base timeout with jitter
+        remaining = cb._open_until - time.monotonic()
+        # base=30 with jitter 0.75-1.25 and backoff 1x → 22.5-37.5
+        assert 20.0 <= remaining <= 40.0, f"Expected ~30s timeout, got {remaining:.1f}s"
+
+
+# ---------------------------------------------------------------------------
+# Test 6: Jitter in backoff timing
+# ---------------------------------------------------------------------------
+
+class TestJitterInBackoff:
+    """Consecutive OPEN transitions must produce non-identical timeouts due to jitter."""
+
+    def test_jitter_produces_variable_timeouts(self):
+        """Multiple OPEN transitions should not have identical timeouts."""
+        # Use a high threshold so we can test repeated transitions
+        cb = CircuitBreaker(threshold=1, timeout_s=30)
+
+        timeouts = []
+        for _ in range(5):
+            cb.state = CircuitState.CLOSED
+            cb.failure_count = 0
+            cb.record_failure(status_code=500)  # CLOSED → OPEN
+            # Record timeout
+            timeouts.append(cb._open_until - time.monotonic())
+
+        # With jitter, not all values should be the same
+        unique = set(round(t, 2) for t in timeouts)
+        assert len(unique) > 1, f"Jitter did not produce variation: {timeouts}"
+
+    def test_timeout_within_jitter_bounds(self):
+        """Base timeout should fall within [0.75x, 1.25x] range (with backoff multiplier)."""
+        cb = CircuitBreaker(threshold=1, timeout_s=30)
+        cb.record_failure(status_code=500)
+        remaining = cb._open_until - time.monotonic()
+        # First OPEN: timeout=30, backoff=2^0=1, jitter 0.75-1.25
+        assert 20.0 <= remaining <= 40.0, f"Timeout {remaining:.1f}s outside jitter band"
+
+
+# ---------------------------------------------------------------------------
+# Test 7: Fallback output format matches primary
+# ---------------------------------------------------------------------------
+
+class TestFallbackOutputFormat:
+    """Fallback responses must return the same {content, usage, latency_ms} shape."""
+
+    def test_fallback_response_has_required_keys(self):
+        """_fallback_call result dict must contain content, usage, latency_ms."""
+        # We can verify by looking at the function implementation —
+        # it returns {"content": ..., "usage": ..., "latency_ms": ...}
+        # which matches gw._call()'s return shape.
+        import inspect
+        from marketmind.gateway.async_client import _fallback_call
+
+        source = inspect.getsource(_fallback_call)
+        # Primary _call returns: {"content", "usage", "latency_ms"}
+        assert '"content"' in source
+        assert '"usage"' in source
+        assert '"latency_ms"' in source
+
+    @pytest.mark.asyncio
+    async def test_fallback_returns_same_structure_as_primary(self):
+        """End-to-end: fallback response has identical keys to primary."""
+        primary_data = {
+            "choices": [{"message": {"content": "primary"}}],
+            "usage": {"total_tokens": 100},
+        }
+        fallback_data = {
+            "choices": [{"message": {"content": "fallback"}}],
+            "usage": {"total_tokens": 50},
+        }
+
+        mock_primary = _mock_client(_mock_response(primary_data))
+        mock_fallback = _mock_client(_mock_response(fallback_data))
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client_cls.side_effect = [mock_primary, mock_fallback]
+            init_gateway(
+                "test-key",
+                fallback_url="https://fallback.example.com/v1",
+                circuit_breaker_threshold=1,
+            )
+            from marketmind.gateway.async_client import _gateway, chat_flash
+
+            # First call: primary (should succeed, CLOSED)
+            result_primary = await chat_flash("sys", "user")
+            expected_keys = {"content", "usage", "latency_ms", "reasoning_content"}
+            assert set(result_primary.keys()) == expected_keys
+
+            # Force circuit OPEN
+            _gateway.circuit_breaker.record_failure(status_code=500)
+            _gateway.circuit_breaker.record_failure(status_code=500)
+            assert _gateway.circuit_breaker.is_open
+
+            # Second call: should hit fallback
+            result_fallback = await chat_flash("sys", "user")
+            assert set(result_fallback.keys()) == expected_keys
+            assert result_fallback["content"] == "fallback"
+
+
+# ---------------------------------------------------------------------------
+# Test 8: Config ordering (settings load correctly)
+# ---------------------------------------------------------------------------
+
+class TestConfigOrdering:
+    """New ShadowSettings fields must have correct defaults and be accessible."""
+
+    def test_default_values(self):
+        s = ShadowSettings()
+        assert s.fallback_provider_url == ""
+        assert s.fallback_model == ""
+        assert s.circuit_breaker_threshold == 3
+        assert s.circuit_breaker_timeout_s == 30
+
+    def test_custom_values(self):
+        s = ShadowSettings(
+            fallback_provider_url="https://custom.example.com/v1",
+            fallback_model="custom-model",
+            circuit_breaker_threshold=5,
+            circuit_breaker_timeout_s=60,
+        )
+        assert s.fallback_provider_url == "https://custom.example.com/v1"
+        assert s.fallback_model == "custom-model"
+        assert s.circuit_breaker_threshold == 5
+        assert s.circuit_breaker_timeout_s == 60
+
+    def test_fields_present_in_dataclass(self):
+        """Verify the fields actually exist on the dataclass (no typo in attribute name)."""
+        s = ShadowSettings()
+        # These should not raise AttributeError
+        _ = s.fallback_provider_url
+        _ = s.fallback_model
+        _ = s.circuit_breaker_threshold
+        _ = s.circuit_breaker_timeout_s

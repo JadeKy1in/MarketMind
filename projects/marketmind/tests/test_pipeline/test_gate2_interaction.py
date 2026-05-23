@@ -84,7 +84,6 @@ def make_signal_conflicts():
     """Build SignalConflict objects."""
     return [
         SignalConflict(
-            hypothesis="EUR/USD directional force vs flow imbalance",
             signal_a=("causal_decomposition", 0.65),
             signal_b=("flow_decomposition", -0.10),
             divergence=0.75,

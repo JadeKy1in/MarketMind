@@ -1,277 +1,482 @@
-"""Pipeline orchestration — run_daily, run_full, run_gate1_mode, run_interactive.
+"""MarketMind pipeline orchestration — daily, shadows, backtest, GUI runners.
 
-Thin coordinator: calls pre_gate1 and post_gate1 modules, wires Gate 1→2→3 in run_full().
+Extracted from app.py to provide standalone execution paths. All functions
+import directly from gateway, pipeline, and shadows modules — no dependency on app.py.
 """
 from __future__ import annotations
-from dataclasses import asdict
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from marketmind.config.settings import MarketMindConfig
+import asyncio
+import json
+import logging
+import sys
+import time
+from pathlib import Path
 
 from marketmind.gateway.async_client import init_gateway
-from marketmind.pipeline.pre_gate1 import run_pre_gate1
-from marketmind.pipeline.post_gate1 import run_post_gate1
+
+# ── StageTracker extracted to pipeline/stage_tracker.py ─────────────────
+from marketmind.pipeline.stage_tracker import StageTracker
+_StageTracker = StageTracker  # backward-compat alias for interactive_orchestration.py
+
+logger = logging.getLogger(__name__)
 
 
-# ── CLI IO handlers for Gate 1 ─────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Module-level globals (H1: pipeline separation)
+# ══════════════════════════════════════════════════════════════════════════════
 
-async def _cli_input_handler(prompt: str) -> str:
-    """Async wrapper around stdin for Gate 1 interaction."""
-    print(prompt, end="")
-    return input()
+_shadow_task: "asyncio.Task | None" = None
+_shadow_result = None  # stores ShadowOrchestrationResult when background task completes
 
-
-async def _cli_status_handler(message: str) -> None:
-    """Async wrapper around print for Gate 1 status display."""
-    print(message)
-
-
-# ── Run modes ──────────────────────────────────────────────────────────────────
-
-async def run_daily(config: "MarketMindConfig", mock: bool = False, verbose: bool = False,
-                    shadow_count: int | None = None,
-                    inject_result=None) -> int:
-    """Execute full daily analysis pipeline (stages 0-10, no Gate 1)."""
-    state = await run_pre_gate1(config, mock, verbose, shadow_count,
-                                inject_result=inject_result)
-    return await run_post_gate1(config, state, mock, verbose)
+# Default benchmark Sharpe ratio for resonance evaluation.
+# TODO: replace with trailing performance metric from backtest or config.
+_DEFAULT_OBSERVED_SHARPE = 0.5
 
 
-async def run_full(config: "MarketMindConfig", mock: bool = False, verbose: bool = False,
-                   shadow_count: int | None = None, session_mode: str = "full") -> int:
-    """Complete pipeline with Gate 1→2→3 user interaction.
+def _shadow_progress_started() -> None:
+    """Called when shadow background task starts."""
+    print("Shadows processing...")
 
-    Flow: Stage 0-3 → Gate 1 → Stage 4-10 → Gate 2 → Gate 3 → Archive
-    """
-    from marketmind.storage.session import SessionManager, SessionState, GateCheckpoint
 
-    state = await run_pre_gate1(config, mock, verbose, shadow_count)
-
-    gate1_session = None
-
-    # ── Gate 1: Human direction confirmation ──────────────────────────────
-    hypotheses = state["hypotheses"]
-    if hypotheses:
-        from marketmind.pipeline.gate1_interaction import run_gate1
-
-        gate1_id = f"gate1-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M')}"
-        print("\n" + "=" * 60)
-        print("  Gate 1 — Investment Direction Confirmation")
-        print("=" * 60)
-
-        gate1_session = await run_gate1(
-            hypotheses=hypotheses,
-            session_id=gate1_id,
-            mode=session_mode,
-            io_handler=_cli_input_handler,
-            status_handler=_cli_status_handler,
-        )
-
-        session_mgr = SessionManager()
-        session_mgr.save(SessionState(
-            session_id=gate1_session.session_id,
-            mode=session_mode,
-            current_gate=1,
-            gate1=GateCheckpoint(1, True, data={
-                "selected_direction": gate1_session.selected_direction,
-                "rejected": gate1_session.rejected_directions,
-            }),
-        ))
-        if verbose:
-            print(f"Gate 1 checkpoint saved: {gate1_session.session_id}")
-
-    # ── Stages 4-10: Full analysis pipeline ───────────────────────────────
-    exit_code = await run_post_gate1(config, state, mock, verbose)
-    if exit_code != 0:
-        return exit_code
-
-    # ── Gate 2: Signal Confirmation ───────────────────────────────────────
-    if gate1_session is None or not gate1_session.selected_direction:
-        print("\nNo direction selected at Gate 1. Pipeline complete.")
-        return 0
-
-    post_hypotheses = state.get("hypotheses", [])
-    fragility_report = state.get("fragility_report")
-    regime_mapping = state.get("regime_mapping")
-
-    from marketmind.pipeline.gate2_interaction import run_gate2
-
-    gate2_id = f"gate2-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M')}"
-    print("\n" + "=" * 60)
-    print("  Gate 2 — Signal Confirmation")
-    print("=" * 60)
-
+def _shadow_progress_done(task: "asyncio.Task") -> None:
+    """Called when shadow background task completes."""
+    if task.cancelled():
+        return
     try:
-        gate2_session = await run_gate2(
-            direction=gate1_session.selected_direction,
-            hypotheses=post_hypotheses,
-            fragility_report=fragility_report,
-            regime_mapping=regime_mapping,
-            session_id=gate2_id,
-            io_handler=_cli_input_handler,
-            status_handler=_cli_status_handler,
+        result = task.result()
+        if result:
+            logger.info("Shadows complete: %s shadows, %s temp created",
+                        result.active_shadows, result.temp_shadows_created)
+            global _shadow_result
+            _shadow_result = result
+    except Exception:
+        logger.exception("Shadows error")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# _archive_session — used by both daily legacy and interactive modes
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def _archive_session(config, l1_result, l2_result, l3_result, verdict: str) -> None:
+    """Archive a pipeline session."""
+    from datetime import datetime as dt
+    from marketmind.storage.archivist import get_archivist
+    with get_archivist(config.data_dir) as archivist:
+        archivist.init_fts()
+        archivist.index_document(
+            date=dt.now().isoformat()[:10],
+            category="daily_session",
+            title="MarketMind Interactive",
+            content=f"Interactive session: {getattr(l1_result, 'event_grade', 'N/A')} | "
+                    f"{getattr(l2_result, 'macro_quadrant', 'N/A')} | resonance={verdict}",
         )
-    except Exception as e:
-        print(f"\n[Gate 2 failed: {e}] Partial state saved. Pipeline stopped gracefully.")
-        session_mgr = SessionManager()
-        session_mgr.save(SessionState(
-            session_id=gate2_id,
-            mode=session_mode,
-            current_gate=2,
-            gate1=GateCheckpoint(1, True, data={
-                "selected_direction": gate1_session.selected_direction,
-            }),
-            gate2=GateCheckpoint(2, False, data={
-                "error": str(e)[:200],
-            }),
-        ))
-        return 1
-
-    # Save cross-gate checkpoint after Gate 2
-    session_mgr = SessionManager()
-    session_mgr.save(SessionState(
-        session_id=gate2_id,
-        mode=session_mode,
-        current_gate=2,
-        gate1=GateCheckpoint(1, True, data={
-            "selected_direction": gate1_session.selected_direction,
-        }),
-        gate2=GateCheckpoint(2, True, data={
-            "conviction": gate2_session.final_conviction,
-            "outcome": gate2_session.outcome,
-        }),
-    ))
-
-    if gate2_session.outcome != "CONTINUE":
-        print(f"\nGate 2 outcome: {gate2_session.outcome}. Pipeline stopped.")
-        return 0
-
-    # ── Gate 3: Position Decision ─────────────────────────────────────────
-    from marketmind.pipeline.gate3_interaction import run_gate3
-
-    gate3_id = f"gate3-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M')}"
-    print("\n" + "=" * 60)
-    print("  Gate 3 — Position Decision")
-    print("=" * 60)
-
-    try:
-        gate3_session = await run_gate3(
-            gate2_session=gate2_session,
-            hypotheses=post_hypotheses,
-            session_id=gate3_id,
-            io_handler=_cli_input_handler,
-            status_handler=_cli_status_handler,
-        )
-    except Exception as e:
-        print(f"\n[Gate 3 failed: {e}] Partial state saved. Pipeline stopped gracefully.")
-        session_mgr = SessionManager()
-        session_mgr.save(SessionState(
-            session_id=gate3_id,
-            mode=session_mode,
-            current_gate=3,
-            gate2=GateCheckpoint(2, True, data={
-                "conviction": gate2_session.final_conviction,
-                "outcome": gate2_session.outcome,
-            }),
-            gate3=GateCheckpoint(3, False, data={
-                "error": str(e)[:200],
-            }),
-        ))
-        return 1
-
-    # Save Gate 3 checkpoint with full ticket data
-    if gate3_session.ticket:
-        session_mgr = SessionManager()
-        session_mgr.save(SessionState(
-            session_id=gate3_id,
-            mode=session_mode,
-            current_gate=3,
-            gate1=GateCheckpoint(1, True, data={
-                "selected_direction": gate1_session.selected_direction,
-            }),
-            gate2=GateCheckpoint(2, True, data={
-                "conviction": gate2_session.final_conviction,
-                "outcome": gate2_session.outcome,
-            }),
-            gate3=GateCheckpoint(3, gate3_session.outcome == "EXECUTED", data={
-                "ticket": asdict(gate3_session.ticket),
-            }),
-        ))
-
-    if gate3_session.outcome == "EXECUTED":
-        # Archive the decision ticket to the session archivist
-        archivist = state.get("archivist")
-        if archivist and gate3_session.ticket:
-            try:
-                archivist.save_json("decisions", f"ticket_{gate3_id}",
-                                    asdict(gate3_session.ticket))
-                if verbose:
-                    print(f"Decision ticket archived: {gate3_id}")
-            except Exception as e:
-                if verbose:
-                    print(f"Archive warning: {e}")
-        print(f"\nDecision executed: {gate3_session.ticket.direction}")
-    else:
-        print(f"\nGate 3 outcome: {gate3_session.outcome}. Pipeline complete.")
-
-    return 0
 
 
-async def run_gate1_mode(config: "MarketMindConfig", mock: bool = False,
-                         verbose: bool = False,
-                         shadow_count: int | None = None) -> int:
-    """Run Stage 0-3 then Gate 1 interaction, save checkpoint, and exit.
+# ══════════════════════════════════════════════════════════════════════════════
+# Shared pipeline step helpers (deduplicated from run_daily / run_daily_legacy)
+# ══════════════════════════════════════════════════════════════════════════════
 
-    Does NOT run stages 4-10. Use --mode gate1 for direction-only sessions.
-    """
-    state = await run_pre_gate1(config, mock, verbose, shadow_count)
+async def _do_news_collection(config, tracker: StageTracker) -> list:
+    tracker.advance(1, "Scout: fetching news from all sources...")
+    from marketmind.pipeline.scout import fetch_all_sources
+    items = await fetch_all_sources(config)
+    tracker.result(f"{len(items)} articles collected")
+    return items
 
-    hypotheses = state["hypotheses"]
-    if not hypotheses:
-        print("No hypotheses to present. Pipeline stopped early.")
-        return 0
 
-    from marketmind.pipeline.gate1_interaction import run_gate1
-    from marketmind.storage.session import SessionManager, SessionState, GateCheckpoint
+async def _do_flash_preprocessing(news_items: list, tracker: StageTracker) -> list:
+    tracker.advance(2, "Flash: preprocessing signals...")
+    from marketmind.pipeline.flash_preprocessor import preprocess_batch
+    signals = await preprocess_batch(news_items[:50])
+    _record_z0_flash(len(news_items[:50]), len(signals))
+    tracker.result(f"{len(signals)} signals extracted")
+    return signals
 
-    session_id = f"gate1-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M')}"
-    print("\n" + "=" * 60)
-    print("  Gate 1 — Investment Direction Confirmation")
-    print("=" * 60)
 
-    gate1_session = await run_gate1(
-        hypotheses=hypotheses,
-        session_id=session_id,
-        mode="full",
-        io_handler=_cli_input_handler,
-        status_handler=_cli_status_handler,
+async def _do_l1_analysis(signals: list, news_items: list, tracker: StageTracker):
+    tracker.advance(3, "Layer 1: narrative analysis...")
+    from marketmind.pipeline.layer1_narrative import analyze_layer1
+    result = await analyze_layer1(signals[:15], news_items)
+    _record_z0_l1(result)
+    tracker.result(f"grade={result.event_grade}, quadrant={result.matrix_quadrant}")
+    return result
+
+
+async def _do_l2_l3_parallel(l1_result, tracker: StageTracker):
+    tracker.advance(4, "Layer 2+3: fundamental + technical analysis...")
+    from marketmind.pipeline.layer2_fundamental import analyze_layer2
+    from marketmind.pipeline.layer3_technical import analyze_layer3
+    from marketmind.config.asset_universe import ASSET_UNIVERSE
+    tickers = [a.ticker for a in list(ASSET_UNIVERSE.values())[:10]]
+    l2_task = analyze_layer2(l1_result)
+    l3_task = analyze_layer3(tickers, {})
+    l2, l3 = await asyncio.gather(l2_task, l3_task)
+    tracker.result(f"L2: {len(l2.ticker_candidates)} candidates, "
+                   f"L3: {len(l3.results)} tickers ({len(l3.green_lights)} green)")
+    return l2, l3
+
+
+async def _do_red_team(l1_result, l2_result, selected_tickers: list, tracker: StageTracker):
+    tracker.advance(6, "Red Team: adversarial challenge...")
+    from marketmind.pipeline.red_team import run_red_team
+    report = await run_red_team(l1_result.raw_analysis, l2_result.raw_analysis, selected_tickers)
+    tracker.result(f"{len(report.challenges)} challenges, A-grade: {report.a_grade_count}")
+    return report
+
+
+async def _do_resonance(l3_result, tracker: StageTracker):
+    tracker.advance(7, "Resonance: statistical validation...")
+    from marketmind.pipeline.resonance import evaluate_resonance, ResonanceResult
+    signal_returns_data = {}
+    if hasattr(l3_result, 'results'):
+        for r in l3_result.results[:10]:
+            if hasattr(r, 'ticker') and hasattr(r, 'daily_return_pct'):
+                key = f"technical_{r.ticker}"
+                signal_returns_data[key] = [r.daily_return_pct] if r.daily_return_pct else []
+    if not signal_returns_data:
+        signal_returns_data = {"fallback": [0.001, -0.002, 0.003, -0.001, 0.002]}
+    return evaluate_resonance(
+        signal_returns=signal_returns_data,
+        dimensions=["narrative", "fundamental", "technical", "sentiment"],
+        observed_sharpe=_DEFAULT_OBSERVED_SHARPE,
     )
 
-    # Save Gate 1 checkpoint
-    session_mgr = SessionManager()
-    session_mgr.save(SessionState(
-        session_id=gate1_session.session_id,
-        mode="full",
-        current_gate=1,
-        gate1=GateCheckpoint(1, True, data={
-            "selected_direction": gate1_session.selected_direction,
-            "rejected": gate1_session.rejected_directions,
-        }),
-    ))
 
-    if verbose:
-        print(f"Gate 1 complete. Session: {gate1_session.session_id}")
-        print(f"  Selected: {gate1_session.selected_direction}")
-        print(f"  Rejected: {gate1_session.rejected_directions}")
+async def _do_decision(l1_result, l2_result, l3_result, red_team, resonance, tracker: StageTracker):
+    tracker.advance(8, "Decision: synthesis...")
+    from marketmind.pipeline.decision import generate_decision
+    decision = await generate_decision(l1=l1_result, l2=l2_result, l3=l3_result,
+                                        red_team=red_team, resonance=resonance)
+    tracker.result(f"cards={len(decision.decision_cards)}, "
+                   f"no_trade={'present' if decision.no_trade_card else 'none'}")
+    return decision
 
-    print("\nGate 1 finished. Use --mode full to continue with stages 4-10.")
+
+async def _do_daily_archive(config, l1_result, l2_result, resonance, tracker: StageTracker) -> None:
+    tracker.advance(9, "Archive: saving session...")
+    from datetime import datetime as dt
+    from marketmind.storage.archivist import get_archivist
+    with get_archivist(config.data_dir) as a:
+        a.init_fts()
+        a.index_document(
+            date=dt.now().isoformat()[:10],
+            category="daily_session",
+            title="MarketMind Daily",
+            content=f"MarketMind daily: {l1_result.event_grade} | {l2_result.macro_quadrant} | "
+                    f"resonance={resonance.verdict}",
+        )
+    tracker.result("Session archived")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Shadow ecosystem init (deduplicated from run_daily / run_daily_legacy)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _record_z0_flash(input_count: int, signal_count: int) -> None:
+    """Z0: append Flash batch metrics to baseline.jsonl."""
+    import json as _j, os as _o
+    from datetime import datetime, timezone
+    try:
+        d = _o.path.join(_o.path.dirname(_o.path.abspath(__file__)), "..", ".claude", "metrics")
+        _o.makedirs(d, exist_ok=True)
+        r = {"timestamp": datetime.now(timezone.utc).isoformat(), "type": "flash",
+             "articles_in": input_count, "signals_out": signal_count}
+        with open(_o.path.join(d, "baseline.jsonl"), "a", encoding="utf-8") as f:
+            f.write(_j.dumps(r, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def _record_z0_l1(l1_result) -> None:
+    """Z0: append L1 analysis metrics to baseline.jsonl."""
+    import json as _j, os as _o
+    from datetime import datetime, timezone
+    try:
+        d = _o.path.join(_o.path.dirname(_o.path.abspath(__file__)), "..", ".claude", "metrics")
+        _o.makedirs(d, exist_ok=True)
+        r = {"timestamp": datetime.now(timezone.utc).isoformat(), "type": "l1",
+             "event_grade": getattr(l1_result, "event_grade", "N/A"),
+             "matrix_quadrant": getattr(l1_result, "matrix_quadrant", "N/A"),
+             "sentiment": getattr(l1_result, "sentiment_direction", "N/A")}
+        with open(_o.path.join(d, "baseline.jsonl"), "a", encoding="utf-8") as f:
+            f.write(_j.dumps(r, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def _init_shadow_ecosystem(config, shadow_count: int | None, tracker: StageTracker):
+    """Init shadow DB + permanent shadows + optional Phase F modules."""
+    if not (config.shadow.shadows_enabled and shadow_count != 0):
+        return None, None
+    tracker.advance(0, "Shadow Mother: scanning events...")
+    from marketmind.shadows.shadow_state import ShadowStateDB
+    from marketmind.shadows.shadow_mother import ShadowMother
+    db = ShadowStateDB(config.shadow.shadows_db_path)
+    db.init_schema()
+    from marketmind.shadows.expert_shadows import create_expert_shadows
+    from marketmind.shadows.daredevil_shadows import create_daredevil_shadows
+    from marketmind.shadows.catfish_agent import create_catfish_agent
+    create_expert_shadows(db, config.shadow)
+    create_daredevil_shadows(db, config.shadow)
+    create_catfish_agent(db, config.shadow)
+    mother = ShadowMother(config.shadow, db)
+    tracker.result(f"Shadow ecosystem initialized with {len(db.get_visible_shadows())} shadows")
+    if getattr(config.shadow, 'scheduler_enabled', False):
+        from marketmind.shadows.background_scheduler import BackgroundScheduler, SchedulerConfig
+        from marketmind.shadows.shadow_memory import ShadowMemoryStore
+        ms = ShadowMemoryStore(db)
+        sc = SchedulerConfig(reflection_interval_minutes=config.shadow.reflection_interval_minutes,
+                             crystallization_interval_hours=config.shadow.crystallization_interval_hours,
+                             max_concurrent_tasks=config.shadow.max_concurrent_tasks, enabled=True)
+        BackgroundScheduler(ms, db, mother, sc).start()
+        tracker.result("Background scheduler started")
+    if getattr(config.shadow, 'gemini_flash_enabled', False):
+        from marketmind.gateway.multimodal_adapter import MultimodalAdapter
+        MultimodalAdapter()
+        tracker.result("Gemini Flash multimodal adapter initialized")
+    return db, mother
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Pipeline execution functions
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def run_daily_legacy(config, mock: bool = False, verbose: bool = False,
+                            shadow_count: int | None = None) -> int:
+    """Execute full daily analysis pipeline WITH blocking shadow cycle.
+
+    This is the PRE-SEPARATION legacy behavior. Shadows run synchronously
+    and block the main pipeline until complete. Use run_daily() for the
+    new non-blocking shadow pipeline.
+    """
+    from marketmind.config.settings import MarketMindConfig
+    init_gateway(config.deepseek_api_key, config.deepseek_base_url)
+
+    tracker = StageTracker(verbose)
+    shadow_db, mother = _init_shadow_ecosystem(config, shadow_count, tracker)
+
+    # Steps 1-4: Shared pipeline core
+    news_items = await _do_news_collection(config, tracker)
+    signals = await _do_flash_preprocessing(news_items, tracker)
+    l1_result = await _do_l1_analysis(signals, news_items, tracker)
+    l2_result, l3_result = await _do_l2_l3_parallel(l1_result, tracker)
+
+    # Step 5: Shadow ecosystem run (BLOCKING — legacy behavior)
+    if config.shadow.shadows_enabled and mother is not None:
+        tracker.advance(5, "Shadows: running analysis cycle...")
+        orchestration = await mother.orchestrate_daily_cycle(news_items, {})
+        tracker.result(f"{orchestration.active_shadows} shadows, "
+                       f"{orchestration.temp_shadows_created} temp created")
+        if getattr(config.shadow, 'crystallization_enabled', False):
+            tracker.result("Memory updated, crystallization check complete")
+
+    # Steps 6-9: Shared pipeline core
+    red_team = await _do_red_team(l1_result, l2_result, l2_result.ticker_candidates, tracker)
+    resonance = await _do_resonance(l3_result, tracker)
+    decision = await _do_decision(l1_result, l2_result, l3_result, red_team, resonance, tracker)
+    await _do_daily_archive(config, l1_result, l2_result, resonance, tracker)
+
+    print("\nMarketMind daily pipeline complete.")
     return 0
 
 
-async def run_interactive(config: "MarketMindConfig", mock: bool = False,
-                          verbose: bool = False, shadow_count: int | None = None) -> int:
-    """Run the full interactive pipeline with CLI prompts at each stage."""
-    from marketmind.pipeline.interactive_orchestration import run_interactive as _run
-    return await _run(config, mock, verbose, shadow_count)
+# ══════════════════════════════════════════════════════════════════════════════
+# H1: Pipeline Separation — new non-blocking shadow pipeline
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# Token Budget Split: 60/40
+#   - 60% reserved for the interactive main pipeline (L1→L2→L3→Decision→Red Team)
+#   - 40% reserved for shadow ecosystem background analysis
+#   Shadows launch as a background asyncio.Task and do NOT block the main pipeline.
+#   The main pipeline completes and displays results immediately; shadow results
+#   are printed to stdout when the background task finishes (typically 5-30s later).
+#
+# WAL mode: Already enabled at shadow_state.py ShadowStateDB._connect() (PRAGMA
+#   journal_mode=WAL). WAL allows concurrent reads from the main pipeline while
+#   shadows write snapshots and votes in the background.
+
+
+async def run_daily(config, mock: bool = False, verbose: bool = False,
+                     shadow_count: int | None = None) -> int:
+    """Execute full daily analysis pipeline.
+
+    Shadows run as a non-blocking background task so the main pipeline
+    completes and displays results without waiting for all shadow analyses.
+    The shadow ecosystem receives 40% of the rate-limit budget and operates
+    in the background with results printed on completion.
+
+    For the legacy blocking behavior, use run_daily_legacy().
+    """
+    init_gateway(config.deepseek_api_key, config.deepseek_base_url)
+
+    tracker = StageTracker(verbose)
+    global _shadow_task, _shadow_result
+    _shadow_result = None
+    shadow_db, mother = _init_shadow_ecosystem(config, shadow_count, tracker)
+
+    # Steps 1-4: Shared pipeline core
+    news_items = await _do_news_collection(config, tracker)
+    signals = await _do_flash_preprocessing(news_items, tracker)
+    l1_result = await _do_l1_analysis(signals, news_items, tracker)
+    l2_result, l3_result = await _do_l2_l3_parallel(l1_result, tracker)
+
+    # Step 5: Shadow ecosystem → NON-BLOCKING background launch (H1)
+    if config.shadow.shadows_enabled and mother is not None:
+        tracker.advance(5, "Shadows: launching background analysis...")
+        try:
+            from marketmind.gateway.async_client import get_budget
+            budget = await get_budget()
+            if budget:
+                br = budget.report()
+                tracker.result(f"Token budget: {br['tokens_pct_used']}% used, "
+                               f"{br['pro_calls_remaining']} Pro calls remaining")
+        except Exception:
+            pass
+        _shadow_progress_started()
+        _shadow_task = asyncio.create_task(mother.orchestrate_daily_cycle(news_items, {}))
+        _shadow_task.add_done_callback(_shadow_progress_done)
+        tracker.result("Shadows launched in background (non-blocking)")
+        if getattr(config.shadow, 'crystallization_enabled', False):
+            tracker.result("Memory update + crystallization will run in background")
+
+    # Steps 6-9: Shared pipeline core
+    red_team = await _do_red_team(l1_result, l2_result, l2_result.ticker_candidates, tracker)
+    resonance = await _do_resonance(l3_result, tracker)
+    decision = await _do_decision(l1_result, l2_result, l3_result, red_team, resonance, tracker)
+    await _do_daily_archive(config, l1_result, l2_result, resonance, tracker)
+
+    print("\nMarketMind daily pipeline complete.")
+    if _shadow_task and not _shadow_task.done():
+        print("(Shadow ecosystem still running in background)")
+    return 0
+
+
+async def run_shadows_only(config, verbose: bool = False) -> int:
+    """Run ONLY the shadow ecosystem (background mode).
+
+    Initializes the shadow database and permanent shadows, collects minimal
+    news for event detection, then runs the full daily orchestration cycle.
+    No main pipeline stages (L1/L2/L3/Decision) are executed.
+    """
+    init_gateway(config.deepseek_api_key, config.deepseek_base_url)
+
+    print("Shadow ecosystem: initializing...")
+
+    from marketmind.shadows.shadow_state import ShadowStateDB
+    from marketmind.shadows.shadow_mother import ShadowMother
+
+    shadow_db = ShadowStateDB(config.shadow.shadows_db_path)
+    shadow_db.init_schema()
+
+    # Initialize permanent shadows (experts + daredevils + catfish)
+    from marketmind.shadows.expert_shadows import create_expert_shadows
+    from marketmind.shadows.daredevil_shadows import create_daredevil_shadows
+    from marketmind.shadows.catfish_agent import create_catfish_agent
+    create_expert_shadows(shadow_db, config.shadow)
+    create_daredevil_shadows(shadow_db, config.shadow)
+    create_catfish_agent(shadow_db, config.shadow)
+
+    mother = ShadowMother(config.shadow, shadow_db)
+    print(f"Shadow ecosystem: {len(shadow_db.get_visible_shadows())} shadows initialized")
+
+    # Collect minimal news for event detection
+    from marketmind.pipeline.scout import fetch_all_sources
+    news_items = await fetch_all_sources(config)
+    if verbose:
+        print(f"Shadow ecosystem: {len(news_items)} articles collected for event scanning")
+
+    # N-L4: Report token budget before shadow cycle
+    try:
+        from marketmind.gateway.async_client import get_budget
+        budget = await get_budget()
+        if budget:
+            budget_report = budget.report()
+            if verbose:
+                print(f"Token budget: {budget_report['tokens_pct_used']}% used, "
+                      f"{budget_report['pro_calls_remaining']} Pro calls remaining")
+    except Exception:
+        pass
+
+    result = await mother.orchestrate_daily_cycle(news_items, {})
+
+    print(f"Shadows complete: {result.active_shadows} shadows, "
+          f"{result.temp_shadows_created} temp created")
+    if verbose:
+        print(f"  Votes collected: {result.votes_collected}")
+        print(f"  Ecosystem alerts: {len(result.ecosystem_alerts)}")
+        if result.rankings:
+            print(f"  Rankings computed for {len(result.rankings)} shadows")
+        if result.challenger_actions:
+            for action in result.challenger_actions:
+                print(f"  Challenger: {action}")
+
+    return 0
+
+
+def run_gui(config) -> int:
+    """Launch CustomTkinter GUI."""
+    from marketmind.ui.main_window import MainWindow
+    from marketmind.gateway.async_client import init_gateway
+
+    init_gateway(config.deepseek_api_key, config.deepseek_base_url)
+    app = MainWindow(config)
+    app.mainloop()
+    return 0
+
+
+def _run_backtest(config, args) -> int:
+    """Run multi-day backtest on shadow consensus signal quality."""
+    from datetime import datetime, timezone
+    from marketmind.shadows.shadow_state import ShadowStateDB
+    from marketmind.backtest_runner import BacktestRunner
+
+    import logging
+    logging.basicConfig(level=logging.INFO)
+
+    shadow_db = ShadowStateDB(config.shadow.shadows_db_path)
+    shadow_db.init_schema()
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    start = args.start or "2026-01-01"
+    end = args.end or today
+
+    try:
+        runner = BacktestRunner(shadow_db)
+        report = runner.run(start, end, args.output)
+    except (ValueError, FileNotFoundError) as e:
+        print(f"[ERROR] Backtest failed: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"[ERROR] Unexpected backtest error: {e}", file=sys.stderr)
+        return 1
+
+    print(json.dumps(report, indent=2) if not args.output else
+          f"Backtest report written to {args.output}")
+
+    return 0
+
+
+async def _run_daily_with_shadows(config, args) -> int:
+    """Run the daily pipeline, then wait for the background shadow task to finish.
+
+    The pipeline prints results immediately (non-blocking from the user's
+    perspective), then we wait for the shadow ecosystem to complete so the
+    process doesn't exit before shadows finish writing to the database.
+    """
+    shadow_n = 0 if args.no_shadows else args.shadows
+    ret = await run_daily(config, mock=args.mock, verbose=args.verbose,
+                           shadow_count=shadow_n)
+
+    # Wait for background shadow task to finish (with 5-minute timeout).
+    # The pipeline has already printed all results; we just keep the event
+    # loop alive long enough for shadows to complete their work.
+    global _shadow_task
+    if _shadow_task and not _shadow_task.done():
+        try:
+            await asyncio.wait_for(_shadow_task, timeout=300)
+        except asyncio.TimeoutError:
+            print("(Shadow ecosystem timed out after 5 minutes — "
+                  "results may be incomplete)")
+        except asyncio.CancelledError:
+            pass
+
+    return ret

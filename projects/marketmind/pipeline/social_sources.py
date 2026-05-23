@@ -24,9 +24,8 @@ if TYPE_CHECKING:
     from marketmind.pipeline.scout import NewsItem
 
 
-# One-time warning flags for dead/disabled sources (module-level, persists for process lifetime)
+# One-time warning flag for dead sources (module-level, persists for process lifetime)
 _apewisdom_dead_warned: bool = False
-_bluesky_creds_warned: bool = False
 
 
 async def fetch_apewisdom() -> list:
@@ -64,11 +63,7 @@ async def _get_bluesky_token() -> str | None:
     username = _os.environ.get("BLUESKY_USERNAME", "")
     app_password = _os.environ.get("BLUESKY_APP_PASSWORD", "")
     if not username or not app_password:
-        global _bluesky_creds_warned
-        if not _bluesky_creds_warned:
-            _bluesky_creds_warned = True
-            logger.info("Bluesky source skipped — credentials not configured "
-                        "(set BLUESKY_USERNAME + BLUESKY_APP_PASSWORD)")
+        logger.warning("Bluesky credentials not set (BLUESKY_USERNAME + BLUESKY_APP_PASSWORD)")
         return None
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -109,7 +104,7 @@ async def fetch_bluesky_posts(source, config) -> list:
 
     query = "finance OR stocks OR market OR $AAPL OR $MSFT OR $NVDA OR $TSLA"
     client_kwargs = {"timeout": 30.0, "follow_redirects": True}
-    if getattr(config, "proxy_url", None):
+    if config.proxy_url:
         client_kwargs["proxy"] = config.proxy_url
     try:
         async with httpx.AsyncClient(**client_kwargs) as client:

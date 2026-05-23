@@ -4,108 +4,207 @@ import pytest
 from marketmind.pipeline.methodology_rules import (
     MainAIRule,
     RuleRegistry,
+    RuleImpactHypothesis,
+    assemble_dynamic_prompt,
 )
 from marketmind.pipeline.methodology_evolution import (
     RuleValidator,
     RuleEvolver,
-    assemble_dynamic_prompt,
 )
 
 
 class TestRuleValidator:
     """Walk-forward validation gate for SHARP rules."""
 
-    def test_insufficient_audits_defers(self):
-        rule = MainAIRule(rule_id="RRSK-TEST01", rule_text="Test rule", category="risk")
-        validator = RuleValidator()
-        should_retire, reason = validator.validate(rule, [{"correct": True}] * 3)
+    def test_insufficient_data_defers(self):
+        """Too few outcome data points defers retirement."""
+        registry = RuleRegistry()
+        validator = RuleValidator(registry, min_validation_windows=5)
+        hypothesis = RuleImpactHypothesis(
+            rule_id="RRSK-TEST01",
+            suspected_impact="negative",
+            confidence=0.7,
+            evidence_summary="Test"
+        )
+        outcome_data = [
+            {"date": "2024-01-01", "outcome_score": 0.8, "rule_active": True},
+            {"date": "2024-01-02", "outcome_score": 0.7, "rule_active": True},
+            {"date": "2024-01-03", "outcome_score": 0.9, "rule_active": True},
+            {"date": "2024-01-04", "outcome_score": 0.6, "rule_active": True},
+        ]
+        should_retire, reason = validator.validate_hypothesis(hypothesis, outcome_data)
         assert not should_retire
-        assert "Insufficient" in reason
+        assert "insufficient_data" in reason
 
-    def test_oos_below_50_retires(self):
-        rule = MainAIRule(rule_id="RRSK-TEST02", rule_text="Bad rule", category="risk")
-        validator = RuleValidator(train_days=5, test_days=5)
-        audits = [{"correct": True}] * 5 + [{"correct": False}] * 5
-        should_retire, reason = validator.validate(rule, audits)
+    def test_negative_impact_confirmed_retires(self):
+        """When without-rule outcomes are better than with-rule, retire the rule."""
+        registry = RuleRegistry()
+        validator = RuleValidator(registry, min_validation_windows=5)
+        hypothesis = RuleImpactHypothesis(
+            rule_id="RRSK-TEST02",
+            suspected_impact="negative",
+            confidence=0.8,
+            evidence_summary="Bad rule"
+        )
+        outcome_data = [
+            {"date": "2024-01-01", "outcome_score": 0.3, "rule_active": True},
+            {"date": "2024-01-02", "outcome_score": 0.2, "rule_active": True},
+            {"date": "2024-01-03", "outcome_score": 0.4, "rule_active": True},
+            {"date": "2024-01-04", "outcome_score": 0.3, "rule_active": True},
+            {"date": "2024-01-05", "outcome_score": 0.35, "rule_active": True},
+            {"date": "2024-01-06", "outcome_score": 0.8, "rule_active": False},
+            {"date": "2024-01-07", "outcome_score": 0.9, "rule_active": False},
+            {"date": "2024-01-08", "outcome_score": 0.85, "rule_active": False},
+        ]
+        should_retire, reason = validator.validate_hypothesis(hypothesis, outcome_data)
         assert should_retire
-        assert "0.00%" in reason
+        assert "Negative impact confirmed" in reason
 
-    def test_oos_above_50_keeps(self):
-        rule = MainAIRule(rule_id="RRSK-TEST03", rule_text="Good rule", category="risk")
-        validator = RuleValidator(train_days=5, test_days=5)
-        audits = [{"correct": True}] * 5 + [
-            {"correct": True}, {"correct": True}, {"correct": True},
-            {"correct": False}, {"correct": False}]
-        should_retire, _ = validator.validate(rule, audits)
+    def test_positive_impact_confirmed_keeps(self):
+        """When with-rule outcomes exceed without-rule, keep the rule."""
+        registry = RuleRegistry()
+        validator = RuleValidator(registry, min_validation_windows=5)
+        hypothesis = RuleImpactHypothesis(
+            rule_id="RRSK-TEST03",
+            suspected_impact="positive",
+            confidence=0.8,
+            evidence_summary="Good rule"
+        )
+        outcome_data = [
+            {"date": "2024-01-01", "outcome_score": 0.8, "rule_active": True},
+            {"date": "2024-01-02", "outcome_score": 0.9, "rule_active": True},
+            {"date": "2024-01-03", "outcome_score": 0.85, "rule_active": True},
+            {"date": "2024-01-04", "outcome_score": 0.7, "rule_active": True},
+            {"date": "2024-01-05", "outcome_score": 0.75, "rule_active": True},
+            {"date": "2024-01-06", "outcome_score": 0.3, "rule_active": False},
+            {"date": "2024-01-07", "outcome_score": 0.4, "rule_active": False},
+            {"date": "2024-01-08", "outcome_score": 0.35, "rule_active": False},
+        ]
+        should_retire, _ = validator.validate_hypothesis(hypothesis, outcome_data)
         assert not should_retire
 
     def test_wfe_degradation_retires(self):
-        rule = MainAIRule(rule_id="RRSK-TEST04", rule_text="Degraded", category="risk")
-        validator = RuleValidator(train_days=5, test_days=5)
-        audits = (
-            [{"correct": True}] * 4 + [{"correct": False}] * 1 +
-            [{"correct": True}] * 2 + [{"correct": False}] * 3
+        """Walk-forward degradation: declining with-rule scores signal retirement."""
+        registry = RuleRegistry()
+        validator = RuleValidator(registry, min_validation_windows=5)
+        hypothesis = RuleImpactHypothesis(
+            rule_id="RRSK-TEST04",
+            suspected_impact="negative",
+            confidence=0.75,
+            evidence_summary="Degraded"
         )
-        should_retire, _ = validator.validate(rule, audits)
+        outcome_data = [
+            {"date": "2024-01-01", "outcome_score": 0.6, "rule_active": True},
+            {"date": "2024-01-02", "outcome_score": 0.5, "rule_active": True},
+            {"date": "2024-01-03", "outcome_score": 0.4, "rule_active": True},
+            {"date": "2024-01-04", "outcome_score": 0.3, "rule_active": True},
+            {"date": "2024-01-05", "outcome_score": 0.2, "rule_active": True},
+            {"date": "2024-01-06", "outcome_score": 0.8, "rule_active": False},
+            {"date": "2024-01-07", "outcome_score": 0.9, "rule_active": False},
+            {"date": "2024-01-08", "outcome_score": 0.85, "rule_active": False},
+        ]
+        should_retire, _ = validator.validate_hypothesis(hypothesis, outcome_data)
         assert should_retire
 
 
 class TestRuleEvolver:
     """Evolution engine with atomic edits."""
 
-    def test_evolve_retires_bad_rules(self):
+    def test_apply_evolution_retires_bad_rules(self):
+        """Validated negative-impact hypothesis retires the rule."""
         registry = RuleRegistry()
-        rule = MainAIRule(rule_id="RRSK-BAD01", rule_text="Bad", category="risk")
+        rule = MainAIRule(rule_id="RRSK-BAD01", content="Bad", category="risk")
         registry.register(rule)
-        validator = RuleValidator(train_days=3, test_days=3)
+        validator = RuleValidator(registry, min_validation_windows=5)
         evolver = RuleEvolver(registry, validator)
-        audits = {"RRSK-BAD01": [{"correct": True}] * 3 + [{"correct": False}] * 3}
-        changes = evolver.evolve(audits)
-        assert any("RETIRED" in c for c in changes)
+        hypothesis = RuleImpactHypothesis(
+            rule_id="RRSK-BAD01",
+            suspected_impact="negative",
+            confidence=0.8,
+            evidence_summary="Bad"
+        )
+        outcome_data = {"RRSK-BAD01": [
+            {"date": "2024-01-01", "outcome_score": 0.3, "rule_active": True},
+            {"date": "2024-01-02", "outcome_score": 0.2, "rule_active": True},
+            {"date": "2024-01-03", "outcome_score": 0.4, "rule_active": True},
+            {"date": "2024-01-04", "outcome_score": 0.5, "rule_active": True},
+            {"date": "2024-01-05", "outcome_score": 0.35, "rule_active": True},
+            {"date": "2024-01-06", "outcome_score": 0.8, "rule_active": False},
+            {"date": "2024-01-07", "outcome_score": 0.9, "rule_active": False},
+            {"date": "2024-01-08", "outcome_score": 0.85, "rule_active": False},
+        ]}
+        modified = evolver.apply_evolution([hypothesis], outcome_data)
+        assert "RRSK-BAD01" in modified
         assert rule.status == "retired"
 
-    def test_evolve_keeps_good_rules(self):
+    def test_apply_evolution_keeps_good_rules(self):
+        """Positive impact hypothesis that is confirmed keeps the rule active."""
         registry = RuleRegistry()
-        rule = MainAIRule(rule_id="RRSK-GOOD01", rule_text="Good", category="risk")
+        rule = MainAIRule(rule_id="RRSK-GOOD01", content="Good", category="risk")
         registry.register(rule)
-        validator = RuleValidator(train_days=3, test_days=3)
+        validator = RuleValidator(registry, min_validation_windows=5)
         evolver = RuleEvolver(registry, validator)
-        audits = {"RRSK-GOOD01": [{"correct": True}] * 6}
-        changes = evolver.evolve(audits)
-        assert not any("RETIRED" in c for c in changes)
+        hypothesis = RuleImpactHypothesis(
+            rule_id="RRSK-GOOD01",
+            suspected_impact="positive",
+            confidence=0.8,
+            evidence_summary="Good"
+        )
+        outcome_data = {"RRSK-GOOD01": [
+            {"date": "2024-01-01", "outcome_score": 0.8, "rule_active": True},
+            {"date": "2024-01-02", "outcome_score": 0.9, "rule_active": True},
+            {"date": "2024-01-03", "outcome_score": 0.85, "rule_active": True},
+            {"date": "2024-01-04", "outcome_score": 0.7, "rule_active": True},
+            {"date": "2024-01-05", "outcome_score": 0.75, "rule_active": True},
+            {"date": "2024-01-06", "outcome_score": 0.3, "rule_active": False},
+            {"date": "2024-01-07", "outcome_score": 0.4, "rule_active": False},
+            {"date": "2024-01-08", "outcome_score": 0.35, "rule_active": False},
+        ]}
+        modified = evolver.apply_evolution([hypothesis], outcome_data)
+        assert len(modified) == 0
         assert rule.status == "active"
-        assert rule.validation_count == 6
 
     def test_tune_threshold(self):
+        """Tune a numerical threshold: replace old value with new, retire old, create evolved rule."""
         registry = RuleRegistry()
-        rule = MainAIRule(rule_id="RRSK-TUNE01", rule_text="Max position size: 5.0% of portfolio",
+        rule = MainAIRule(rule_id="RRSK-TUNE01", content="Max position size: 5.0% of portfolio",
                           category="risk")
         registry.register(rule)
-        evolver = RuleEvolver(registry)
-        result = evolver.tune_threshold(rule, "max_position", 7.0, 5.0)
-        assert "TUNED" in result
-        assert rule.version == 2
-        assert "7.0%" in rule.rule_text
-
-    def test_add_condition(self):
-        registry = RuleRegistry()
-        rule = MainAIRule(rule_id="RRSK-ADD01", rule_text="Always set a stop loss.",
-                          category="risk")
-        registry.register(rule)
-        evolver = RuleEvolver(registry)
-        result = evolver.add_condition(rule, "Stop loss at 2% below entry")
-        assert "EXTENDED" in result
-        assert rule.version == 2
-        assert "2% below entry" in rule.rule_text
-
-    def test_remove_rule(self):
-        registry = RuleRegistry()
-        rule = MainAIRule(rule_id="RRSK-REM01", rule_text="Remove me", category="risk")
-        registry.register(rule)
-        evolver = RuleEvolver(registry)
-        result = evolver.remove_rule("RRSK-REM01")
-        assert "REMOVED" in result
+        validator = RuleValidator(registry)
+        evolver = RuleEvolver(registry, validator)
+        result = evolver.tune_threshold("RRSK-TUNE01", 5.0, 7.0, "max_position")
+        assert result is not None
+        assert "7.0%" in result.content
+        assert result.generation == 1
+        assert result.parent_rule_id == "RRSK-TUNE01"
         assert rule.status == "retired"
+
+    def test_add_constraint(self):
+        """Add a new constraint rule derived from validated learning."""
+        registry = RuleRegistry()
+        rule = MainAIRule(rule_id="RRSK-ADD01", content="Always set a stop loss.",
+                          category="risk")
+        registry.register(rule)
+        validator = RuleValidator(registry)
+        evolver = RuleEvolver(registry, validator)
+        result = evolver.add_constraint("Stop loss at 2% below entry", "risk",
+                                        parent_rule_id="RRSK-ADD01")
+        assert result is not None
+        assert "2% below entry" in result.content
+        assert result.parent_rule_id == "RRSK-ADD01"
+        assert registry.get(result.rule_id) is not None
+
+    def test_remove_constraint(self):
+        """Remove a harmful rule from the registry."""
+        registry = RuleRegistry()
+        rule = MainAIRule(rule_id="RRSK-REM01", content="Remove me", category="risk")
+        registry.register(rule)
+        validator = RuleValidator(registry)
+        evolver = RuleEvolver(registry, validator)
+        result = evolver.remove_constraint("RRSK-REM01", "Test removal")
+        assert result is True
+        assert rule.status == "retired"
+        assert "Removed: Test removal" in rule.retire_reason
 
 
 class TestDynamicPromptAssembly:
@@ -113,50 +212,30 @@ class TestDynamicPromptAssembly:
 
     def test_assemble_excludes_retired(self):
         registry = RuleRegistry()
-        registry.register(MainAIRule(rule_id="RRSK-ACT01", rule_text="Active rule",
-                                     category="risk"))
-        registry.register(MainAIRule(rule_id="RRSK-RET01", rule_text="Retired rule",
-                                     category="risk", status="retired"))
+        registry.register(MainAIRule(rule_id="RRSK-ACT01", content="Active rule",
+                                     category="risk_management"))
+        registry.register(MainAIRule(rule_id="RRSK-RET01", content="Retired rule",
+                                     category="risk_management", status="retired"))
         prompt = assemble_dynamic_prompt(registry)
         assert "Active rule" in prompt
         assert "Retired rule" not in prompt
 
     def test_assemble_category_order(self):
         registry = RuleRegistry()
-        registry.register(MainAIRule(rule_id="RRIS-T01", rule_text="Risk first",
-                                     category="risk"))
-        registry.register(MainAIRule(rule_id="RPRO-T01", rule_text="Process last",
-                                     category="process"))
-        registry.register(MainAIRule(rule_id="RANA-T01", rule_text="Analysis middle",
-                                     category="analysis"))
+        registry.register(MainAIRule(rule_id="RRIS-T01", content="Position first",
+                                     category="position_sizing"))
+        registry.register(MainAIRule(rule_id="RPRO-T01", content="Output last",
+                                     category="output_format"))
+        registry.register(MainAIRule(rule_id="RANA-T01", content="Quality middle",
+                                     category="quality"))
         prompt = assemble_dynamic_prompt(registry)
-        risk_pos = prompt.index("Risk first")
-        analysis_pos = prompt.index("Analysis middle")
-        process_pos = prompt.index("Process last")
-        assert risk_pos < analysis_pos < process_pos
-
-    def test_assemble_decay_note(self):
-        registry = RuleRegistry()
-        rule = MainAIRule(rule_id="RRSK-DEC01", rule_text="Decaying rule",
-                          category="risk", decay_factor=0.3)
-        registry.register(rule)
-        prompt = assemble_dynamic_prompt(registry)
-        assert "[decay=0.3]" in prompt
+        pos_pos = prompt.index("Position first")
+        quality_pos = prompt.index("Quality middle")
+        output_pos = prompt.index("Output last")
+        assert pos_pos < quality_pos < output_pos
 
     def test_assemble_empty_registry(self):
         registry = RuleRegistry()
         prompt = assemble_dynamic_prompt(registry, "Default instructions")
         assert "Default instructions" in prompt
 
-    def test_decay_updates_with_validation(self):
-        rule = MainAIRule(rule_id="RRSK-DEC02", rule_text="Test", category="risk")
-        rule.validation_count = 100
-        rule.success_count = 90
-        rule._update_decay()
-        assert rule.decay_factor > 0.7
-
-        rule2 = MainAIRule(rule_id="RRSK-DEC03", rule_text="Bad", category="risk")
-        rule2.validation_count = 1000
-        rule2.success_count = 200
-        rule2._update_decay()
-        assert rule2.decay_factor < 0.35

@@ -97,11 +97,14 @@ async def test_chat_with_integrity_injects_protocol():
             caller_agent="builder-test"
         )
         assert result["content"] == "Verified analysis"
-        # Verify the integrity header was injected into the system prompt
+        # Verify the integrity header and time context were injected
         call_args = mock_http.post.call_args
         sent_messages = call_args[1]["json"]["messages"]
         assert "DATA_INTEGRITY_PROTOCOL" in sent_messages[0]["content"]
         assert "builder-test" in sent_messages[0]["content"]
+        assert "TIME_CONTEXT" in sent_messages[0]["content"]
+        assert "TODAY is" in sent_messages[0]["content"]
+        assert "SINGLE SOURCE OF TRUTH" in sent_messages[0]["content"]
 
 
 @pytest.mark.asyncio

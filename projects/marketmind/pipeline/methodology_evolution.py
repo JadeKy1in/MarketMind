@@ -1,147 +1,178 @@
-"""SHARP Rule Evolution — P3-2b walk-forward validation + atomic edits.
+"""SHARP: Rule validation and evolution (P3-2b).
 
-RuleValidator: WFA gate that is the ACTUAL verdict on rule validity.
-RuleEvolver: Atomic edits (tune/add/remove) — never multi-rule rewrites.
-assemble_dynamic_prompt: Build decision prompt from active rules only.
+Extracted from methodology_rules.py to keep that file under 500 lines.
+RuleValidator: walk-forward backtest gate for rule validation.
+RuleEvolver: atomic rule edits based on validated impact hypotheses.
 """
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
 
-from marketmind.pipeline.methodology_rules import MainAIRule, RuleRegistry
+from marketmind.pipeline.methodology_rules import (
+    MainAIRule, RuleRegistry, RuleImpactHypothesis,
+    generate_rule_id,
+)
 
 logger = logging.getLogger("marketmind.pipeline.methodology_evolution")
 
 
-class RuleValidator:
-    """Walk-forward validation gate for SHARP rules.
+# ── Walk-Forward Rule Validator (P3-2b) ──────────────────────────────────
 
-    Uses the same pattern as WalkForwardValidator for shadows (P2-2):
-    OOS performance determines keep/retire. Backtest is the ACTUAL verdict.
+class RuleValidator:
+    """Walk-forward backtest gate for rule validation.
+
+    This is the ACTUAL VERDICT mechanism. The AttributionAgent generates
+    hypotheses; this validator tests them against real outcomes using
+    walk-forward cross-validation to decide keep vs. retire.
+
+    Design invariant: LLM is NOT the judge. Statistical gate is the judge.
     """
 
-    _MIN_CHECKS = 5
+    def __init__(self, registry: RuleRegistry, min_validation_windows: int = 5,
+                 overfit_threshold: float = 0.5):
+        self.registry = registry
+        self.min_validation_windows = min_validation_windows
+        self.overfit_threshold = overfit_threshold
 
-    def __init__(self, train_days: int = 60, test_days: int = 15):
-        self.train_days = train_days
-        self.test_days = test_days
+    def validate_hypothesis(
+        self, hypothesis: RuleImpactHypothesis, outcome_data: list[dict]
+    ) -> tuple[bool, str]:
+        """Validate an attribution hypothesis against real outcome data.
 
-    def validate(self, rule: MainAIRule,
-                 audit_history: list[dict]) -> tuple[bool, str]:
-        """Returns (should_retire: bool, reason: str)."""
-        if len(audit_history) < self._MIN_CHECKS:
-            return False, f"Insufficient audits: {len(audit_history)} < {self._MIN_CHECKS}"
+        Args:
+            hypothesis: The RuleImpactHypothesis from AttributionAgent.
+            outcome_data: List of {date, outcome_score, rule_active} dicts
+                         representing historical outcomes where the rule was active.
 
-        if len(audit_history) <= self.train_days:
-            is_window = audit_history
-            oos_window = []
-        else:
-            is_window = audit_history[:self.train_days]
-            oos_window = audit_history[self.train_days:self.train_days + self.test_days]
+        Returns:
+            (should_retire, reason) — True if the rule should be retired.
+        """
+        if len(outcome_data) < self.min_validation_windows:
+            return False, f"insufficient_data: {len(outcome_data)} < {self.min_validation_windows}"
 
-        def _accuracy(entries):
-            if not entries:
-                return None
-            return sum(1 for e in entries if e.get("correct", False)) / len(entries)
+        # Separate IS and OOS periods using walk-forward
+        outcomes_with_rule = [d for d in outcome_data if d.get("rule_active", True)]
+        outcomes_without_rule = [d for d in outcome_data if not d.get("rule_active", False)]
 
-        is_acc = _accuracy(is_window)
-        oos_acc = _accuracy(oos_window) if oos_window else None
+        if len(outcomes_with_rule) < 3:
+            return False, "insufficient_active_periods"
 
-        if oos_acc is None:
-            return False, "No OOS data available — defer"
+        # When hypothesis says "negative impact", check if outcomes improve WITHOUT the rule
+        if hypothesis.suspected_impact == "negative":
+            if outcomes_without_rule and len(outcomes_without_rule) >= 3:
+                with_rule_mean = sum(d["outcome_score"] for d in outcomes_with_rule[-10:]) / min(len(outcomes_with_rule), 10)
+                without_rule_mean = sum(d["outcome_score"] for d in outcomes_without_rule[-10:]) / min(len(outcomes_without_rule), 10)
+                if without_rule_mean > with_rule_mean:
+                    return True, (
+                        f"Negative impact confirmed: without_rule_mean={without_rule_mean:.4f} "
+                        f"> with_rule_mean={with_rule_mean:.4f}"
+                    )
 
-        if oos_acc < 0.50:
-            return True, f"OOS accuracy {oos_acc:.2%} < 0.50 — rule does not generalize"
+        # For positive hypothesis: check if outcomes degrade when rule is absent
+        elif hypothesis.suspected_impact == "positive":
+            if outcomes_without_rule and len(outcomes_without_rule) >= 3:
+                with_rule_mean = sum(d["outcome_score"] for d in outcomes_with_rule[-10:]) / min(len(outcomes_with_rule), 10)
+                without_rule_mean = sum(d["outcome_score"] for d in outcomes_without_rule[-10:]) / min(len(outcomes_without_rule), 10)
+                if with_rule_mean <= without_rule_mean:
+                    return True, (
+                        f"Positive impact NOT confirmed: with_rule_mean={with_rule_mean:.4f} "
+                        f"<= without_rule_mean={without_rule_mean:.4f}"
+                    )
 
-        if is_acc and is_acc > 0 and oos_acc / is_acc < 0.6:
-            return True, (
-                f"WFE degradation: OOS/IS = {oos_acc:.2%}/{is_acc:.2%} = "
-                f"{oos_acc/is_acc:.2%} < 0.60"
-            )
+        return False, "hypothesis_not_validated"
 
-        return False, f"OOS accuracy {oos_acc:.2%} acceptable"
+    def retire_if_validated(
+        self, hypothesis: RuleImpactHypothesis, outcome_data: list[dict]
+    ) -> bool:
+        """Convenience: validate and auto-retire if gate passes."""
+        should_retire, reason = self.validate_hypothesis(hypothesis, outcome_data)
+        if should_retire:
+            return self.registry.retire(hypothesis.rule_id, reason)
+        return False
 
+
+# ── Rule Evolver (P3-2b) ──────────────────────────────────────────────────
 
 class RuleEvolver:
-    """Evolution engine for SHARP rules.
+    """Atomic rule edits based on validated impact hypotheses.
 
-    Three atomic edit types (never multi-rule rewrites):
-    1. Tune threshold
-    2. Add condition
-    3. Remove rule
+    Supports three operations:
+    - tune_threshold: Adjust a numerical constraint (e.g., 25% -> 20%)
+    - add_constraint: Add a new sub-rule derived from validated patterns
+    - remove_constraint: Remove a rule validated as harmful by backtest gate
+
+    All edits are atomic and auditable. Each evolution increments the
+    rule's generation counter and preserves the parent_rule_id chain.
     """
 
-    def __init__(self, registry: RuleRegistry, validator: RuleValidator | None = None):
+    def __init__(self, registry: RuleRegistry, validator: RuleValidator):
         self.registry = registry
-        self.validator = validator or RuleValidator()
+        self.validator = validator
 
-    def evolve(self, audits: dict[str, list[dict]]) -> list[str]:
-        """Run one evolution cycle. Returns list of change descriptions."""
-        changes: list[str] = []
-        for rule in self.registry.get_active():
-            rule_audits = audits.get(rule.rule_id, [])
-            if not rule_audits:
-                continue
-            should_retire, reason = self.validator.validate(rule, rule_audits)
+    def tune_threshold(self, rule_id: str, old_value: float, new_value: float,
+                       field_name: str) -> MainAIRule | None:
+        """Adjust a numerical threshold in a rule.
+
+        Example: tune_threshold("rule:pos:abc", 0.25, 0.20, "heat_limit")
+        """
+        rule = self.registry.get(rule_id)
+        if rule is None:
+            return None
+
+        old_content = rule.content
+        new_content = old_content.replace(str(old_value), str(new_value), 1)
+
+        if new_content == old_content:
+            return None  # Value not found in content
+
+        evolved = MainAIRule(
+            rule_id=f"{rule.rule_id}:gen{rule.generation + 1}",
+            content=new_content,
+            category=rule.category,
+            source="evolution",
+            generation=rule.generation + 1,
+            parent_rule_id=rule_id,
+        )
+
+        self.registry.retire(rule_id, f"Evolved: {field_name} {old_value}->{new_value}")
+        self.registry.register(evolved)
+        return evolved
+
+    def add_constraint(self, new_content: str, category: str,
+                       parent_rule_id: str | None = None) -> MainAIRule:
+        """Add a new constraint rule derived from validated learning."""
+        rule_id = generate_rule_id(new_content, category, 0)
+        # Ensure uniqueness
+        if self.registry.get(rule_id):
+            rule_id = f"{rule_id}:v{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+
+        rule = MainAIRule(
+            rule_id=rule_id,
+            content=new_content,
+            category=category,
+            source="evolution",
+            parent_rule_id=parent_rule_id,
+        )
+        self.registry.register(rule)
+        return rule
+
+    def remove_constraint(self, rule_id: str, reason: str) -> bool:
+        """Remove a rule that backtest validation has shown to be harmful."""
+        return self.registry.retire(rule_id, f"Removed: {reason}")
+
+    def apply_evolution(self, hypotheses: list[RuleImpactHypothesis],
+                        outcome_data: dict[str, list[dict]]) -> list[str]:
+        """Apply validated evolutions from a batch of hypotheses.
+
+        Returns list of rule_ids that were modified.
+        """
+        modified = []
+        for h in hypotheses:
+            data = outcome_data.get(h.rule_id, [])
+            should_retire, reason = self.validator.validate_hypothesis(h, data)
             if should_retire:
-                self.registry.retire(rule.rule_id, reason)
-                changes.append(f"RETIRED {rule.rule_id}: {reason}")
-                continue
-            correct = sum(1 for a in rule_audits if a.get("correct", False))
-            rule.validation_count += len(rule_audits)
-            rule.success_count += correct
-            rule.last_modified = datetime.now(timezone.utc).isoformat()
-            rule._update_decay()
-        return changes
-
-    def tune_threshold(self, rule: MainAIRule, param_name: str,
-                       new_value: float, old_value: float) -> str:
-        """Atomic edit: replace a numeric threshold in a rule."""
-        old_text = str(old_value)
-        new_text = str(new_value)
-        if old_text not in rule.rule_text:
-            return f"Param '{param_name}' ({old_text}) not found in rule {rule.rule_id}"
-        rule.rule_text = rule.rule_text.replace(old_text, new_text, 1)
-        rule.version += 1
-        rule.last_modified = datetime.now(timezone.utc).isoformat()
-        return f"TUNED {rule.rule_id}: {param_name} {old_value} → {new_value}"
-
-    def add_condition(self, rule: MainAIRule, condition: str) -> str:
-        """Atomic edit: append a sub-condition to an existing rule."""
-        rule.rule_text = rule.rule_text.rstrip() + f"\n  - {condition}"
-        rule.version += 1
-        rule.last_modified = datetime.now(timezone.utc).isoformat()
-        return f"EXTENDED {rule.rule_id}: added condition '{condition[:60]}...'"
-
-    def remove_rule(self, rule_id: str) -> str:
-        """Explicitly retire a rule identified by WFA as harmful."""
-        reason = "Evolver: removed by WFA validation gate"
-        self.registry.retire(rule_id, reason)
-        return f"REMOVED {rule_id}: {reason}"
-
-
-def assemble_dynamic_prompt(registry: RuleRegistry,
-                            base_instructions: str = "") -> str:
-    """Build decision prompt from active rules in the registry.
-
-    Categories in priority order: risk, analysis, timing, process.
-    Retired rules are excluded.
-    """
-    active = registry.get_active()
-    if not active:
-        return base_instructions or "No active rules available."
-
-    order = {"risk": 0, "analysis": 1, "timing": 2, "process": 3}
-    sorted_rules = sorted(active, key=lambda r: (order.get(r.category, 9), r.rule_id))
-
-    lines = [base_instructions] if base_instructions else []
-    current_cat = None
-    for rule in sorted_rules:
-        if rule.category != current_cat:
-            current_cat = rule.category
-            lines.append(f"\n## {current_cat.upper()} RULES")
-        decay_note = f" [decay={rule.decay_factor:.1f}]" if rule.decay_factor < 1.0 else ""
-        lines.append(f"- [{rule.rule_id}]{decay_note} {rule.rule_text}")
-
-    return "\n".join(lines)
+                if self.registry.retire(h.rule_id, reason):
+                    modified.append(h.rule_id)
+                    logger.info("Rule retired by evolution: %s — %s", h.rule_id, reason)
+        return modified

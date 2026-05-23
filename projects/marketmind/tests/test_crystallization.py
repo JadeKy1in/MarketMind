@@ -4,7 +4,7 @@ Covers:
 - CrystallizationEngine inner loop with mock shadow_analyses
 - Promote path: high enough validation_score → promoted to semantic
 - Retire path: low validation_score → retired
-- Cold start: < min_samples analyses → skipped (hold action)
+- Cold start: < min_samples votes → skipped (hold action)
 - Methodology evolver records prediction
 - Methodology report generation
 - Audit trail persistence
@@ -23,8 +23,8 @@ from marketmind.shadows.methodology_evolver import (
     MethodologyEvolver, MethodRecord, MethodologyReport,
     load_tracker, save_tracker, log_method_outcome,
     evolve_methodology, format_evolution_report,
-    breed_new_method, maintain_population,
 )
+from marketmind.shadows.method_breeding import breed_new_method, maintain_population
 from marketmind.shadows.crystallization import CrystallizationEngine
 from marketmind.config.settings import ShadowSettings
 
@@ -102,7 +102,7 @@ def _seed_shadow_and_votes(temp_db, shadow_id, ticker, vote_data):
                  f"{date_str}T00:00:00.000Z"),
             )
             # Seed outcome data: simulate PnL in virtual_trades
-            # Long analyses on positive-return days win; short on negative win
+            # Long votes on positive-return days win; short on negative win
             pnl = 0.05 if direction == "long" else -0.03
             conn.execute(
                 """INSERT OR IGNORE INTO virtual_trades
@@ -442,13 +442,13 @@ class TestCrystallizationEngine:
         # Seed belief node
         node_id = _seed_belief_node(store, shadow_id, ticker)
 
-        # 12 short analyses — we will seed trades with positive PnL (up returns)
-        # so all short analyses are wrong (short loses when market goes up)
+        # 12 short votes — we will seed trades with positive PnL (up returns)
+        # so all short votes are wrong (short loses when market goes up)
         conn = temp_db._connect()
         try:
             for i in range(12):
                 date_str = f"2026-05-{i+1:02d}"
-                # Insert analysis
+                # Insert vote
                 conn.execute(
                     """INSERT INTO shadow_analyses
                        (shadow_id, date, ticker, direction, confidence, thesis, risk_note, created_at)
@@ -457,7 +457,7 @@ class TestCrystallizationEngine:
                      f"Thesis for {date_str}", f"Risk for {date_str}",
                      f"{date_str}T00:00:00.000Z"),
                 )
-                # Insert trade with POSITIVE PnL → up return → short analysis is WRONG
+                # Insert trade with POSITIVE PnL → up return → short vote is WRONG
                 conn.execute(
                     """INSERT OR IGNORE INTO virtual_trades
                        (shadow_id, ticker, direction, entry_price, exit_price,

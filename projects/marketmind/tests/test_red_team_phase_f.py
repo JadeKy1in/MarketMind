@@ -91,7 +91,7 @@ class TestPromptInjectionViaOCR:
 
     The defense is statistical: a single injected observation enters shadow
     memory but cannot survive the crystallization significance gate (needs
-    >=10 consistent shadow_analyses with high hit rate to promote).
+    >=10 consistent shadow_votes with high hit rate to promote).
     """
 
     def test_injected_prompt_is_ingested_but_wont_crystallize(self, memory_store,
@@ -127,7 +127,7 @@ class TestPromptInjectionViaOCR:
         assert any(o["extracted_text"] and "BUY EVERYTHING" in o["extracted_text"]
                    for o in observations), "Injected text IS in memory (vulnerability)"
 
-        # Crystallization defense: no shadow_analyses backing the claim
+        # Crystallization defense: no shadow_votes backing the claim
         belief_node = memory_store.get_belief_node(node_id)
         assert belief_node is not None
         assert belief_node["observation_count"] == 1
@@ -313,9 +313,9 @@ class TestSchedulerResourceExhaustion:
 class TestCrystallizationContamination:
     """Repeatedly inject a false signal; verify crystallization doesn't promote it.
 
-    The defense is the cold-start guard (min_samples=10 shadow_analyses) and
-    backtest validation against actual shadow_analyses PnL. Injected observations
-    in memory have no corresponding analyses, so backtest returns 0 samples.
+    The defense is the cold-start guard (min_samples=10 shadow_votes) and
+    backtest validation against actual shadow_votes PnL. Injected observations
+    in memory have no corresponding votes, so backtest returns 0 samples.
     """
 
     @pytest.fixture
@@ -366,7 +366,7 @@ class TestCrystallizationContamination:
         results = asyncio.run(engine.run_crystallization_cycle())
 
         # Verify: no false signal was promoted
-        # (Cold start or no matching shadow_analyses → no promotions)
+        # (Cold start or no matching shadow_votes → no promotions)
         promoted = [r for r in results if r.action == "promote"]
         stats = engine.get_crystallization_stats()
         assert (

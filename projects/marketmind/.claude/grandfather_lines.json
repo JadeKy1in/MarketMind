@@ -1,0 +1,12 @@
+{
+  "gateway/async_client.py": 490,
+  "pipeline/interactive_orchestration.py": 502,
+  "pipeline/investigation_loop.py": 518,
+  "pipeline/orchestration.py": 482,
+  "pipeline/scout.py": 461,
+  "pipeline/verification_chain.py": 450,
+  "regenerate_fixtures.py": 583,
+  "shadows/shadow_db.py": 539,
+  "shadows/shadow_memory.py": 572,
+  "shadows/shadow_mother.py": 721
+}

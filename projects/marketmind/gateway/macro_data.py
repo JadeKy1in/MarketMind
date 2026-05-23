@@ -2,7 +2,7 @@
 
 Three public functions, all using direct httpx (no new dependencies):
 
-- get_macro_indicator("BDI") — FRED API (free key, env FRED_KEY). GSCPI is NY Fed only (not on FRED).
+- get_macro_indicator("BDI" | "GSCPI") — FRED API (free key, env FRED_KEY)
 - get_cot_data("ES" | "CL" | "GC" | "NG") — CFTC SODA API (no key, public JSON)
 - get_eia_inventory("crude" | "gasoline" | "distillate") — EIA API v2 (free key, env EIA_KEY)
 
@@ -23,9 +23,9 @@ import logging
 import os
 from datetime import datetime, timezone
 from typing import Any
-import httpx
+from urllib.parse import quote
 
-from marketmind.integrity.input_guard import sanitize_for_llm_prompt
+import httpx
 
 logger = logging.getLogger("marketmind.gateway.macro_data")
 
@@ -37,16 +37,13 @@ _FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
 # Series IDs for supported macro indicators
 _FRED_SERIES: dict[str, dict[str, str]] = {
     "BDI": {
-        "series_id": "PCU483111483111",
-        "label": "PPI: Deep Sea Freight Transportation (BDI proxy)",
-        "cadence": "monthly",
+        "series_id": "DRSAGRGQ086SBEA",
+        "label": "Baltic Dry Index",
+        "cadence": "daily",
     },
-    # GSCPI is published by NY Fed, NOT on FRED.
-    # Alternative: https://www.newyorkfed.org/research/policy/gscpi
-    # "GSCPI" queries return source_unavailable with a pointer.
     "GSCPI": {
         "series_id": "GSCPI",
-        "label": "Global Supply Chain Pressure Index (NY Fed — not on FRED)",
+        "label": "Global Supply Chain Pressure Index",
         "cadence": "monthly",
     },
 }
@@ -120,22 +117,6 @@ def _clear_cache() -> None:
     """Clear the module-level cache (used between tests)."""
     _cache.clear()
     _cache_locks.clear()
-
-
-def _sanitize_text_fields(data: dict, source: str) -> dict:
-    """Sanitize all string fields in a data dict before LLM consumption.
-
-    Numeric fields pass through unchanged.  String fields are run through
-    input_guard and replaced with their sanitized form.  Any injection
-    warnings are logged at WARNING level.
-    """
-    for key, val in list(data.items()):
-        if isinstance(val, str):
-            result = sanitize_for_llm_prompt(val, source=source)
-            data[key] = result.sanitized
-            for warning in result.warnings:
-                logger.warning("input_guard [%s] field=%s: %s", source, key, warning)
-    return data
 
 
 # ===================================================================
@@ -244,15 +225,15 @@ async def _fetch_fred(indicator: str) -> dict:
     """Fetch latest observation for a FRED series."""
     series_info = _FRED_SERIES.get(indicator)
     if series_info is None:
-        return _sanitize_text_fields({
+        return {
             "error": "source_unavailable",
             "detail": f"Unknown indicator: '{indicator}'. Supported: BDI, GSCPI",
-        }, "fred_data")
+        }
 
     fred_key = _get_fred_key()
     if not fred_key:
         logger.warning("FRED_KEY not configured — cannot fetch %s", indicator)
-        return _sanitize_text_fields({"error": "source_unavailable", "detail": "FRED_KEY not configured"}, "fred_data")
+        return {"error": "source_unavailable", "detail": "FRED_KEY not configured"}
 
     series_id = series_info["series_id"]
     url = (
@@ -271,10 +252,10 @@ async def _fetch_fred(indicator: str) -> dict:
         observations = data.get("observations", [])
 
         if not observations or observations[0].get("value") in (None, "."):
-            return _sanitize_text_fields({"error": "source_unavailable", "detail": f"No data for {indicator}"}, "fred_data")
+            return {"error": "source_unavailable", "detail": f"No data for {indicator}"}
 
         obs = observations[0]
-        return _sanitize_text_fields({
+        return {
             "indicator": indicator,
             "label": series_info["label"],
             "value": _parse_float(obs.get("value")),
@@ -282,13 +263,13 @@ async def _fetch_fred(indicator: str) -> dict:
             "source": "fred",
             "cadence": series_info["cadence"],
             "series_id": series_id,
-        }, "fred_data")
+        }
     except httpx.HTTPStatusError as e:
-        logger.warning("FRED API error for %s: %s", indicator, _redact_url(str(e)))
-        return _sanitize_text_fields({"error": "source_unavailable", "detail": f"FRED API returned {e.response.status_code}"}, "fred_data")
+        logger.warning("FRED API error for %s: %s", indicator, e)
+        return {"error": "source_unavailable", "detail": f"FRED API returned {e.response.status_code}"}
     except Exception as e:
-        logger.warning("FRED fetch failed for %s: %s", indicator, _redact_url(str(e)))
-        return _sanitize_text_fields({"error": "source_unavailable", "detail": _redact_url(str(e))}, "fred_data")
+        logger.warning("FRED fetch failed for %s: %s", indicator, e)
+        return {"error": "source_unavailable", "detail": str(e)}
     finally:
         await client.aclose()
 
@@ -302,32 +283,34 @@ async def _fetch_cftc(asset: str) -> dict:
     """Fetch latest COT report for an asset from CFTC SODA API."""
     asset_info = _CFTC_ASSETS.get(asset)
     if asset_info is None:
-        return _sanitize_text_fields({
+        return {
             "error": "source_unavailable",
             "detail": f"Unknown asset: '{asset}'. Supported: ES, CL, GC, NG",
-        }, "cftc_data")
+        }
 
     market_filter = asset_info["market_filter"]
 
-    # SoQL query — LIKE wildcards use literal %, spaces kept as-is (httpx handles URL encoding)
+    # SODA API SoQL query — filter by market name, latest date, limit 1
     query = (
         f"SELECT market_and_exchange_names, report_date_as_yyyy_mm_dd, "
         f"noncomm_positions_long_all, noncomm_positions_short_all, "
         f"comm_positions_long_all, comm_positions_short_all "
-        f"WHERE market_and_exchange_names LIKE '%{market_filter}%' "
+        f"WHERE market_and_exchange_names LIKE '%{quote(market_filter)}%' "
         f"AND report_date_as_yyyy_mm_dd > '2026-01-01' "
         f"ORDER BY report_date_as_yyyy_mm_dd DESC "
         f"LIMIT 1"
     )
 
+    url = f"{_CFTC_SODA_BASE}?$query={query}"
+
     client = httpx.AsyncClient(timeout=httpx.Timeout(15.0))
     try:
-        resp = await client.get(_CFTC_SODA_BASE, params={"$query": query})
+        resp = await client.get(url)
         resp.raise_for_status()
         data = resp.json()
 
         if not data or not isinstance(data, list) or len(data) == 0:
-            return _sanitize_text_fields({"error": "source_unavailable", "detail": f"No COT data for {asset}"}, "cftc_data")
+            return {"error": "source_unavailable", "detail": f"No COT data for {asset}"}
 
         row = data[0]
         noncomm_long = _parse_int(row.get("noncomm_positions_long_all", 0))
@@ -341,7 +324,7 @@ async def _fetch_cftc(asset: str) -> dict:
         # Simple heuristic signal
         signal = _cot_signal(asset, speculative_net)
 
-        return _sanitize_text_fields({
+        return {
             "asset": asset,
             "label": asset_info["label"],
             "commercial_net": commercial_net,
@@ -354,13 +337,13 @@ async def _fetch_cftc(asset: str) -> dict:
             "source": "cftc",
             "cadence": asset_info["cadence"],
             "signal": signal,
-        }, "cftc_data")
+        }
     except httpx.HTTPStatusError as e:
         logger.warning("CFTC SODA API error for %s: %s", asset, e)
-        return _sanitize_text_fields({"error": "source_unavailable", "detail": f"CFTC API returned {e.response.status_code}"}, "cftc_data")
+        return {"error": "source_unavailable", "detail": f"CFTC API returned {e.response.status_code}"}
     except Exception as e:
         logger.warning("CFTC fetch failed for %s: %s", asset, e)
-        return _sanitize_text_fields({"error": "source_unavailable", "detail": str(e)}, "cftc_data")
+        return {"error": "source_unavailable", "detail": str(e)}
     finally:
         await client.aclose()
 
@@ -399,15 +382,15 @@ async def _fetch_eia(product: str) -> dict:
     """Fetch latest weekly US petroleum inventory from EIA API v2."""
     product_info = _EIA_PRODUCTS.get(product)
     if product_info is None:
-        return _sanitize_text_fields({
+        return {
             "error": "source_unavailable",
             "detail": f"Unknown product: '{product}'. Supported: crude, gasoline, distillate",
-        }, "eia_data")
+        }
 
     eia_key = _get_eia_key()
     if not eia_key:
         logger.warning("EIA_KEY not configured — cannot fetch %s", product)
-        return _sanitize_text_fields({"error": "source_unavailable", "detail": "EIA_KEY not configured"}, "eia_data")
+        return {"error": "source_unavailable", "detail": "EIA_KEY not configured"}
 
     route = product_info["route"]
     url = (
@@ -430,25 +413,25 @@ async def _fetch_eia(product: str) -> dict:
         records = response_data.get("data", [])
 
         if not records:
-            return _sanitize_text_fields({"error": "source_unavailable", "detail": f"No EIA data for {product}"}, "eia_data")
+            return {"error": "source_unavailable", "detail": f"No EIA data for {product}"}
 
         record = records[0]
         inventory_mbbl = _parse_float(record.get("value", 0))
 
-        return _sanitize_text_fields({
+        return {
             "product": product,
             "label": product_info["label"],
             "inventory_mbbl": inventory_mbbl,
             "date": record.get("period", ""),
             "source": "eia",
             "cadence": product_info["cadence"],
-        }, "eia_data")
+        }
     except httpx.HTTPStatusError as e:
-        logger.warning("EIA API error for %s: %s", product, _redact_url(str(e)))
-        return _sanitize_text_fields({"error": "source_unavailable", "detail": f"EIA API returned {e.response.status_code}"}, "eia_data")
+        logger.warning("EIA API error for %s: %s", product, e)
+        return {"error": "source_unavailable", "detail": f"EIA API returned {e.response.status_code}"}
     except Exception as e:
-        logger.warning("EIA fetch failed for %s: %s", product, _redact_url(str(e)))
-        return _sanitize_text_fields({"error": "source_unavailable", "detail": _redact_url(str(e))}, "eia_data")
+        logger.warning("EIA fetch failed for %s: %s", product, e)
+        return {"error": "source_unavailable", "detail": str(e)}
     finally:
         await client.aclose()
 
@@ -465,8 +448,8 @@ def _get_fred_key() -> str:
         cfg = MarketMindConfig()
         if cfg.fred_key:
             return cfg.fred_key
-    except (ImportError, AttributeError) as e:
-        logger.warning("FRED API key not available from MarketMindConfig: %s", e)
+    except Exception:
+        pass
     return os.environ.get("FRED_KEY", "").strip()
 
 
@@ -477,8 +460,8 @@ def _get_eia_key() -> str:
         cfg = MarketMindConfig()
         if cfg.eia_key:
             return cfg.eia_key
-    except (ImportError, AttributeError) as e:
-        logger.warning("EIA API key not available from MarketMindConfig: %s", e)
+    except Exception:
+        pass
     return os.environ.get("EIA_KEY", "").strip()
 
 
@@ -496,9 +479,3 @@ def _parse_int(val: Any) -> int:
         return int(val)
     except (TypeError, ValueError):
         return 0
-
-
-def _redact_url(text: str) -> str:
-    """Replace api_key=XXXX with api_key=*** to prevent key leakage in logs/errors."""
-    import re
-    return re.sub(r'api_key=[^&\s\'\"<>]+', 'api_key=***', text)

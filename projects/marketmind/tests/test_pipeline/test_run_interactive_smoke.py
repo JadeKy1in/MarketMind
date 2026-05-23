@@ -123,7 +123,7 @@ async def test_interactive_full_flow_confirm():
     mock_archivist.init_fts.return_value = None
     mock_archivist.index_document.return_value = None
 
-    with patch("marketmind.app._setup_logging"):  # skip log dir creation
+    with patch("marketmind.pipeline.interactive_orchestration._setup_logging"):  # skip log dir creation
         with patch("marketmind.gateway.async_client.init_gateway"):  # skip API key validation
             with patch("marketmind.pipeline.scout.fetch_all_sources",
                        AsyncMock(return_value=[])):
@@ -145,30 +145,10 @@ async def test_interactive_full_flow_confirm():
                                         ):
                                             with patch("marketmind.storage.archivist.get_archivist",
                                                        return_value=mock_archivist):
-                                                from marketmind.pipeline.orchestration import run_interactive
+                                                from marketmind.pipeline.interactive_orchestration import run_interactive
                                                 rc = await run_interactive(
                                                     config, mock=True, verbose=False,
                                                     shadow_count=None,
                                                 )
 
     assert rc == 0
-
-
-# ── Gate 1 wiring tests ───────────────────────────────────────────────────────
-
-def test_run_full_function_exists():
-    """run_full should be importable and callable."""
-    from marketmind.pipeline.orchestration import run_full
-    assert callable(run_full)
-
-
-def test_run_gate1_mode_function_exists():
-    """run_gate1_mode should be importable and callable."""
-    from marketmind.pipeline.orchestration import run_gate1_mode
-    assert callable(run_gate1_mode)
-
-
-def test_run_daily_still_importable():
-    """run_daily must still be importable for backward compatibility."""
-    from marketmind.pipeline.orchestration import run_daily
-    assert callable(run_daily)

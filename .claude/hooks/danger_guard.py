@@ -45,10 +45,29 @@ PROTECTED_PATHS = [
 
 
 def check_protected_path(args_str):
-    """Check if command targets protected filesystem paths. Returns matching path or None."""
-    for path in PROTECTED_PATHS:
-        if path in args_str:
-            return path
+    """Check if command targets protected filesystem paths. Returns matching path or None.
+
+    Only matches paths appearing as command arguments (after cp/mv/rm/tee or > redirect),
+    NOT paths appearing inside string literals or Python code.
+    """
+    # Check explicit command targets: cp/mv/rm/tee + path
+    for cmd_prefix in ("cp ", "mv ", "rm ", "tee "):
+        idx = args_str.find(cmd_prefix)
+        if idx == -1:
+            continue
+        rest = args_str[idx + len(cmd_prefix):].strip()
+        for path in PROTECTED_PATHS:
+            if rest.startswith(path) or rest.startswith(path.replace("/", "\\")):
+                return path
+
+    # Check > redirect targets
+    if ">" in args_str:
+        import re
+        for m in re.finditer(r'\d?\>\s*(\S+)', args_str):
+            rt = m.group(1).strip('"').strip("'")
+            for path in PROTECTED_PATHS:
+                if rt == path or rt.startswith(path):
+                    return path
     return None
 
 
@@ -73,6 +92,41 @@ def check_forbidden(command):
     return None
 
 
+def check_task_declaration(file_path):
+    """Verify current_task.json exists and is fresh before code changes.
+    Returns (ok, error_msg). ok=True means proceed, ok=False means block.
+    """
+    if not file_path or not file_path.endswith(".py"):
+        return True, ""
+    # Skip test files and .claude/ internal files
+    fp_norm = file_path.replace("\\", "/")
+    if "/tests/" in fp_norm or "/.claude/" in fp_norm:
+        return True, ""
+
+    task_file = ".claude/state/current_task.json"
+    try:
+        with open(task_file, "r") as f:
+            task = json.loads(f.read())
+    except (OSError, json.JSONDecodeError):
+        return False, f"current_task.json missing or invalid — declare task before editing {file_path}"
+
+    task_type = task.get("type", "")
+    task_files = task.get("files", [])
+    if not task_type or not task_files:
+        return False, f"current_task.json incomplete (need type + files) — update before editing {file_path}"
+
+    # Check if the edited file is covered by the task declaration
+    file_basename = fp_norm.split("/")[-1]
+    covered = any(file_basename in tf or tf in fp_norm for tf in task_files)
+    if not covered:
+        return False, (
+            f"File '{file_basename}' not in current_task.json files list. "
+            f"Update task declaration before editing."
+        )
+
+    return True, ""
+
+
 def main():
     try:
         raw = sys.stdin.read()
@@ -92,6 +146,14 @@ def main():
 
     command = tool_input.get("command", "")
     file_path = tool_input.get("file_path", "")
+
+    # Start gate: enforce task declaration before Write/Edit to Python files
+    if tool_name in ("Write", "Edit"):
+        ok, err = check_task_declaration(file_path)
+        if not ok:
+            sys.stderr.write(f"BLOCKED: {err}\n")
+            sys.stderr.write("Run: write .claude/state/current_task.json with {{'type':'...','files':[...]}}\n")
+            sys.exit(2)
 
     if not command and not file_path:
         sys.exit(0)

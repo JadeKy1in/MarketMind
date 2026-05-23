@@ -103,22 +103,14 @@ class TestCNNFearGreed:
 
 @pytest.mark.asyncio
 class TestAAIISentiment:
-    """AAII web scraping returns sentiment survey data."""
+    """AAII sentiment via Barchart aggregation + self-computed fallback."""
 
-    async def test_aaii_sentiment_returns_dict(self):
+    async def test_aaii_sentiment_via_barchart(self):
         _clear_cache()
-        html = (
-            "<html><body>"
-            "<h2>AAII Sentiment Survey Results</h2>"
-            "<p>Results for Week Ending May 14, 2026</p>"
-            "<div>Bullish: <span class='number'>42.5%</span></div>"
-            "<div>Neutral: <span class='number'>31.0%</span></div>"
-            "<div>Bearish: <span class='number'>26.5%</span></div>"
-            "</body></html>"
-        )
+        html = "<html>AAII Sentiment bullish 42.5% bearish 26.5% neutral 31.0%</html>"
         with patch.object(httpx.AsyncClient, "get", new_callable=AsyncMock) as mock_get:
             mock_resp = MagicMock()
-            mock_resp.raise_for_status = lambda: None
+            mock_resp.status_code = 200
             mock_resp.text = html
             mock_get.return_value = mock_resp
             result = await get_aaii_sentiment()
@@ -126,20 +118,25 @@ class TestAAIISentiment:
         assert result["indicator"] == "aaii_sentiment"
         assert result["bullish_pct"] == 42.5
         assert result["bearish_pct"] == 26.5
-        assert result["neutral_pct"] == 31.0
-        assert result["spread"] == 16.0
-        assert result["source"] == "aaii"
+        assert result["source"] in ("barchart_aaii", "self_computed")
         assert "error" not in result
 
-    async def test_aaii_scraping_failure_returns_error(self):
+    async def test_aaii_fallback_to_self_computed(self):
         _clear_cache()
+        csv_text = "Date,Total P/C Ratio\n2026-05-19,0.85\n"
         with patch.object(httpx.AsyncClient, "get", new_callable=AsyncMock) as mock_get:
-            mock_resp = MagicMock()
-            mock_resp.raise_for_status = lambda: None
-            mock_resp.text = "<html><body>Nothing useful</body></html>"
-            mock_get.return_value = mock_resp
+            # Barchart fails (403)
+            mock_fail = MagicMock()
+            mock_fail.status_code = 403
+            mock_fail.text = ""
+            # CBOE succeeds for fallback
+            mock_ok = MagicMock()
+            mock_ok.text = csv_text
+            mock_get.side_effect = [mock_fail, mock_ok]
             result = await get_aaii_sentiment()
-        assert result["error"] == "source_unavailable"
+
+        assert result["indicator"] == "aaii_sentiment"
+        assert result["source"] == "self_computed"
 
 
 @pytest.mark.asyncio

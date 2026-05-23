@@ -1,12 +1,20 @@
 """Unified async DeepSeek gateway. All LLM calls route through here."""
 from __future__ import annotations
+import re
 import time
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Any
 import httpx
 
 from marketmind.gateway.token_budget import TokenBudget, Priority
+from marketmind.gateway.circuit_breaker import (
+    CircuitBreaker, CircuitState, CircuitOpenError, _extract_status_code,
+)
+
+# ── KeyRotator extracted to gateway/key_rotator.py ──────────────────────
+from marketmind.gateway.key_rotator import KeyRotator, KEY_ROTATE_THRESHOLD, SHARED_POOL_WARNED  # noqa: F811 re-exported
 
 logger = logging.getLogger("marketmind.gateway.async_client")
 
@@ -14,96 +22,60 @@ DEEPSEEK_BASE = "https://api.deepseek.com/v1"
 DEFAULT_TIMEOUT = httpx.Timeout(120.0)
 MAX_CONNECTIONS = 20
 
-from marketmind.gateway.circuit_breaker import (
-    CircuitState, CircuitBreaker, CircuitBreakerOpenError,
-    QuotaExhaustedError, RateLimitError, _backoff_delay, infer_error_type, _try_fallback,
-)
+# Model name mapping for fallback providers that do not support DeepSeek model names
+_FALLBACK_MODEL_MAP: dict[str, str] = {
+    "deepseek-v4-flash": "gpt-4o-mini",
+    "deepseek-v4-pro": "gpt-4o",
+}
 
 
-KEY_ROTATE_THRESHOLD = 5  # Preemptively rotate when remaining below this
-SHARED_POOL_WARNED = False
-
-
-class KeyRotator:
-    """API key rotation with asyncio.Lock and per-key quota tracking."""
-
-    def __init__(self, keys: list[str]):
-        if not keys:
-            raise ValueError("At least one API key required")
-        self._keys = keys
-        self._idx = 0
-        self._lock = asyncio.Lock()
-        self._remaining: dict[int, int | None] = {i: None for i in range(len(keys))}
-
-    def current(self) -> str:
-        return self._keys[self._idx]
-
-    def update_remaining(self, remaining: int | None) -> None:
-        """Update quota remaining for the current key from response headers."""
-        self._remaining[self._idx] = remaining
-
-    def current_remaining(self) -> int | None:
-        return self._remaining[self._idx]
-
-    def key_status(self) -> dict:
-        """Return per-key quota status for monitoring."""
-        status = {}
-        for i, key in enumerate(self._keys):
-            suffix = key[-6:] if len(key) > 6 else "***"
-            status[f"key_{i}_{suffix}"] = {
-                "in_use": i == self._idx,
-                "remaining": self._remaining.get(i),
-            }
-        # Detect shared quota pool
-        non_none = [v for v in self._remaining.values() if v is not None]
-        if len(non_none) >= 2 and len(set(non_none)) == 1:
-            status["_shared_pool_warning"] = True
-        return status
-
-    async def rotate(self) -> str:
-        async with self._lock:
-            self._idx = (self._idx + 1) % len(self._keys)
-            return self._keys[self._idx]
-
-    def needs_rotation(self) -> bool:
-        """Check if current key should be preemptively rotated."""
-        rem = self._remaining.get(self._idx)
-        return rem is not None and rem < KEY_ROTATE_THRESHOLD
-
-    def __len__(self) -> int:
-        return len(self._keys)
+class RateLimitError(Exception):
+    def __init__(self, retry_after: int):
+        self.retry_after = retry_after
+        super().__init__(f"Rate limited. Retry after {retry_after}s")
 
 
 class DeepSeekGateway:
-    def __init__(self, keys: list[str], base_url: str = DEEPSEEK_BASE,
-                 circuit_breaker_enabled: bool = False,
-                 circuit_breaker_threshold: int = 3,
-                 circuit_breaker_timeout_s: int = 30,
-                 fallback_provider_url: str | None = None,
-                 fallback_model: str | None = None,
-                 fallback_api_key: str | None = None):
-        self.key_rotator = KeyRotator(keys)
+    def __init__(
+        self,
+        keys: list[str],
+        base_url: str = DEEPSEEK_BASE,
+        fallback_url: str = "",
+        fallback_model: str = "",
+        fallback_api_key: str = "",
+        circuit_breaker_threshold: int = 3,
+        circuit_breaker_timeout_s: int = 30,
+        max_requests_per_key: int | None = None,
+    ):
+        self.key_rotator = KeyRotator(keys, max_requests_per_key=max_requests_per_key)
         self.base_url = base_url.rstrip("/")
         self._client = httpx.AsyncClient(
             timeout=DEFAULT_TIMEOUT,
             limits=httpx.Limits(max_connections=MAX_CONNECTIONS),
         )
-        # P3-3: Circuit breaker
         self.circuit_breaker = CircuitBreaker(
-            failure_threshold=circuit_breaker_threshold,
-            timeout_seconds=float(circuit_breaker_timeout_s),
-            fallback_provider_url=fallback_provider_url,
-            fallback_model=fallback_model,
-            fallback_api_key=fallback_api_key,
-        ) if circuit_breaker_enabled else None
-        # Separate breaker for fallback provider
-        self._fallback_circuit_breaker = CircuitBreaker(
-            failure_threshold=circuit_breaker_threshold * 2,
-            timeout_seconds=float(circuit_breaker_timeout_s) * 2,
-        ) if circuit_breaker_enabled and fallback_provider_url else None
+            threshold=circuit_breaker_threshold,
+            timeout_s=circuit_breaker_timeout_s,
+        )
+        self.fallback_url = fallback_url.rstrip("/") if fallback_url else ""
+        self.fallback_model = fallback_model
+        self.fallback_api_key = fallback_api_key
+        self._fallback_client: httpx.AsyncClient | None = None
+
+    async def _get_fallback_client(self) -> httpx.AsyncClient | None:
+        """Lazily create the fallback HTTP client."""
+        if self.fallback_url and self._fallback_client is None:
+            self._fallback_client = httpx.AsyncClient(
+                timeout=DEFAULT_TIMEOUT,
+                limits=httpx.Limits(max_connections=MAX_CONNECTIONS),
+            )
+        return self._fallback_client
 
     async def close(self) -> None:
         await self._client.aclose()
+        if self._fallback_client is not None:
+            await self._fallback_client.aclose()
+            self._fallback_client = None
 
     async def __aenter__(self):
         return self
@@ -130,9 +102,13 @@ class DeepSeekGateway:
             "max_tokens": max_tokens,
             "stream": False,
         }
-        headers = {"Authorization": f"Bearer {self.key_rotator.current()}"}
+        # DeepSeek API: reasoning_effort goes in JSON body, not header
+        # "thinking" only works on Pro models — Flash ignores it or errors
         if reasoning_effort:
-            headers["X-Reasoning-Effort"] = reasoning_effort
+            payload["reasoning_effort"] = reasoning_effort
+        if "pro" in model.lower() and reasoning_effort:
+            payload["thinking"] = {"type": "enabled"}
+        headers = {"Authorization": f"Bearer {self.key_rotator.current()}"}
 
         t0 = time.perf_counter()
         resp = await self._client.post(
@@ -144,6 +120,9 @@ class DeepSeekGateway:
             raise RateLimitError(retry_after)
         resp.raise_for_status()
 
+        # Track per-key usage for preemptive rotation (max_requests_per_key)
+        self.key_rotator.record_request()
+
         # Track per-key quota from response headers (preserve previous if missing)
         remaining_str = resp.headers.get("x-ratelimit-remaining")
         if remaining_str is not None:
@@ -153,10 +132,23 @@ class DeepSeekGateway:
                 pass
 
         data = resp.json()
+        msg = data["choices"][0]["message"]
+        # DeepSeek V4 Pro with thinking=enabled may put output in reasoning_content
+        # and leave content empty/None. Fall back to reasoning_content when content is absent.
+        reasoning_content = msg.get("reasoning_content", "") or ""
+        raw_content = msg.get("content") or ""
+        if not raw_content.strip() and reasoning_content.strip():
+            raw_content = reasoning_content
+            logger.debug("DeepSeek: content empty, fell back to reasoning_content (%d chars)",
+                        len(reasoning_content))
+        elif reasoning_content.strip():
+            logger.debug("DeepSeek reasoning_content received: %d chars (effort=%s)",
+                        len(reasoning_content), reasoning_effort)
         return {
-            "content": data["choices"][0]["message"]["content"],
+            "content": raw_content,
             "usage": data.get("usage", {}),
             "latency_ms": elapsed_ms,
+            "reasoning_content": reasoning_content,
         }
 
 
@@ -168,24 +160,24 @@ def init_gateway(api_key: str, base_url: str = DEEPSEEK_BASE,
                   daily_token_budget: int = 2_000_000,
                   daily_pro_limit: int = 30,
                   daily_flash_limit: int = 100,
-                  circuit_breaker_enabled: bool = True,
+                  fallback_url: str = "",
+                  fallback_model: str = "",
+                  fallback_api_key: str = "",
                   circuit_breaker_threshold: int = 3,
                   circuit_breaker_timeout_s: int = 30,
-                  fallback_provider_url: str | None = None,
-                  fallback_model: str | None = None,
-                  fallback_api_key: str | None = None) -> None:
+                  max_requests_per_key: int | None = None) -> None:
     global _gateway, _budget
     keys = [k.strip() for k in api_key.split(",") if k.strip()] if api_key else []
     if not keys:
         raise RuntimeError("No API key configured. Set DEEPSEEK_API_KEY or DEEPSEEK_API_KEYS.")
     _gateway = DeepSeekGateway(
         keys, base_url,
-        circuit_breaker_enabled=circuit_breaker_enabled,
-        circuit_breaker_threshold=circuit_breaker_threshold,
-        circuit_breaker_timeout_s=circuit_breaker_timeout_s,
-        fallback_provider_url=fallback_provider_url,
+        fallback_url=fallback_url,
         fallback_model=fallback_model,
         fallback_api_key=fallback_api_key,
+        circuit_breaker_threshold=circuit_breaker_threshold,
+        circuit_breaker_timeout_s=circuit_breaker_timeout_s,
+        max_requests_per_key=max_requests_per_key,
     )
     _budget = TokenBudget(
         daily_limit=daily_token_budget,
@@ -211,7 +203,7 @@ def get_budget_report() -> dict:
         global SHARED_POOL_WARNED
         if report["key_status"].get("_shared_pool_warning") and not SHARED_POOL_WARNED:
             SHARED_POOL_WARNED = True
-            logger.warning(
+            logger.debug(
                 "All API keys appear to share one quota pool — "
                 "rotation provides resilience against key expiration but not quota expansion."
             )
@@ -229,30 +221,16 @@ async def chat_flash(
     user_prompt: str,
     temperature: float = 0.3,
     max_tokens: int = 4096,
-    reasoning_effort: str = "minimal",
+    reasoning_effort: str = "",
 ) -> dict[str, Any]:
     """Internal: raw Flash call without integrity protocol injection.
     Shadow agents MUST use chat_with_integrity() instead.
-
-    reasoning_effort defaults to 'minimal' — Flash is a fast data-task model.
-    Reasoning tokens consume output budget without benefit for triage/parsing tasks.
-    """
-    from marketmind.integrity.input_guard import sanitize_for_llm_prompt  # late import (circular via integrity.__init__ → fact_checker)
-    sys_result = sanitize_for_llm_prompt(system_prompt, source="llm_prompt")
-    usr_result = sanitize_for_llm_prompt(user_prompt, source="llm_prompt")
-    if sys_result.warnings:
-        for w in sys_result.warnings:
-            logger.warning("input_guard [llm_prompt] system_prompt: %s", w)
-    if usr_result.warnings:
-        for w in usr_result.warnings:
-            logger.warning("input_guard [llm_prompt] user_prompt: %s", w)
-    system_prompt = sys_result.sanitized
-    user_prompt = usr_result.sanitized
-
+    Note: Flash model does NOT support thinking/reasoning_effort."""
     gw = await get_gateway()
     budget = await get_budget()
     estimated = max_tokens + 1024
     if not budget.reserve_flash(estimated):
+        logger.warning("Budget exhausted for flash model call")
         return {"content": "", "error": "budget_exhausted", "usage": {}}
     try:
         return await _call_with_retry(
@@ -272,22 +250,11 @@ async def chat_pro(
 ) -> dict[str, Any]:
     """Internal: raw Pro call without integrity protocol injection.
     Shadow agents MUST use chat_with_integrity() instead."""
-    from marketmind.integrity.input_guard import sanitize_for_llm_prompt  # late import (circular via integrity.__init__ → fact_checker)
-    sys_result = sanitize_for_llm_prompt(system_prompt, source="llm_prompt")
-    usr_result = sanitize_for_llm_prompt(user_prompt, source="llm_prompt")
-    if sys_result.warnings:
-        for w in sys_result.warnings:
-            logger.warning("input_guard [llm_prompt] system_prompt: %s", w)
-    if usr_result.warnings:
-        for w in usr_result.warnings:
-            logger.warning("input_guard [llm_prompt] user_prompt: %s", w)
-    system_prompt = sys_result.sanitized
-    user_prompt = usr_result.sanitized
-
     gw = await get_gateway()
     budget = await get_budget()
     estimated = max_tokens + 2048
     if not budget.reserve_pro(estimated):
+        logger.warning("Budget exhausted for pro model call")
         return {"content": "", "error": "budget_exhausted", "usage": {}}
     try:
         return await _call_with_retry(
@@ -296,6 +263,61 @@ async def chat_pro(
         )
     finally:
         budget.release_pro(estimated)
+
+
+async def _fallback_call(
+    gw: DeepSeekGateway,
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float,
+    max_tokens: int,
+    reasoning_effort: str,
+) -> dict[str, Any]:
+    """Route a call through the fallback provider when primary circuit is OPEN."""
+    fallback_client = await gw._get_fallback_client()
+    if fallback_client is None:
+        raise CircuitOpenError(
+            "Circuit breaker is OPEN and no fallback provider is configured"
+        )
+
+    fallback_model = gw.fallback_model or _FALLBACK_MODEL_MAP.get(model, model)
+    payload = {
+        "model": fallback_model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": False,
+    }
+    # For DeepSeek-compatible providers, reasoning_effort goes in body
+    # For OpenAI-compatible fallback, also keep header for backward compat
+    if reasoning_effort:
+        payload["reasoning_effort"] = reasoning_effort
+    fallback_key = gw.fallback_api_key or gw.key_rotator.current()
+    headers = {"Authorization": f"Bearer {fallback_key}"}
+
+    t0 = time.perf_counter()
+    resp = await fallback_client.post(
+        f"{gw.fallback_url}/chat/completions", json=payload, headers=headers
+    )
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+
+    if resp.status_code == 429:
+        retry_after = int(resp.headers.get("Retry-After", 5))
+        raise RateLimitError(retry_after)
+    resp.raise_for_status()
+
+    data = resp.json()
+    msg = data["choices"][0]["message"]
+    return {
+        "content": msg["content"],
+        "usage": data.get("usage", {}),
+        "latency_ms": elapsed_ms,
+        "reasoning_content": msg.get("reasoning_content", ""),
+    }
 
 
 async def _call_with_retry(
@@ -307,44 +329,96 @@ async def _call_with_retry(
     max_tokens: int,
     reasoning_effort: str,
 ) -> dict[str, Any]:
-    """Call LLM with retry on 429, preemptive key rotation, and circuit breaker gate.
+    """Call LLM with circuit breaker, one retry on 429, and preemptive key rotation.
 
-    P3-3: Circuit breaker wraps the call — OPEN state blocks early,
-    HALF_OPEN probes, success/failure feed back to state machine.
+    Circuit breaker integration (P3-3):
+    - CLOSED: Normal operation with retry logic.
+    - OPEN: Fast-fail — route to fallback provider immediately.
+    - HALF_OPEN: Allow one probe call through the primary; on success
+      transition back to CLOSED, on failure back to OPEN.
     """
     budget = await get_budget()
+    cb = gw.circuit_breaker
 
     # Preemptive rotation if current key is near quota limit
     if gw.key_rotator.needs_rotation() and len(gw.key_rotator) > 1:
         await gw.key_rotator.rotate()
         logger.debug("Preemptive key rotation (remaining quota low)")
 
-    async def _primary_call():
-        try:
-            return await gw._call(
-                model, system_prompt, user_prompt, temperature, max_tokens, reasoning_effort
+    # --- Circuit-breaker gate ---
+    if cb.is_open:
+        if gw.fallback_url:
+            logger.info("Circuit OPEN — routing to fallback provider")
+            return await _fallback_call(
+                gw, model, system_prompt, user_prompt,
+                temperature, max_tokens, reasoning_effort,
             )
-        except RateLimitError as e:
-            budget.handle_429(e.retry_after)
-            if len(gw.key_rotator) > 1:
-                await gw.key_rotator.rotate()
-                logger.info("Key rotated after 429 (total keys: %d)", len(gw.key_rotator))
-            else:
-                logger.warning("429 received but only 1 key configured — cannot rotate")
-            # Retry once with new key
-            return await gw._call(
-                model, system_prompt, user_prompt, temperature, max_tokens, reasoning_effort
-            )
+        raise CircuitOpenError()
 
-    # P3-3: Gate through circuit breaker if enabled
-    if gw.circuit_breaker is not None:
+    try:
+        result = await gw._call(
+            model, system_prompt, user_prompt,
+            temperature, max_tokens, reasoning_effort,
+        )
+        cb.record_success()
+        return result
+    except RateLimitError as e:
+        cb.record_failure(status_code=429, retry_after=e.retry_after)
+        budget.handle_429(e.retry_after)
+
+        # If circuit transitioned to OPEN, route to fallback (if available)
+        if cb.is_open:
+            if gw.fallback_url:
+                logger.info("Circuit OPEN after 429 — routing to fallback provider")
+                return await _fallback_call(
+                    gw, model, system_prompt, user_prompt,
+                    temperature, max_tokens, reasoning_effort,
+                )
+            raise CircuitOpenError()
+
+        if len(gw.key_rotator) > 1:
+            await gw.key_rotator.rotate()
+            logger.info("Key rotated after 429 (total keys: %d)", len(gw.key_rotator))
+        else:
+            logger.warning("429 received but only 1 key configured — cannot rotate")
+
+        # Retry once with new key
         try:
-            return await gw.circuit_breaker.call(_primary_call)
-        except CircuitBreakerOpenError:
-            return {"content": "", "error": "circuit_open",
-                    "usage": {}, "fallback": True}
-    else:
-        return await _primary_call()
+            result = await gw._call(
+                model, system_prompt, user_prompt,
+                temperature, max_tokens, reasoning_effort,
+            )
+            cb.record_success()
+            return result
+        except RateLimitError as e2:
+            cb.record_failure(status_code=429, retry_after=e2.retry_after)
+            if cb.is_open and gw.fallback_url:
+                logger.info("Circuit OPEN after retry 429 — routing to fallback")
+                return await _fallback_call(
+                    gw, model, system_prompt, user_prompt,
+                    temperature, max_tokens, reasoning_effort,
+                )
+            raise
+        except Exception as e2:
+            status_code = _extract_status_code(e2)
+            cb.record_failure(status_code=status_code)
+            if cb.is_open and gw.fallback_url:
+                logger.info("Circuit OPEN after retry error — routing to fallback")
+                return await _fallback_call(
+                    gw, model, system_prompt, user_prompt,
+                    temperature, max_tokens, reasoning_effort,
+                )
+            raise
+    except Exception as e:
+        status_code = _extract_status_code(e)
+        cb.record_failure(status_code=status_code)
+        if cb.is_open and gw.fallback_url:
+            logger.info("Circuit OPEN after error — routing to fallback")
+            return await _fallback_call(
+                gw, model, system_prompt, user_prompt,
+                temperature, max_tokens, reasoning_effort,
+            )
+        raise
 
 
 async def chat_batch_flash(
@@ -387,8 +461,20 @@ async def chat_with_integrity(
         "If data is unavailable, state 'DATA_UNAVAILABLE' — never fabricate. "
         "You are bound by Law 7 (Data Integrity).\n\n"
     )
-    full_system = integrity_header
+    # SINGLE SOURCE OF TRUTH for time — injected at gateway level so all
+    # LLM calls (including shadows that don't use SessionContext) share the
+    # same temporal anchor.  UTC eliminates timezone ambiguity.
+    time_context = (
+        f"TIME_CONTEXT: TODAY is {datetime.now(timezone.utc).strftime('%Y-%m-%d')} (UTC). "
+        "Use this as the SINGLE SOURCE OF TRUTH for the current date in all "
+        "analysis, reasoning, and date references.\n\n"
+    )
+    full_system = integrity_header + time_context
     if cash_reframing_ticker:
+        # Validate ticker format to prevent prompt injection
+        if cash_reframing_ticker and not re.match(r'^[A-Z]{1,5}(\.[A-Z]{1,3})?$', cash_reframing_ticker):
+            logger.warning("Invalid ticker format in cash_reframing: %s", cash_reframing_ticker)
+            cash_reframing_ticker = "UNKNOWN"  # Safe fallback
         cr_protocol = CASH_REFRAMING_PROTOCOL.replace(
             "{ticker}", cash_reframing_ticker
         ).replace(

@@ -19,6 +19,7 @@ from marketmind.shadows.shadow_schema import (  # noqa: F401 — re-export
     CODE_VERSION,
     _SCHEMA_SQL,
     _MIGRATIONS,
+    init_shadow_db_schema,
 )
 
 logger = logging.getLogger("marketmind.shadows.shadow_state")
@@ -57,42 +58,10 @@ class ShadowStateDB:
     def init_schema(self) -> None:
         conn = self._connect()
         try:
-            conn.executescript(_SCHEMA_SQL)
-            row = conn.execute(
-                "SELECT value FROM metadata WHERE key = 'schema_version'"
-            ).fetchone()
-            db_version = int(row["value"]) if row else 0
-
-            if db_version > CODE_VERSION:
-                logger.warning(
-                    "DB schema_version %d > code CODE_VERSION %d — "
-                    "database was opened with newer code. Skipping migrations.",
-                    db_version, CODE_VERSION
-                )
-            else:
-                for ver, func in _MIGRATIONS:
-                    if ver > db_version:
-                        func(conn)
-                        conn.execute(
-                            "INSERT OR REPLACE INTO metadata (key, value) "
-                            "VALUES ('schema_version', ?)",
-                            (str(ver),)
-                        )
-                        logger.info("Migration %d applied successfully.", ver)
-
+            init_shadow_db_schema(conn)
             conn.commit()
         finally:
             conn.close()
-
-    @staticmethod
-    def _migrate_add_column(conn: sqlite3.Connection, table: str,
-                            column: str, col_type: str) -> None:
-        """Safe ALTER TABLE ADD COLUMN -- ignores if column already exists."""
-        try:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
-            logger.info("Migration: added %s.%s %s", table, column, col_type)
-        except sqlite3.OperationalError:
-            pass  # Column already exists -- safe to ignore
 
     def close(self) -> None:
         pass  # SQLite connections are closed per-operation
@@ -161,6 +130,20 @@ class ShadowStateDB:
 
     def get_open_trades(self, shadow_id: str) -> list[VirtualTrade]:
         return self._delegate(f"{_REPO_BASE}.shadow_trade_repo", "get_open_trades", shadow_id)
+
+    def get_all_open_trades(self) -> list[dict]:
+        """Aggregate open trades across all visible shadows. Returns list of dicts."""
+        trades: list[dict] = []
+        for s in self.get_visible_shadows():
+            for t in self.get_open_trades(s.shadow_id):
+                trades.append({
+                    "ticker": t.ticker,
+                    "entry_price": t.entry_price,
+                    "direction": t.direction,
+                    "shadow_id": t.shadow_id,
+                    "market_value": getattr(t, "market_value", t.entry_price),
+                })
+        return trades
 
     def get_trade_history(self, shadow_id: str, limit: int = 90) -> list[VirtualTrade]:
         return self._delegate(f"{_REPO_BASE}.shadow_trade_repo", "get_trade_history", shadow_id, limit)

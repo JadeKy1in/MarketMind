@@ -1,164 +1,132 @@
-"""Tests for Ecosystem Auditor — blind-spot detection mechanism (replaces Catfish).
-
-ECOSYSTEM AUDITOR — NOT A SHADOW. Reads shadow output, does not produce votes.
-Detection categories: direction concentration, asset class neglect,
-methodology convergence, uncovered tickers.
-"""
+﻿"""Tests for Catfish Agent — minority-opinion enforcer."""
 import pytest
 
-from marketmind.shadows.ecosystem_auditor import EcosystemAuditor, EcosystemAlert
 from marketmind.shadows.catfish_agent import (
-    CatfishAgent, CATFISH_SYSTEM_PROMPT, create_catfish_agent
+    CatfishAgent, CATFISH_CONFIG, CATFISH_SYSTEM_PROMPT, create_catfish_agent
 )
 from marketmind.shadows.shadow_agent import ShadowVote
+from marketmind.shadows.shadow_state import ShadowConfig
+from marketmind.config.settings import ShadowSettings
+
+
+@pytest.fixture
+def settings():
+    return ShadowSettings()
+
+
+@pytest.fixture
+def catfish_config():
+    return ShadowConfig(
+        shadow_id="catfish:primary:test_catfish",
+        shadow_type="catfish",
+        display_name="Test Catfish",
+        methodology_prompt=CATFISH_SYSTEM_PROMPT,
+        virtual_capital=30000.0,
+        temperature=0.8,
+        reasoning_effort="low",
+    )
+
+
+@pytest.fixture
+def catfish(catfish_config, temp_shadow_db, settings):
+    return CatfishAgent(catfish_config, temp_shadow_db, settings)
 
 
 def make_vote(shadow_id, ticker, direction, confidence=0.5):
     return ShadowVote(
         shadow_id=shadow_id, shadow_type="expert",
-        date="2026-05-18", ticker=ticker, direction=direction,
+        date="2026-05-11", ticker=ticker, direction=direction,
         confidence=confidence, thesis="test", risk_note="test",
     )
 
 
-# ── EcosystemAuditor tests ─────────────────────────────────────────────
-
-class TestEcosystemAuditor:
-    """EcosystemAuditor is the replacement for Catfish — pure Python blind-spot scan."""
-
-    def test_empty_votes_produces_no_alerts(self):
-        auditor = EcosystemAuditor()
-        alerts = auditor.run_audit([])
-        assert len(alerts) == 0
-
-    def test_direction_concentration_alert(self):
-        auditor = EcosystemAuditor()
-        # 9 long, 1 short = 90% long -> triggers direction concentration
-        votes = [
-            make_vote(f"s{i}", "SPY", "long") for i in range(9)
-        ] + [make_vote("s9", "QQQ", "short")]
-        alerts = auditor.run_audit(votes)
-        direction_alerts = [a for a in alerts if a.category == "direction_concentration"]
-        assert len(direction_alerts) >= 1
-        assert "90%" in direction_alerts[0].title or "90%" in direction_alerts[0].detail
-
-    def test_below_threshold_no_direction_alert(self):
-        auditor = EcosystemAuditor()
-        votes = [
-            make_vote(f"s{i}", f"TICKER_{i}", "long") for i in range(5)
-        ] + [
-            make_vote(f"s{i+5}", f"TICKER_{i+5}", "short") for i in range(5)
-        ]
-        alerts = auditor.run_audit(votes)
-        direction_alerts = [a for a in alerts if a.category == "direction_concentration"]
-        assert len(direction_alerts) == 0
-
-    def test_asset_class_neglect_alert(self):
-        auditor = EcosystemAuditor()
-        # Only vote on tech stocks, neglect everything else
-        votes = [
-            make_vote(f"s{i}", "QQQ", "long") for i in range(10)
-        ]
-        alerts = auditor.run_audit(votes)
-        neglect_alerts = [a for a in alerts if a.category == "asset_class_neglect"]
-        assert len(neglect_alerts) >= 1
-
-    def test_ticker_convergence_alert(self):
-        auditor = EcosystemAuditor()
-        # All votes on same 3 tickers
-        votes = []
-        for i in range(9):
-            votes.append(make_vote(f"s{i}", "SPY", "long"))
-        for i in range(5):
-            votes.append(make_vote(f"s{i+9}", "QQQ", "short"))
-        for i in range(3):
-            votes.append(make_vote(f"s{i+14}", "AAPL", "long"))
-        alerts = auditor.run_audit(votes)
-        convergence_alerts = [a for a in alerts if a.category == "methodology_convergence"]
-        assert len(convergence_alerts) >= 1
-
-    def test_uncovered_tickers_alert(self):
-        auditor = EcosystemAuditor()
-        # Only vote on a few tickers, miss major market-cap names
+class TestCatfishConsensusDetection:
+    def test_80_percent_consensus_triggers(self, catfish):
+        """>=80% agreement triggers catfish."""
         votes = [
             make_vote("s1", "SPY", "long"),
-            make_vote("s2", "QQQ", "short"),
+            make_vote("s2", "SPY", "long"),
+            make_vote("s3", "SPY", "long"),
+            make_vote("s4", "SPY", "long"),  # 4/4 = 100%
         ]
-        alerts = auditor.run_audit(votes)
-        uncovered = [a for a in alerts if a.category == "uncovered_tickers"]
-        assert len(uncovered) >= 1
+        triggered, pct, direction = catfish.check_consensus(votes, "SPY")
+        assert triggered is True
+        assert pct == 1.0
+        assert direction == "long"
 
-    def test_max_5_alerts_output(self):
-        """Ecosystem auditor output <= 5 blind spot alerts."""
-        auditor = EcosystemAuditor()
-        # Create conditions for all alert types
+    def test_75_percent_no_trigger(self, catfish):
+        """<80% agreement does NOT trigger catfish."""
         votes = [
-            make_vote(f"s{i}", "SPY", "long") for i in range(15)
+            make_vote("s1", "SPY", "long"),
+            make_vote("s2", "SPY", "long"),
+            make_vote("s3", "SPY", "long"),   # 3/4 = 75%
+            make_vote("s4", "SPY", "short"),
         ]
-        alerts = auditor.run_audit(votes)
-        assert len(alerts) <= 5
+        triggered, pct, _ = catfish.check_consensus(votes, "SPY")
+        assert triggered is False
+        assert pct == 0.75
 
-    def test_alert_structure(self):
-        auditor = EcosystemAuditor()
+    def test_fewer_than_3_votes_no_trigger(self, catfish):
+        """Need >=3 non-abstain votes to check consensus."""
         votes = [
-            make_vote(f"s{i}", "SPY", "long") for i in range(10)
+            make_vote("s1", "SPY", "long"),
+            make_vote("s2", "SPY", "long"),  # only 2
         ]
-        alerts = auditor.run_audit(votes)
-        for alert in alerts:
-            assert alert.alert_id
-            assert alert.category in (
-                "direction_concentration", "asset_class_neglect",
-                "methodology_convergence", "uncovered_tickers",
-            )
-            assert alert.severity in ("info", "warning", "critical")
-            assert alert.title
-            assert alert.detail
+        triggered, pct, _ = catfish.check_consensus(votes, "SPY")
+        assert triggered is False
+        assert pct == 0.0
 
-
-# ── Backward-compat CatfishAgent tests ──────────────────────────────────
-
-class TestCatfishBackwardCompat:
-    """CatfishAgent is deprecated but must maintain backward compat for existing callers."""
-
-    def test_catfish_agent_is_deprecated(self):
-        with pytest.warns(DeprecationWarning):
-            agent = CatfishAgent()
-        assert agent._auditor is not None
-
-    def test_create_catfish_agent_deprecated(self):
-        with pytest.warns(DeprecationWarning):
-            agent = create_catfish_agent()
-        assert isinstance(agent, CatfishAgent)
-
-    def test_catfish_no_longer_produces_votes(self):
-        import asyncio
-        agent = CatfishAgent()
-        output = asyncio.run(agent._analyze([], {}))
-        assert len(output.votes) == 0
-        assert "CATFISH_DEPRECATED" in str(output.insights)
-
-    def test_catfish_run_audit_delegates(self):
-        agent = CatfishAgent()
-        votes = [
-            make_vote(f"s{i}", "SPY", "long") for i in range(10)
-        ]
-        alerts = agent.run_audit(votes)
-        assert len(alerts) > 0
-        for alert in alerts:
-            assert isinstance(alert, EcosystemAlert)
-
-    def test_catfish_check_consensus_backward_compat(self):
-        agent = CatfishAgent()
+    def test_abstain_votes_excluded(self, catfish):
+        """Abstain votes are excluded from consensus calculation."""
         votes = [
             make_vote("s1", "SPY", "long"),
             make_vote("s2", "SPY", "long"),
             make_vote("s3", "SPY", "long"),
             make_vote("s4", "SPY", "long"),
+            make_vote("s5", "SPY", "abstain"),
         ]
-        triggered, pct, direction = agent.check_consensus(votes, "SPY")
+        triggered, pct, _ = catfish.check_consensus(votes, "SPY")
         assert triggered is True
-        assert pct == 1.0
-        assert direction == "long"
+        assert pct == 1.0  # 4/4 non-abstain = 100%
 
-    def test_catfish_system_prompt_deprecation_notice(self):
-        assert "DEPRECATED" in CATFISH_SYSTEM_PROMPT
+
+class TestCatfishAgent:
+    def test_catfish_uses_high_temperature(self, catfish):
+        assert catfish.config.temperature == 0.8
+
+    @pytest.mark.asyncio
+    async def test_catfish_analyze_without_trigger(self, catfish):
+        output = await catfish._analyze([], {})
+        assert len(output.votes) == 0
+        assert "NO_CONSENSUS_DETECTED" in str(output.insights)
+
+    @pytest.mark.asyncio
+    async def test_catfish_analyze_with_trigger(self, catfish):
+        from unittest.mock import AsyncMock, patch
+        mock_result = {
+            "content": "VOTE_START\nticker: SPY\ndirection: short\nconfidence: 0.5\nthesis: counter argument\nrisk_note: adverse selection\nVOTE_END",
+            "latency_ms": 450
+        }
+        market_data = {
+            "catfish_trigger_ticker": "SPY",
+            "catfish_trigger_direction": "long",
+            "catfish_trigger_agreement_pct": 0.85,
+        }
+        with patch("marketmind.gateway.async_client.chat_with_integrity", new_callable=AsyncMock, return_value=mock_result):
+            output = await catfish._analyze([{"headline": "Test"}], market_data)
+        assert len(output.votes) == 1
+        assert output.votes[0].direction == "short"  # opposes long consensus
+        assert output.votes[0].ticker == "SPY"
+
+    def test_catfish_not_valid_counter(self, catfish):
+        """Catfish methodology requires NO_VALID_COUNTER response when no legitimate argument."""
+        prompt = CATFISH_SYSTEM_PROMPT
+        assert "NO_VALID_COUNTER" in prompt
+        assert "NEVER fabricate" in prompt
+
+
+def test_create_catfish_factory(temp_shadow_db):
+    settings = ShadowSettings()
+    agent = create_catfish_agent(temp_shadow_db, settings)
+    assert isinstance(agent, CatfishAgent)
+    assert agent.config.temperature == 0.8

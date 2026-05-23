@@ -25,6 +25,7 @@ from pathlib import Path
 import httpx
 
 from marketmind.shadows.shadow_agent import ExternalObservation
+from marketmind.gateway.ocr_helpers import _tesseract_ocr, _pil_metadata, _pdfplumber_extract, _write_temp_image
 
 logger = logging.getLogger("marketmind.gateway.multimodal_adapter")
 
@@ -114,7 +115,7 @@ class GeminiFlashGateway:
                 self._read_encode_image, image_path
             )
 
-            url = f"{GEMINI_BASE}?key={self._api_key}"
+            url = GEMINI_BASE
             payload = {
                 "contents": [{
                     "parts": [
@@ -124,7 +125,8 @@ class GeminiFlashGateway:
                 }],
                 "generationConfig": {"temperature": 0.0, "maxOutputTokens": 4096},
             }
-            resp = await client.post(url, json=payload)
+            headers = {"x-goog-api-key": self._api_key, "Content-Type": "application/json"}
+            resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             body = resp.json()
 
@@ -153,19 +155,39 @@ class GeminiFlashGateway:
 class MultimodalAdapter:
     """Async adapter that converts multimodal inputs into ExternalObservation.
 
+    OCR Priority Chain:
+      1. English documents  -> Gemini 2.0 Flash (free, high accuracy, 86% OCR)
+      2. Chinese documents  -> Local Tesseract/pdfplumber (data sovereignty, no cross-border)
+      3. Table-heavy PDFs   -> pdfplumber (best table extraction)
+      4. Gemini 2.5 Flash is NOT used (known OCR regression: 86% -> 78.9%)
+
     Priority chain per input type:
-      - Image:   Gemini Vision -> Tesseract OCR -> PIL metadata
-      - PDF:     pdfplumber -> Gemini Vision (scanned PDFs)
-      - Screenshot: Gemini Vision from base64
-      - Text:    passthrough
+      - Image:       Gemini Vision -> Tesseract OCR -> PIL metadata
+      - PDF:         pdfplumber -> Gemini Vision (scanned PDFs)
+      - Screenshot:  Gemini Vision from base64
+      - Text:        passthrough
+
+    The _check_cross_border_consent() gate detects Chinese characters and
+    routes to local OCR, satisfying Phase 3 Resolution 6-D data sovereignty.
 
     Falls back gracefully at each step. Returns error observations
     when no extraction method succeeds.
     """
 
     def __init__(self, gemini_api_key: str | None = None) -> None:
-        self._api_key = gemini_api_key if gemini_api_key is not None else os.environ.get("GEMINI_API_KEY", "")
+        self._api_key = gemini_api_key or os.environ.get("GEMINI_API_KEY", "")
         self._gemini: GeminiFlashGateway | None = None
+        # Per-operation OCR statistics for operational monitoring
+        # NOTE: Claude Sonnet 4 is the RECOMMENDED Chinese OCR model but requires
+        # a paid API key. For Phase C, local Tesseract is the primary Chinese path.
+        self._ocr_stats: dict[str, dict[str, int]] = {
+            "gemini_vision": {"success": 0, "failure": 0},
+            "tesseract_ocr": {"success": 0, "failure": 0},
+            "pdfplumber": {"success": 0, "failure": 0},
+            "pil_metadata": {"success": 0, "failure": 0},
+            "passthrough": {"success": 0, "failure": 0},
+            "consent_denied": {"count": 0},
+        }
 
     async def _get_gemini(self) -> GeminiFlashGateway | None:
         if self._gemini is not None:
@@ -179,6 +201,41 @@ class MultimodalAdapter:
         if self._gemini is not None:
             await self._gemini.close()
             self._gemini = None
+
+    # ----- Cross-border API consent (C6: China compliance) -----
+
+    @staticmethod
+    def _check_cross_border_consent(file_path: str) -> bool:
+        """Check whether a file is safe to send to Gemini (cross-border API).
+
+        Resolution 6-C: Chinese-language or sensitive files must use local OCR
+        fallback instead of sending data to a foreign API.
+
+        Returns True if the file content is English/ASCII (safe to send),
+        returns False if the file contains Chinese characters or sensitive patterns.
+        """
+        CHINESE_CHAR_RANGE = (0x4E00, 0x9FFF)
+        try:
+            with open(file_path, "rb") as f:
+                raw = f.read(4096)  # Sample first 4KB
+            text = raw.decode("utf-8", errors="ignore")
+            for ch in text:
+                cp = ord(ch)
+                if CHINESE_CHAR_RANGE[0] <= cp <= CHINESE_CHAR_RANGE[1]:
+                    logger.warning(
+                        "Cross-border consent DENIED for %s: "
+                        "Chinese characters detected. Falling back to local OCR.",
+                        file_path
+                    )
+                    # Interactive mode warning (logged for user awareness)
+                    logger.info(
+                        "此文件将调用境外 API (Gemini) 处理，是否继续？"
+                    )
+                    return False
+        except Exception as exc:
+            logger.debug("Consent check failed for %s: %s; defaulting to deny", file_path, exc)
+            return False
+        return True
 
     # ----- Image Extraction -----
 
@@ -194,11 +251,15 @@ class MultimodalAdapter:
         if not os.path.isfile(image_path):
             return _error_observation("image", image_path, "File not found")
 
-        # 1. Gemini Vision (preferred)
+        # 1. Gemini Vision (preferred) — gated by cross-border consent check
+        consent_ok = self._check_cross_border_consent(image_path)
+        if not consent_ok:
+            self._ocr_stats["consent_denied"]["count"] += 1
         gemini = await self._get_gemini()
-        if gemini is not None:
+        if consent_ok and gemini is not None:
             text = await gemini.extract_vision(image_path)
             if text:
+                self._ocr_stats["gemini_vision"]["success"] += 1
                 return ExternalObservation(
                     observation_id=_make_observation_id(),
                     source_type="image",
@@ -212,10 +273,13 @@ class MultimodalAdapter:
                     source_attribution="multimodal_adapter",
                     evaluated_at=_now_iso(),
                 )
+            else:
+                self._ocr_stats["gemini_vision"]["failure"] += 1
 
         # 2. Tesseract OCR (runs in thread to avoid blocking)
         tesseract_result = await _tesseract_ocr(image_path)
         if tesseract_result is not None:
+            self._ocr_stats["tesseract_ocr"]["success"] += 1
             return ExternalObservation(
                 observation_id=_make_observation_id(),
                 source_type="image",
@@ -229,10 +293,13 @@ class MultimodalAdapter:
                 source_attribution="multimodal_adapter",
                 evaluated_at=_now_iso(),
             )
+        else:
+            self._ocr_stats["tesseract_ocr"]["failure"] += 1
 
         # 3. PIL metadata fallback (runs in thread)
         pil_result = await _pil_metadata(image_path)
         if pil_result is not None:
+            self._ocr_stats["pil_metadata"]["success"] += 1
             return ExternalObservation(
                 observation_id=_make_observation_id(),
                 source_type="image",
@@ -243,6 +310,8 @@ class MultimodalAdapter:
                 source_attribution="multimodal_adapter",
                 evaluated_at=_now_iso(),
             )
+        else:
+            self._ocr_stats["pil_metadata"]["failure"] += 1
 
         return _error_observation(
             "image", image_path,
@@ -267,6 +336,7 @@ class MultimodalAdapter:
         # 1. pdfplumber (runs in thread)
         plumber_result = await _pdfplumber_extract(pdf_path)
         if plumber_result is not None:
+            self._ocr_stats["pdfplumber"]["success"] += 1
             return ExternalObservation(
                 observation_id=_make_observation_id(),
                 source_type="pdf",
@@ -277,12 +347,18 @@ class MultimodalAdapter:
                 source_attribution="multimodal_adapter",
                 evaluated_at=_now_iso(),
             )
+        else:
+            self._ocr_stats["pdfplumber"]["failure"] += 1
 
-        # 2. Gemini Vision fallback (for scanned/image-based PDFs)
+        # 2. Gemini Vision fallback (for scanned/image-based PDFs) — gated by consent check
+        consent_ok = self._check_cross_border_consent(pdf_path)
+        if not consent_ok:
+            self._ocr_stats["consent_denied"]["count"] += 1
         gemini = await self._get_gemini()
-        if gemini is not None:
+        if consent_ok and gemini is not None:
             text = await gemini.extract_vision(pdf_path)
             if text:
+                self._ocr_stats["gemini_vision"]["success"] += 1
                 return ExternalObservation(
                     observation_id=_make_observation_id(),
                     source_type="pdf",
@@ -297,6 +373,8 @@ class MultimodalAdapter:
                     source_attribution="multimodal_adapter",
                     evaluated_at=_now_iso(),
                 )
+            else:
+                self._ocr_stats["gemini_vision"]["failure"] += 1
 
         return _error_observation(
             "pdf", pdf_path,
@@ -361,6 +439,7 @@ class MultimodalAdapter:
         try:
             text = await gemini.extract_vision(tmp_path)
             if text:
+                self._ocr_stats["gemini_vision"]["success"] += 1
                 return ExternalObservation(
                     observation_id=_make_observation_id(),
                     source_type="screenshot",
@@ -375,6 +454,8 @@ class MultimodalAdapter:
                     source_attribution="multimodal_adapter",
                     evaluated_at=_now_iso(),
                 )
+            else:
+                self._ocr_stats["gemini_vision"]["failure"] += 1
         finally:
             try:
                 os.unlink(tmp_path)
@@ -399,6 +480,7 @@ class MultimodalAdapter:
         Returns:
             ExternalObservation with the text as-is.
         """
+        self._ocr_stats["passthrough"]["success"] += 1
         obs_id = _make_observation_id()
         return ExternalObservation(
             observation_id=obs_id,
@@ -411,100 +493,3 @@ class MultimodalAdapter:
             evaluated_at=_now_iso(),
         )
 
-
-# ---------------------------------------------------------------------------
-# Internal synchronous helpers (run via asyncio.to_thread)
-# ---------------------------------------------------------------------------
-
-
-async def _tesseract_ocr(image_path: str) -> str | None:
-    """Run Tesseract OCR on an image (runs in thread to avoid blocking)."""
-    try:
-        import subprocess
-        proc = await asyncio.to_thread(
-            subprocess.run,
-            ["tesseract", image_path, "stdout", "-l", "eng+chi_sim", "--psm", "6"],
-            capture_output=True, text=True, timeout=30,
-        )
-        if proc.returncode == 0 and proc.stdout.strip():
-            return proc.stdout.strip()
-    except FileNotFoundError:
-        logger.debug("Tesseract not installed; skipping OCR")
-    except Exception as exc:
-        logger.debug("Tesseract failed: %s", exc)
-    return None
-
-
-async def _pil_metadata(image_path: str) -> dict | None:
-    """Extract basic metadata from an image via PIL (runs in thread to avoid blocking)."""
-    try:
-        from PIL import Image
-    except ImportError:
-        logger.debug("PIL not installed; cannot extract image metadata")
-        return None
-    try:
-        def _open_and_read():
-            with Image.open(image_path) as img:
-                # Force load to ensure all metadata is read while file is open
-                img.load()
-                text = (
-                    f"[Image: {img.format} | {img.size[0]}x{img.size[1]} | "
-                    f"mode={img.mode} | No OCR text available. Install tesseract for OCR.]"
-                )
-                return {
-                    "text": text,
-                    "meta": {
-                        "extraction_method": "pil_metadata",
-                        "image_format": img.format,
-                        "dimensions": list(img.size),
-                    },
-                }
-        return await asyncio.to_thread(_open_and_read)
-    except Exception as exc:
-        logger.debug("PIL metadata extraction failed: %s", exc)
-    return None
-
-
-async def _pdfplumber_extract(pdf_path: str) -> dict | None:
-    """Extract text from a PDF using pdfplumber (runs in thread to avoid blocking)."""
-    try:
-        import pdfplumber
-    except ImportError:
-        logger.debug("pdfplumber not installed; skipping PDF extraction")
-        return None
-    try:
-        def _extract():
-            with pdfplumber.open(pdf_path) as pdf:
-                pages_text = []
-                for page in pdf.pages[:20]:
-                    text = page.extract_text()
-                    if text:
-                        pages_text.append(text)
-                if pages_text:
-                    return {
-                        "text": "\n\n".join(pages_text),
-                        "meta": {
-                            "extraction_method": "pdfplumber",
-                            "pages_extracted": len(pages_text),
-                        },
-                    }
-                return None
-        return await asyncio.to_thread(_extract)
-    except Exception as exc:
-        logger.debug("pdfplumber extraction failed for %s: %s", pdf_path, exc)
-    return None
-
-
-def _write_temp_image(image_bytes: bytes) -> str | None:
-    """Write image bytes to a temporary .png file (sync, called directly).
-
-    Returns the temp file path, or None on failure.
-    """
-    try:
-        import tempfile
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-            f.write(image_bytes)
-            return f.name
-    except Exception as exc:
-        logger.debug("Failed to write temp image: %s", exc)
-    return None

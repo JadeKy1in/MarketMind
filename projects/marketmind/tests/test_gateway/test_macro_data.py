@@ -64,7 +64,7 @@ class TestFredBDI:
             assert result["value"] == 1450.0
             assert result["date"] == "2026-05-15"
             assert result["source"] == "fred"
-            assert result["cadence"] == "monthly"
+            assert result["cadence"] == "daily"
             assert "error" not in result
 
     async def test_bdi_case_insensitive(self):

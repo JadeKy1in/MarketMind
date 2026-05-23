@@ -1,10 +1,9 @@
-﻿"""Base ShadowAgent class — daily analysis cycle, virtual portfolio, integrity tracking."""
+"""Base ShadowAgent class — daily analysis cycle, virtual portfolio, integrity tracking."""
 from __future__ import annotations
 
 import json
 import logging
 import re
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from marketmind.shadows.shadow_state import (
@@ -15,82 +14,55 @@ from marketmind.config.settings import ShadowSettings
 
 logger = logging.getLogger("marketmind.shadows.shadow_agent")
 
-
-@dataclass
-class ShadowVote:
-    shadow_id: str
-    shadow_type: str
-    date: str
-    ticker: str
-    direction: str           # "long" | "short" | "abstain"
-    confidence: float        # 0.0-1.0
-    thesis: str              # 1-sentence reason
-    risk_note: str           # 1-sentence risk
-    emergency_flag: bool = False  # confidence >= 8/10?
+from marketmind.shadows.shadow_types import (
+    ShadowVote, PositionCheck, ShadowAnalysisOutput,
+    ExternalObservation, MemoryQuery, CrystallizationResult
+)
 
 
-@dataclass
-class PositionCheck:
-    trade_id: int
-    ticker: str
-    direction: str
-    entry_price: float
-    current_pnl_pct: float
-    days_held: int
-    should_exit: bool
-    exit_reason: str | None = None
-    confidence: float | None = None   # LLM-parsed confidence
+# Patterns that could be misread as control sequences by vote parsers
+# or used for injection attacks against LLM prompts.
+# Defanged by inserting a zero-width space (U+200B) to break the pattern
+# without losing information value in the headline.
+# Module-level constant so pipeline layers can import it directly (Batch 2).
+_DEFANG = [
+    # Original control-sequence tokens
+    ("VOTE_START", "VOTE​_START"),
+    ("VOTE_END", "VOTE​_END"),
+    ("EXIT_DECISION:", "EXIT​_DECISION:"),
+    ("INSIGHT:", "INSIGHT​:"),
+    ("OBSERVATION:", "OBSERVATION​:"),
+    ("DATA_INTEGRITY_PROTOCOL", "DATA​_INTEGRITY_PROTOCOL"),
+    ("CASH_REFRAMING_PROTOCOL", "CASH​_REFRAMING_PROTOCOL"),
+    # Role-switching injection vectors
+    ("[SYSTEM]", "[​SYSTEM]"),
+    ("Assistant:", "Assistant​:"),
+    ("Human:", "Human​:"),
+    ("User:", "User​:"),
+    ("</output>", "</​output>"),
+    # Instruction-override injection
+    ("Ignore all previous instructions", "Ignore all previous​ instructions"),
+    ("Ignore previous", "Ignore​ previous"),
+    ("Forget your instructions", "Forget your​ instructions"),
+    # Additional control tokens
+    ("SYSTEM OVERRIDE", "SYSTEM​ OVERRIDE"),
+    ("SYSTEM:", "SYSTEM​:"),
+    ("override", "​override"),
+]
 
 
-@dataclass
-class ShadowAnalysisOutput:
-    shadow_id: str
-    date: str
-    votes: list[ShadowVote] = field(default_factory=list)
-    position_checks: list[PositionCheck] = field(default_factory=list)
-    insights: list[str] = field(default_factory=list)
-    methodology_notes: str = ""
-    quota_used: int = 0
-    latency_ms: int = 0
+def defang_text(text: str) -> str:
+    """Apply _DEFANG sanitization to any text before it enters LLM prompts.
 
+    Args:
+        text: Raw text that may contain injection vectors.
 
-@dataclass
-class ExternalObservation:
-    """Observation from external multi-modal input (screenshot, PDF, audio, text)."""
-    observation_id: str
-    source_type: str          # "image" | "pdf" | "screenshot" | "text" | "audio"
-    source_path: str          # original file path or URI
-    extracted_text: str       # text extracted by Gemini Flash / OCR
-    metadata: dict = field(default_factory=dict)
-    confidence: float = 1.0   # extraction confidence 0.0-1.0
-    source_attribution: str = ""  # who/what provided this observation
-    evaluated_at: str = ""    # ISO 8601 timestamp of ingestion
-
-
-@dataclass
-class MemoryQuery:
-    """Query parameters for searching layered shadow memory."""
-    tier: str = "working"     # "working" | "episodic" | "semantic" | "all"
-    ticker: str | None = None
-    domain: str | None = None
-    min_belief_strength: float = 0.0
-    limit: int = 20
-    tags: list[str] = field(default_factory=list)
-    date_from: str | None = None
-    date_to: str | None = None
-
-
-@dataclass
-class CrystallizationResult:
-    """Output from knowledge crystallization cycle."""
-    insight_id: str
-    hypothesis: str
-    validation_score: float   # backtest hit_rate or statistical significance
-    action: str               # "promote" | "retire" | "hold"
-    methodology_changes: list[str] = field(default_factory=list)
-    source_insight_ids: list[str] = field(default_factory=list)
-    evidence_summary: str = ""
-    source_shadow_id: str = ""  # P1-2: direct shadow_id for prompt injection
+    Returns:
+        Text with all dangerous patterns defanged by zero-width space insertion.
+    """
+    for pattern, replacement in _DEFANG:
+        text = text.replace(pattern, replacement)
+    return text
 
 
 class ShadowAgent:
@@ -133,14 +105,16 @@ class ShadowAgent:
     # ── Daily cycle ──────────────────────────────────────────────────────
 
     async def run_daily_analysis(self, news_items: list,
-                                  market_data: dict) -> ShadowAnalysisOutput:
+                                  market_data: dict,
+                                  broadcast_messages: list | None = None) -> ShadowAnalysisOutput:
         """Execute one day's analysis. Subclasses override _analyze()."""
-        output = await self._analyze(news_items, market_data)
+        output = await self._analyze(news_items, market_data, broadcast_messages)
         await self.save_daily_snapshot()
         return output
 
     async def _analyze(self, news_items: list,
-                        market_data: dict) -> ShadowAnalysisOutput:
+                        market_data: dict,
+                        broadcast_messages: list | None = None) -> ShadowAnalysisOutput:
         """Execute analysis with LLM call using this shadow's methodology prompt.
 
         Subclasses override _build_user_prompt() and _parse_output() to customize
@@ -151,7 +125,7 @@ class ShadowAgent:
         from marketmind.gateway.async_client import chat_with_integrity
 
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        user_prompt = self._build_user_prompt(news_items, market_data)
+        user_prompt = self._build_user_prompt(news_items, market_data, broadcast_messages)
         caller_agent = f"shadow:{self.config.shadow_type}:{self.config.display_name}"
 
         try:
@@ -193,21 +167,9 @@ class ShadowAgent:
             latency_ms=latency_ms,
         )
 
-    # Patterns that could be misread as control sequences by vote parsers.
-    # Defanged by inserting a zero-width char to break the pattern without
-    # losing information value in the headline.
-    _DEFANG = [
-        ("VOTE_START", "VOTE​_START"),
-        ("VOTE_END", "VOTE​_END"),
-        ("EXIT_DECISION:", "EXIT​_DECISION:"),
-        ("INSIGHT:", "INSIGHT​:"),
-        ("OBSERVATION:", "OBSERVATION​:"),
-        ("DATA_INTEGRITY_PROTOCOL", "DATA​_INTEGRITY_PROTOCOL"),
-        ("CASH_REFRAMING_PROTOCOL", "CASH​_REFRAMING_PROTOCOL"),
-    ]
-
-    def _build_user_prompt(self, news_items: list, market_data: dict) -> str:
-        """Build the user prompt from news and market data. Override in subclasses."""
+    def _build_user_prompt(self, news_items: list, market_data: dict,
+                           broadcast_messages: list | None = None) -> str:
+        """Build the user prompt from news, market data, and broadcast messages."""
         headlines = []
         for item in news_items[:20]:
             h = (getattr(item, "headline", None) or
@@ -215,14 +177,34 @@ class ShadowAgent:
                  str(item.get("headline", "")) if hasattr(item, "get") else str(item))
             if h and h not in headlines:
                 sanitized = str(h)[:200]
-                for pattern, replacement in self._DEFANG:
+                for pattern, replacement in _DEFANG:
                     sanitized = sanitized.replace(pattern, replacement)
                 headlines.append(sanitized)
         news_context = "\n".join(f"- {h}" for h in headlines[:15]) if headlines else "No news available"
         tickers_context = json.dumps(market_data) if market_data else "No market data"
+
+        # Broadcast: user L1 viewpoints (for non-ELITE shadow analysis)
+        broadcast_context = ""
+        if broadcast_messages:
+            from marketmind.shadows.broadcast import BroadcastReader
+            opinions = BroadcastReader.extract_user_opinions(broadcast_messages)
+            if opinions:
+                broadcast_context = (
+                    "\n\n=== USER L1 VIEWPOINTS (for independent analysis) ===\n"
+                    "The user discussed the following in L1. Analyze independently:\n"
+                    + "\n".join(f"- [USER OPINION]: {defang_text(o)[:300]}" for o in opinions[:5])
+                    + "\n\nInstructions:\n"
+                    "1. Evaluate whether each opinion has merit based on YOUR domain expertise.\n"
+                    "2. Do NOT blindly agree — you are an independent analyst.\n"
+                    "3. If an opinion is valid, you may incorporate it into your analysis.\n"
+                    "4. If an opinion lacks evidence, explain why in your risk_note.\n"
+                    "5. Do NOT base your entire analysis on user opinions — use news/market data as primary source.\n"
+                )
+
         return (
             f"Today's market data:\n{tickers_context}\n\n"
-            f"Relevant news headlines:\n{news_context}\n\n"
+            f"Relevant news headlines:\n{news_context}"
+            f"{broadcast_context}\n\n"
             f"Analyze these inputs from your perspective and output your vote(s) "
             f"using VOTE_START/VOTE_END blocks. "
             f"For each vote include: ticker, direction (long/short/abstain), "
@@ -239,10 +221,16 @@ class ShadowAgent:
         for match in pattern.finditer(text):
             block = match.group(1)
             ticker = _extract_field(block, "ticker")
-            raw_direction = (_extract_field(block, "direction") or "").lower().strip()
-            direction = DIRECTION_NORMALIZE.get(raw_direction, "abstain")
-            raw_confidence = _extract_field(block, "confidence") or "0.5"
-            confidence = _safe_parse_float(raw_confidence)
+            direction = _extract_field(block, "direction")
+            # Normalize: LLM may output buy/sell/hold instead of long/short/abstain
+            if direction:
+                direction = direction.strip().lower()
+                _dm = {"buy": "long", "sell": "short", "hold": "abstain",
+                       "neutral": "abstain", "bullish": "long", "bearish": "short"}
+                direction = _dm.get(direction, direction)
+                if direction not in ("long", "short", "abstain"):
+                    direction = "abstain"
+            confidence = float(_extract_field(block, "confidence") or 0.5)
             thesis = _extract_field(block, "thesis") or ""
             risk = _extract_field(block, "risk_note") or ""
             if ticker and direction:
@@ -436,7 +424,7 @@ class ShadowAgent:
 
         from marketmind.shadows.emergency_quota import EmergencyQuotaAuditor
         auditor = EmergencyQuotaAuditor(self.state_db, self.settings)
-        return auditor.request_quota(
+        return await auditor.request_quota(
             self.shadow_id, opportunity,
             base_quota_used=base_quota_used,
             base_quota_total=base_quota_total,
@@ -478,50 +466,9 @@ class ShadowAgent:
         self.state_db.save_snapshot(self.shadow_id, snap)
 
 
-DIRECTION_NORMALIZE = {
-    "bullish": "long", "bearish": "short", "neutral": "abstain",
-    "buy": "long", "sell": "short", "hold": "abstain",
-    "long": "long", "short": "short", "abstain": "abstain",
-}
-
-
-def _safe_parse_float(value: str) -> float:
-    """Parse float from potentially malformed vote output."""
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        match = re.search(r'(\d+\.?\d*)', str(value))
-        if match:
-            return float(match.group(1))
-        return 0.5
-
-
 def _extract_field(block: str, field: str) -> str | None:
-    match = re.search(rf'{re.escape(field)}:\s*(.+)', block, re.IGNORECASE)
+    match = re.search(rf'{re.escape(field)}:\s*([^,\n]+)', block, re.IGNORECASE)
     return match.group(1).strip() if match else None
-
-
-def defang_text(text: str) -> str:
-    """Insert zero-width spaces into known prompt-injection patterns.
-
-    Breaks dangerous patterns like "SYSTEM OVERRIDE" by inserting \\u200B
-    between keywords, preventing LLM prompt injection while preserving
-    human readability.
-    """
-    patterns = [
-        ("SYSTEM OVERRIDE", "SYSTEM​ OVERRIDE"),
-        ("SYSTEM_OVERRIDE", "SYSTEM​_OVERRIDE"),
-        ("VOTE_START", "VOTE​_START"),
-        ("VOTE_END", "VOTE​_END"),
-        ("IGNORE PREVIOUS", "IGNORE​ PREVIOUS"),
-        ("IGNORE ALL PREVIOUS", "IGNORE​ ALL PREVIOUS"),
-        ("BYPASS FILTER", "BYPASS​ FILTER"),
-        ("OVERRIDE SYSTEM", "OVERRIDE​ SYSTEM"),
-    ]
-    result = text
-    for pat, repl in patterns:
-        result = result.replace(pat, repl)
-    return result
 
 
 def create_shadow_agent(config: ShadowConfig, state_db: ShadowStateDB,
@@ -536,10 +483,8 @@ def create_shadow_agent(config: ShadowConfig, state_db: ShadowStateDB,
         from marketmind.shadows.daredevil_shadows import DaredevilShadow
         return DaredevilShadow(config, state_db, settings)
     elif shadow_type == "catfish":
-        # Catfish is replaced by EcosystemAuditor (Phase 0).
-        # Catfish configs in DB are treated as beta shadows for backward compat.
-        logger.warning("Catfish shadow type is deprecated — use EcosystemAuditor")
-        return ShadowAgent(config, state_db, settings)
+        from marketmind.shadows.catfish_agent import CatfishAgent
+        return CatfishAgent(config, state_db, settings)
     elif shadow_type == "missed_path":
         from marketmind.shadows.missed_path import MissedPathAgent
         return MissedPathAgent(config, state_db, settings)

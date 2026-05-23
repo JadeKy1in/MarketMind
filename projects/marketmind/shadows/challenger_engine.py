@@ -7,11 +7,8 @@ Stage 3 (COMPARISON): 2-week paired trial → paired t-test (one-sided, alpha=0.
 from __future__ import annotations
 
 import logging
-import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
-
-from scipy import stats
 
 from marketmind.shadows.shadow_state import (
     ShadowStateDB, ShadowConfig, DailySnapshot
@@ -182,10 +179,6 @@ class ChallengerEngine:
         The challenger inherits the target's methodology but is invisible to rankings
         (shadow_type="challenger" is excluded by get_visible_shadows()).
 
-        P3-1: Predecessor failure patterns from AEL debriefs and crystallization
-        retirements are injected into the challenger's methodology prompt so the
-        challenger learns from the target's documented mistakes.
-
         Args:
             target_shadow_id: The shadow being challenged.
 
@@ -203,42 +196,12 @@ class ChallengerEngine:
         ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
         challenger_id = f"challenger:{target.domain or 'general'}:{ts}"
 
-        # ── P3-1: Inject predecessor failure patterns ──────────────────
-        methodology_prompt = target.methodology_prompt
-        try:
-            from marketmind.shadows.methodology_injector import MethodologyInjector
-
-            # Query failure patterns from AEL debriefs (last 90 days)
-            failure_patterns = self.state_db.get_failure_patterns(
-                target_shadow_id, days=90
-            )
-
-            # Query retired insights from crystallization
-            retired_insights = self.state_db.get_retired_insights(
-                target_shadow_id, days=90
-            )
-
-            # Combine and cap at 5 total patterns
-            all_patterns = (failure_patterns or []) + (retired_insights or [])
-            if len(all_patterns) > 5:
-                all_patterns = all_patterns[:5]
-
-            if all_patterns:
-                methodology_prompt = MethodologyInjector.format_failure_patterns(
-                    methodology_prompt, all_patterns
-                )
-        except Exception as e:
-            logger.debug(
-                "Failure pattern injection skipped for %s: %s",
-                target_shadow_id, e,
-            )
-
         # Build challenger config — inherits target methodology with challenger marker
         challenger_config = ShadowConfig(
             shadow_id=challenger_id,
             shadow_type="challenger",
             display_name=f"Challenger[{target.display_name}]",
-            methodology_prompt=methodology_prompt,
+            methodology_prompt=target.methodology_prompt,
             virtual_capital=target.virtual_capital,
             max_positions=target.max_positions,
             model=target.model,
@@ -267,7 +230,118 @@ class ChallengerEngine:
                         return c.shadow_id
             raise
 
+        # ── P3-1: Inject predecessor failure patterns ────────────────────────
+        try:
+            failures = self._collect_predecessor_failures(target_shadow_id)
+            if failures:
+                from marketmind.shadows.methodology_injector import MethodologyInjector
+                injector = MethodologyInjector(self.state_db)
+                injector.inject_failure_patterns(challenger_id, failures)
+        except Exception as e:
+            logger.warning(
+                "Failed to inject predecessor failure patterns for challenger '%s': %s",
+                challenger_id, e
+            )
+
         return challenger_id
+
+    def _collect_predecessor_failures(
+        self, target_shadow_id: str, _ael_engine=None
+    ) -> list[str]:
+        """Collect failure patterns from AEL debriefs and crystallization retirements.
+
+        Primary source: AEL debrief failure_patterns (last 3 months).
+        Secondary source: crystallization retired insights from methodology_changes table.
+        Cap at 5 total patterns to avoid prompt bloat.
+        Graceful degradation if AEL data unavailable.
+
+        Args:
+            target_shadow_id: The target (predecessor) shadow.
+            _ael_engine: Optional pre-configured AELEvolutionEngine for testing.
+
+        Returns:
+            List of deduplicated failure pattern strings (max 5).
+        """
+        failures: list[str] = []
+
+        # ── Primary source: AEL debrief failure patterns ─────────────────────
+        try:
+            from marketmind.shadows.ael_evolution import AELEvolutionEngine
+            engine = _ael_engine
+            if engine is None:
+                engine = AELEvolutionEngine(state_db=self.state_db)
+            debriefs = engine._debrief_history.get(target_shadow_id, [])
+            for debrief in debriefs:
+                for pattern in debrief.failure_patterns:
+                    stripped = pattern.strip() if pattern else ""
+                    if stripped and stripped not in failures:
+                        failures.append(stripped)
+                        if len(failures) >= 5:
+                            break
+                if len(failures) >= 5:
+                    break
+        except Exception:
+            logger.debug(
+                "AEL debrief data unavailable for %s", target_shadow_id
+            )
+
+        # ── Fallback: methodology_changes debrief entries ──────────────────
+        if len(failures) < 5:
+            try:
+                from datetime import timedelta
+                cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+                conn = self.state_db._connect()
+                try:
+                    rows = conn.execute(
+                        """SELECT reason FROM methodology_changes
+                           WHERE shadow_id = ?
+                             AND change_type = 'debrief'
+                             AND changed_at >= ?
+                           ORDER BY changed_at DESC
+                           LIMIT ?""",
+                        (target_shadow_id, cutoff, 5 - len(failures))
+                    ).fetchall()
+                    for row in rows:
+                        reason = row["reason"] or ""
+                        if reason and reason not in failures:
+                            failures.append(reason)
+                            if len(failures) >= 5:
+                                break
+                finally:
+                    conn.close()
+            except Exception:
+                pass
+
+        # ── Secondary source: crystallization retired insights ───────────────
+        if len(failures) < 5:
+            try:
+                conn = self.state_db._connect()
+                try:
+                    rows = conn.execute(
+                        """SELECT reason FROM methodology_changes
+                           WHERE shadow_id = ?
+                             AND reason LIKE 'Retired%'
+                           ORDER BY changed_at DESC
+                           LIMIT ?""",
+                        (target_shadow_id, 5 - len(failures))
+                    ).fetchall()
+                    for row in rows:
+                        reason = row["reason"] or ""
+                        # Extract insight: "Retired invalidated insight: <text>"
+                        if ":" in reason:
+                            insight = reason.split(":", 1)[1].strip()
+                        else:
+                            insight = reason.strip()
+                        if insight and insight not in failures:
+                            failures.append(insight)
+                            if len(failures) >= 5:
+                                break
+                finally:
+                    conn.close()
+            except Exception:
+                pass
+
+        return failures[:5]
 
     # ── Comparison trial ─────────────────────────────────────────────────
 
@@ -388,59 +462,16 @@ class ChallengerEngine:
             verdict=verdict,
         )
 
-    # ── Statistical helpers ──────────────────────────────────────────────
+    # ── Statistical helpers (delegated to challenger_stats) ──────────────
 
     @staticmethod
     def _compute_wilcoxon(
         target_returns: list[float],
         challenger_returns: list[float],
     ) -> tuple[float, float]:
-        """Wilcoxon signed-rank test (P2-3: non-parametric, handles fat tails).
-
-        Tests H0: median difference = 0 vs H1: challenger > target.
-        Uses normal approximation for sample sizes >= 20.
-        """
-        n = min(len(target_returns), len(challenger_returns))
-        if n < 5:
-            return (1.0, 0.0)
-
-        # Compute paired differences
-        diffs = [c - t for t, c in zip(target_returns[-n:], challenger_returns[-n:])]
-        # Remove zeros (ties)
-        diffs = [d for d in diffs if d != 0]
-        if not diffs:
-            return (1.0, 0.0)
-
-        # Rank absolute differences
-        abs_diffs = [abs(d) for d in diffs]
-        ranked = sorted(range(len(abs_diffs)), key=lambda i: abs_diffs[i])
-        ranks = [0] * len(abs_diffs)
-        i = 0
-        while i < len(ranked):
-            j = i
-            while j < len(ranked) and abs_diffs[ranked[j]] == abs_diffs[ranked[i]]:
-                j += 1
-            avg_rank = sum(range(i + 1, j + 1)) / (j - i)
-            for k in range(i, j):
-                ranks[ranked[k]] = avg_rank
-            i = j
-
-        # Sum of ranks for positive differences
-        w_plus = sum(ranks[i] for i in range(len(diffs)) if diffs[i] > 0)
-        n_eff = len(diffs)
-
-        # Normal approximation
-        mean_w = n_eff * (n_eff + 1) / 4
-        std_w = (n_eff * (n_eff + 1) * (2 * n_eff + 1) / 24) ** 0.5
-
-        if std_w == 0:
-            return (1.0, float(w_plus))
-
-        z = (w_plus - mean_w) / std_w
-        # One-sided p-value: P(Z > z)
-        pvalue = 1.0 - 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
-
-        return (max(0.0, min(1.0, pvalue)), float(w_plus))
+        """Wilcoxon signed-rank test (delegated to challenger_stats)."""
+        from marketmind.shadows.challenger_stats import compute_wilcoxon
+        return compute_wilcoxon(target_returns, challenger_returns)
 
     def _compute_paired_ttest(
         self,
@@ -448,103 +479,20 @@ class ChallengerEngine:
         challenger_returns: list[float],
         one_sided: bool = True,
     ) -> tuple[float, float, float]:
-        """Compute paired t-test between target and challenger daily returns.
-
-        Uses scipy.stats.ttest_rel for the calculation.
-
-        Args:
-            target_returns: Daily returns of the target shadow.
-            challenger_returns: Daily returns of the challenger shadow.
-            one_sided: If True, return one-sided p-value (H1: challenger > target).
-
-        Returns:
-            Tuple of (pvalue, t_statistic, mean_difference).
-            pvalue is one-sided if one_sided=True.
-        """
-        if len(target_returns) != len(challenger_returns):
-            raise ValueError(
-                f"Return arrays must have same length: {len(target_returns)} vs {len(challenger_returns)}"
-            )
-        if len(target_returns) < 2:
-            return (1.0, 0.0, 0.0)
-
-        result = stats.ttest_rel(target_returns, challenger_returns)
-
-        t_stat = result.statistic
-        # ttest_rel computes target - challenger. Negative means challenger > target.
-        pvalue_two_sided = result.pvalue
-
-        if one_sided:
-            # For one-sided H1: challenger > target, i.e., (target - challenger) < 0
-            # If the difference mean is negative (challenger wins), halve the p-value
-            if t_stat < 0:
-                pvalue = pvalue_two_sided / 2.0
-            else:
-                # Difference mean is positive (target wins), p-value > 0.5
-                pvalue = 1.0 - pvalue_two_sided / 2.0
-        else:
-            pvalue = pvalue_two_sided
-
-        mean_diff = sum(target_returns) / len(target_returns) - sum(challenger_returns) / len(challenger_returns)
-
-        return (pvalue, t_stat, mean_diff)
+        """Compute paired t-test (delegated to challenger_stats)."""
+        from marketmind.shadows.challenger_stats import compute_paired_ttest
+        return compute_paired_ttest(target_returns, challenger_returns, one_sided)
 
     @staticmethod
     def _compute_calmar_from_snapshots(
         state_db: ShadowStateDB, shadow_id: str, days: int = 90
     ) -> float:
-        """Compute Calmar ratio from snapshot history.
-
-        Calmar = cumulative_return / max(|MDD|, 0.001), capped at 100.
-        """
-        snaps = state_db.get_snapshot_history(shadow_id, days=days)
-        if not snaps:
-            return 0.0
-
-        # Use the most recent cumulative return
-        latest = snaps[0]  # Most recent first (DESC order)
-        cumulative_return = latest.cumulative_return_pct or 0.0
-        max_drawdown = max(
-            (s.max_drawdown_pct or 0.0 for s in snaps),
-            default=0.001
-        )
-
-        mdd_floor = max(max_drawdown, 0.001)
-        calmar = cumulative_return / mdd_floor
-        return min(calmar, 100.0)
+        """Compute Calmar ratio (delegated to challenger_stats)."""
+        from marketmind.shadows.challenger_stats import compute_calmar_from_snapshots
+        return compute_calmar_from_snapshots(state_db, shadow_id, days)
 
     @staticmethod
     def _check_calmar_gate(calmar: float, gate: float = 0.3) -> bool:
-        """Check if a shadow's Calmar ratio passes the comparison gate.
-
-        Args:
-            calmar: The shadow's Calmar ratio.
-            gate: Minimum Calmar threshold (default 0.3).
-
-        Returns:
-            True if Calmar > gate.
-        """
-        return calmar > gate
-
-
-# ── Brier-aware challenge validity ───────────────────────────────────────
-
-def get_challenge_validity(challenger_brier: float, target_brier: float) -> float:
-    """A challenge from a well-calibrated shadow against a poorly-calibrated
-    shadow is more valid.
-
-    Uses a logistic function centered at equal Brier scores. When the
-    challenger has a lower (better) Brier score, validity approaches 1.0.
-    When the challenger has a higher (worse) Brier score, validity
-    approaches 0.0. Equal scores yield 0.5.
-
-    Args:
-        challenger_brier: Brier score of the challenging shadow (0=perfect, 1=worst).
-        target_brier: Brier score of the target/incumbent shadow.
-
-    Returns:
-        Validity score in [0.0, 1.0]. Higher means the challenge is more valid.
-    """
-    import math
-    diff = target_brier - challenger_brier  # positive = challenger better calibrated
-    return 1.0 / (1.0 + math.exp(-5.0 * diff))
+        """Check Calmar gate (delegated to challenger_stats)."""
+        from marketmind.shadows.challenger_stats import check_calmar_gate
+        return check_calmar_gate(calmar, gate)

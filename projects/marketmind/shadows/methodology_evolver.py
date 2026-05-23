@@ -28,6 +28,23 @@ _METHOD_DIR = Path(__file__).resolve().parent.parent / "data" / "methodology"
 _METHOD_DIR.mkdir(parents=True, exist_ok=True)
 _METHOD_FILE = _METHOD_DIR / "method_tracker.json"
 _AUDIT_FILE = _METHOD_DIR / "evolution_audit.jsonl"
+_AUDIT_MAX_LINES = 10_000  # Rotate when exceeded, keeping most recent half
+
+
+def _rotate_audit_if_needed() -> None:
+    """Truncate audit file to most recent half when it exceeds max lines."""
+    if not _AUDIT_FILE.exists():
+        return
+    try:
+        with open(_AUDIT_FILE, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        if len(lines) > _AUDIT_MAX_LINES:
+            keep = _AUDIT_MAX_LINES // 2
+            with open(_AUDIT_FILE, "w", encoding="utf-8") as f:
+                f.writelines(lines[-keep:])
+            logger.info("Audit file rotated: %d → %d lines", len(lines), keep)
+    except Exception:
+        pass  # Rotation is best-effort, don't block on failure
 
 
 @dataclass
@@ -287,155 +304,7 @@ def format_evolution_report(report: MethodologyReport) -> str:
     return "\n".join(lines)
 
 
-# ============================================================
-# MethodBreeder — Auto-generate new methods when old ones retire
-# ============================================================
-
-# Breeding templates: combine two existing methods to create a new one
-BREED_TEMPLATES = [
-    "Hybrid of {parent1} and {parent2}: apply {parent1} logic "
-    "with {parent2} timing filters",
-    "{parent1} with {parent2}'s risk management overlays",
-    "Ensemble: {parent1} for entry, {parent2} for exit decisions",
-    "Regime-switched: {parent1} in bull markets, {parent2} in bear markets",
-    "Reversed {parent1}: flip the signal direction and validate",
-    "Scaled {parent1}: apply position sizing from {parent2}",
-]
-
-
-def breed_new_method() -> Optional[str]:
-    """Generate a new method by combining two existing active methods.
-
-    Uses technique inspired by AlphaCrafter's Miner Agent and
-    QuantEvolve's island model: when methods retire, breed new ones
-    from the remaining best performers.
-
-    Returns:
-        New method_id if breeding was successful, None otherwise.
-    """
-    tracker = load_tracker()
-    active = [m for m in tracker.values() if m.active and m.total_predictions >= 3]
-
-    if len(active) < 2:
-        logger.warning("Breeder: need at least 2 active methods, have %d", len(active))
-        return None
-
-    # Select best performers as parents
-    ranked = sorted(
-        active,
-        key=lambda m: m.correct_predictions / max(m.total_predictions, 1),
-        reverse=True,
-    )
-    parent1 = ranked[0]
-    parent2 = ranked[1] if len(ranked) > 1 else parent1
-
-    import random
-    template = random.choice(BREED_TEMPLATES)
-    description = template.format(
-        parent1=parent1.method_id,
-        parent2=parent2.method_id,
-    )
-
-    # Generate unique ID
-    base_id = f"bred-{parent1.method_id[:8]}-{parent2.method_id[:8]}"
-    new_id = base_id
-    counter = 1
-    while new_id in tracker:
-        new_id = f"{base_id}-v{counter}"
-        counter += 1
-
-    new_method = MethodRecord(
-        method_id=new_id,
-        description=description,
-        category="bred",
-        active=True,
-        decay_factor=0.6,  # Start with moderate confidence
-    )
-
-    tracker[new_id] = new_method
-    save_tracker(tracker)
-
-    # Write audit entry
-    entry = {
-        "timestamp": _auto_iso(),
-        "event": "method_bred",
-        "new_method": new_id,
-        "parent1": parent1.method_id,
-        "parent2": parent2.method_id,
-        "description": description,
-    }
-    with open(_AUDIT_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-
-    logger.info(
-        "Breeder: created %s from %s + %s",
-        new_id, parent1.method_id, parent2.method_id,
-    )
-    return new_id
-
-
-def maintain_population(min_active: int = 6, max_active: int = 15) -> dict[str, Any]:
-    """Maintain a healthy population of analysis methods.
-
-    If too few active methods remain (< min_active), breed new ones.
-    If too many (> max_active), retire the worst performers.
-
-    Args:
-        min_active: Minimum number of active methods to maintain.
-        max_active: Maximum before forced retirement.
-
-    Returns:
-        Dict with actions taken and population stats.
-    """
-    tracker = load_tracker()
-    active = [m for m in tracker.values() if m.active]
-    retired = [m for m in tracker.values() if not m.active]
-
-    result: dict[str, Any] = {
-        "before_active": len(active),
-        "before_retired": len(retired),
-        "actions": [],
-    }
-
-    # Retire excess
-    if len(active) > max_active:
-        ranked = sorted(
-            active,
-            key=lambda m: m.correct_predictions / max(m.total_predictions, 1),
-        )
-        to_retire = ranked[:(len(active) - max_active)]
-        for m in to_retire:
-            m.active = False
-            result["actions"].append(f"Retired (excess): {m.method_id}")
-
-    # Breed if too few
-    while len([m for m in tracker.values() if m.active]) < min_active:
-        new_id = breed_new_method()
-        if new_id:
-            result["actions"].append(f"Bred: {new_id}")
-        else:
-            break  # Can't breed
-
-    save_tracker(tracker)
-
-    active_after = len([m for m in tracker.values() if m.active])
-    result["after_active"] = active_after
-    result["methods_created"] = len(result["actions"])
-
-    # Auto-reactivate retired methods as last resort
-    if active_after < min_active and retired:
-        best_retired = sorted(
-            retired,
-            key=lambda m: m.correct_predictions / max(m.total_predictions, 1),
-            reverse=True,
-        )
-        for m in best_retired[:(min_active - active_after)]:
-            m.active = True
-            m.decay_factor = 0.3  # Low confidence restart
-            result["actions"].append(f"Reactivated: {m.method_id} (low confidence)")
-
-    save_tracker(tracker)
-    return result
+# Method breeding extracted to shadows/method_breeding.py
 
 
 class MethodologyEvolver:
@@ -551,151 +420,7 @@ class MethodologyEvolver:
                         entries.append(entry)
                 except json.JSONDecodeError:
                     continue
-        return sorted(entries, key=lambda e: e.get("timestamp", ""), reverse=True)[:limit]
-
-
-# ── MethodologyInjector (P1-1: Write improvement signals back to shadow prompts) ─
-
-class MethodologyInjector:
-    """Writes improvement signals back to ShadowConfig.methodology_prompt.
-
-    This is the MISSING PRIMITIVE identified by the Architect review. All
-    feedback loops (crystallization, AEL, challenger verdicts, method
-    breeding, reset candidates) detect issues but cannot write changes
-    back to shadow prompts. This class bridges that gap.
-
-    All injections are logged to the methodology_changes audit table.
-    """
-
-    def __init__(self, state_db):
-        self._state_db = state_db
-
-    def inject_lessons(self, shadow_id: str, lessons: list[str]) -> bool:
-        """Append [LESSONS LEARNED] block to a shadow's methodology prompt.
-
-        Used by AEL slow layer (Phase 7) to persist monthly debrief findings.
-        """
-        config = self._state_db.get_shadow(shadow_id)
-        if config is None:
-            return False
-
-        # Remove any previous [LESSONS LEARNED] section
-        old_prompt = config.methodology_prompt
-        base_prompt = old_prompt.split("[LESSONS LEARNED")[0].strip()
-
-        lessons_text = "\n".join(f"- {l}" for l in lessons)
-        new_prompt = f"{base_prompt}\n\n[LESSONS LEARNED — apply these in your analysis]\n{lessons_text}"
-
-        return self._state_db.update_methodology_prompt(
-            shadow_id, new_prompt,
-            reason=f"Injected {len(lessons)} AEL lessons"
-        )
-
-    def inject_validated_insight(self, shadow_id: str, insight: str) -> bool:
-        """Add a [VALIDATED INSIGHT] block from crystallization (P1-2)."""
-        config = self._state_db.get_shadow(shadow_id)
-        if config is None:
-            return False
-
-        old_prompt = config.methodology_prompt
-        # Remove any previous injected insight with same content
-        cleaned = re.sub(
-            r'\n\[VALIDATED INSIGHT\].*?\n(?=\n|\[|$)', '', old_prompt, flags=re.DOTALL
-        )
-        new_prompt = f"{cleaned.strip()}\n\n[VALIDATED INSIGHT] {insight}"
-
-        return self._state_db.update_methodology_prompt(
-            shadow_id, new_prompt,
-            reason=f"Promoted crystallized insight: {insight[:100]}"
-        )
-
-    def inject_retired_insight(self, shadow_id: str, insight: str) -> bool:
-        """Add a [RETIRED] note when a previously-validated insight is invalidated."""
-        config = self._state_db.get_shadow(shadow_id)
-        if config is None:
-            return False
-
-        old_prompt = config.methodology_prompt
-        retired_block = f"\n[RETIRED: This insight was invalidated — do NOT use]\n{insight}"
-        new_prompt = old_prompt + retired_block
-
-        return self._state_db.update_methodology_prompt(
-            shadow_id, new_prompt,
-            reason=f"Retired invalidated insight: {insight[:100]}"
-        )
-
-    def inject_failure_patterns(self, shadow_id: str, failures: list[str]) -> bool:
-        """Prepend [FAILURE PATTERNS TO AVOID] for challengers (P3-1).
-
-        Used when a challenger replaces a target — the challenger learns
-        from the predecessor's documented failures.
-        """
-        config = self._state_db.get_shadow(shadow_id)
-        if config is None:
-            return False
-
-        old_prompt = config.methodology_prompt
-        # Remove any previous [FAILURE PATTERNS] section
-        base = old_prompt.split("[FAILURE PATTERNS TO AVOID]")[0].strip()
-
-        failures_text = "\n".join(f"- {f}" for f in failures)
-        new_prompt = (
-            f"[FAILURE PATTERNS TO AVOID — learned from predecessor]\n"
-            f"{failures_text}\n\n{base}"
-        )
-
-        return self._state_db.update_methodology_prompt(
-            shadow_id, new_prompt,
-            reason=f"Injected {len(failures)} predecessor failure patterns"
-        )
-
-    def reset_to_baseline(self, shadow_id: str) -> bool:
-        """Restore a shadow's methodology to its original template.
-
-        Used when a reset candidate is flagged (stagnation detected).
-        The original methodology is recovered from the first entry in
-        the methodology_changes audit table, or from config_json.
-        """
-        original = self._state_db.get_original_methodology(shadow_id)
-        if original is None:
-            config = self._state_db.get_shadow(shadow_id)
-            if config is None:
-                return False
-            original = config.methodology_prompt
-            if not original:
-                return False
-
-        return self._state_db.update_methodology_prompt(
-            shadow_id, original,
-            reason="Reset to baseline (stagnation detected)"
-        )
-
-    def get_audit_trail(
-        self, method_id: str | None = None, limit: int = 50
-    ) -> list[dict]:
-        """Get the methodology audit trail, optionally filtered by method_id.
-
-        Args:
-            method_id: Optional filter for a specific method.
-            limit: Maximum number of entries to return.
-
-        Returns:
-            List of audit entry dicts, most recent first.
-        """
-        if not _AUDIT_FILE.exists():
-            return []
-        entries = []
-        with open(_AUDIT_FILE, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                    if method_id is None or entry.get("method_id") == method_id:
-                        entries.append(entry)
-                except json.JSONDecodeError:
-                    continue
-        # Return most recent first, limited
         entries.reverse()
         return entries[:limit]
+
+

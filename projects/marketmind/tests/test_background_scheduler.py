@@ -304,8 +304,8 @@ class TestTaskHandlers:
             memory_store.apply_decay = original_decay
 
     @pytest.mark.asyncio
-    async def test_crystallization_queries_shadow_analyses(self, scheduler, temp_db):
-        """Crystallization task queries shadow_analyses from DB."""
+    async def test_crystallization_queries_shadow_votes(self, scheduler, temp_db):
+        """Crystallization task queries shadow_votes from DB."""
         task = TaskNode(task_id="cryst_01", task_type="crystallization")
         result = await scheduler._run_crystallization(task)
         assert result["task_type"] == "crystallization"

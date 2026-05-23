@@ -254,7 +254,7 @@ class FigureSignalExtractor:
 
                 signal = FigureSignal(
                     person_name=person.name,
-                    category=person.category,
+                    category=person.category if hasattr(person, "category") and person.category else "",
                     signal_direction=person.signal_direction,
                     event_type=event_type,
                     ticker=ticker,

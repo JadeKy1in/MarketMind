@@ -115,6 +115,19 @@ class KnowledgeFilter:
         r'(?i)\bMNPI\b',
     ]
 
+    # Public disclosure sources: legally-mandated public filings exempt from
+    # suspicious content isolation (Red Team insider-sources CRITICAL-1 fix).
+    # These sources produce structured, public data — NOT Material Non-Public Information.
+    # Exempting them prevents false-positive ISOLATE on legally-required disclosures
+    # that legitimately contain terms like "insider trading" (e.g., SEC Form 4).
+    PUBLIC_DISCLOSURE_SOURCES = {
+        "SEC EDGAR Form 4",
+        "SEC EDGAR 8-K",
+        "SEC EDGAR 13F",
+        "House Stock Watcher",
+        "Congress Trades",
+    }
+
     def __init__(self):
         self._isolated_items: list[KnowledgeItem] = []
 
@@ -263,14 +276,20 @@ class KnowledgeFilter:
         # Criterion 4a: Suspicious content detection (Red Team F-6-2)
         # ISOLATE observations containing suspicious patterns (e.g. insider info,
         # confidential documents, leaked material) regardless of source confidence.
-        for pattern in self.SUSPICIOUS_CONTENT_PATTERNS:
-            if re.search(pattern, text):
-                return KnowledgeVerdict(
-                    verdict="ISOLATE",
-                    reason=f"Suspicious content pattern detected — quarantined for 30-day re-verification",
-                    confidence=0.65,
-                    evaluated_at=evaluated_at,
-                )
+        # CRITICAL-1 fix: exempt public disclosure sources (legally-mandated filings
+        # from SEC, Congress, etc.) — these legitimately contain terms like
+        # "insider trading" and should NOT be quarantined.
+        source_attr = (observation.source_attribution or "").strip()
+        is_public_disclosure = source_attr in self.PUBLIC_DISCLOSURE_SOURCES
+        if not is_public_disclosure:
+            for pattern in self.SUSPICIOUS_CONTENT_PATTERNS:
+                if re.search(pattern, text):
+                    return KnowledgeVerdict(
+                        verdict="ISOLATE",
+                        reason=f"Suspicious content pattern detected — quarantined for 30-day re-verification",
+                        confidence=0.65,
+                        evaluated_at=evaluated_at,
+                    )
 
         # Criterion 4: Contradiction check against existing knowledge
         if existing_knowledge:
@@ -429,4 +448,10 @@ class KnowledgeFilter:
                 "false_positive_ratio": self.ACE_FALSE_POSITIVE_WEIGHT,
                 "cascade_interaction": self.ACE_CASCADE_INTERACTION,
             },
+            "public_disclosure_sources": sorted(self.PUBLIC_DISCLOSURE_SOURCES),
+            "public_disclosure_note": (
+                "Observations with source_attribution matching a public disclosure source "
+                "are exempt from SUSPICIOUS_CONTENT_PATTERNS isolation. These are "
+                "legally-mandated public filings (SEC, Congress) — not MNPI."
+            ),
         }

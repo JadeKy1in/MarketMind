@@ -53,7 +53,6 @@ def _make_directional_person() -> KeyPerson:
         platforms=["fed_website"],
         fraud_risk="low",
         has_dedicated_source=False,
-        category="I",
         notes="Test directional person.",
     )
 
@@ -67,7 +66,6 @@ def _make_contrarian_person() -> KeyPerson:
         platforms=["x"],
         fraud_risk="medium",
         has_dedicated_source=False,
-        category="III",
         notes="Test contrarian person.",
     )
 
@@ -92,11 +90,11 @@ class TestKeywordMatch:
         """Person names are also indexed, not just explicit keywords."""
         extractor = FigureSignalExtractor()
 
-        # Jerome Powell's name should be indexed
-        assert "jerome powell" in extractor._name_index
-        persons = extractor._name_index["jerome powell"]
+        # Elon Musk's name should be indexed
+        assert "elon musk" in extractor._name_index
+        persons = extractor._name_index["elon musk"]
         names = {p.name for p in persons}
-        assert "Jerome Powell" in names
+        assert "Elon Musk" in names
 
     def test_no_match_returns_empty(self):
         """Text with no key person keywords → extract returns empty list."""
@@ -323,7 +321,7 @@ class TestFlashClassificationMock:
             (s for s in result if s.person_name == "Donald Trump"), None
         )
         assert trump_signal is not None, f"Expected Trump signal, got: {[s.person_name for s in result]}"
-        assert trump_signal.category == "II"
+        # category field removed from KeyPerson
         assert trump_signal.signal_direction == "directional"
         assert trump_signal.event_type in ("speech", "trade", "filing", "social_post")
         assert trump_signal.awa_score > 0.0
@@ -337,13 +335,13 @@ class TestFlashClassificationMock:
         extractor = FigureSignalExtractor()
 
         item = {
-            "title": "Powell and Trump clash on rate policy",
+            "title": "Musk and Trump clash on trade policy",
             "content": (
-                "Federal Reserve Chair Jerome Powell pushed back against "
-                "President Donald Trump's calls for immediate rate cuts, "
-                "saying the FOMC will remain data-dependent."
+                "Elon Musk criticized President Donald Trump's latest "
+                "tariff proposals, warning they could disrupt Tesla's "
+                "global supply chain and raise EV production costs."
             ),
-            "url": "https://example.com/powell-trump",
+            "url": "https://example.com/musk-trump",
             "published_at": "2026-05-21T14:00:00Z",
         }
 
@@ -356,7 +354,7 @@ class TestFlashClassificationMock:
             result = asyncio.run(extractor.extract([item]))
 
         names = {s.person_name for s in result}
-        assert "Jerome Powell" in names
+        assert "Elon Musk" in names
         assert "Donald Trump" in names
         assert len(result) == 2
 
@@ -389,7 +387,7 @@ class TestFigureSignalToRaw:
     def test_to_raw_strips_awa_scores(self):
         """to_raw() should only contain person_name, summary, timestamp, source_url."""
         signal = FigureSignal(
-            person_name="Jerome Powell",
+            person_name="Donald Trump",
             category="I",
             signal_direction="directional",
             event_type="speech",
@@ -397,7 +395,7 @@ class TestFigureSignalToRaw:
             direction="long",
             awa_score=0.75,
             confidence=0.85,
-            summary="Powell discusses rate policy",
+            summary="Trump discusses trade policy",
             source_url="https://example.com",
             timestamp="2026-05-21T10:00:00Z",
         )
@@ -410,7 +408,7 @@ class TestFigureSignalToRaw:
         assert "source_url" in raw
         # AWA scores and direction MUST NOT leak to shadow ecosystem
         assert "awa_score" not in raw
-        assert "category" not in raw
+        # category field removed from KeyPerson - skip
         assert "signal_direction" not in raw
         assert "direction" not in raw
         assert "confidence" not in raw

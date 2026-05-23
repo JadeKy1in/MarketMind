@@ -380,3 +380,42 @@ _MIGRATIONS: list[tuple[int, callable]] = [
     (11, _migration_11_upgrade_cycle_checkpoints),
     (12, _migration_12_add_phase_c_independent_tools),
 ]
+
+
+# ── Schema initialization (extracted from ShadowStateDB) ──────────────
+
+
+def init_shadow_db_schema(conn: sqlite3.Connection) -> None:
+    """Initialize DB schema: create tables + apply pending migrations."""
+    conn.executescript(_SCHEMA_SQL)
+    row = conn.execute(
+        "SELECT value FROM metadata WHERE key = 'schema_version'"
+    ).fetchone()
+    db_version = int(row["value"]) if row else 0
+
+    if db_version > CODE_VERSION:
+        logger.warning(
+            "DB schema_version %d > code CODE_VERSION %d — "
+            "database was opened with newer code. Skipping migrations.",
+            db_version, CODE_VERSION
+        )
+    else:
+        for ver, func in _MIGRATIONS:
+            if ver > db_version:
+                func(conn)
+                conn.execute(
+                    "INSERT OR REPLACE INTO metadata (key, value) "
+                    "VALUES ('schema_version', ?)",
+                    (str(ver),)
+                )
+                logger.info("Migration %d applied successfully.", ver)
+
+
+def migrate_add_column(conn: sqlite3.Connection, table: str,
+                        column: str, col_type: str) -> None:
+    """Safe ALTER TABLE ADD COLUMN — ignores if column already exists."""
+    try:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+        logger.info("Migration: added %s.%s %s", table, column, col_type)
+    except sqlite3.OperationalError:
+        pass
