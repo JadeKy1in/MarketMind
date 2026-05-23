@@ -1,1 +1,17 @@
-{"type": "architect", "files": ["README.md", "CLAUDE.md", "projects/marketmind/CLAUDE.md", ".claude/state/current_task.json", ".claude/state/user_preferences.json", ".claude/state/.preferences.hash", ".claude/state/proxy_mode.json", ".claude/tools/proxy_mode.py"], "risk": "low", "description": "2026-05-23 EOD: audit + fix proxy_mode corruption, stale task/project files, hash format, encoding"}
+{"type": "architect", "files": [
+  "README.md", "CLAUDE.md", "projects/marketmind/CLAUDE.md",
+  ".claude/state/current_task.json", ".claude/state/user_preferences.json",
+  ".claude/state/.preferences.hash", ".claude/state/proxy_mode.json",
+  ".claude/tools/proxy_mode.py",
+  "projects/marketmind/pipeline/scout.py",
+  "projects/marketmind/.claude/settings.local.json",
+  ".claude/settings.local.json",
+  ".claude/hooks/stop_gate_check.py",
+  ".claude/state/user_proxy_design.json",
+  "projects/singoo/CLAUDE.md",
+  "projects/marketmind/input/account_state.json",
+  ".gitignore",
+  "projects/marketmind/requirements.txt",
+  "projects/marketmind/.claude/hooks/stop_gate_check.py",
+  "projects/marketmind/regenerate_fixtures.py"
+], "risk": "low", "description": "2026-05-24: MEDIUM+LOW audit fixes: .gitignore patterns, python-dotenv removal, stop_gate plan/review gates, grandfathered comment on regenerate_fixtures.py"}

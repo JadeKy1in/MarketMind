@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Generate comprehensive pipeline fixtures by constructing data structures directly.
 
+GRANDFATHERED: This file exceeds the 500-line module ceiling (583 lines). It is a
+fixture-generation utility, not an active pipeline module — the ceiling rule targets
+runtime modules that evolve frequently. Refactoring into sub-generators is deferred
+until the next fixture format redesign.
+
 This bypasses HTTP/LLM calls that would hang. Fixtures use realistic synthetic data
 following the shape of actual pipeline outputs (NewsItem, TriageResult, HypothesisResult, etc.).
 

@@ -34,6 +34,13 @@ cache/
 error_dump.log
 coverage/
 
+# Backup files
+*.bak
+.claude/logs/
+.claude/progress/
+.claude/decisions/*.bak
+.claude/state/*.bak
+
 # Old Cline stuff (keep as reference but don't track changes)
 memory-bank/
 projects/robinhood/memory-bank/

@@ -5,7 +5,7 @@
     "projects/marketmind/api_server.py": "7b3b874d60a5d7fa62d04b4f241af0fd2b8d2d6ee08125bd7d9f657b9a5581b1",
     "projects/marketmind/app.py": "478ca811db0fa433540ec93c5f71fbb79ed83251594d7333782bf4f7104fe6fa",
     "projects/marketmind/backtest_runner.py": "818ec447e852283b7bfc2fcc5d0772103d13dfd0f6919931af5dfeba97d1a9c2",
-    "projects/marketmind/regenerate_fixtures.py": "35dd8d447c2fb64d23d918d82c6551c4a2bd158be8e4ba44ebc9dc3fa01ec627",
+    "projects/marketmind/regenerate_fixtures.py": "c02dce4fb627e41c64019d2e579b3421a55ab16e9d7447e057b7794c110efcf6",
     "projects/marketmind/run_patrol_dryrun.py": "5aafeb89acb88f9b8a77674f4b074ee235f687e9d12112b78f83d989ef0b65e0",
     "projects/marketmind/__init__.py": "010bfabdeccd88ca4005b2ab78bd9b757050a55958d156609d5bede37e8b8947",
     "projects/marketmind/api/data_providers.py": "96ba75e844b68b766a820e38c20eafbc730868ff0682ecd19bd82e5538ee5c94",
