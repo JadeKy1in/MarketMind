@@ -192,7 +192,7 @@ class DeepSeekGateway:
             extracted = _extract_json_from_reasoning(reasoning_content)
             if extracted:
                 raw_content = extracted
-                logger.debug("DeepSeek: extracted JSON from reasoning_content tail (%d chars)",
+                logger.info("DeepSeek: extracted JSON from reasoning tail (%d chars)",
                             len(raw_content))
             else:
                 logger.warning("DeepSeek: content empty, reasoning_content=%d chars — no JSON found",
