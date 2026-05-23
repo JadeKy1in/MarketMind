@@ -1,65 +1,137 @@
-# MarketMind v2.0
+# MarketMind — Multi-Agent Investment Analysis Platform
 
-> AI-Powered Investment Analysis Workstation · Multi-Agent Shadow Ecosystem
-> AI 驱动的投资分析工作站 · 多智能体影子生态系统
+AI 驱动的投资信号验证与决策支持系统。25 个独立分析影子并行评估市场信号，通过投票、排名、挑战者淘汰机制形成投资决策。
 
-MarketMind is a personal AI investment analysis platform. Every morning, it collects global financial news from 35 sources, runs deep analysis through a 10-stage LLM pipeline, and presents structured investment decisions. Meanwhile, 24 independent AI "shadows" — each a virtual fund manager with their own personality, strategy, and data sources — compete in an internal ranking system, evolve their methodologies through 6 layers of self-evolution, and graduate to earn discussion rights at Gate 2.
-
-MarketMind 是一个个人 AI 投资分析平台。每天从 35 个全球信息源采集新闻，通过 10 阶段 LLM 管道进行深度分析，输出结构化投资决策。同时，24 个独立 AI「影子」在内部排名系统中竞争，通过 6 层自进化持续优化方法论，并毕业获得 Gate 2 对话资格。
-
-**MarketMind does not trade for you. You remain the final decision maker.**
-**MarketMind 不替你交易。你始终是最终决策者。**
+**[→ 项目代码](projects/marketmind/)** | **1,998 tests · 0 fail · 0 skip**
 
 ---
 
-## Quick Start · 快速开始
+## 架构
+
+```
+28 News Sources → Scout → Flash Triage → L1 Narrative (A-E Grade)
+    ↓
+L2 Fundamentals + L3 Technicals (parallel)
+    ↓
+25-Shadow Ecosystem (16 Experts + 8 Daredevils + 1 Catfish)
+    ├── Independent analysis → Voting → Ranking → Crystallization
+    ├── 3-stage Challenger elimination (stats + Calmar gate)
+    └── Collusion detection + Emergency quota audit
+    ↓
+Red Team + Resonance → Decision → Archive
+```
+
+**Real-time**: WebSocket → Dashboard (status lights, shadow rankings, stage progress)
+
+---
+
+## Quick Start
 
 ```bash
-# Web Dashboard (recommended)
 cd projects/marketmind
+
+# Dashboard → http://localhost:8520
 python api_server.py
-# Open http://localhost:8520
 
-# CLI daily analysis
-python app.py --mode daily --mock --verbose
+# Mock analysis (no API cost)
+python app.py --mode daily --mock -v
 
-# Inject external information
-python app.py --mode daily --inject "Your info here" --inject-files report.pdf
+# Real API
+python app.py --mode daily -v
 
-# Run tests (1,744 tests)
-python -m pytest projects/marketmind/tests/ -v --tb=short
+# Run tests
+python -m pytest tests/ -v -m "not slow" -p no:warnings
 ```
 
-## Architecture · 架构
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| AI | DeepSeek Flash (light) + DeepSeek Pro (deep analysis) |
+| Backend | Python 3.11+, FastAPI + Uvicorn, WebSocket |
+| Frontend | Vanilla HTML/CSS/JS Dashboard |
+| Data | SQLite (WAL), RSS/JSON API feeds (28 sources) |
+| Stats | SciPy, NumPy, scikit-learn |
+| CI/CD | GitHub Actions (auto-test on push) |
+
+---
+
+## Shadow Ecosystem
+
+25 AI agents, each with independent methodology, risk profile, and domain:
+
+- **16 Experts**: Domain specialists (gold, crypto, energy, bonds, volatility, etc.)
+- **8 Daredevils**: High-risk strategies (momentum, mean-reversion, breakout)
+- **1 Catfish**: Anti-consensus — warns when everyone agrees
+
+**Ranking**: Daily composite score (MPPM + Sharpe + Calmar + Omega + Win Rate). Walk-Forward Efficiency validation prevents overfitting.
+
+**Elimination**: 3-stage pipeline — warning → secret challenger → paired comparison (t-test + Calmar gate).
+
+**ELITE**: Top performers get extra quota + higher vote weight.
+
+---
+
+## Tests
 
 ```
-10-stage Main Pipeline · 主管道
-  Scout (35 sources) → Flash Triage → HVR Deep-dive → L1 Narrative →
-  L2 Fundamental + L3 Technical → Red Team → Decision → Gate 1/2/3
-
-24-Shadow Ecosystem · 影子生态
-  16 Experts + 4 Momentum + 4 Contrarian · 16 专家 + 4 动量 + 4 逆向
-  6-layer Self-Evolution · 6 层自进化
-  Ranking → Challenger → Knowledge → Diversity → Crystallization → Simulation
+1,998 passed, 0 failed, 0 skipped
+├── Pipeline:    1,019  (Scout, Flash, L1-L3, Red Team, Resonance, Decision)
+├── Shadows:       492  (Agent, Ranking, Challenger, Crystallization, Memory)
+├── API:            16  (Routes, WebSocket, Data Providers)
+├── Real-API:        5  (9-stage full pipeline with live LLM, skipped in CI)
+└── Other:         466  (Storage, Config, Gateway, UI, Tools)
 ```
 
-## Key Numbers · 关键数据
+---
 
-| Metric · 指标 | Value · 值 |
-|------|:--:|
-| Python files · 文件 | 329 |
-| Lines of code · 代码行 | ~79,000 |
-| Tests · 测试 | 1,744 |
-| Information sources · 信息源 | 17 |
-| Shadow agents · 影子 | 24 |
-| PICA audit · 审计 | 全链通过 |
+## Development Gates
 
-## Tech Stack · 技术栈
+| Gate | When | What |
+|------|------|------|
+| **PreToolUse** | Before any Edit/Write | Task declaration required (`current_task.json`) |
+| **Pre-commit** | Before commit | 500-line ceiling per `.py` file |
+| **Stop Gate** | Session end | 7 PICA audits (unit, security, integration, regression, architecture, plan, review) |
+| **CI** | On push | Full test suite via GitHub Actions |
 
-Python · FastAPI · asyncio · httpx · DeepSeek · SQLite · yfinance · scipy · numpy · CustomTkinter · pytest
+---
 
-## Development · 开发指南
+## Project Structure
 
-- **[CLAUDE.md](CLAUDE.md)** — Workspace conventions · 工作区规范
-- **[projects/marketmind/CLAUDE.md](projects/marketmind/CLAUDE.md)** — Architecture guide · 架构指南
-- **[.claude/RESTART_GUIDE.md](.claude/RESTART_GUIDE.md)** — Session restart · 会话重启
+```
+projects/marketmind/
+├── pipeline/          # 10-stage analysis pipeline
+│   ├── scout.py               # 28-source news collection
+│   ├── layer1_narrative.py    # L1 event grading + matrix
+│   ├── layer2_fundamental.py  # L2 fundamental analysis
+│   ├── layer3_technical.py    # L3 technical analysis
+│   ├── red_team.py            # adversarial challenge
+│   ├── resonance.py           # statistical validation
+│   └── decision.py            # final synthesis
+├── shadows/          # 25-shadow ecosystem
+│   ├── shadow_mother.py       # daily orchestration
+│   ├── ranking_engine.py      # composite scoring
+│   └── challenger_engine.py   # 3-stage elimination
+├── api/              # FastAPI server
+│   ├── routes.py              # REST endpoints
+│   └── websocket.py           # real-time push
+├── gateway/          # LLM routing
+│   └── async_client.py        # DeepSeek Flash/Pro
+├── config/           # configuration
+├── storage/          # archiving (JSON + SQLite FTS5)
+├── tests/            # 1,998 tests
+└── data/             # runtime data (organized by date)
+```
+
+---
+
+## Setup
+
+Copy `.env.example`:
+```bash
+DEEPSEEK_API_KEY=your_key
+NEWSAPI_KEY=your_key       # optional
+GNEWS_API_KEY=your_key     # optional
+```
