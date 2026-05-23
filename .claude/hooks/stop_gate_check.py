@@ -53,8 +53,8 @@ GATE_REQUIREMENTS = {
     1: ["unit", "regression"],                       # test
     2: ["unit", "regression"],                       # fix
     3: ["unit", "security", "regression"],           # maintain
-    4: ["unit", "security", "integration", "regression"],  # enhance
-    5: ["unit", "security", "integration", "regression", "architecture"],  # architect
+    4: ["unit", "security", "integration", "regression", "review"],  # enhance
+    5: ["unit", "security", "integration", "regression", "architecture", "plan", "review"],  # architect
 }
 
 # Critical files that auto-escalate

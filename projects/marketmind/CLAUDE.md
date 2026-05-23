@@ -99,7 +99,33 @@ All LLM calls route through `gateway/async_client.py` — no module should call 
 - `tests/test_<module>.py` — mirrors source structure 1:1
 
 **Existing files over 500 lines (technical debt — not a template):**
-`layer1_interactive.py` (515), `shadow_mother.py`, `shadow_state.py`, `ranking_engine.py`. These are grandfathered. Do NOT use their length as precedent for new code.
+None. All files now under 550-line ceiling.
+
+## Development Process — Mechanical Gates (LOCKED)
+
+Each gate is silent unless violated — no manual confirmation, no prompts, no slowdown. You only notice them if you skip a step.
+
+| Trigger | Required Action | Enforced By |
+|---------|----------------|-------------|
+| Editing any `.py` file | `current_task.json` must list the file | PreToolUse `danger_guard.py` — blocks Edit/Write |
+| New module >50 lines | Write a plan artifact first | Stop gate — requires `pica-plan-*.json` at architect level |
+| Completing enhance+ work | Code review must exist | Stop gate — requires `pica-review-*.json` at enhance+ level |
+| Session end with changes | All PICA audits must pass | Stop gate — hash-chain verification |
+
+**Plan artifact format** (`.claude/audits/pica-plan-{date}.json`):
+```json
+{"gate":"plan", "date":"2026-05-23", "what":"extract X from Y to Z", "why":"500-line ceiling", "files_checked":{}}
+```
+
+**Review artifact format** (`.claude/audits/pica-review-{date}.json`):
+```json
+{"gate":"review", "date":"2026-05-23", "reviewer":"self or agent", "findings":"...", "files_checked":{}}
+```
+
+**Judgment calls** (no mechanical enforcement — self-discipline):
+- **Brainstorming**: invoke `superpowers:brainstorming` before any new feature/architecture. If you're thinking "let me just start coding", STOP — brainstorm first.
+- **TDD**: invoke `superpowers:test-driven-development` before implementing any new function. Test file exists → then write code. Not after.
+- **Verification**: invoke `superpowers:verification-before-completion` before claiming "done". Evidence before assertion.
 
 ## Testing
 
