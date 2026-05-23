@@ -1,14 +1,25 @@
 # MarketMind Restart Guide — 2026-05-23
 
-**Last updated**: 2026-05-23 | **Branch**: master | **Tests**: 1,842 pass, 0 fail, 0 skip
+**Last updated**: 2026-05-23 | **Branch**: master | **Tests**: 1,989 pass, 0 fail, 0 skip
 **All pushed to GitHub**: ✅
 **CLAUDE.md auto-loads Git Safety Protocol**: ✅ §8 enforced every session
+**frontload_required**: true
 
 ---
 
 ## 重启指令：
 
-> 继续 MarketMind 开发。阅读 `.claude/RESTART_GUIDE.md`。上次完成：Phase J+K 全部，skip+fail 全修复，l1 提取，WS 测试，T6 实盘。测试 1,841 pass, 0 fail, 0 skip。下一步：实现 broadcast_person_signal + 部署验证。
+> 继续 MarketMind 开发。阅读 `.claude/RESTART_GUIDE.md`。
+
+---
+
+## ⚡ FRONTLOAD REQUIRED — before any code change:
+
+**FLASH先扫描，确定决策点，交互完成后再放后台：**
+1. Flash 读此文件 + CLAUDE.md + memory → 列出需要用户参与的决定
+2. 有复杂决定 → 启动 Red-Blue 辩论 + User Proxy Agent
+3. 完成所有同步交互 → 用户确认
+4. 然后才启动异步工作（Agent 并行）
 
 ---
 

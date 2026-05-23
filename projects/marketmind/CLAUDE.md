@@ -145,8 +145,18 @@ Every session starts with a FLASH quick-scan (cheap, fast) to classify work:
 **Red-Blue Debate Protocol** (for complex decisions):
 1. Red Agent: attacks the proposal, finds risks, argues against
 2. Blue Agent: defends, finds evidence, argues for
-3. Synthesis: present both sides + recommendation to user
-4. User makes final call
+3. User Proxy Agent: represents user interests — loaded from auto-memory, CLAUDE.md preferences, past decisions. Participates as a third voice in the debate. Can make autonomous decisions when user is unavailable.
+4. Synthesis: present all sides + recommendation
+5. User makes final call (if present) or Proxy decides with confidence score
+
+**User Proxy Agent** (autonomous decision delegate):
+- Source of truth: `C:\Users\Administrator\.claude\projects\E--AI-Studio-Workspace\memory\` (auto-memory), this CLAUDE.md, project history
+- Decision confidence levels:
+  - HIGH (>90%): matches known preferences, past similar decisions exist → act immediately
+  - MEDIUM (60-90%): reasonable inference, but no exact precedent → act + flag for review
+  - LOW (<60%): no clear signal from memory → defer, escalate to user with context
+- All proxy decisions logged to `.claude/decisions/proxy_decisions.jsonl` with full deliberation transcript
+- User can review and override any proxy decision retroactively
 
 ## Testing
 
