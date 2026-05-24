@@ -29,7 +29,27 @@ class AlertManager:
         now = time.monotonic()
         dedup_key = alert.dedup_key
 
-        # 1. Dedup: same key within 60s -> increment counter
+        # 1. Track WARN timestamps for escalation (before dedup — all occurrences count)
+        escalating = False
+        if alert.severity == Severity.WARN:
+            self._warn_timestamps[dedup_key].append(now)
+            recent = [t for t in self._warn_timestamps[dedup_key]
+                      if now - t < _FREQ_ESCALATION_WINDOW]
+            self._warn_timestamps[dedup_key] = recent
+            if len(recent) >= _FREQ_ESCALATION_THRESHOLD:
+                alert = Alert(
+                    severity=Severity.ERROR,
+                    source=alert.source,
+                    impact_scope=alert.impact_scope,
+                    title=f"[ESCALATED] {alert.title}",
+                    detail=alert.detail,
+                    action_advice=alert.action_advice,
+                    degraded_output=alert.degraded_output,
+                )
+                dedup_key = alert.dedup_key
+                escalating = True
+
+        # 2. Dedup: same key within 60s -> increment counter, suppress re-broadcast
         if dedup_key in self._dedup_window:
             elapsed = now - self._dedup_window[dedup_key]
             if elapsed < 60:
@@ -37,37 +57,19 @@ class AlertManager:
                     if a.get("dedup_key") == dedup_key:
                         a["repeat_count"] = a.get("repeat_count", 1) + 1
                         break
-                escalating = False
-                if alert.severity == Severity.WARN:
-                    self._warn_timestamps[dedup_key].append(now)
-                    recent = [t for t in self._warn_timestamps[dedup_key]
-                              if now - t < _FREQ_ESCALATION_WINDOW]
-                    self._warn_timestamps[dedup_key] = recent
-                    if len(recent) >= _FREQ_ESCALATION_THRESHOLD:
-                        alert = Alert(
-                            severity=Severity.ERROR,
-                            source=alert.source,
-                            impact_scope=alert.impact_scope,
-                            title=f"[ESCALATED] {alert.title}",
-                            detail=alert.detail,
-                            action_advice=alert.action_advice,
-                            degraded_output=alert.degraded_output,
-                        )
-                        dedup_key = alert.dedup_key
-                        escalating = True
                 if not escalating:
                     return
 
         self._dedup_window[dedup_key] = now
 
-        # 2. Source cooldown: same source+severity within 30s -> throttle
+        # 3. Source cooldown: same source+severity within 30s -> throttle
         source_key = f"{alert.source}|{alert.severity.value}"
         if source_key in self._source_cooldown:
             if now - self._source_cooldown[source_key] < 30:
                 return
         self._source_cooldown[source_key] = now
 
-        # 3. Global throttle: max 10 broadcast/sec
+        # 4. Global throttle: max 10 broadcast/sec
         if now - self._second_start > 1.0:
             self._broadcast_count_this_second = 0
             self._second_start = now
@@ -75,11 +77,11 @@ class AlertManager:
             return
         self._broadcast_count_this_second += 1
 
-        # 4. Sanitize
+        # 5. Sanitize
         alert.title = sanitize(alert.title)
         alert.detail = sanitize(alert.detail)
 
-        # 5. Persist
+        # 6. Persist
         alert_dict = {
             "id": alert.id, "severity": alert.severity.value,
             "source": alert.source, "impact_scope": alert.impact_scope.value,
@@ -94,7 +96,7 @@ class AlertManager:
         self._alert_log.insert(alert_dict)
         self._alerts.append(alert_dict)
 
-        # 6. Evict oldest INFO if over capacity
+        # 7. Evict oldest INFO if over capacity
         if len(self._alerts) > 200:
             for i, a in enumerate(self._alerts):
                 if a["severity"] == "INFO":
@@ -103,7 +105,7 @@ class AlertManager:
             else:
                 self._alerts.pop(0)
 
-        # 7. Broadcast via WebSocket
+        # 8. Broadcast via WebSocket
         if self._ws_broadcast_fn:
             try:
                 loop = asyncio.get_running_loop()

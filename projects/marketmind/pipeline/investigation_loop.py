@@ -267,7 +267,6 @@ async def _expectation_gap_check(
             system_prompt=system,
             user_prompt=f"Assess how much of this hypothesis is priced in: {hypothesis[:1000]}",
             temperature=0.2,
-            max_tokens=4096,
         )
         if pro_calls_counter is not None:
             pro_calls_counter[0] += 1
@@ -342,7 +341,6 @@ async def _adversarial_bear_check(
             system_prompt=system,
             user_prompt=f"Challenge this hypothesis as a skeptical short-seller:\n{result.refined_hypothesis}",
             temperature=0.5,
-            max_tokens=4096,
         )
         if pro_calls_counter is not None:
             pro_calls_counter[0] += 1

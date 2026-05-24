@@ -164,7 +164,7 @@ class TestSentimentDegradation:
     async def test_sentiment_graceful_degradation(self):
         _clear_cache()
         with patch.object(httpx.AsyncClient, "get", new_callable=AsyncMock) as mock_get:
-            mock_resp = AsyncMock()
+            mock_resp = MagicMock()
             mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
                 "Server error", request=AsyncMock(), response=AsyncMock(status_code=500))
             mock_get.return_value = mock_resp

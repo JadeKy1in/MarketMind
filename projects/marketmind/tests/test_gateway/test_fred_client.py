@@ -324,7 +324,7 @@ class TestHTTPErrors:
         ), patch.object(
             httpx.AsyncClient, "get", new_callable=AsyncMock,
         ) as mock_get:
-            mock_resp = AsyncMock()
+            mock_resp = MagicMock()
             mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
                 "Server error",
                 request=AsyncMock(),

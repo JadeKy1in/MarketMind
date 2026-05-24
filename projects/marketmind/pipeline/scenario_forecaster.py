@@ -208,7 +208,6 @@ async def forecast_scenarios(
             system_prompt=_SCENARIO_SYSTEM,
             user_prompt=user_prompt,
             temperature=0.3,
-            max_tokens=4096,
         )
 
         content = response.get("content", "")
@@ -271,7 +270,6 @@ async def _generate_tail_risk(
             system_prompt=_SCENARIO_SYSTEM,
             user_prompt=user_prompt,
             temperature=0.3,
-            max_tokens=4096,
         )
 
         content = response.get("content", "")

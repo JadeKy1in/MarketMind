@@ -55,7 +55,6 @@ async def run_fact_check(content: str, source_agent: str, session_id: str) -> Fa
             system_prompt=FACT_CHECK_PROMPT,
             user_prompt=user_prompt,
             temperature=0.1,
-            max_tokens=4096,
         )
         return _parse_fact_check_response(result["content"], claims)
     except Exception as e:

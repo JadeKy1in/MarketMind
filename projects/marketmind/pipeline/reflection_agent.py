@@ -140,7 +140,6 @@ async def run_reflection(
             system_prompt=_REFLECTION_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             temperature=0.3,
-            max_tokens=2048,
         )
     else:
         return None

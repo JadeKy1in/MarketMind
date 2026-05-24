@@ -200,7 +200,6 @@ async def decompose_hypothesis(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         temperature=0.3,
-        max_tokens=1024,
     )
 
     if response.get("error"):

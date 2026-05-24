@@ -79,7 +79,6 @@ Analyze for causal errors, information gaps, and classify the root cause."""
             system_prompt=CAUSAL_REVIEW_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             temperature=0.2,
-            max_tokens=2048,
         )
         return _parse_causal_response(result.get("content", ""))
     except Exception as e:

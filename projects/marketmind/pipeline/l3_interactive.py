@@ -123,7 +123,7 @@ async def _handle_l3_question(user_text: str, green_lights: list, yellow_red: li
             ),
             user_prompt=f"用户问题: {defang_text(user_text)}\n\n直接回答。不超过150字。",
             temperature=0.3,
-            max_tokens=512, reasoning_effort="minimal",
+            reasoning_effort="",
         )
         reply = resp.get("content", "抱歉，无法处理。输入'好'进入决策或'observe'观望。")
     except Exception:

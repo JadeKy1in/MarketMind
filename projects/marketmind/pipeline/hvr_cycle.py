@@ -129,7 +129,6 @@ async def _refine_hypothesis(
             system_prompt=system,
             user_prompt=f"Refine this hypothesis based on the verification data above.\nHypothesis: {hypothesis}",
             temperature=0.3,
-            max_tokens=1536,
         )
         if pro_calls_counter is not None:
             pro_calls_counter[0] += 1

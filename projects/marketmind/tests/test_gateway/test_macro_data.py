@@ -221,7 +221,7 @@ class TestSessionCache:
         ), patch.object(
             httpx.AsyncClient, "get", new_callable=AsyncMock,
         ) as mock_get:
-            mock_resp = AsyncMock()
+            mock_resp = MagicMock()
             mock_resp.raise_for_status = lambda: None
             mock_resp.json.return_value = fixture
             mock_get.return_value = mock_resp
@@ -261,7 +261,7 @@ class TestDegradation:
         ), patch.object(
             httpx.AsyncClient, "get", new_callable=AsyncMock,
         ) as mock_get:
-            mock_resp = AsyncMock()
+            mock_resp = MagicMock()
             mock_resp.raise_for_status = lambda: None
             mock_resp.json.return_value = {"observations": []}
             mock_get.return_value = mock_resp
@@ -274,7 +274,7 @@ class TestDegradation:
         with patch.object(
             httpx.AsyncClient, "get", new_callable=AsyncMock,
         ) as mock_get:
-            mock_resp = AsyncMock()
+            mock_resp = MagicMock()
             mock_resp.raise_for_status = lambda: None
             mock_resp.json.return_value = []
             mock_get.return_value = mock_resp
@@ -328,7 +328,7 @@ class TestHTTPErrors:
             httpx.AsyncClient, "get", new_callable=AsyncMock,
         ) as mock_get:
             import httpx as _httpx
-            mock_resp = AsyncMock()
+            mock_resp = MagicMock()
             mock_resp.raise_for_status.side_effect = _httpx.HTTPStatusError(
                 "Server error",
                 request=AsyncMock(),

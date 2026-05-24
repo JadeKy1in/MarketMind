@@ -398,7 +398,7 @@ async def _handle_l2_question(user_text: str, l2_result: Layer2Result) -> None:
                     f"L2结果: {defang_text(l2_result.raw_analysis)[:600]}"
                 ),
                 user_prompt=f"用户请求: {defang_text(user_text)}\n\n直接回答，不超过200字。",
-                temperature=0.3, max_tokens=512, reasoning_effort="minimal",
+                temperature=0.3, reasoning_effort="",
             )
             reply = resp.get("content", "无法处理。")
         except Exception:
@@ -417,7 +417,7 @@ async def _handle_l2_question(user_text: str, l2_result: Layer2Result) -> None:
                 f"L2结果: {defang_text(l2_result.raw_analysis)[:600]}"
             ),
             user_prompt=f"用户问题: {defang_text(user_text)}\n\n直接回答。",
-            temperature=0.3, max_tokens=512, reasoning_effort="minimal",
+            temperature=0.3, reasoning_effort="",
         )
         reply = resp.get("content", "无法处理。输入'好'进入L3或'observe'观望。")
     except Exception:
