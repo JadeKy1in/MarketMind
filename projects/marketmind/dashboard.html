@@ -168,6 +168,10 @@
   .sd-badge.watch { background:rgba(136,120,200,.15); color:var(--pu); }
   .sd-badge.endangered { background:rgba(224,85,106,.15); color:var(--rd); }
 
+  .btn-run { background:var(--gr); color:#000; border:none; padding:3px 10px;
+    font:11px var(--mono); font-weight:600; border-radius:3px; cursor:pointer; margin-right:4px; }
+  .btn-run:hover { opacity:.85; }
+  .btn-run.running { background:var(--am); animation:pulse 1.2s infinite; }
   .bell-btn { position:relative; cursor:pointer; font-size:16px; margin-left:8px; user-select:none; }
   .bell-badge { position:absolute; top:-6px; right:-8px; background:var(--rd); color:#fff;
     font:9px var(--mono); padding:1px 5px; border-radius:8px; min-width:16px; text-align:center; }
@@ -199,6 +203,7 @@
 <div class="header">
   <div class="h-l">
     <span class="logo">MarketMind <span>v2.0</span></span>
+    <button class="btn-run" id="btnRun" onclick="startPipeline()" title="Start daily analysis with mock data">▶ Run</button>
     <span class="dot ok" id="sysDot"></span>
     <span style="font-size:11px;color:var(--t3)" id="sysMsg">Ready 就绪</span>
     <span class="alert-badge" id="alertBadge">ALERT</span>
@@ -413,6 +418,17 @@ function removeFile(idx){
   input.files=dt.files;updateFileChips();
 }
 document.getElementById('fileInput').addEventListener('change',updateFileChips);
+
+async function startPipeline(mock=true){
+	var btn=document.getElementById("btnRun");
+	btn.textContent='⚡ Running...'; btn.classList.add('running'); btn.disabled=true;
+	try{
+		var r=await fetch(API+'/api/pipeline/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mock:mock})});
+		var d=await r.json();
+		if(d.status==='started'){ console.log('Pipeline started, PID:',d.pid); }
+		else { alert('Pipeline start failed: '+d.detail); btn.textContent='▶ Run'; btn.classList.remove('running'); btn.disabled=false; }
+	}catch(e){ alert('Error: '+e.message); btn.textContent='▶ Run'; btn.classList.remove('running'); btn.disabled=false; }
+}
 
 async function sendMsg(){
   const input=document.getElementById('chatInput'),text=input.value.trim();

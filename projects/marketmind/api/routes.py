@@ -172,3 +172,37 @@ async def evolution_stagnation():
 @app.get("/api/health")
 async def health():
     return JSONResponse(get_health())
+
+
+@app.post("/api/pipeline/run")
+async def pipeline_run(request: dict):
+    """Trigger a daily pipeline run with optional --mock flag. Runs asynchronously."""
+    import asyncio
+    import subprocess
+    import sys
+    from pathlib import Path
+    from marketmind.api.data_providers import add_log_entry
+
+    mock = request.get("mock", True) if request else True
+    project_dir = Path(__file__).resolve().parent.parent
+    cmd = [sys.executable, "app.py", "--mode", "daily"]
+    if mock:
+        cmd.append("--mock")
+    cmd.append("-v")
+
+    add_log_entry("info", f"Pipeline started: {' '.join(cmd)}")
+    try:
+        proc = subprocess.Popen(
+            cmd, cwd=str(project_dir),
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", errors="replace",
+        )
+        # Non-blocking: fire and forget, pipeline broadcasts progress via WS
+        return JSONResponse({
+            "status": "started",
+            "pid": proc.pid,
+            "mock": mock,
+        })
+    except Exception as e:
+        add_log_entry("error", f"Pipeline failed to start: {e}")
+        return JSONResponse({"status": "error", "detail": str(e)}, status_code=500)
