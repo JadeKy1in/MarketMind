@@ -77,11 +77,13 @@
   .shadow-card { background:var(--card); border:1px solid var(--bd); border-radius:4px; padding:12px 14px; margin-bottom:8px; }
   .shadow-card-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
   .shadow-name { font:14px var(--sans); color:var(--t1); font-weight:500; }
-  .shadow-tier-tag { font:10px var(--mono); padding:2px 8px; border-radius:3px; }
+  .shadow-tier-tag { font:10px var(--sans); padding:2px 8px; border-radius:3px; }
   .t-elite { color:var(--am); background:rgba(200,160,80,.12); }
   .t-excel { color:var(--bl); background:rgba(90,143,208,.12); }
   .t-normal { color:var(--t3); background:rgba(106,114,128,.1); }
   .t-watch { color:var(--pu); background:rgba(136,120,200,.12); }
+  .shadow-card.top-performer { background:rgba(92,184,120,.08); border-left:2px solid var(--gr); }
+  .shadow-card.low-performer { background:rgba(224,85,106,.08); border-left:2px solid var(--rd); }
   .shadow-stats { display:grid; grid-template-columns:1fr 1fr 1fr; gap:4px; font:11px var(--mono); }
   .shadow-stat { display:flex; justify-content:space-between; padding:2px 0; color:var(--t3); }
   .shadow-stat-val { color:var(--t2); }
@@ -460,9 +462,13 @@ async function loadShadowDetail(){
     const tiers=overview.tiers||{}, all_shadows=rankings.rankings||[];
     let html='<div style="font-size:12px;margin-bottom:12px;display:flex;gap:20px">';
     html+=`<span>Total: ${overview.total||0}</span><span>Graduates: ${overview.graduates||0}</span><span>Trials: ${overview.challenger_trials||0}</span><span>Evolutions: ${overview.evolutions_today||0}</span></div>`;
-    if(all_shadows.length) html+='<div style="font-size:11px;color:var(--t3);margin-bottom:8px">ALL SHADOWS · 全部影子</div>'+all_shadows.map(s=>
-      `<div class="shadow-card"><div class="shadow-card-header"><span class="shadow-name" style="cursor:pointer;text-decoration:underline" onclick="event.stopPropagation();loadIndividualShadow('${s.shadow_id||''}')">${s.name}</span><span class="shadow-tier-tag t-${s.tier}">${s.tier.toUpperCase()}</span></div><div class="shadow-stats"><div class="shadow-stat"><span>Composite</span><span class="shadow-stat-val">${s.score.toFixed(2)}</span></div></div></div>`
-    ).join('');
+    if(all_shadows.length) html+='<div style="font-size:11px;color:var(--t3);margin-bottom:8px">ALL SHADOWS · 全部影子</div>'+all_shadows.map((s,idx)=>{
+      const tierNames={elite:'ELITE · 精英',excellent:'EXCELLENT · 优秀',normal:'NORMAL · 普通',watch:'WATCH · 观察',endangered:'ENDANGERED · 濒危'};
+      let cardClass='shadow-card';
+      if(idx<5) cardClass+=' top-performer';
+      else if(idx>=all_shadows.length-5) cardClass+=' low-performer';
+      return `<div class="${cardClass}"><div class="shadow-card-header"><span class="shadow-name" style="cursor:pointer;text-decoration:underline" onclick="event.stopPropagation();loadIndividualShadow('${s.shadow_id||''}')">${s.name}</span><span class="shadow-tier-tag t-${s.tier}">${tierNames[s.tier]||s.tier.toUpperCase()}</span></div><div class="shadow-stats"><div class="shadow-stat"><span>Composite</span><span class="shadow-stat-val">${s.score.toFixed(2)}</span></div></div></div>`;
+    }).join('');
     document.getElementById('shadowDetail').innerHTML=html||'<div class="muted">No shadow data available</div>';
   }catch(e){}
 }
