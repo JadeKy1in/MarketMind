@@ -31,12 +31,14 @@ _alm = get_alert_manager()
 _alm.set_broadcast_fn(broadcast_alert)
 
 DASHBOARD_PATH = Path(__file__).parent.parent / "dashboard.html"
+EVOLUTION_PATH = Path(__file__).parent.parent / "evolution.html"
 
 
 _CACHE_PREVENT_HEADERS = {
-    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
     "Pragma": "no-cache",
     "Expires": "0",
+    "Vary": "*",
 }
 
 
@@ -45,6 +47,14 @@ async def dashboard():
     content = DASHBOARD_PATH.read_text(encoding="utf-8")
     headers = dict(_CACHE_PREVENT_HEADERS)
     headers["ETag"] = f'"{int(DASHBOARD_PATH.stat().st_mtime)}"'
+    return HTMLResponse(content=content, headers=headers)
+
+
+@app.get("/evolution", response_class=HTMLResponse)
+async def evolution():
+    content = EVOLUTION_PATH.read_text(encoding="utf-8")
+    headers = dict(_CACHE_PREVENT_HEADERS)
+    headers["ETag"] = f'"{int(EVOLUTION_PATH.stat().st_mtime)}"'
     return HTMLResponse(content=content, headers=headers)
 
 
