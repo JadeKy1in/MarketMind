@@ -15,6 +15,8 @@ from marketmind.gateway.circuit_breaker import (
 
 # ── KeyRotator extracted to gateway/key_rotator.py ──────────────────────
 from marketmind.gateway.key_rotator import KeyRotator, KEY_ROTATE_THRESHOLD, SHARED_POOL_WARNED  # noqa: F811 re-exported
+from marketmind.notification.alert_schema import Severity, ImpactScope
+from marketmind.notification.alert_manager import emit_alert
 
 logger = logging.getLogger("marketmind.gateway.async_client")
 
@@ -194,9 +196,21 @@ class DeepSeekGateway:
                 raw_content = extracted
                 logger.info("DeepSeek: extracted JSON from reasoning tail (%d chars)",
                             len(raw_content))
+                emit_alert(
+                    Severity.WARN, "gateway", ImpactScope.MAIN_PIPELINE,
+                    "JSON extracted from reasoning tail — content field was empty",
+                    f"Recovered {len(raw_content)} chars from reasoning_content",
+                    "检查Pro响应格式，当前已自动恢复", degraded_output=False,
+                )
             else:
                 logger.warning("DeepSeek: content empty, reasoning_content=%d chars — no JSON found",
                             len(reasoning_content))
+                emit_alert(
+                    Severity.ERROR, "gateway", ImpactScope.MAIN_PIPELINE,
+                    "Pro response content empty — no JSON recovered",
+                    f"reasoning_content={len(reasoning_content)} chars, no extractable JSON",
+                    "检查API响应格式，可能影响分析质量", degraded_output=True,
+                )
         elif reasoning_content.strip():
             logger.debug("DeepSeek reasoning_content received: %d chars (effort=%s)",
                         len(reasoning_content), reasoning_effort)
@@ -287,6 +301,12 @@ async def chat_flash(
     estimated = max_tokens + 1024
     if not budget.reserve_flash(estimated):
         logger.warning("Budget exhausted for flash model call")
+        emit_alert(
+            Severity.CRITICAL, "gateway", ImpactScope.INFRASTRUCTURE,
+            "Flash token budget exhausted",
+            "今日Flash调用预算已用完，部分数据采集可能不完整",
+            "增加预算或减少调用频率", degraded_output=True,
+        )
         return {"content": "", "error": "budget_exhausted", "usage": {}}
     try:
         return await _call_with_retry(
@@ -311,6 +331,12 @@ async def chat_pro(
     estimated = max_tokens + 2048
     if not budget.reserve_pro(estimated):
         logger.warning("Budget exhausted for pro model call")
+        emit_alert(
+            Severity.CRITICAL, "gateway", ImpactScope.INFRASTRUCTURE,
+            "Pro token budget exhausted",
+            "今日Pro调用预算已用完，分析结果将不可靠",
+            "增加预算，今日分析可能需重新运行", degraded_output=True,
+        )
         return {"content": "", "error": "budget_exhausted", "usage": {}}
     try:
         return await _call_with_retry(
@@ -405,6 +431,12 @@ async def _call_with_retry(
     if cb.is_open:
         if gw.fallback_url:
             logger.info("Circuit OPEN — routing to fallback provider")
+            emit_alert(
+                Severity.WARN, "gateway", ImpactScope.INFRASTRUCTURE,
+                "Circuit breaker OPEN — routing to fallback provider",
+                f"Primary API circuit open, using fallback: {gw.fallback_model or 'configured'}",
+                "检查主API状态，当前使用备用提供商", degraded_output=True,
+            )
             return await _fallback_call(
                 gw, model, system_prompt, user_prompt,
                 temperature, max_tokens, reasoning_effort,
