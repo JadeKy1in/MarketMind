@@ -1,23 +1,11 @@
 {
   "gate": "security",
   "date": "2026-05-24",
-  "scope": "notification + evolution + dashboard UI",
-  "reviewer": "feature-dev:code-reviewer (Red Team a9ed90ec0eca002a8)",
-  "findings_fixed": [
-    "H1: Rate limiting added (30s cooldown + 10/sec throttle)",
-    "H2: Dedup algorithm specified (source+severity+title[:40], 60s window)",
-    "H3: Alert DB fallback (Python logging)",
-    "H4: Content sanitization (API keys, paths, HTTP bodies)",
-    "M5: Shadow skip scenario #17 added",
-    "M6: Frequency escalation (WARN 5x/10min → ERROR)"
-  ],
-  "sanitization": "API key patterns, Windows paths, HTTP bodies truncated to 200 chars",
-  "rate_limiting": "Dedup 60s window + source 30s cooldown + global 10/sec + 200 max per run",
   "files_checked": {
-    "projects/marketmind/notification/sanitizer.py": "6fa784e09729f1d4",
-    "projects/marketmind/notification/alert_manager.py": "222674cb0af83c75",
-    "projects/marketmind/notification/alert_log.py": "b76b7d06f76bd311",
-    "projects/marketmind/api/websocket.py": "30ada70fa9b3fa2f",
-    "projects/marketmind/gateway/async_client.py": "f35de043c196e858"
+    "projects/marketmind/notification/sanitizer.py": "6fa784e09729f1d4d4e6cec19dbf498d4739d747dac247ba34fa70f055a52aea",
+    "projects/marketmind/notification/alert_manager.py": "222674cb0af83c7575ee8767021458239feb23cdb04223977d467119f19f0495",
+    "projects/marketmind/notification/alert_log.py": "b76b7d06f76bd311ff1ccde033bfb6e979bd967f92358c75c4a5ef0046145667",
+    "projects/marketmind/api/websocket.py": "30ada70fa9b3fa2f480fbc96bba3f61b97196614689db0c7cfb9c27552b8031b",
+    "projects/marketmind/gateway/async_client.py": "f35de043c196e8580d74b732dd54c246536017c77a7de403ce490f4ea2ad021c"
   }
 }

@@ -1,23 +1,12 @@
 {
   "gate": "integration",
   "date": "2026-05-24",
-  "scope": "AlertManager + API + WebSocket + Dashboard + Evolution + Pipeline",
-  "integration_points": [
-    "AlertManager → WebSocket broadcast (dashboard bell/toast/banner/log)",
-    "AlertManager → API endpoints (/api/alerts, /api/alerts/health)",
-    "@monitor decorator → 8 pipeline stages",
-    "Gateway → emit_alert at 5 degradation points",
-    "Evolution → /api/evolution/shadows, /pipeline, /stagnation",
-    "Dashboard → /evolution navigation link"
-  ],
-  "all_endpoints_verified": true,
-  "ws_broadcast_tested": true,
   "files_checked": {
-    "projects/marketmind/api/routes.py": "dab03fa472329f2f",
-    "projects/marketmind/api/websocket.py": "30ada70fa9b3fa2f",
-    "projects/marketmind/api/data_providers.py": "61056593d0d19a60",
-    "projects/marketmind/notification/alert_manager.py": "222674cb0af83c75",
-    "projects/marketmind/dashboard.html": "247cac5d2341d0dc",
-    "projects/marketmind/evolution.html": "4fe1c1195c838c16"
+    "projects/marketmind/api/routes.py": "dab03fa472329f2f17050bab8b8b96993a5bb31230a566271b74da3b6763b96b",
+    "projects/marketmind/api/websocket.py": "30ada70fa9b3fa2f480fbc96bba3f61b97196614689db0c7cfb9c27552b8031b",
+    "projects/marketmind/api/data_providers.py": "61056593d0d19a60b1254f127f97a9a5366e4bd978092ad385c29de666061db5",
+    "projects/marketmind/notification/alert_manager.py": "222674cb0af83c7575ee8767021458239feb23cdb04223977d467119f19f0495",
+    "projects/marketmind/dashboard.html": "247cac5d2341d0dc1c39ab9951c51ea184dbecd58bf60b98b8e6bd4c98ae0771",
+    "projects/marketmind/evolution.html": "4fe1c1195c838c16e6172f26267dfb10e2792bf704ba514fc9f551ea06ca3b73"
   }
 }

@@ -1,17 +1,11 @@
 {
   "gate": "unit",
   "date": "2026-05-24",
-  "scope": "notification + evolution tests",
-  "new_tests": 27,
-  "total_tests": 2016,
-  "pass": 2016,
-  "fail": 0,
-  "verification": "pytest -q -m 'not slow' — 2016 passed, 0 fail",
   "files_checked": {
-    "projects/marketmind/tests/test_notification/test_alert_schema.py": "3e141f2dff33082a",
-    "projects/marketmind/tests/test_notification/test_sanitizer.py": "9ee0cf4d2a572cc8",
-    "projects/marketmind/tests/test_notification/test_alert_manager.py": "656856571ba33284",
-    "projects/marketmind/tests/test_notification/test_monitor_decorator.py": "64fd082869919a36",
-    "projects/marketmind/tests/test_evolution/test_stagnation_detector.py": "d6882cfbf04c0f81"
+    "projects/marketmind/tests/test_notification/test_alert_schema.py": "3e141f2dff33082ae21efb2f56c55665be68ecff86ce5fb430f90c94abf6cba0",
+    "projects/marketmind/tests/test_notification/test_sanitizer.py": "9ee0cf4d2a572cc87d5b04e07d36f1181d1e71aee18942dad8ee6173088af6d8",
+    "projects/marketmind/tests/test_notification/test_alert_manager.py": "656856571ba332840808efe1818dfc3752c100a0281abfb09e15e1775d8d0bb3",
+    "projects/marketmind/tests/test_notification/test_monitor_decorator.py": "64fd082869919a36069f6eb3fd542edfa6a39d4d9a28121a496adf36ced2521a",
+    "projects/marketmind/tests/test_evolution/test_stagnation_detector.py": "d6882cfbf04c0f813fdd3cbf09d1c98c0699e2288c6e08541a388b8e65059133"
   }
 }
