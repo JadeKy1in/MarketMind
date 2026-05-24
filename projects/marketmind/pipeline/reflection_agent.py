@@ -12,6 +12,9 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from marketmind.notification.monitor_decorator import monitor
+from marketmind.notification.alert_schema import ImpactScope
+
 from marketmind.gateway.async_client import chat_flash, chat_pro
 from marketmind.pipeline.prediction_extractor import PredictableHypothesis
 
@@ -169,6 +172,7 @@ async def run_reflection(
     )
 
 
+@monitor(source="reflection_agent", impact=ImpactScope.MAIN_PIPELINE)
 async def run_batch_reflection(
     expired_predictions: list[PredictableHypothesis],
     store,  # LearningStore

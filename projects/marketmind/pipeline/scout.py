@@ -11,6 +11,9 @@ from typing import Any
 import feedparser
 import httpx
 
+from marketmind.notification.monitor_decorator import monitor
+from marketmind.notification.alert_schema import ImpactScope
+
 from marketmind.config.settings import MarketMindConfig
 from marketmind.config.source_authority import Source, SourceTier, SourceStatus, get_working_sources, SOURCES
 
@@ -323,6 +326,7 @@ def _load_manual_data(items: list) -> None:
             logger.warning("Failed to load Bluesky manual file: %s", e)
 
 
+@monitor(source="scout", impact=ImpactScope.INFRASTRUCTURE)
 async def fetch_all_sources(config: MarketMindConfig, use_cross_run_cache: bool = True) -> list[NewsItem]:
     """Fetch from all working sources, deduplicate, return sorted by priority_score descending.
 

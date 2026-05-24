@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import logging
 
+from marketmind.notification.monitor_decorator import monitor
+from marketmind.notification.alert_schema import ImpactScope
+
 logger = logging.getLogger("marketmind.pipeline.layer2")
 from dataclasses import dataclass, field
 
@@ -125,6 +128,7 @@ Key rules:
 """
 
 
+@monitor(source="l2_fundamental", impact=ImpactScope.MAIN_PIPELINE)
 async def analyze_layer2(l1: Layer1Result, market_context: dict | None = None,
                          l1_context: str | None = None) -> Layer2Result:
     """Run Layer 2 fundamental analysis, incorporating Layer 1 narrative context."""

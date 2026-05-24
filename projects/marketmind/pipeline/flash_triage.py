@@ -20,6 +20,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from marketmind.pipeline.event_clusterer import ClusteringResult
 
+from marketmind.notification.monitor_decorator import monitor
+from marketmind.notification.alert_schema import ImpactScope
+
 from marketmind.config.flash_output_schema import validate_flash_output
 from marketmind.config.investigation_config import (
     FLASH_TRIAGE_BATCH_SIZE,
@@ -122,6 +125,7 @@ def _parse_json_response(content: str) -> list[dict]:
     return []
 
 
+@monitor(source="flash_triage", impact=ImpactScope.MAIN_PIPELINE)
 async def triage_batch(
     items: list[NewsItem],
     batch_size: int | None = None,

@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import logging
 
+from marketmind.notification.monitor_decorator import monitor
+from marketmind.notification.alert_schema import ImpactScope
+
 logger = logging.getLogger("marketmind.pipeline.red_team")
 from dataclasses import dataclass, field
 
@@ -60,6 +63,7 @@ Output JSON:
 }"""
 
 
+@monitor(source="red_team", impact=ImpactScope.MAIN_PIPELINE)
 async def run_red_team(l1_raw: str, l2_raw: str, tickers: list[str]) -> RedTeamReport:
     """Run adversarial review of Layer 1-2 analysis."""
     user_prompt = f"""Review the following analysis for flaws, biases, and unsupported claims.

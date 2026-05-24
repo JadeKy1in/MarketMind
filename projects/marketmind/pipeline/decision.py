@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import logging
 
+from marketmind.notification.monitor_decorator import monitor
+from marketmind.notification.alert_schema import ImpactScope
+
 logger = logging.getLogger("marketmind.pipeline.decision")
 from dataclasses import dataclass, field
 from typing import Any
@@ -239,6 +242,7 @@ async def generate_contrarian_challenges(decision: DecisionOutput) -> list[dict]
         return []
 
 
+@monitor(source="decision", impact=ImpactScope.MAIN_PIPELINE)
 async def generate_decision(
     l1: Layer1Result,
     l2: Layer2Result,

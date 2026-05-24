@@ -5,6 +5,9 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from marketmind.notification.monitor_decorator import monitor
+from marketmind.notification.alert_schema import ImpactScope
+
 logger = logging.getLogger("marketmind.pipeline.layer1")
 
 from marketmind.gateway.async_client import chat_pro
@@ -75,6 +78,7 @@ Tail risk: implied correlation spikes, VIX term structure inversion, volatility 
 IMPORTANT: All numeric values must cite a verifiable source or be marked EST:. Never fabricate data."""
 
 
+@monitor(source="l1_narrative", impact=ImpactScope.MAIN_PIPELINE)
 async def analyze_layer1(signals: list[FlashSignal], news_items: list[NewsItem]) -> Layer1Result:
     """Run Layer 1 narrative analysis on preprocessed signals."""
     if not signals:

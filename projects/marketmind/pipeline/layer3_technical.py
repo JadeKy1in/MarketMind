@@ -3,6 +3,9 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
+from marketmind.notification.monitor_decorator import monitor
+from marketmind.notification.alert_schema import ImpactScope
+
 logger = logging.getLogger("marketmind.pipeline.layer3")
 import json
 from typing import Any
@@ -95,6 +98,7 @@ Druckenmiller principle: if fundamentals bullish but technicals bearish → lean
 IMPORTANT: All price data must be verifiable. Never fabricate levels."""
 
 
+@monitor(source="l3_technical", impact=ImpactScope.MAIN_PIPELINE)
 async def analyze_layer3(tickers: list[str], market_data: dict | None = None) -> Layer3BatchResult:
     """Run Layer 3 technical review. Receives ONLY ticker list and raw market data — NOT L1/L2 results."""
     if not tickers:
