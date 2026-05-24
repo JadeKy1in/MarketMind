@@ -1,1 +1,1 @@
-{"type": "enhance", "files": ["gateway/async_client.py", "pipeline/layer1_narrative.py", ".claude/state/current_task.json"], "risk": "low", "description": "Fix LLM JSON reliability: chat_pro_json with disabled thinking + JSON mode + retry"}
+{"type": "fix", "files": ["api/routes.py", "dashboard.html", "evolution.html"], "risk": "low", "description": "Fix browser caching: add max-age=0, meta tags, /evolution route, nav link"}
