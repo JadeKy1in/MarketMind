@@ -164,6 +164,31 @@
   .sd-badge.normal { background:rgba(106,114,128,.1); color:var(--t3); }
   .sd-badge.watch { background:rgba(136,120,200,.15); color:var(--pu); }
   .sd-badge.endangered { background:rgba(224,85,106,.15); color:var(--rd); }
+
+  .bell-btn { position:relative; cursor:pointer; font-size:16px; margin-left:8px; user-select:none; }
+  .bell-badge { position:absolute; top:-6px; right:-8px; background:var(--rd); color:#fff;
+    font:9px var(--mono); padding:1px 5px; border-radius:8px; min-width:16px; text-align:center; }
+  .bell-dropdown { position:fixed; right:70px; top:34px; width:380px; max-height:480px;
+    overflow-y:auto; background:var(--card); border:1px solid var(--bd); z-index:100;
+    border-radius:4px; box-shadow:0 4px 24px rgba(0,0,0,.5); }
+  .bell-entry { padding:6px 10px; border-bottom:1px solid var(--bd); font-size:12px; cursor:default; }
+  .bell-entry:hover { background:var(--elv); }
+  .crit-banner { padding:6px 14px; background:#3d1a1f; color:#f5a0a8; font:12px var(--sans);
+    display:flex; justify-content:space-between; align-items:center; flex-shrink:0; }
+  .crit-banner button { background:none; border:none; color:#f5a0a8; cursor:pointer; font-size:16px; padding:0 4px; }
+  .toast { position:fixed; top:50px; right:20px; z-index:200; background:var(--card);
+    border-left:3px solid var(--rd); padding:10px 16px; border-radius:4px;
+    max-width:360px; animation:slideIn .3s ease; font-size:13px; }
+  @keyframes slideIn { from{transform:translateX(100%);opacity:0} to{transform:translateX(0);opacity:1} }
+  @keyframes slideOut { from{transform:translateX(0);opacity:1} to{transform:translateX(120%);opacity:0} }
+  .scroll-log { border-top:1px solid var(--bd); background:var(--card); flex-shrink:0; }
+  .scroll-log-header { padding:4px 14px; cursor:pointer; font:10px var(--mono); color:var(--t3);
+    display:flex; justify-content:space-between; user-select:none; }
+  .scroll-log-body { max-height:120px; overflow-y:auto; padding:0 14px; font:11px var(--mono); }
+  .log-entry { padding:2px 0; border-bottom:1px solid var(--bd); display:flex; gap:8px; align-items:center; }
+  .log-sev { min-width:50px; font-weight:600; font-size:10px; }
+  .log-sev.CRITICAL { color:var(--rd); } .log-sev.ERROR { color:var(--am); }
+  .log-sev.WARN { color:var(--pu); } .log-sev.INFO { color:var(--t3); }
 </style>
 </head>
 <body>
@@ -196,10 +221,12 @@
     <span id="clock" style="display:inline-flex;justify-content:space-between;width:120px;font-family:var(--mono);font-size:11px">--:--:--</span>
     <span title="数据源连接状态">数据源 <span class="v" id="srcCnt">--</span></span>
     <span title="已运行">运行: <span class="v" id="uptime">--</span></span>
+    <span class="bell-btn" id="bellBtn" onclick="toggleBell()" title="告警通知">🔔<span class="bell-badge" id="bellBadge" style="display:none">0</span></span>
   </div>
 </div>
 
 <div class="layout">
+<div class="bell-dropdown" id="bellDropdown" style="display:none"></div>
 
 <!-- ===== MAIN ===== -->
 <div class="main">
@@ -209,6 +236,11 @@
     <span class="pbar-pct" id="pct">idle</span>
     <div class="pbar-track"><div class="pbar-fill" id="pfill"></div></div>
     <span class="pbar-label" id="pstage">Pipeline not running</span>
+  </div>
+
+  <div class="crit-banner" id="critBanner" style="display:none">
+    <span id="critText"></span>
+    <button onclick="dismissCritical()">✕</button>
   </div>
 
   <!-- Briefing -->
@@ -251,8 +283,13 @@
       <div class="file-chips" id="fileChips"></div>
     </div>
   </div>
+  <div class="scroll-log" id="scrollLog" style="display:none">
+    <div class="scroll-log-header" onclick="toggleScrollLog()">
+      <span>📋 系统日志</span><span id="logToggle">▲</span>
+    </div>
+    <div class="scroll-log-body" id="scrollLogBody"></div>
+  </div>
 </div>
-
 <!-- ===== SIDEBAR ===== -->
 <div class="sidebar">
 
@@ -574,8 +611,96 @@ async function refresh(){
       const entries=log.entries||[];
       if(entries.length) document.getElementById('logBody').innerHTML=entries.slice(-15).map(e=>`<div class="log-line"><span style="min-width:40px">${e.time.replace(/</g,"&lt;")}</span><span class="log-${e.level==='error'?'err':e.level==='warn'?'warn':'ok'}">${e.message.replace(/</g,"&lt;")}</span></div>`).join('');
     }catch(e){}
+    // Alerts
+    try{
+      const ar=await fetch('/api/alerts').then(r=>r.json());
+      if(ar.alerts)ar.alerts.forEach(a=>{if(!activeAlerts.find(x=>x.id===a.id))handleAlert(a);});
+    }catch(e){}
   }catch(e){}
 }
+let activeAlerts = [];
+const MAX_TOASTS = 3;
+
+function handleAlert(msg) {
+  activeAlerts.unshift(msg);
+  if (activeAlerts.length > 200) activeAlerts.length = 200;
+  updateBell();
+  if (msg.severity === 'CRITICAL') showCriticalBanner(msg);
+  if (msg.severity === 'ERROR') showToast(msg);
+  appendLogEntry(msg);
+}
+
+function updateBell() {
+  const critical = activeAlerts.filter(a => a.severity === 'CRITICAL' && !a.resolved).length;
+  const errors = activeAlerts.filter(a => a.severity === 'ERROR').length;
+  const badge = document.getElementById('bellBadge');
+  const total = critical + errors;
+  if (total > 0) {
+    badge.style.display = 'inline-block';
+    badge.textContent = total;
+    badge.style.background = critical > 0 ? 'var(--rd)' : 'var(--am)';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function toggleBell() {
+  const dd = document.getElementById('bellDropdown');
+  if (dd.style.display === 'block') { dd.style.display = 'none'; return; }
+  dd.innerHTML = activeAlerts.slice(0, 20).map(a =>
+    '<div class="bell-entry">' +
+    '<span class="log-sev ' + a.severity + '">' + a.severity + '</span> ' +
+    '<span>' + (a.title || '') + '</span>' +
+    '<div style="color:var(--t3);font-size:10px;margin-top:2px">' +
+    (a.source||'') + ' · ' + (a.timestamp||'').slice(11,19) + ' · ' + (a.action_advice||'') +
+    '</div></div>'
+  ).join('') || '<div class="bell-entry" style="color:var(--t3)">No alerts</div>';
+  dd.style.display = 'block';
+}
+
+function showCriticalBanner(msg) {
+  document.getElementById('critBanner').style.display = 'flex';
+  document.getElementById('critText').textContent = '⚠ ' + (msg.title || 'Critical alert');
+}
+
+function dismissCritical() {
+  document.getElementById('critBanner').style.display = 'none';
+}
+
+function showToast(msg) {
+  var toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.innerHTML = '<strong style="color:var(--rd)">' + msg.severity + '</strong> ' + (msg.title||'') +
+    (msg.action_advice ? '<br><small style="color:var(--t3)">' + msg.action_advice + '</small>' : '');
+  document.body.appendChild(toast);
+  setTimeout(function() {
+    toast.style.animation = 'slideOut .3s ease';
+    setTimeout(function() { toast.remove(); }, 300);
+  }, 30000);
+  var toasts = document.querySelectorAll('.toast');
+  if (toasts.length > MAX_TOASTS) toasts[0].remove();
+}
+
+function appendLogEntry(msg) {
+  var log = document.getElementById('scrollLogBody');
+  var entry = document.createElement('div');
+  entry.className = 'log-entry';
+  var sevColor = {CRITICAL:'var(--rd)',ERROR:'var(--am)',WARN:'var(--pu)',INFO:'var(--t3)'}[msg.severity]||'var(--t3)';
+  entry.innerHTML = '<span style="color:'+sevColor+';min-width:50px;font-weight:600;font-size:10px">'+msg.severity+'</span>' +
+    '<span style="flex:1">'+(msg.title||'')+'</span>' +
+    '<span style="color:var(--t3);font-size:10px">'+(msg.timestamp||'').slice(11,19)+'</span>';
+  log.insertBefore(entry, log.firstChild);
+  if (log.children.length > 50) log.lastChild.remove();
+  document.getElementById('scrollLog').style.display = 'block';
+}
+
+function toggleScrollLog() {
+  var body = document.getElementById('scrollLogBody');
+  var toggle = document.getElementById('logToggle');
+  if (body.style.display === 'none') { body.style.display = 'block'; toggle.textContent = '▲'; }
+  else { body.style.display = 'none'; toggle.textContent = '▼'; }
+}
+
 refresh(); setInterval(refresh,5000);
 </script>
 <div class="drop-overlay" id="dropOverlay">
@@ -622,6 +747,8 @@ refresh(); setInterval(refresh,5000);
           line.innerHTML='<span style="min-width:40px">'+d.ts.replace(/</g,'&lt;')+'</span><span class="'+cls+'">'+d.message.replace(/</g,'&lt;')+'</span>';
           logBody.insertBefore(line,logBody.firstChild);
           while(logBody.children.length>50)logBody.removeChild(logBody.lastChild);
+        }else if(d.type==='alert'){
+          handleAlert(d);
         }
       }catch(ex){}
     };
