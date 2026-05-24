@@ -158,16 +158,20 @@ def get_shadow_overview() -> dict:
 
 
 def get_shadow_rankings() -> dict:
+    from marketmind.shadows.shadow_metadata import get_shadow_meta
     db = _get_shadow_db()
     shadows = db.get_visible_shadows()
     top_all = []
     for s in shadows[:25]:
         snap = db.get_latest_snapshot(s.shadow_id)
+        meta = get_shadow_meta(s.shadow_id)
         top_all.append({
             "shadow_id": s.shadow_id,
             "name": s.display_name,
             "tier": snap.achievement_tier if snap and snap.achievement_tier else "normal",
             "score": round(snap.composite_score, 2) if snap and snap.composite_score else 0.0,
+            "cn_name": meta["cn_name"],
+            "desc": meta["desc"],
         })
     return {"rankings": top_all}
 

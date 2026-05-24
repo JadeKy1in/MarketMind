@@ -23,22 +23,22 @@ class ActivityMonitor:
             return None  # First time seeing this shadow, no alert
 
         # Grade change detected — emit appropriate alert
-        grade_labels = {"green": "Active (活跃)", "yellow": "Stable (稳定)", "red": "Idle (待激活)"}
+        grade_labels = {"green": "Active · 活跃", "yellow": "Watch · 关注", "red": "Stagnant · 停滞"}
 
         if current_grade == "red":
             emit_alert(Severity.WARN, f"shadow:{shadow_id}", ImpactScope.SHADOW_SYSTEM,
-                       f"{shadow_id}: 进化活跃度降为待激活 (Idle)",
-                       f"从 {grade_labels.get(prev, prev)} → {grade_labels['red']}，活动分={activity_score:.2f}",
+                       f"{shadow_id}: 进化活跃度降为停滞 (Stagnant)",
+                       f"从 {grade_labels.get(prev, prev)} → Stagnant · 停滞，活动分={activity_score:.2f}",
                        "检查影子策略是否需要调整或退役", degraded_output=False)
         elif current_grade == "yellow" and prev == "green":
             emit_alert(Severity.INFO, f"shadow:{shadow_id}", ImpactScope.SHADOW_SYSTEM,
-                       f"{shadow_id}: 进化活跃度降为稳定 (Stable)",
-                       f"从 Active → Stable，活动分={activity_score:.2f}",
+                       f"{shadow_id}: 进化活跃度降为关注 (Watch)",
+                       f"从 Active · 活跃 → Watch · 关注，活动分={activity_score:.2f}",
                        "持续观察，如进一步下降需关注", degraded_output=False)
         elif current_grade == "green" and prev in ("yellow", "red"):
             emit_alert(Severity.INFO, f"shadow:{shadow_id}", ImpactScope.SHADOW_SYSTEM,
                        f"{shadow_id}: 进化活跃度恢复为活跃 (Active)",
-                       f"从 {grade_labels.get(prev, prev)} → Active，活动分={activity_score:.2f}",
+                       f"从 {grade_labels.get(prev, prev)} → Active · 活跃，活动分={activity_score:.2f}",
                        "影子已恢复活力，仅通知无需操作", degraded_output=False)
 
         return current_grade

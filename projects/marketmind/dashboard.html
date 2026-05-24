@@ -169,6 +169,11 @@
   .sd-badge.normal { background:rgba(106,114,128,.1); color:var(--t3); }
   .sd-badge.watch { background:rgba(136,120,200,.15); color:var(--pu); }
   .sd-badge.endangered { background:rgba(224,85,106,.15); color:var(--rd); }
+  .sd-section-title { font-family: var(--sans); }
+  .sd-metric-lbl { font-family: var(--sans); }
+  .sd-metric-val { font-family: var(--mono); }
+  .shadow-detail-title { font-family: var(--sans); }
+  .shadow-detail-sub { font-family: var(--mono); }
 
   .btn-run { background:var(--gr); color:#000; border:none; padding:3px 10px;
     font:11px var(--mono); font-weight:600; border-radius:3px; cursor:pointer; margin-right:4px; }
@@ -467,25 +472,28 @@ async function loadShadowDetail(){
       let cardClass='shadow-card';
       if(idx<5) cardClass+=' top-performer';
       else if(idx>=all_shadows.length-5) cardClass+=' low-performer';
-      return `<div class="${cardClass}"><div class="shadow-card-header"><span class="shadow-name" style="cursor:pointer;text-decoration:underline" onclick="event.stopPropagation();loadIndividualShadow('${s.shadow_id||''}')">${s.name}</span><span class="shadow-tier-tag t-${s.tier}">${tierNames[s.tier]||s.tier.toUpperCase()}</span></div><div class="shadow-stats"><div class="shadow-stat"><span>Composite</span><span class="shadow-stat-val">${s.score.toFixed(2)}</span></div></div></div>`;
+      return `<div class="${cardClass}"><div class="shadow-card-header"><span class="shadow-name" style="cursor:pointer;text-decoration:underline" onclick="event.stopPropagation();loadIndividualShadow('${s.shadow_id||''}')">` +
+        (s.cn_name||s.name) + ' <span style="font-weight:400;color:var(--t3);font-size:11px">' + (s.name||'') + '</span></span><span class="shadow-tier-tag t-' + s.tier + '">' + (tierNames[s.tier]||s.tier.toUpperCase()) + '</span></div>' +
+        (s.desc ? '<div style="font:10px var(--mono);color:var(--t3);margin-top:2px;margin-bottom:6px">' + s.desc + '</div>' : '') +
+        '<div class="shadow-stats"><div class="shadow-stat"><span>Composite</span><span class="shadow-stat-val">' + s.score.toFixed(2) + '</span></div></div></div>`;
     }).join('');
     document.getElementById('shadowDetail').innerHTML=html||'<div class="muted">No shadow data available</div>';
   }catch(e){}
 }
 
 async function loadIndividualShadow(shadowId){
-  if(!shadowId){ document.getElementById('shadowDetail').innerHTML='<div class="muted">No shadow selected</div>'; return; }
-  document.getElementById('shadowDetail').innerHTML='<div class="muted">Loading...</div>';
+  if(!shadowId){ document.getElementById('shadowDetail').innerHTML='<div class="muted">No shadow selected · 未选择影子</div>'; return; }
+  document.getElementById('shadowDetail').innerHTML='<div class="muted">Loading... · 加载中</div>';
   try{
     const d=await fetch('/api/shadows/'+encodeURIComponent(shadowId)).then(r=>r.json());
-    if(d.error){ document.getElementById('shadowDetail').innerHTML='<div class="muted">Error: '+d.error.replace(/</g,'&lt;')+'</div>'; return; }
+    if(d.error){ document.getElementById('shadowDetail').innerHTML='<div class="muted">Error · 错误: '+d.error.replace(/</g,'&lt;')+'</div>'; return; }
 
     const fn=v=>v!=null?v:'--';
     const fpct=v=>v!=null?(v>0?'+':'')+v.toFixed(2)+'%':'--';
     const tierClass={'elite':'elite','excellent':'excellent','normal':'normal','watch':'watch','endangered':'endangered'};
 
     let html='<div class="shadow-detail-header">';
-    html+='<button class="shadow-detail-back" onclick="event.stopPropagation();loadShadowDetail()">← Back</button>';
+    html+='<button class="shadow-detail-back" onclick="event.stopPropagation();loadShadowDetail()">← Back · 返回</button>';
     html+=`<span class="shadow-detail-title">${fn(d.display_name)}</span>`;
     html+=`<span class="shadow-detail-sub">${fn(d.shadow_type)} / ${fn(d.domain||'unassigned')}</span>`;
     if(d.latest_snapshot&&d.latest_snapshot.achievement_tier){
@@ -496,87 +504,87 @@ async function loadIndividualShadow(shadowId){
 
     // Methodology prompt
     if(d.methodology_prompt){
-      html+='<div class="sd-section"><div class="sd-section-title">Methodology</div>';
+      html+='<div class="sd-section"><div class="sd-section-title">Methodology · 分析方法</div>';
       html+=`<div class="sd-prompt">${d.methodology_prompt.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div></div>`;
     }
 
     // Config summary
-    html+='<div class="sd-section"><div class="sd-section-title">Config</div>';
+    html+='<div class="sd-section"><div class="sd-section-title">Config · 配置</div>';
     html+='<div class="sd-grid">';
-    html+=`<div class="sd-metric"><div class="sd-metric-lbl">Status</div><div class="sd-metric-val">${fn(d.status)}</div></div>`;
-    html+=`<div class="sd-metric"><div class="sd-metric-lbl">Model</div><div class="sd-metric-val">${fn(d.model)}</div></div>`;
-    html+=`<div class="sd-metric"><div class="sd-metric-lbl">Generation</div><div class="sd-metric-val">${fn(d.generation)}</div></div>`;
-    html+=`<div class="sd-metric"><div class="sd-metric-lbl">Virtual Capital</div><div class="sd-metric-val">$${fn(typeof d.virtual_capital==='number'?d.virtual_capital.toFixed(0):d.virtual_capital)}</div></div>`;
-    html+=`<div class="sd-metric"><div class="sd-metric-lbl">Max Positions</div><div class="sd-metric-val">${fn(d.max_positions)}</div></div>`;
-    html+=`<div class="sd-metric"><div class="sd-metric-lbl">Created</div><div class="sd-metric-val" style="font-size:11px">${fn((d.created_at||'').slice(0,10))}</div></div>`;
+    html+=`<div class="sd-metric"><div class="sd-metric-lbl">Status · 状态</div><div class="sd-metric-val">${fn(d.status)}</div></div>`;
+    html+=`<div class="sd-metric"><div class="sd-metric-lbl">Model · 模型</div><div class="sd-metric-val">${fn(d.model)}</div></div>`;
+    html+=`<div class="sd-metric"><div class="sd-metric-lbl">Generation · 世代</div><div class="sd-metric-val">${fn(d.generation)}</div></div>`;
+    html+=`<div class="sd-metric"><div class="sd-metric-lbl">Virtual Capital · 虚拟资金</div><div class="sd-metric-val">$${fn(typeof d.virtual_capital==='number'?d.virtual_capital.toFixed(0):d.virtual_capital)}</div></div>`;
+    html+=`<div class="sd-metric"><div class="sd-metric-lbl">Max Positions · 最大仓位</div><div class="sd-metric-val">${fn(d.max_positions)}</div></div>`;
+    html+=`<div class="sd-metric"><div class="sd-metric-lbl">Created · 创建时间</div><div class="sd-metric-val" style="font-size:11px">${fn((d.created_at||'').slice(0,10))}</div></div>`;
     html+='</div></div>';
 
     // Performance
     if(d.latest_snapshot){
       const sn=d.latest_snapshot;
-      html+='<div class="sd-section"><div class="sd-section-title">Latest Performance</div>';
+      html+='<div class="sd-section"><div class="sd-section-title">Latest Performance · 最新表现</div>';
       html+='<div class="sd-grid">';
-      html+=`<div class="sd-metric"><div class="sd-metric-lbl">Daily Return</div><div class="sd-metric-val" style="color:${(sn.daily_return_pct||0)>=0?'var(--gr)':'var(--rd)'}">${fpct(sn.daily_return_pct)}</div></div>`;
-      html+=`<div class="sd-metric"><div class="sd-metric-lbl">Cumulative Return</div><div class="sd-metric-val" style="color:${(sn.cumulative_return_pct||0)>=0?'var(--gr)':'var(--rd)'}">${fpct(sn.cumulative_return_pct)}</div></div>`;
-      html+=`<div class="sd-metric"><div class="sd-metric-lbl">Max Drawdown</div><div class="sd-metric-val" style="color:var(--rd)">${fn(sn.max_drawdown_pct!=null?sn.max_drawdown_pct.toFixed(2)+'%':'--')}</div></div>`;
-      html+=`<div class="sd-metric"><div class="sd-metric-lbl">Win Rate</div><div class="sd-metric-val">${fn(sn.win_rate_pct!=null?sn.win_rate_pct.toFixed(1)+'%':'--')}</div></div>`;
-      html+=`<div class="sd-metric"><div class="sd-metric-lbl">Sharpe</div><div class="sd-metric-val">${fn(sn.sharpe_ratio!=null?sn.sharpe_ratio.toFixed(2):'--')}</div></div>`;
-      html+=`<div class="sd-metric"><div class="sd-metric-lbl">Composite</div><div class="sd-metric-val">${fn(sn.composite_score!=null?sn.composite_score.toFixed(2):'--')}</div></div>`;
+      html+=`<div class="sd-metric"><div class="sd-metric-lbl">Daily Return · 日收益</div><div class="sd-metric-val" style="color:${(sn.daily_return_pct||0)>=0?'var(--gr)':'var(--rd)'}">${fpct(sn.daily_return_pct)}</div></div>`;
+      html+=`<div class="sd-metric"><div class="sd-metric-lbl">Cumulative Return · 累计收益</div><div class="sd-metric-val" style="color:${(sn.cumulative_return_pct||0)>=0?'var(--gr)':'var(--rd)'}">${fpct(sn.cumulative_return_pct)}</div></div>`;
+      html+=`<div class="sd-metric"><div class="sd-metric-lbl">Max Drawdown · 最大回撤</div><div class="sd-metric-val" style="color:var(--rd)">${fn(sn.max_drawdown_pct!=null?sn.max_drawdown_pct.toFixed(2)+'%':'--')}</div></div>`;
+      html+=`<div class="sd-metric"><div class="sd-metric-lbl">Win Rate · 胜率</div><div class="sd-metric-val">${fn(sn.win_rate_pct!=null?sn.win_rate_pct.toFixed(1)+'%':'--')}</div></div>`;
+      html+=`<div class="sd-metric"><div class="sd-metric-lbl">Sharpe · 夏普比率</div><div class="sd-metric-val">${fn(sn.sharpe_ratio!=null?sn.sharpe_ratio.toFixed(2):'--')}</div></div>`;
+      html+=`<div class="sd-metric"><div class="sd-metric-lbl">Composite · 综合评分</div><div class="sd-metric-val">${fn(sn.composite_score!=null?sn.composite_score.toFixed(2):'--')}</div></div>`;
       html+='</div></div>';
     }
 
     // Recent analyses
-    html+='<div class="sd-section"><div class="sd-section-title">Recent Analyses</div>';
+    html+='<div class="sd-section"><div class="sd-section-title">Recent Analyses · 近期分析</div>';
     if(d.recent_analyses&&d.recent_analyses.length){
-      html+='<table class="sd-table"><thead><tr><th>Date</th><th>Ticker</th><th>Direction</th></tr></thead><tbody>';
+      html+='<table class="sd-table"><thead><tr><th>Date · 日期</th><th>Ticker · 标的</th><th>Direction · 方向</th></tr></thead><tbody>';
       html+=d.recent_analyses.map(a=>{
         const dirCls={'long':'sd-dir-long','short':'sd-dir-short'}[a.direction]||'sd-dir-abstain';
         return `<tr><td>${fn(a.date)}</td><td style="color:var(--t1);font-weight:500">${fn(a.ticker)}</td><td class="${dirCls}">${fn(a.direction).toUpperCase()}</td></tr>`;
       }).join('');
       html+='</tbody></table>';
-    }else{html+='<div class="sd-empty">No analyses recorded</div>';}
+    }else{html+='<div class="sd-empty">No analyses recorded · 暂无分析记录</div>';}
     html+='</div>';
 
     // Tier history
-    html+='<div class="sd-section"><div class="sd-section-title">Tier History</div>';
+    html+='<div class="sd-section"><div class="sd-section-title">Tier History · 等级历史</div>';
     if(d.tier_history&&d.tier_history.length){
-      html+='<table class="sd-table"><thead><tr><th>Date</th><th>Tier</th></tr></thead><tbody>';
+      html+='<table class="sd-table"><thead><tr><th>Date · 日期</th><th>Tier · 等级</th></tr></thead><tbody>';
       html+=d.tier_history.slice(0,15).map(t=>{
         const bcls=tierClass[t.tier]||'normal';
         return `<tr><td>${fn(t.date)}</td><td><span class="sd-badge ${bcls}">${fn(t.tier).toUpperCase()}</span></td></tr>`;
       }).join('');
       html+='</tbody></table>';
-    }else{html+='<div class="sd-empty">No tier history</div>';}
+    }else{html+='<div class="sd-empty">No tier history · 暂无等级历史</div>';}
     html+='</div>';
 
     // Open positions
-    html+='<div class="sd-section"><div class="sd-section-title">Open Positions</div>';
+    html+='<div class="sd-section"><div class="sd-section-title">Open Positions · 持仓</div>';
     if(d.open_trades&&d.open_trades.length){
-      html+='<table class="sd-table"><thead><tr><th>Ticker</th><th>Direction</th><th>Entry</th><th>P&L</th><th>Entry Date</th></tr></thead><tbody>';
+      html+='<table class="sd-table"><thead><tr><th>Ticker · 标的</th><th>Direction · 方向</th><th>Entry · 入场价</th><th>P&amp;L · 盈亏</th><th>Entry Date · 入场日期</th></tr></thead><tbody>';
       html+=d.open_trades.map(t=>{
         const dirCls=t.direction==='long'?'sd-dir-long':'sd-dir-short';
         const pnlCls=(t.pnl_pct||0)>=0?'var(--gr)':'var(--rd)';
         return `<tr><td style="color:var(--t1);font-weight:500">${fn(t.ticker)}</td><td class="${dirCls}">${fn(t.direction).toUpperCase()}</td><td>$${fn(typeof t.entry_price==='number'?t.entry_price.toFixed(2):t.entry_price)}</td><td style="color:${pnlCls}">${fpct(t.pnl_pct)}</td><td>${fn(t.entry_date)}</td></tr>`;
       }).join('');
       html+='</tbody></table>';
-    }else{html+='<div class="sd-empty">No open positions</div>';}
+    }else{html+='<div class="sd-empty">No open positions · 暂无持仓</div>';}
     html+='</div>';
 
     // Snapshot history
-    html+='<div class="sd-section"><div class="sd-section-title">Snapshot History (Last 60 Days)</div>';
+    html+='<div class="sd-section"><div class="sd-section-title">Snapshot History · 快照历史 (近60天)</div>';
     if(d.snapshots&&d.snapshots.length){
-      html+='<table class="sd-table"><thead><tr><th>Date</th><th>Return</th><th>Cumul</th><th>DD</th><th>WR</th><th>Tier</th></tr></thead><tbody>';
+      html+='<table class="sd-table"><thead><tr><th>Date · 日期</th><th>Return · 收益</th><th>Cumul · 累计</th><th>DD · 回撤</th><th>WR · 胜率</th><th>Tier · 等级</th></tr></thead><tbody>';
       html+=d.snapshots.slice(0,20).map(s=>{
         const t=s.achievement_tier||'--';
         const bcls=tierClass[t]||'normal';
         return `<tr><td>${fn(s.date)}</td><td style="color:${(s.daily_return_pct||0)>=0?'var(--gr)':'var(--rd)'}">${fpct(s.daily_return_pct)}</td><td style="color:${(s.cumulative_return_pct||0)>=0?'var(--gr)':'var(--rd)'}">${fpct(s.cumulative_return_pct)}</td><td style="color:var(--rd)">${fn(s.max_drawdown_pct!=null?s.max_drawdown_pct.toFixed(2)+'%':'--')}</td><td>${fn(s.win_rate_pct!=null?s.win_rate_pct.toFixed(1)+'%':'--')}</td><td><span class="sd-badge ${bcls}">${t.toUpperCase()}</span></td></tr>`;
       }).join('');
       html+='</tbody></table>';
-    }else{html+='<div class="sd-empty">No snapshot history</div>';}
+    }else{html+='<div class="sd-empty">No snapshot history · 暂无快照历史</div>';}
     html+='</div>';
 
     document.getElementById('shadowDetail').innerHTML=html;
-  }catch(e){ document.getElementById('shadowDetail').innerHTML='<div class="muted">Failed to load shadow details</div>'; }
+  }catch(e){ document.getElementById('shadowDetail').innerHTML='<div class="muted">Failed to load shadow details · 加载影子详情失败</div>'; }
 }
 
 // ── Review overlay ────────────────────────────────────────────────

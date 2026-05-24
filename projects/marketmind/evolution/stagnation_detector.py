@@ -87,7 +87,7 @@ def composite_stagnation_score(cusum_score: float, psi_score: float, trend_pvalu
 
 
 def stagnation_grade(score: float) -> str:
-    """Return stagnation grade: "green" (active), "yellow" (stable), "red" (idle)."""
+    """Return stagnation grade: "green" (active), "yellow" (watch/monitor), "red" (stagnant, needs investigation)."""
     if score < 0.3:
         return "green"
     elif score < 0.6:

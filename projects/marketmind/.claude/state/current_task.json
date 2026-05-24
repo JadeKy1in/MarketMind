@@ -1,1 +1,1 @@
-{"type": "fix", "files": ["api/routes.py", "dashboard.html", "evolution.html"], "risk": "low", "description": "Fix browser caching: add max-age=0, meta tags, /evolution route, nav link"}
+{"type": "feat", "files": ["evolution/activity_monitor.py", "tests/test_evolution/test_activity_monitor.py"], "risk": "low", "description": "ActivityMonitor — emit alerts only on shadow activity level changes"}
