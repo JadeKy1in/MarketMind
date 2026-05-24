@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MarketMind — Evolution Tracking</title>
+<style>
+  :root {
+    --bg:#0a0c0f; --card:#111418; --bd:#252830; --t1:#e8eaed; --t2:#9aa0b0; --t3:#6a7280;
+    --gr:#5cb878; --rd:#e0556a; --am:#c8a050; --bl:#5a8fd0;
+    --mono:'SF Mono','Cascadia Code','Consolas',monospace;
+    --sans:'PingFang SC','SF Pro SC',sans-serif;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--t1); font:14px/1.5 var(--sans); padding:20px; }
+  .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
+  .header h1 { font:16px var(--mono); color:var(--am); }
+  .header a { color:var(--bl); text-decoration:none; font:12px var(--mono); }
+  .section { margin-bottom:24px; }
+  .section-title { font:12px var(--mono); color:var(--t3); text-transform:uppercase; letter-spacing:1px; margin-bottom:12px; border-bottom:1px solid var(--bd); padding-bottom:4px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:8px; }
+  .cell { background:var(--card); border:2px solid var(--bd); border-radius:4px; padding:10px; cursor:pointer; transition:border-color .3s; }
+  .cell:hover { border-color:var(--t2); }
+  .cell.green { border-color:var(--gr); }
+  .cell.yellow { border-color:var(--am); }
+  .cell.red { border-color:var(--rd); }
+  .cell-name { font:12px var(--mono); color:var(--t1); margin-bottom:4px; }
+  .cell-meta { font:10px var(--mono); color:var(--t3); }
+  .stagnation-dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:4px; vertical-align:middle; }
+  .stagnation-dot.green { background:var(--gr); }
+  .stagnation-dot.yellow { background:var(--am); }
+  .stagnation-dot.red { background:var(--rd); }
+  .metric-row { display:flex; gap:16px; flex-wrap:wrap; }
+  .metric-card { background:var(--card); border:1px solid var(--bd); border-radius:4px; padding:12px 16px; min-width:150px; }
+  .metric-value { font:24px var(--mono); color:var(--t1); }
+  .metric-label { font:10px var(--mono); color:var(--t3); text-transform:uppercase; margin-bottom:4px; }
+  .metric-delta { font:11px var(--mono); margin-top:4px; }
+  .delta-up { color:var(--gr); }
+  .delta-down { color:var(--rd); }
+  .delta-flat { color:var(--t3); }
+  .empty-state { color:var(--t3); font-size:14px; text-align:center; padding:60px 0; }
+  .refresh-btn { background:var(--card); border:1px solid var(--bd); color:var(--t1); padding:4px 12px; border-radius:3px; cursor:pointer; font:12px var(--mono); }
+  .refresh-btn:hover { border-color:var(--am); }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>📈 Evolution Tracking</h1>
+  <div>
+    <span id="lastUpdated" style="color:var(--t3);font:11px var(--mono)"></span>
+    <button class="refresh-btn" onclick="loadAll()">⟳ Refresh</button>
+    <a href="/" style="margin-left:16px;">← Dashboard</a>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">Shadow Stagnation Overview — <span style="color:var(--gr)">Healthy</span> / <span style="color:var(--am)">Watch</span> / <span style="color:var(--rd)">Stagnant</span></div>
+  <div class="grid" id="shadowGrid">
+    <div class="empty-state">Loading...</div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">Pipeline Evolution</div>
+  <div class="metric-row" id="pipelineMetrics">
+    <div class="empty-state">Loading...</div>
+  </div>
+</div>
+
+<script>
+function fmtPct(v) { return v != null ? (v*100).toFixed(1)+'%' : '—'; }
+function fmtNum(v) { return v != null ? v.toFixed(3) : '—'; }
+
+async function loadAll() {
+  await Promise.all([loadStagnation(), loadPipeline()]);
+  document.getElementById('lastUpdated').textContent = 'Updated: ' + new Date().toLocaleString();
+}
+
+async function loadStagnation() {
+  try {
+    var resp = await fetch('/api/evolution/stagnation');
+    var data = await resp.json();
+    var grid = document.getElementById('shadowGrid');
+    var entries = Object.entries(data.stagnation || {});
+    if (entries.length === 0) {
+      grid.innerHTML = '<div class="empty-state">No data yet — run pipeline to accumulate weekly snapshots</div>';
+      return;
+    }
+    entries.sort(function(a,b) { return a[1].stagnation_score - b[1].stagnation_score; });
+    grid.innerHTML = entries.map(function(e) {
+      var id = e[0], s = e[1];
+      return '<div class="cell ' + s.grade + '">' +
+        '<div class="cell-name">' + id + '</div>' +
+        '<div class="cell-meta">' +
+        '<span class="stagnation-dot ' + s.grade + '"></span>' +
+        (s.stagnation_score*100).toFixed(0) + '% stagnant' +
+        '<br>CUSUM: ' + s.cusum.toFixed(2) + ' | PSI: ' + s.psi.toFixed(2) + ' | p: ' + s.trend_pvalue.toFixed(3) +
+        '</div></div>';
+    }).join('');
+  } catch(e) {
+    document.getElementById('shadowGrid').innerHTML = '<div class="empty-state">Error loading data</div>';
+  }
+}
+
+async function loadPipeline() {
+  try {
+    var resp = await fetch('/api/evolution/pipeline');
+    var data = await resp.json();
+    var latest = data.history && data.history.length ? data.history[data.history.length-1].metrics : {};
+    var baseline = data.baseline || {};
+    var cards = [
+      {label:'Degradation Rate', v:latest.degradation_rate, b:baseline.degradation_rate, fmt:fmtPct, better:'down'},
+      {label:'Direction Accuracy', v:latest.direction_accuracy, b:baseline.direction_accuracy, fmt:fmtPct, better:'up'},
+      {label:'Closure Rate', v:latest.closure_rate, b:baseline.closure_rate, fmt:fmtPct, better:'up'},
+      {label:'DSR', v:latest.dsr, b:baseline.dsr, fmt:fmtNum, better:'up'},
+    ];
+    document.getElementById('pipelineMetrics').innerHTML = cards.map(function(m) {
+      var delta = (m.b != null && m.v != null) ? (m.v - m.b) : 0;
+      var cls = '';
+      if (m.b == null) cls = 'delta-flat';
+      else if (m.better === 'up') cls = delta > 0.02 ? 'delta-up' : delta < -0.02 ? 'delta-down' : 'delta-flat';
+      else cls = delta < -0.02 ? 'delta-up' : delta > 0.02 ? 'delta-down' : 'delta-flat';
+      var deltaStr = m.b != null ? (delta>=0?'+':'')+m.fmt(delta) : 'no baseline';
+      return '<div class="metric-card">' +
+        '<div class="metric-label">' + m.label + '</div>' +
+        '<div class="metric-value">' + m.fmt(m.v) + '</div>' +
+        '<div class="metric-delta ' + cls + '">vs baseline: ' + m.fmt(m.b) + ' (' + deltaStr + ')</div>' +
+        '</div>';
+    }).join('') || '<div class="empty-state">No pipeline data yet</div>';
+  } catch(e) {
+    document.getElementById('pipelineMetrics').innerHTML = '<div class="empty-state">Error loading data</div>';
+  }
+}
+
+loadAll();
+setInterval(loadAll, 60000);
+</script>
+</body>
+</html>
