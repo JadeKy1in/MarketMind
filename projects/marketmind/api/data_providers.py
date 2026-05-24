@@ -160,16 +160,16 @@ def get_shadow_overview() -> dict:
 def get_shadow_rankings() -> dict:
     db = _get_shadow_db()
     shadows = db.get_visible_shadows()
-    top5 = []
-    for s in shadows[:5]:
+    top_all = []
+    for s in shadows[:25]:
         snap = db.get_latest_snapshot(s.shadow_id)
-        top5.append({
+        top_all.append({
             "shadow_id": s.shadow_id,
             "name": s.display_name,
             "tier": snap.achievement_tier if snap and snap.achievement_tier else "normal",
             "score": round(snap.composite_score, 2) if snap and snap.composite_score else 0.0,
         })
-    return {"top5": top5}
+    return {"rankings": top_all}
 
 
 def get_shadow_detail(shadow_id: str) -> dict:
