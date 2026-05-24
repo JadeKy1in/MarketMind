@@ -80,13 +80,14 @@ def _reg_beta(x: float, a: float, b: float) -> float:
 
 
 def composite_stagnation_score(cusum_score: float, psi_score: float, trend_pvalue: float) -> float:
-    """Combine three signals into 0-1 score. Higher = more stagnant."""
+    """Combine three signals into 0-1 score. Higher = less active."""
     trend_signal = 1.0 if trend_pvalue > 0.05 else 0.0
     psi_signal = min(psi_score / 0.25, 1.0)
     return cusum_score * 0.33 + psi_signal * 0.33 + trend_signal * 0.34
 
 
 def stagnation_grade(score: float) -> str:
+    """Return stagnation grade: "green" (active), "yellow" (stable), "red" (idle)."""
     if score < 0.3:
         return "green"
     elif score < 0.6:

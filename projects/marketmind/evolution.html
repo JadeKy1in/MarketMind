@@ -58,7 +58,7 @@
 </div>
 
 <div class="section">
-  <div class="section-title">Shadow Stagnation · 影子停滞状态 — <span style="color:var(--gr)">Healthy (健康)</span> / <span style="color:var(--am)">Watch (观察)</span> / <span style="color:var(--rd)">Stagnant (停滞)</span></div>
+  <div class="section-title">Evolution Activity · 进化活跃度 — <span style="color:var(--gr)">Active (活跃)</span> / <span style="color:var(--am)">Stable (稳定)</span> / <span style="color:var(--rd)">Idle (待激活)</span></div>
   <div class="grid" id="shadowGrid">
     <div class="empty-state">Loading...</div>
   </div>
@@ -97,7 +97,7 @@ async function loadStagnation() {
         '<div class="cell-name">' + id + '</div>' +
         '<div class="cell-meta">' +
         '<span class="stagnation-dot ' + s.grade + '"></span>' +
-        (s.stagnation_score*100).toFixed(0) + '% stagnant' +
+        (s.stagnation_score*100).toFixed(0) + 'activity' +
         '<br>CUSUM: ' + s.cusum.toFixed(2) + ' | PSI: ' + s.psi.toFixed(2) + ' | p: ' + s.trend_pvalue.toFixed(3) +
         '</div></div>';
     }).join('');
