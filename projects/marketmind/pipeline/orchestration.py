@@ -117,8 +117,11 @@ async def _do_l2_l3_parallel(l1_result, tracker: StageTracker):
 
 async def _do_red_team(l1_result, l2_result, selected_tickers: list, tracker: StageTracker):
     tracker.advance(6, "Red Team: adversarial challenge...")
-    from marketmind.pipeline.red_team import run_red_team
+    from marketmind.pipeline.red_team import run_red_team, RedTeamReport
     report = await run_red_team(l1_result.raw_analysis, l2_result.raw_analysis, selected_tickers)
+    if report is None:
+        tracker.result("Red Team timed out — returning empty report")
+        return RedTeamReport()
     tracker.result(f"{len(report.challenges)} challenges, A-grade: {report.a_grade_count}")
     return report
 
