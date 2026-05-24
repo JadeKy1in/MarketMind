@@ -1,9 +1,0 @@
-{
-  "module": "fragility_thresholds",
-  "timestamp": "2026-05-18T05:30:02Z",
-  "auditor": "PICA-Security-PhaseH",
-  "risk_tier": "Low",
-  "findings": [],
-  "verdict": "PASS",
-  "notes": "Pure data/validation module. No LLM calls, no file I/O, no network. 13 fragility thresholds across liquidity/rate/volatility/macro/international/crypto domains. validate_thresholds() checks for >90-day staleness with UTC timestamps. datetime.now(timezone.utc) used for default last_validated. Exempt from single-entry-point rule."
-}

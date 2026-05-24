@@ -1,9 +1,0 @@
-{
-  "module": "mechanism_glossary",
-  "timestamp": "2026-05-18T05:30:02Z",
-  "auditor": "PICA-Security-PhaseH",
-  "risk_tier": "Low",
-  "findings": [],
-  "verdict": "PASS",
-  "notes": "Pure data/reference module. No LLM calls, no file I/O, no network. 30+ mechanism entries with Chinese names, descriptions, data sources, directional implications. MECHANISM_ESCAPE_HATCH constant enforces honest uncertainty. No mutable state. Exempt from single-entry-point rule."
-}

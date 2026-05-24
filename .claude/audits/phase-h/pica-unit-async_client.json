@@ -1,1 +1,0 @@
-{"module": "gateway/async_client.py", "timestamp": "2026-05-19T03:00:00Z", "level": "PICA-Unit", "test_count": 7, "passed": 7, "failed": 0, "verdict": "PASS", "change": "chat_flash reasoning_effort default: max → minimal"}

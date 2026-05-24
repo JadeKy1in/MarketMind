@@ -1,9 +1,0 @@
-{
-  "module": "asset_class_routing",
-  "timestamp": "2026-05-18T05:30:02Z",
-  "auditor": "PICA-Security-PhaseH",
-  "risk_tier": "Low",
-  "findings": [],
-  "verdict": "PASS",
-  "notes": "Pure configuration/routing module. No LLM calls, no file I/O, no network. 9 AssetClassConfig entries with keywords, tickers, entity types, and decomposition lens routing. route_asset_class() is deterministic keyword-density classifier. Disambiguation warning logged when runner-up within 0.1 confidence. No mutable global state. Exempt from single-entry-point rule."
-}

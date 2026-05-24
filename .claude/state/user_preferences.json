@@ -1,6 +1,8 @@
 {
   "_schema_version": "1.0",
   "_created": "2026-05-23T11:00:00Z",
+  "_updated": "2026-05-24T03:30:00Z",
+  "_cold_start_completed": true,
   "_description": "User proxy preference store — three-tier (universal, domain, project). See user_proxy_design.json for semantics.",
 
   "tags": {
@@ -29,7 +31,86 @@
       "scope": "Style invariants across all projects — applied before project/domain tiers.",
       "curation": "manual",
       "priority": 1,
-      "entries": []
+      "entries": [
+        {
+          "id": "naming_pep8",
+          "tag": "STANDARD",
+          "description": "Python code follows PEP 8 naming: snake_case for variables/functions, PascalCase for classes",
+          "rule": "All Python identifiers MUST follow PEP 8 — snake_case for functions and variables, PascalCase for classes, UPPER_SNAKE for constants.",
+          "confidence": 0.95,
+          "source": "explicit_approval",
+          "signals": [{"type": "explicit_approval", "timestamp": "2026-05-24T03:30:00Z", "context_fingerprint": {"project": "marketmind", "decision_class": "style"}}],
+          "confirmations_received": 1,
+          "status": "active",
+          "created_at": "2026-05-24T03:30:00Z",
+          "updated_at": "2026-05-24T03:30:00Z"
+        },
+        {
+          "id": "commit_style_conventional",
+          "tag": "STANDARD",
+          "description": "Git commits use English conventional commit format: feat:/fix:/chore:/docs: prefix + short description",
+          "rule": "Every commit message MUST use conventional commit format in English: type(scope): description. Types: feat, fix, chore, docs, refactor, test.",
+          "confidence": 0.95,
+          "source": "explicit_approval",
+          "signals": [{"type": "explicit_approval", "timestamp": "2026-05-24T03:30:00Z", "context_fingerprint": {"decision_class": "commit"}}],
+          "confirmations_received": 1,
+          "status": "active",
+          "created_at": "2026-05-24T03:30:00Z",
+          "updated_at": "2026-05-24T03:30:00Z"
+        },
+        {
+          "id": "testing_always_full",
+          "tag": "HIGH_STAKES",
+          "description": "Every code change MUST run full test suite before commit — no exceptions",
+          "rule": "Before every commit that changes .py files, run: python -m pytest tests/ -x -q -m 'not slow'. Must pass 100%.",
+          "confidence": 0.95,
+          "source": "explicit_approval",
+          "signals": [{"type": "explicit_approval", "timestamp": "2026-05-24T03:30:00Z", "context_fingerprint": {"decision_class": "testing"}}],
+          "confirmations_received": 1,
+          "status": "active",
+          "created_at": "2026-05-24T03:30:00Z",
+          "updated_at": "2026-05-24T03:30:00Z"
+        },
+        {
+          "id": "autonomy_technical_only",
+          "tag": "HIGH_STAKES",
+          "description": "Proxy Agent auto-executes technical decisions (code quality, architecture) but defers product/feature direction to user",
+          "rule": "Decisions classified as TECHNICAL (code structure, tool choice, performance optimization) may be auto-executed. Decisions classified as PRODUCT (feature scope, UX behavior, business logic) MUST be escalated to user.",
+          "confidence": 0.90,
+          "source": "explicit_approval",
+          "signals": [{"type": "explicit_approval", "timestamp": "2026-05-24T03:30:00Z", "context_fingerprint": {"decision_class": "autonomy"}}],
+          "confirmations_received": 1,
+          "status": "active",
+          "created_at": "2026-05-24T03:30:00Z",
+          "updated_at": "2026-05-24T03:30:00Z"
+        },
+        {
+          "id": "risk_thorough_root_cause",
+          "tag": "HIGH_STAKES",
+          "description": "Conservative process (backup first, precise changes, test thoroughly) but root-cause-focused solutions — fix the problem, not the symptom",
+          "rule": "Before modifying critical modules (gateway, pipeline core, shadow state): (1) backup existing file to .claude/backups/, (2) minimal precise edit targeting root cause, (3) run related tests before commit. Fix the underlying cause, not the surface symptom.",
+          "confidence": 0.92,
+          "source": "explicit_approval",
+          "signals": [{"type": "explicit_approval", "timestamp": "2026-05-24T03:30:00Z", "context_fingerprint": {"decision_class": "risk"}}],
+          "confirmations_received": 1,
+          "status": "active",
+          "created_at": "2026-05-24T03:30:00Z",
+          "updated_at": "2026-05-24T03:30:00Z"
+        },
+        {
+          "id": "docs_major_changes_only",
+          "tag": "STANDARD",
+          "description": "Only write documentation for major features or architecture changes — routine fixes documented via commit messages",
+          "rule": "Create docs files (specs, plans, retrospectives) only for: new features >100 lines, architecture changes, API/schema changes. Routine bug fixes and tweaks are documented via commit messages only.",
+          "confidence": 0.93,
+          "source": "explicit_approval",
+          "signals": [{"type": "explicit_approval", "timestamp": "2026-05-24T03:30:00Z", "context_fingerprint": {"decision_class": "documentation"}}],
+          "confirmations_received": 1,
+          "status": "active",
+          "created_at": "2026-05-24T03:30:00Z",
+          "updated_at": "2026-05-24T03:30:00Z"
+        }
+      ]
     },
     "domain": {
       "scope": "Per-domain patterns (Python project conventions, TypeScript/react patterns, database/sql conventions).",

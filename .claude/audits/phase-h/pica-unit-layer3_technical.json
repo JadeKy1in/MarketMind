@@ -1,1 +1,0 @@
-{"module": "pipeline/layer3_technical.py", "timestamp": "2026-05-19T03:15:00Z", "level": "PICA-Unit", "test_count": 8, "passed": 8, "failed": 0, "verdict": "PASS", "change": "Float conversion: d.get(key, 0) → d.get(key) or 0 to handle None values from LLM JSON null fields"}
