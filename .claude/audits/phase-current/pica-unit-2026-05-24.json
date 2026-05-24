@@ -1,0 +1,18 @@
+{
+  "gate": "unit",
+  "date": "2026-05-24",
+  "scope": "notification + evolution + max_token fix",
+  "new_tests": 27,
+  "total_tests": 2016,
+  "pass": 2016,
+  "fail": 0,
+  "test_files": [
+    "tests/test_notification/test_alert_schema.py",
+    "tests/test_notification/test_sanitizer.py",
+    "tests/test_notification/test_alert_manager.py",
+    "tests/test_notification/test_monitor_decorator.py",
+    "tests/test_evolution/test_stagnation_detector.py"
+  ],
+  "verification": "pytest -q -m 'not slow' — 2016 passed, 0 fail",
+  "hash": "unit-20260524-2016pass"
+}

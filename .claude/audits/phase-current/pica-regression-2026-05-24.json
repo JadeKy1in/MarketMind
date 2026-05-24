@@ -1,0 +1,21 @@
+{
+  "gate": "regression",
+  "date": "2026-05-24",
+  "scope": "full test suite verification after notification + evolution + max_token changes",
+  "before": {
+    "total": 1997,
+    "pass": 1996,
+    "fail": 1,
+    "failing_test": "test_stage3_l1_real (flaky — API rate limit during parallel run)"
+  },
+  "after": {
+    "total": 2016,
+    "pass": 2016,
+    "fail": 0,
+    "new_tests": 27
+  },
+  "command": "pytest tests/ -x -q -m 'not slow' -p no:warnings",
+  "result": "2016 passed, 9 deselected in 236.27s",
+  "flaky_test_verified": "test_stage3_l1_real PASSED when run in isolation (125.74s) — transient 429 during full suite",
+  "hash": "regression-20260524-2016pass-0fail"
+}

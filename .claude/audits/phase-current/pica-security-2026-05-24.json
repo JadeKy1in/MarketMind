@@ -1,0 +1,47 @@
+{
+  "gate": "security",
+  "date": "2026-05-24",
+  "scope": "notification + evolution + dashboard UI",
+  "reviewer": "feature-dev:code-reviewer (Red Team agent a9ed90ec0eca002a8)",
+  "findings": [
+    {
+      "id": "H1",
+      "severity": "HIGH",
+      "issue": "No rate limiting or alert storm protection",
+      "fix": "Added per-source cooldown 30s, global throttle 10/sec, dedup with 60s window"
+    },
+    {
+      "id": "H2",
+      "severity": "HIGH",
+      "issue": "Dedup/grouping algorithm completely unspecified",
+      "fix": "Specified: same source+severity+title[:40] within 60s window"
+    },
+    {
+      "id": "H3",
+      "severity": "HIGH",
+      "issue": "No failure mode for alert database itself",
+      "fix": "Python logging fallback + UI stale indicator + 60s health check"
+    },
+    {
+      "id": "H4",
+      "severity": "HIGH",
+      "issue": "No sanitization of Alert.detail before WebSocket broadcast",
+      "fix": "Sanitize: strip API keys, file paths, truncate HTTP bodies to 200 chars"
+    },
+    {
+      "id": "M5",
+      "severity": "MED",
+      "issue": "Shadow step skip scenario missing from coverage table",
+      "fix": "Added scenario #17"
+    },
+    {
+      "id": "M6",
+      "severity": "MED",
+      "issue": "Static severity assignments — no escalation on repetition",
+      "fix": "WARN 5x/10min auto-upgrades to ERROR"
+    }
+  ],
+  "all_fixed": true,
+  "post_fix_review": "frequency escalation off-by-one bug found and fixed (WARN timestamps now tracked outside 60s dedup guard)",
+  "hash": "security-20260524-6found-6fixed"
+}
