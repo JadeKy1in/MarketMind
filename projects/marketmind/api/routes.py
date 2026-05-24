@@ -132,6 +132,33 @@ async def alerts_health():
     return JSONResponse(get_alert_manager().health())
 
 
+@app.get("/api/evolution/shadows")
+async def evolution_shadows():
+    try:
+        from marketmind.api.data_providers import get_shadow_evolution
+        return JSONResponse(get_shadow_evolution())
+    except Exception:
+        return JSONResponse({"shadows": {}})
+
+
+@app.get("/api/evolution/pipeline")
+async def evolution_pipeline():
+    try:
+        from marketmind.api.data_providers import get_pipeline_evolution
+        return JSONResponse(get_pipeline_evolution())
+    except Exception:
+        return JSONResponse({"history": [], "baseline": None})
+
+
+@app.get("/api/evolution/stagnation")
+async def evolution_stagnation():
+    try:
+        from marketmind.api.data_providers import get_stagnation_report
+        return JSONResponse(get_stagnation_report())
+    except Exception:
+        return JSONResponse({"stagnation": {}})
+
+
 @app.get("/api/health")
 async def health():
     return JSONResponse(get_health())

@@ -265,3 +265,66 @@ def get_decision_history(limit: int = 10) -> dict:
         for r in results
     ]
     return {"decisions": decisions}
+
+
+# ── Evolution Tracking Providers ────────────────────────────────────
+
+def get_shadow_evolution() -> dict:
+    import json
+    from marketmind.evolution.snapshot_store import SnapshotStore
+    store = SnapshotStore()
+    rows = store._conn.execute(
+        "SELECT entity_id, week_start, metrics_json FROM snapshots "
+        "WHERE scope='shadow' ORDER BY week_start DESC LIMIT 500"
+    ).fetchall()
+    shadows: dict[str, list] = {}
+    for row in rows:
+        sid, ws, mj = row[0], row[1], json.loads(row[2])
+        if sid not in shadows:
+            shadows[sid] = []
+        shadows[sid].append({"week_start": ws, "metrics": mj})
+    return {"shadows": shadows}
+
+
+def get_pipeline_evolution() -> dict:
+    from marketmind.evolution.snapshot_store import SnapshotStore
+    store = SnapshotStore()
+    history = store.get_history("pipeline", "main_pipeline", limit=12)
+    baseline = store.get_baseline("pipeline", "main_pipeline")
+    return {"history": history, "baseline": baseline}
+
+
+def get_stagnation_report() -> dict:
+    import json
+    from marketmind.evolution.stagnation_detector import (
+        compute_cusum, compute_psi, linear_trend_pvalue,
+        composite_stagnation_score, stagnation_grade,
+    )
+    from marketmind.evolution.snapshot_store import SnapshotStore
+    store = SnapshotStore()
+    results = {}
+    rows = store._conn.execute(
+        "SELECT entity_id, metrics_json FROM snapshots WHERE scope='shadow'"
+    ).fetchall()
+    # Group by shadow
+    shadow_data: dict[str, list[dict]] = {}
+    for row in rows:
+        sid, mj = row[0], json.loads(row[1])
+        if sid not in shadow_data:
+            shadow_data[sid] = []
+        shadow_data[sid].append(mj)
+    for sid, metrics_list in shadow_data.items():
+        sharpes = [m.get("sharpe", 0) for m in metrics_list if "sharpe" in m]
+        if len(sharpes) >= 4:
+            cusum = compute_cusum(sharpes)
+            psi = compute_psi(sharpes[:len(sharpes)//2], sharpes[len(sharpes)//2:])
+            pval = linear_trend_pvalue(sharpes)
+            score = composite_stagnation_score(cusum, psi, pval)
+            results[sid] = {
+                "stagnation_score": round(score, 3),
+                "grade": stagnation_grade(score),
+                "cusum": round(cusum, 3),
+                "psi": round(psi, 3),
+                "trend_pvalue": round(pval, 3),
+            }
+    return {"stagnation": results}
