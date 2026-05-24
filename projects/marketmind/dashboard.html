@@ -14,7 +14,7 @@
     --t1: #e8eaed; --t2: #9aa0b0; --t3: #6a7280;
     --gr: #5cb878; --rd: #e0556a; --am: #c8a050; --bl: #5a8fd0; --pu: #8878c8;
     --mono: 'SF Mono','Cascadia Code','JetBrains Mono','Consolas',monospace;
-    --sans: 'PingFang SC','SF Pro SC',-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;
+    --sans: 'PingFang SC','Microsoft YaHei','SF Pro Text','SF Pro Display',-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;
   }
   * { margin:0; padding:0; box-sizing:border-box; scrollbar-width:thin; scrollbar-color:var(--bd) transparent; }
   body { background:var(--bg); color:var(--t1); font:14px/1.5 var(--sans); -webkit-font-smoothing:antialiased; height:100vh; overflow:hidden; }
@@ -457,10 +457,10 @@ function renderChat(){
 async function loadShadowDetail(){
   try{
     const [overview,rankings]=await Promise.all([fetch('/api/shadows/overview').then(r=>r.json()),fetch('/api/shadows/rankings').then(r=>r.json())]);
-    const tiers=overview.tiers||{}, top5=rankings.top5||[];
+    const tiers=overview.tiers||{}, all_shadows=rankings.rankings||[];
     let html='<div style="font-size:12px;margin-bottom:12px;display:flex;gap:20px">';
     html+=`<span>Total: ${overview.total||0}</span><span>Graduates: ${overview.graduates||0}</span><span>Trials: ${overview.challenger_trials||0}</span><span>Evolutions: ${overview.evolutions_today||0}</span></div>`;
-    if(top5.length) html+='<div style="font-size:11px;color:var(--t3);margin-bottom:8px">TOP PERFORMERS</div>'+top5.map(s=>
+    if(all_shadows.length) html+='<div style="font-size:11px;color:var(--t3);margin-bottom:8px">ALL SHADOWS · 全部影子</div>'+all_shadows.map(s=>
       `<div class="shadow-card"><div class="shadow-card-header"><span class="shadow-name" style="cursor:pointer;text-decoration:underline" onclick="event.stopPropagation();loadIndividualShadow('${s.shadow_id||''}')">${s.name}</span><span class="shadow-tier-tag t-${s.tier}">${s.tier.toUpperCase()}</span></div><div class="shadow-stats"><div class="shadow-stat"><span>Composite</span><span class="shadow-stat-val">${s.score.toFixed(2)}</span></div></div></div>`
     ).join('');
     document.getElementById('shadowDetail').innerHTML=html||'<div class="muted">No shadow data available</div>';

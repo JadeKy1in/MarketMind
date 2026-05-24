@@ -6,7 +6,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MarketMind — Evolution Tracking</title>
+<title>📈 Evolution Tracking · 进化追踪</title>
 <style>
   :root {
     --bg:#0a0c0f; --card:#111418; --bd:#252830; --t1:#e8eaed; --t2:#9aa0b0; --t3:#6a7280;
@@ -16,6 +16,7 @@
   }
   * { margin:0; padding:0; box-sizing:border-box; }
   body { background:var(--bg); color:var(--t1); font:14px/1.5 var(--sans); padding:20px; }
+  [lang="zh"] { font-family: 'PingFang SC','Microsoft YaHei','Noto Sans SC',sans-serif; }
   .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
   .header h1 { font:16px var(--mono); color:var(--am); }
   .header a { color:var(--bl); text-decoration:none; font:12px var(--mono); }
@@ -48,7 +49,7 @@
 </head>
 <body>
 <div class="header">
-  <h1>📈 Evolution Tracking</h1>
+  <h1>📈 Evolution Tracking · 进化追踪</h1>
   <div>
     <span id="lastUpdated" style="color:var(--t3);font:11px var(--mono)"></span>
     <button class="refresh-btn" onclick="loadAll()">⟳ Refresh</button>
@@ -57,14 +58,14 @@
 </div>
 
 <div class="section">
-  <div class="section-title">Shadow Stagnation Overview — <span style="color:var(--gr)">Healthy</span> / <span style="color:var(--am)">Watch</span> / <span style="color:var(--rd)">Stagnant</span></div>
+  <div class="section-title">Shadow Stagnation · 影子停滞状态 — <span style="color:var(--gr)">Healthy (健康)</span> / <span style="color:var(--am)">Watch (观察)</span> / <span style="color:var(--rd)">Stagnant (停滞)</span></div>
   <div class="grid" id="shadowGrid">
     <div class="empty-state">Loading...</div>
   </div>
 </div>
 
 <div class="section">
-  <div class="section-title">Pipeline Evolution</div>
+  <div class="section-title">Pipeline Evolution · 管线进化</div>
   <div class="metric-row" id="pipelineMetrics">
     <div class="empty-state">Loading...</div>
   </div>
@@ -76,7 +77,7 @@ function fmtNum(v) { return v != null ? v.toFixed(3) : '—'; }
 
 async function loadAll() {
   await Promise.all([loadStagnation(), loadPipeline()]);
-  document.getElementById('lastUpdated').textContent = 'Updated: ' + new Date().toLocaleString();
+  document.getElementById('lastUpdated').textContent = 'Updated · 更新于: ' + new Date().toLocaleString();
 }
 
 async function loadStagnation() {
@@ -86,7 +87,7 @@ async function loadStagnation() {
     var grid = document.getElementById('shadowGrid');
     var entries = Object.entries(data.stagnation || {});
     if (entries.length === 0) {
-      grid.innerHTML = '<div class="empty-state">No data yet — run pipeline to accumulate weekly snapshots</div>';
+      grid.innerHTML = '<div class="empty-state">No data yet — run pipeline to accumulate snapshots · 暂无数据，运行管线积累快照</div>';
       return;
     }
     entries.sort(function(a,b) { return a[1].stagnation_score - b[1].stagnation_score; });
@@ -112,10 +113,10 @@ async function loadPipeline() {
     var latest = data.history && data.history.length ? data.history[data.history.length-1].metrics : {};
     var baseline = data.baseline || {};
     var cards = [
-      {label:'Degradation Rate', v:latest.degradation_rate, b:baseline.degradation_rate, fmt:fmtPct, better:'down'},
-      {label:'Direction Accuracy', v:latest.direction_accuracy, b:baseline.direction_accuracy, fmt:fmtPct, better:'up'},
-      {label:'Closure Rate', v:latest.closure_rate, b:baseline.closure_rate, fmt:fmtPct, better:'up'},
-      {label:'DSR', v:latest.dsr, b:baseline.dsr, fmt:fmtNum, better:'up'},
+      {label:'Degradation Rate · 降级率', v:latest.degradation_rate, b:baseline.degradation_rate, fmt:fmtPct, better:'down'},
+      {label:'Direction Accuracy · 方向准确率', v:latest.direction_accuracy, b:baseline.direction_accuracy, fmt:fmtPct, better:'up'},
+      {label:'Closure Rate · 复盘闭环率', v:latest.closure_rate, b:baseline.closure_rate, fmt:fmtPct, better:'up'},
+      {label:'DSR · 降噪夏普', v:latest.dsr, b:baseline.dsr, fmt:fmtNum, better:'up'},
     ];
     document.getElementById('pipelineMetrics').innerHTML = cards.map(function(m) {
       var delta = (m.b != null && m.v != null) ? (m.v - m.b) : 0;
