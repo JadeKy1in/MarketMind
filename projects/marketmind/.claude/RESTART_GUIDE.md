@@ -1,58 +1,81 @@
-# MarketMind Restart Guide — 2026-05-23 EOD
+# MarketMind Restart Guide — 2026-05-24 EOD
 
-**Tests**: 1,998 pass, 0 fail, 0 skip | **CI**: green | **Branch**: master
-**frontload_required**: true
+**Tests**: 2,039 pass, 0 fail, 0 skip | **CI**: green | **Branch**: master
+**All pushed**: no | **frontload_required**: true
+**Commits today**: 24
 
 ---
 
 ## 重启指令
 
-> 继续 MarketMind 开发。阅读 `.claude/RESTART_GUIDE.md`。
+> 继续 MarketMind 开发。阅读 `.claude/RESTART_GUIDE.md`。上次完成：通知系统 + 进化追踪面板 + UI 增强。测试 2,039 pass。
 
 ---
 
-## ⚡ FRONTLOAD — 先交互再开发
+## 今日完成 (2026-05-24)
 
-1. Flash 扫描此文件 → 列出需要用户决定的点
-2. 完成所有同步交互 → 然后启动异步 Agent
+### 通知/告警系统
+- AlertManager：去重/限流/升级/脱敏/持久化，WebSocket 实时推送
+- Dashboard UI：铃铛 + 弹窗（ERROR 30s）+ 紧急横幅（CRITICAL）+ 滚动日志
+- Gateway 埋点：5 个降级点（预算耗尽/JSON回退/断路器切换）
+- 8 个 Pipeline Stage：@monitor 装饰器自动捕获异常/空返回/超时
 
----
+### 进化追踪
+- `/evolution` 独立页面：影子进化活跃度网格 + 管线指标卡
+- 停滞检测：CUSUM + PSI + 线性趋势 → 综合活跃度分（绿/黄/红）
+- ActivityMonitor：只在活跃度等级变化时通知一次
 
-## 项目当前状态
+### 基础设施
+- max_token 修复：13 个 Pro 调用解除限制
+- 浏览器缓存修复：三层防缓存（Server + HTML meta + ETag）
+- 文档清理：~130 过期文件删除（git 历史可恢复）
+- User Proxy Agent 冷启动：6 条偏好种子
 
-### 已完成
-- 10 pipeline stages + 3 gates（全管线实盘验证通过）
-- Shadow ecosystem：25 shadows，ELITE，challenger
-- API server + WebSocket + Dashboard（影子详情页）
-- 模块化：所有文件 <550 行，6 个 L1 模块，7 个 grandfather 新模块
-- 测试：1,998 pass，覆盖率全面
-- CI/CD：GitHub Actions，push 自动跑
-- 门禁：PreToolUse start gate + 7-gate Stop gate（PICA 自动刷新）
-- User Proxy Agent v1.1（19 红方发现修复）
-- 代码清理：461 死文件删除，worktree 自动清理
-
-### 运行时快速命令
-```bash
-cd E:/AI_Studio_Workspace/projects/marketmind
-python api_server.py                    # Dashboard → http://localhost:8520
-python app.py --mode daily --mock -v    # 模拟分析（不花钱）
-python app.py --mode daily -v           # 真实 API 分析
-python -m pytest tests/ -v -m "not slow" -p no:warnings  # 快速测试
-```
+### UI 增强
+- ▶ Run 按钮：Dashboard 一键启动 mock 管线分析
+- 影子排名：25 影子全显示，前 5 绿色高亮，后 5 红色高亮
+- 影子中文名 + 投资标的/策略描述
+- 影子详情页中英双语 + 统一字体
+- 进化活跃度：红=停滞·Stagnant，黄=关注·Watch，绿=活跃·Active
 
 ---
 
-## 下次可以做的
+## 明天可以做的
 
 | # | 任务 | 说明 |
 |:--:|------|------|
-| **1** | **通知/报错系统** | 最高优先级。先查外网资料（金融/数据平台的通知系统设计、Prometheus AlertManager 模式、Bloomberg 终端错误分级），然后设计 MarketMind 专属的 AlertManager + Dashboard 通知面板。覆盖所有降级场景：思考溢出(content空→JSON回退)、float解析失败、API 429/预算耗尽、stage 返回空、影子超时、文件缺失。每个警告需有级别(INFO/WARN/ERROR/CRITICAL)、来源模块、时间戳、可操作建议。UI 上：Dashboard 右上角通知铃铛 + 底部滚动日志 + 严重问题弹窗 |
-| 2 | UI 优化 | Dashboard 使用体验——你自己用的时候觉得哪里不好 |
-| 3 | User Proxy Agent 实战 | 首次启用代理系统，走一遍冷启动引导 |
-| 4 | A/B 测试 AEL | `scripts/ael_experiment.py` 已跑通，可以调参实验 |
+| **1** | **你亲自测试 Dashboard** | `python api_server.py` → `localhost:8520`，点 ▶ Run，看通知铃铛、进化页面、影子卡片是否符合预期 |
+| 2 | AEL 调参实验 | `scripts/ael_experiment.py` 已有 mock 结果，可对比月频 vs 双周频 |
+| 3 | 影子知识管理器测试 | 确认影子学习闭环是否正常 |
+| 4 | 管线实盘验证 | `python app.py --mode daily`（需要 API 预算） |
 
-## 最近修复
+---
 
-- **LLM JSON 可靠性**: 思考模式 token 竞争修复——max_tokens 从 4K→32K(Pro默认)、_extract_json_from_reasoning 兜底
-- **全量审计**: 20 问题修完（8 HIGH + 5 MED + 7 LOW）
-- **一致性检查**: Stop hook 每次会话结束自动扫描
+## 快速命令
+
+```bash
+cd E:/AI_Studio_Workspace/projects/marketmind
+python api_server.py                    # Dashboard → http://localhost:8520
+python app.py --mode daily --mock -v    # 模拟分析
+python -m pytest tests/ -q -m "not slow" -p no:warnings  # 测试
+```
+
+## 新增 API 端点
+
+| 端点 | 用途 |
+|------|------|
+| `GET /api/alerts` | 最近 50 条告警 |
+| `GET /api/alerts/health` | AlertManager 健康状态 |
+| `POST /api/pipeline/run` | 触发管线（`{mock: true}` 模拟模式） |
+| `GET /evolution` | 进化追踪页面 |
+| `GET /api/evolution/shadows` | 影子进化快照 |
+| `GET /api/evolution/pipeline` | 管线进化历史 |
+| `GET /api/evolution/stagnation` | 活跃度分数 |
+
+## 新增模块
+
+| 模块 | 用途 |
+|------|------|
+| `notification/` | AlertManager + @monitor + sanitizer |
+| `evolution/` | 停滞检测 + 快照存储 + 活跃度监控 |
+| `shadows/shadow_metadata.py` | 影子中英文名 + 策略描述 |
