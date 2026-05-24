@@ -1,30 +1,36 @@
 {
   "gate": "review",
   "date": "2026-05-24",
-  "scope": "notification/ + evolution/ + api/ + dashboard.html + evolution.html + pipeline @monitor + gateway emits",
-  "review_type": "Red Team pre-implementation design review + code quality reviews per task",
-  "design_review": {
-    "reviewer": "feature-dev:code-reviewer (a9ed90ec0eca002a8)",
-    "findings": 6,
-    "fixed": 6,
-    "method": "Read full spec + 4 existing code files, comprehensive"
-  },
-  "per_task_reviews": [
-    {"task": "Task 1: Alert Schema", "result": "✅ Approved"},
-    {"task": "Task 2: Sanitizer", "result": "✅ Approved"},
-    {"task": "Task 3: AlertManager Core", "result": "Spec review found escalation bug, fixed before proceed"},
-    {"task": "Task 4: Monitor Decorator", "result": "✅ Approved"},
-    {"task": "Task 5: API Integration", "result": "✅ Approved"},
-    {"task": "Task 6: Dashboard UI", "result": "✅ Approved"},
-    {"task": "Task 7: Evolution Backend", "result": "✅ Approved, 2 algorithm bugs fixed by implementer"},
-    {"task": "Task 8: Evolution API", "result": "✅ Approved"},
-    {"task": "Task 9: Evolution UI", "result": "✅ Approved"}
-  ],
+  "scope": "notification + evolution + max_token + @monitor + gateway + dashboard",
+  "design_review": "Red Team (a9ed90ec0eca002a8) — 6 findings, all fixed",
+  "per_task_reviews": "9 tasks, each with spec+code quality review via subagent-driven-development",
   "implementer_self_fixes": [
-    "Task 3: Escalation dedup return bug — escalating flag added",
-    "Task 7: CUSUM normalization bug — max_deviation/expected random walk fix",
-    "Task 7: Linear trend floating-point zero-check — RSS < 1e-10 tolerance"
+    "Task 3: Escalating flag to prevent suppressed ERROR after escalate",
+    "Task 7: CUSUM normalization with max_deviation / expected_random_walk",
+    "Task 7: Floating-point zero tolerance for perfect-fit RSS"
   ],
-  "post_implementation_fix": "Frequency escalation off-by-one — WARN timestamps moved outside 60s dedup guard",
-  "hash": "review-20260524-9tasks-3selffixes-1postfix"
+  "post_implementation_fix": "Frequency escalation: WARN timestamps moved outside 60s dedup guard",
+  "files_checked": {
+    "projects/marketmind/notification/alert_schema.py": "7a24190e72e7aac3",
+    "projects/marketmind/notification/sanitizer.py": "6fa784e09729f1d4",
+    "projects/marketmind/notification/alert_manager.py": "222674cb0af83c75",
+    "projects/marketmind/notification/alert_log.py": "b76b7d06f76bd311",
+    "projects/marketmind/notification/monitor_decorator.py": "6b1434502d765154",
+    "projects/marketmind/evolution/stagnation_detector.py": "f39135aef8d5744b",
+    "projects/marketmind/evolution/snapshot_store.py": "0a3f4a713a082797",
+    "projects/marketmind/api/routes.py": "dab03fa472329f2f",
+    "projects/marketmind/api/websocket.py": "30ada70fa9b3fa2f",
+    "projects/marketmind/api/data_providers.py": "61056593d0d19a60",
+    "projects/marketmind/dashboard.html": "247cac5d2341d0dc",
+    "projects/marketmind/evolution.html": "4fe1c1195c838c16",
+    "projects/marketmind/gateway/async_client.py": "f35de043c196e858",
+    "projects/marketmind/pipeline/layer1_narrative.py": "cb5e1ba4c6a237cc",
+    "projects/marketmind/pipeline/layer2_fundamental.py": "a6c2221136bcfcac",
+    "projects/marketmind/pipeline/layer3_technical.py": "3567e284c577f235",
+    "projects/marketmind/pipeline/red_team.py": "546b31697f44ca69",
+    "projects/marketmind/pipeline/decision.py": "3076c45a02ffdef0",
+    "projects/marketmind/pipeline/reflection_agent.py": "82773389b213bb39",
+    "projects/marketmind/pipeline/scout.py": "df9b4f1de4e54ecb",
+    "projects/marketmind/pipeline/flash_triage.py": "068f0d8da78b788c"
+  }
 }

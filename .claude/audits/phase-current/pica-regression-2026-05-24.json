@@ -1,21 +1,32 @@
 {
   "gate": "regression",
   "date": "2026-05-24",
-  "scope": "full test suite verification after notification + evolution + max_token changes",
-  "before": {
-    "total": 1997,
-    "pass": 1996,
-    "fail": 1,
-    "failing_test": "test_stage3_l1_real (flaky — API rate limit during parallel run)"
-  },
-  "after": {
-    "total": 2016,
-    "pass": 2016,
-    "fail": 0,
-    "new_tests": 27
-  },
+  "scope": "full test suite after notification + evolution + max_token + @monitor changes",
+  "before": {"total": 1997, "pass": 1996, "fail": 1},
+  "after": {"total": 2016, "pass": 2016, "fail": 0, "new_tests": 27},
   "command": "pytest tests/ -x -q -m 'not slow' -p no:warnings",
   "result": "2016 passed, 9 deselected in 236.27s",
-  "flaky_test_verified": "test_stage3_l1_real PASSED when run in isolation (125.74s) — transient 429 during full suite",
-  "hash": "regression-20260524-2016pass-0fail"
+  "files_checked": {
+    "projects/marketmind/notification/alert_schema.py": "7a24190e72e7aac3",
+    "projects/marketmind/notification/sanitizer.py": "6fa784e09729f1d4",
+    "projects/marketmind/notification/alert_manager.py": "222674cb0af83c75",
+    "projects/marketmind/notification/alert_log.py": "b76b7d06f76bd311",
+    "projects/marketmind/notification/monitor_decorator.py": "6b1434502d765154",
+    "projects/marketmind/evolution/stagnation_detector.py": "f39135aef8d5744b",
+    "projects/marketmind/evolution/snapshot_store.py": "0a3f4a713a082797",
+    "projects/marketmind/api/routes.py": "dab03fa472329f2f",
+    "projects/marketmind/api/websocket.py": "30ada70fa9b3fa2f",
+    "projects/marketmind/api/data_providers.py": "61056593d0d19a60",
+    "projects/marketmind/dashboard.html": "247cac5d2341d0dc",
+    "projects/marketmind/evolution.html": "4fe1c1195c838c16",
+    "projects/marketmind/gateway/async_client.py": "f35de043c196e858",
+    "projects/marketmind/pipeline/layer1_narrative.py": "cb5e1ba4c6a237cc",
+    "projects/marketmind/pipeline/layer2_fundamental.py": "a6c2221136bcfcac",
+    "projects/marketmind/pipeline/layer3_technical.py": "3567e284c577f235",
+    "projects/marketmind/pipeline/red_team.py": "546b31697f44ca69",
+    "projects/marketmind/pipeline/decision.py": "3076c45a02ffdef0",
+    "projects/marketmind/pipeline/reflection_agent.py": "82773389b213bb39",
+    "projects/marketmind/pipeline/scout.py": "df9b4f1de4e54ecb",
+    "projects/marketmind/pipeline/flash_triage.py": "068f0d8da78b788c"
+  }
 }

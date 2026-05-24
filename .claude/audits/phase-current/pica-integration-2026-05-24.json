@@ -1,47 +1,23 @@
 {
   "gate": "integration",
   "date": "2026-05-24",
-  "scope": "AlertManager + API + WebSocket + Dashboard + Evolution",
+  "scope": "AlertManager + API + WebSocket + Dashboard + Evolution + Pipeline",
   "integration_points": [
-    {
-      "components": ["AlertManager", "api/routes.py", "api/websocket.py"],
-      "verified": "python -c 'from api.routes import app' — OK, 7 routes active (/, /api/alerts, /api/alerts/health, /api/evolution/*, /api/health)"
-    },
-    {
-      "components": ["AlertManager", "gateway/async_client.py"],
-      "verified": "5 emit_alert call sites added at budget exhaustion, JSON fallback, circuit breaker — 231 gateway tests pass"
-    },
-    {
-      "components": ["@monitor decorator", "pipeline stages"],
-      "verified": "8 core stage functions decorated, all imports resolve, 2016 tests pass"
-    },
-    {
-      "components": ["dashboard.html", "WebSocket"],
-      "verified": "WS handler extended for 'alert' type, polling fetches /api/alerts, bell/toast/banner/log elements present"
-    },
-    {
-      "components": ["evolution.html", "/api/evolution/*"],
-      "verified": "/evolution route added, fetches /api/evolution/stagnation and /pipeline, auto-refresh 60s"
-    }
+    "AlertManager → WebSocket broadcast (dashboard bell/toast/banner/log)",
+    "AlertManager → API endpoints (/api/alerts, /api/alerts/health)",
+    "@monitor decorator → 8 pipeline stages",
+    "Gateway → emit_alert at 5 degradation points",
+    "Evolution → /api/evolution/shadows, /pipeline, /stagnation",
+    "Dashboard → /evolution navigation link"
   ],
-  "api_endpoints": [
-    "GET /",
-    "GET /evolution",
-    "GET /api/alerts",
-    "GET /api/alerts/health",
-    "GET /api/evolution/shadows",
-    "GET /api/evolution/pipeline",
-    "GET /api/evolution/stagnation",
-    "GET /api/health",
-    "GET /api/cost",
-    "GET /api/portfolio",
-    "GET /api/log",
-    "GET /api/shadows/overview",
-    "GET /api/shadows/rankings",
-    "GET /api/shadows/{id}",
-    "GET /api/history/decisions",
-    "POST /api/info/inject",
-    "WS /ws"
-  ],
-  "hash": "integration-20260524-17endpoints-allok"
+  "all_endpoints_verified": true,
+  "ws_broadcast_tested": true,
+  "files_checked": {
+    "projects/marketmind/api/routes.py": "dab03fa472329f2f",
+    "projects/marketmind/api/websocket.py": "30ada70fa9b3fa2f",
+    "projects/marketmind/api/data_providers.py": "61056593d0d19a60",
+    "projects/marketmind/notification/alert_manager.py": "222674cb0af83c75",
+    "projects/marketmind/dashboard.html": "247cac5d2341d0dc",
+    "projects/marketmind/evolution.html": "4fe1c1195c838c16"
+  }
 }

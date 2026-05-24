@@ -1,18 +1,17 @@
 {
   "gate": "unit",
   "date": "2026-05-24",
-  "scope": "notification + evolution + max_token fix",
+  "scope": "notification + evolution tests",
   "new_tests": 27,
   "total_tests": 2016,
   "pass": 2016,
   "fail": 0,
-  "test_files": [
-    "tests/test_notification/test_alert_schema.py",
-    "tests/test_notification/test_sanitizer.py",
-    "tests/test_notification/test_alert_manager.py",
-    "tests/test_notification/test_monitor_decorator.py",
-    "tests/test_evolution/test_stagnation_detector.py"
-  ],
   "verification": "pytest -q -m 'not slow' — 2016 passed, 0 fail",
-  "hash": "unit-20260524-2016pass"
+  "files_checked": {
+    "projects/marketmind/tests/test_notification/test_alert_schema.py": "3e141f2dff33082a",
+    "projects/marketmind/tests/test_notification/test_sanitizer.py": "9ee0cf4d2a572cc8",
+    "projects/marketmind/tests/test_notification/test_alert_manager.py": "656856571ba33284",
+    "projects/marketmind/tests/test_notification/test_monitor_decorator.py": "64fd082869919a36",
+    "projects/marketmind/tests/test_evolution/test_stagnation_detector.py": "d6882cfbf04c0f81"
+  }
 }
