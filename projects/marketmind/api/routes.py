@@ -21,9 +21,14 @@ from marketmind.api.data_providers import (
     get_shadow_rankings,
 )
 from marketmind.api.websocket import ws_endpoint
+from marketmind.notification.alert_manager import get_alert_manager
+from marketmind.api.websocket import broadcast_alert
 
 app = FastAPI(title="MarketMind", version="2.0")
 app.websocket("/ws")(ws_endpoint)
+
+_alm = get_alert_manager()
+_alm.set_broadcast_fn(broadcast_alert)
 
 DASHBOARD_PATH = Path(__file__).parent.parent / "dashboard.html"
 
@@ -115,6 +120,16 @@ async def info_inject(request: dict):
         "items": len(result.items),
         "chars": result.total_chars,
     })
+
+
+@app.get("/api/alerts")
+async def alerts():
+    return JSONResponse({"alerts": get_alert_manager().recent(50)})
+
+
+@app.get("/api/alerts/health")
+async def alerts_health():
+    return JSONResponse(get_alert_manager().health())
 
 
 @app.get("/api/health")

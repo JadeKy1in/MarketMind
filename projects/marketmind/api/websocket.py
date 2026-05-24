@@ -84,6 +84,11 @@ async def broadcast_person_signal(signal: "FigureSignal") -> None:
     })
 
 
+async def broadcast_alert(alert_payload: dict) -> None:
+    """Broadcast an alert to all connected dashboard clients."""
+    await _manager.broadcast(alert_payload)
+
+
 async def ws_endpoint(websocket: WebSocket) -> None:
     """Handle one dashboard WebSocket connection — keep-alive with ping/pong."""
     await _manager.connect(websocket)
