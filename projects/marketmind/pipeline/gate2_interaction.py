@@ -5,7 +5,10 @@ User has already selected a direction at Gate 1. Now they receive multi-angle
 results and must confirm/adjust their conviction.
 
 No LLM calls — pure orchestration and display formatting.
-No shadow/ELITE integration — main AI pipeline data only.
+Shadow/ELITE integration: graduated shadows (ELITE + EXCELLENT with gate2_qualified)
+can be invited into discussion via /invite command. Moderator firewall ensures
+shadows never see each other's analysis. Falls back to ELITE-only domain-triggered
+contributions when no graduated shadows are available.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ if TYPE_CHECKING:
     from marketmind.pipeline.regime_mapper import RegimeMapping
     from marketmind.pipeline.decision import SignalConflict
     from marketmind.pipeline.kill_monitor import KillCriterion
+    from marketmind.shadows.shadow_state import ShadowStateDB
 
 from marketmind.integrity.input_guard import sanitize_for_llm_prompt
 from marketmind.storage.gate_archiver import GateArchiver, GateTurn
@@ -52,6 +56,125 @@ _CONVICTION_RE = re.compile(r"(?<!\d)([1-9]|10)(?!\d)")
 _CONFIRM_RE = re.compile(r"继续|确认|确定|不变|维持|yes|continue", re.IGNORECASE)
 _MODIFY_RE = re.compile(r"修改|调整|换成|换个|降低|提高", re.IGNORECASE)
 _PAUSE_RE = re.compile(r"暂停|暂缓|先放|等等|稍后|park", re.IGNORECASE)
+
+
+# ── Moderator Firewall Rules ──────────────────────────────────────────────────
+
+MODERATOR_FIREWALL_RULES = """
+── MODERATOR FIREWALL ──
+Rule 1: User questions are relayed to individual shadows — shadows NEVER see
+        each other's analysis or opinions.
+Rule 2: Peer analysis is stripped before relay — each shadow receives ONLY the
+        user's original question plus the main AI pipeline baseline.
+Rule 3: Shadow responses are presented separately, prefixed with
+        "SHADOW [display_name] OPINION" — never merged into main AI output.
+Rule 4: Shadows have NO decision authority — their opinions are informational.
+Rule 5: Each shadow contributes at most ONCE per Gate 2 session.
+── END ──
+"""
+
+# ── Shadow integration helpers ────────────────────────────────────────────────
+
+def _list_available_shadows(state_db, session_id: str) -> str:
+    """Show graduated shadows with analysis completion status.
+
+    Queries graduation engine to find gate2_qualified shadows across all tiers
+    (ELITE and EXCELLENT). Displays each shadow with its analysis readiness
+    (date check on latest snapshot) and domain.
+    """
+    from marketmind.shadows.graduation_engine import GraduationEngine
+
+    engine = GraduationEngine(state_db)
+    active = state_db.get_active_shadows()
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    lines = ["── 可用影子 ──", ""]
+    found = 0
+    for s in active:
+        if s.shadow_type in ("beta", "temp_event", "challenger", "missed_path", "catfish"):
+            continue
+        result = engine.evaluate(s.shadow_id)
+        if not result.gate2_qualified:
+            continue
+        found += 1
+        snap = state_db.get_latest_snapshot(s.shadow_id)
+        has_analysis = (snap is not None and snap.date == today
+                        and getattr(snap, "insights_generated", 0) > 0)
+        status_icon = "ready" if has_analysis else "analyzing"
+        domain_str = s.domain or "general"
+        tier_label = (
+            getattr(snap, "achievement_tier", "") if snap else ""
+        ).upper()
+        lines.append(
+            f"  [{tier_label or s.shadow_type}] {s.display_name} "
+            f"({domain_str}) — {status_icon}"
+        )
+        if has_analysis:
+            lines.append(f"     置信度: {snap.composite_score or 'N/A'}")
+    if found == 0:
+        lines.append("  (无可用毕业影子)")
+    lines.append("")
+    lines.append("使用 /invite <name> 邀请影子加入讨论")
+    lines.append("── END ──")
+    return "\n".join(lines)
+
+
+_INVITED_SHADOWS: dict[str, list[str]] = {}  # session_id → [shadow_id, ...]
+
+
+def _invite_shadow(shadow_id: str, state_db, session_id: str) -> str:
+    """Bring a graduated shadow into the Gate 2 discussion.
+
+    Verifies graduation status, records the invitation in the session tracker,
+    and returns a formatted introduction line for display.
+    """
+    from marketmind.shadows.graduation_engine import GraduationEngine
+
+    config = state_db.get_shadow(shadow_id)
+    if config is None:
+        return f"[错误] 未找到影子: {shadow_id}"
+
+    engine = GraduationEngine(state_db)
+    result = engine.evaluate(shadow_id)
+    if not result.gate2_qualified:
+        return f"[拒绝] {config.display_name} 尚未通过毕业评估，无法参与讨论。"
+
+    invited = _INVITED_SHADOWS.setdefault(session_id, [])
+    if shadow_id in invited:
+        return f"[提示] {config.display_name} 已加入当前讨论。"
+    invited.append(shadow_id)
+
+    domain_str = config.domain or "general"
+    return (
+        f"── 已邀请影子 ──\n"
+        f"  {config.display_name} [{config.shadow_type}] ({domain_str})\n"
+        f"  状态: 已加入讨论 | 防火墙隔离: ON\n"
+        f"  向此影子提问: @{config.display_name} <问题>\n"
+        f"── END ──"
+    )
+
+
+def _moderator_relay(user_question: str, shadow_id: str,
+                     state_db) -> str:
+    """Moderator firewall relay — strips peer analysis, returns clean question.
+
+    Scans the user's question text and removes any references to other shadow
+    names or their analysis. Only the main AI pipeline baseline and the user's
+    original words pass through to the target shadow.
+    """
+    config = state_db.get_shadow(shadow_id)
+    if config is None:
+        return user_question
+
+    clean = user_question
+    all_shadows = state_db.get_active_shadows()
+    for s in all_shadows:
+        if s.shadow_id == shadow_id:
+            continue
+        if s.display_name and s.display_name in clean:
+            clean = clean.replace(s.display_name, "[REDACTED]")
+
+    return clean
 
 
 # ── Data types ────────────────────────────────────────────────────────────────
@@ -197,6 +320,8 @@ async def run_gate2(
     red_team_report=None,
     signal_conflicts: list | None = None,
     kill_criteria: list | None = None,
+    state_db = None,
+    elite_registry = None,
 ) -> Gate2Session:
     """Run the Gate 2 signal confirmation conversation loop.
 
@@ -211,6 +336,8 @@ async def run_gate2(
         red_team_report: Optional Red Team report.
         signal_conflicts: Optional signal conflicts from decision layer.
         kill_criteria: Optional kill criteria from kill_monitor.
+        state_db: Optional ShadowStateDB for shadow integration.
+        elite_registry: Optional EliteRegistry for ELITE fallback mode.
 
     Returns:
         Gate2Session with final conviction, outcome, and conversation log.
@@ -272,6 +399,16 @@ async def run_gate2(
             session.user_initial_conviction = parsed
         else:
             session.user_initial_conviction = raw_conviction[:50]
+
+        # ── Step 0: Shadow ecosystem status ───────────────────────────────
+        if state_db is not None:
+            try:
+                await _say("\n" + _list_available_shadows(state_db, session_id))
+                await _log("AI", "shadow_listing", "structured_data",
+                           "Graduated shadow listing displayed",
+                           {"session_id": session_id})
+            except Exception:
+                await _say("[提示] 影子生态系统暂不可用。继续仅主AI分析。")
 
         # ── Step 2: ANALYSE ──────────────────────────────────────────────
         # Present multi-angle AI analysis with debiasing notice
@@ -353,6 +490,69 @@ async def run_gate2(
             if session.turns >= _TURN_WARNING:
                 remaining = _TURN_LIMIT - session.turns
                 await _say(f"[提示] 已进行 {session.turns}/{_TURN_LIMIT} 轮，剩余 {remaining} 轮。")
+
+            # ── Shadow invitation commands ─────────────────────────────────
+            if state_db is not None and user_input.strip().startswith("/invite"):
+                parts = user_input.strip().split(maxsplit=1)
+                if len(parts) >= 2:
+                    target_name = parts[1].strip()
+                    # Search for shadow by display_name or shadow_id
+                    matched_id = None
+                    for s in state_db.get_active_shadows():
+                        if (s.display_name and target_name.lower() in s.display_name.lower()) \
+                                or target_name.lower() == s.shadow_id.lower():
+                            matched_id = s.shadow_id
+                            break
+                    if matched_id:
+                        result = _invite_shadow(matched_id, state_db, session_id)
+                        await _say(result)
+                        await _log("AI", "shadow_invite", "structured_data",
+                                   f"Shadow invited: {matched_id}",
+                                   {"shadow_id": matched_id})
+                        if elite_registry is not None:
+                            try:
+                                sc = state_db.get_shadow(matched_id)
+                                if sc is not None:
+                                    elite_registry.register_shadow_analysis(
+                                        shadow_id=matched_id,
+                                        shadow_name=sc.display_name,
+                                        domain=sc.domain or "general",
+                                        analysis_text="",
+                                        confidence=0.0,
+                                    )
+                            except Exception:
+                                pass
+                    else:
+                        await _say(f"[错误] 未找到影子: {target_name}")
+                else:
+                    await _say("用法: /invite <影子名称>")
+                continue
+
+            # ── @shadow_name question relay ────────────────────────────────
+            if state_db is not None and elite_registry is not None and user_input.strip().startswith("@"):
+                at_match = re.match(r"@(\S+)", user_input.strip())
+                if at_match:
+                    target_name = at_match.group(1)
+                    matched_id = None
+                    for s in state_db.get_active_shadows():
+                        if s.display_name and target_name.lower() in s.display_name.lower():
+                            matched_id = s.shadow_id
+                            break
+                    if matched_id and matched_id in _INVITED_SHADOWS.get(session_id, []):
+                        clean_q = _moderator_relay(user_input, matched_id, state_db)
+                        await _say(
+                            f"── 防火墙中继 ──\n"
+                            f"  目标: {target_name}\n"
+                            f"  已中继: {clean_q[:200]}\n"
+                            f"  (影子响应将在下一轮展示)\n"
+                            f"── END ──"
+                        )
+                        await _log("AI", "shadow_relay", "structured_data",
+                                   f"Moderator relay to {matched_id}",
+                                   {"shadow_id": matched_id, "clean_question": clean_q[:200]})
+                    else:
+                        await _say(f"[提示] '{target_name}' 未加入讨论。请先用 /invite <name> 邀请。")
+                    continue
 
             # Parse conviction update
             new_conviction = _parse_conviction(user_input)

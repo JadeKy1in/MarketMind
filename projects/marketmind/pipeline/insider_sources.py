@@ -1,9 +1,10 @@
 """Phase G Layer 4: Insider / Smart Money data sources.
 
-Congress trades: SOURCE DEAD as of 2026-05 (House Stock Watcher S3 403,
-Senate Stock Watcher 503/TLS, CapitolTrades BFF 503). Returns empty list
-with one-time warning. SEC Form 4 and 13F via EDGAR Atom feeds remain
-active. Insider cluster detection for priority boosting.
+Congress trades: revived via @anguslin/mcp-capitol-trades MCP server
+(replaces dead House Stock Watcher/Senate Stock Watcher/CapitolTrades BFF
+endpoints with real-time HTML scraping through Node.js MCP). SEC Form 4
+and 13F via EDGAR Atom feeds remain active. Insider cluster detection
+for priority boosting.
 
 All sources are free, use no API keys, and return NewsItem objects
 with content_type="insider_signal" for Flash bypass routing.
@@ -22,28 +23,26 @@ import httpx
 logger = logging.getLogger("marketmind.pipeline.insider_sources")
 
 
-# One-time warning flag for dead sources (module-level, persists for process lifetime)
-_congress_trades_dead_warned: bool = False
-
-
 async def fetch_congress_trades() -> list[Any]:
-    """Fetch Congressional stock trades — SOURCE DEAD as of 2026-05.
+    """Fetch Congressional stock trades via MCP Capitol Trades server.
 
-    House Stock Watcher S3 (all regions 403), Senate Stock Watcher API (503/TLS),
-    and CapitolTrades BFF (503 CloudFront) are all confirmed DEAD. No free,
-    programmatic congressional trade endpoint is currently available.
-
-    Returns empty list with a one-time warning log.
+    Uses the @anguslin/mcp-capitol-trades MCP server (Node.js subprocess)
+    to scrape capitoltrades.com/trades in real-time. No API key needed.
     """
-    global _congress_trades_dead_warned
-    if not _congress_trades_dead_warned:
-        _congress_trades_dead_warned = True
-        logger.warning(
-            "Congress Trades source is DEAD (House Stock Watcher S3: 403, "
-            "Senate Stock Watcher API: 503/TLS, CapitolTrades BFF: 503 CloudFront). "
-            "No free congressional trade endpoint available. Returning empty list."
-        )
-    return []
+    from marketmind.pipeline.congress_mcp_client import (
+        fetch_congress_trades_via_mcp,
+        congress_trades_to_newsitems,
+    )
+    try:
+        trades = await fetch_congress_trades_via_mcp(days=90)
+        if trades:
+            items = congress_trades_to_newsitems(trades)
+            logger.info("Congress Trades: %d trades → %d NewsItems", len(trades), len(items))
+            return items
+        return []
+    except Exception as e:
+        logger.warning("Congress Trades MCP fetch failed: %s", e)
+        return []
 
 
 async def fetch_form4_insider() -> list[Any]:

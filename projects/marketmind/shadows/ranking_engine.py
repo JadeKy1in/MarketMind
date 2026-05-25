@@ -128,52 +128,82 @@ class RankingEngine:
     ) -> str:
         """Returns tier based on consecutive day rules.
 
-        States: ELITE, EXCELLENT, NORMAL, WATCH, ENDANGERED
-
-        P2-4: market_accuracy < 0.50 demotes ELITE to NORMAL.
-        This prevents shadows from achieving top tier when directional
-        predictions don't align with external market data.
+        Phase 1: 4-tier system (ELITE, EXCELLENT, NORMAL, ENDANGERED).
+        WATCH merged into ENDANGERED at 0.20 threshold.
+        Win-rate floor protection with 3-part gate.
+        Absolute Sharpe gate prevents all-ELITE degradation.
+        Hysteresis buffer (84-86%) prevents boundary toggling.
         """
         if not percentile_history:
             return "normal"
 
         cfg = self.config
+        current_tier = self._get_current_tier_from_history()
+
         days_at_elite = self._count_consecutive_above(
             percentile_history, cfg.achievement_percentiles["elite"]
         )
         days_at_excellent = self._count_consecutive_above(
             percentile_history, cfg.achievement_percentiles["excellent"]
         )
-        days_below_watch = self._count_consecutive_below(
-            percentile_history, cfg.achievement_percentiles["watch"]
-        )
         days_below_endangered = self._count_consecutive_below(
             percentile_history, cfg.achievement_percentiles["endangered"]
         )
 
-        # Elite check
-        if days_at_elite >= cfg.elite_consecutive_days and deflated_sharpe > cfg.elite_deflated_sharpe_min:
-            if market_accuracy is not None and market_accuracy < 0.50:
-                logger.info(
-                    "ELITE demoted to NORMAL: market_accuracy=%.2f < 0.50",
-                    market_accuracy,
-                )
-                return "normal"
-            return "elite"
+        # Elite check with absolute Sharpe gate
+        if days_at_elite >= cfg.elite_consecutive_days:
+            if deflated_sharpe < cfg.elite_absolute_sharpe_min:
+                pass  # Absolute quality gate blocks ELITE
+            elif market_accuracy is not None and market_accuracy < 0.50:
+                pass  # Market accuracy gate blocks ELITE
+            else:
+                # Hysteresis: 84-86% holds current tier
+                latest_pct = percentile_history[-1][1] if percentile_history else 0
+                if current_tier == "excellent" and 0.84 <= latest_pct <= 0.86:
+                    return "excellent"
+                return "elite"
 
-        # Excellent check
-        if days_at_excellent >= cfg.excellent_consecutive_days and deflated_sharpe > cfg.excellent_deflated_sharpe_min:
+        # Excellent check with win-rate floor protection
+        if days_at_excellent >= cfg.excellent_consecutive_days and deflated_sharpe >= cfg.excellent_absolute_sharpe_min:
             return "excellent"
+
+        # Win-rate floor: prevent demotion with 3-part gate
+        if current_tier in ("elite", "excellent") and self._win_rate_floor_active(
+            wr=getattr(self, '_cached_wr', 0.0),
+            cumulative_return=getattr(self, '_cached_cum_return', 0.0),
+            avg_position_pct=getattr(self, '_cached_avg_pos', 0.0),
+        ):
+            return current_tier  # Protected
 
         # Endangered check
         if days_below_endangered >= cfg.endangered_consecutive_days:
             return "endangered"
 
-        # Watch check
-        if days_below_watch >= cfg.watch_consecutive_days or mdd > cfg.watch_mdd_threshold:
-            return "watch"
-
         return "normal"
+
+    def _get_current_tier_from_history(self) -> str:
+        """Extract current tier from latest snapshot via state_db if available."""
+        if hasattr(self, '_state_db') and self._state_db:
+            snap = self._state_db.get_latest_snapshot(self._last_shadow_id)
+            if snap and snap.achievement_tier:
+                return snap.achievement_tier
+        return "normal"
+
+    def _win_rate_floor_active(self, wr: float = 0.0, cumulative_return: float = 0.0,
+                                avg_position_pct: float = 0.0) -> bool:
+        """3-part gate: win-rate >50% + cumulative return > 0 + avg position >1%.
+
+        CPI integration (Phase 2 follow-up): replace cumulative_return > 0 with
+        cumulative_return > CPI over evaluation period. Requires bls_fetcher
+        pipeline integration. Currently uses nominal-return check as proxy.
+        """
+        if wr < 0.50:
+            return False
+        if cumulative_return <= 0:
+            return False  # Proxy for inflation (CPI integration pending)
+        if avg_position_pct < 0.01:
+            return False
+        return True
 
     @staticmethod
     def _count_consecutive_above(history: list[tuple[str, float]],

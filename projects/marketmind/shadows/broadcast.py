@@ -108,7 +108,7 @@ class BroadcastWriter:
                            chat_context: str = "") -> list[Path]:
         """Write L1 chat history as broadcast messages for shadows.
 
-        IMPORTANT (per phase_b_ideation_notes.md): Shadows see user's raw opinions
+        IMPORTANT (per docs/dev/phase_b_ideation_notes.md): Shadows see user's raw opinions
         and chat history, but NOT the main AI's pre-discussion analysis. Main AI
         analysis is excluded to prevent anchoring.
         """

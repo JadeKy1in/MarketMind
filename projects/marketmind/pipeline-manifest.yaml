@@ -36,7 +36,7 @@ pipeline:
         on configurable intervals) and MultimodalAdapter (Gemini Flash for
         image/PDF/screenshot ingestion).
 
-        FULL DESIGN: .claude/research/shadow-ecosystem-full-design.md
+        FULL DESIGN: docs/dev/research/shadow-ecosystem-full-design.md
         (shadow types, ranking formula, tier system, promotion/elimination,
         ELITE protocol, broadcast rules, collusion detection)
       dependencies: []
@@ -137,7 +137,7 @@ pipeline:
       description: >
         Shadows analyze news independently from the main AI decision pipeline.
 
-        INFORMATION BROADCAST RULES (from phase_b_ideation_notes.md §1):
+        INFORMATION BROADCAST RULES (from docs/dev/phase_b_ideation_notes.md §1):
         Shadows RECEIVE:
           - Raw news/facts from all sources (same news_items as main AI)
           - Market data (prices, fundamentals) via gateway modules
@@ -241,7 +241,7 @@ design_decisions:
       opinions in EliteRegistry. During Gate 2, domain-triggered awakening:
       user mentions domain keyword → matching ELITE shadow contributes opinion.
       Each shadow max ONCE per session. NO decision authority.
-    evidence: "shadows/elite_participation.py, phase_b_ideation_notes.md §4"
+    evidence: "shadows/elite_participation.py, docs/dev/phase_b_ideation_notes.md §4"
     status: LOCKED
 
   - id: DD-003
@@ -250,7 +250,7 @@ design_decisions:
       To preserve shadow independence and prevent anchoring bias, shadows
       receive raw news/facts + user's raw opinions only. They do NOT receive
       the main AI's pre-discussion analysis or report.
-    evidence: "phase_b_ideation_notes.md §1, CLAUDE.md Information Broadcast Rules"
+    evidence: "docs/dev/phase_b_ideation_notes.md §1, CLAUDE.md Information Broadcast Rules"
     status: LOCKED
 
   - id: DD-004

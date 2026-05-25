@@ -169,13 +169,14 @@ async def test_ael_lesson_parse_from_llm_output():
         "Wait for FOMC minutes release before entering new positions."
     )
 
-    failures, successes, lesson = engine._parse_debrief(content)
+    failures, successes, lesson, consolidation_note = engine._parse_debrief(content)
 
     assert len(failures) == 2
     assert "entering trades too early" in failures[0]
     assert len(successes) == 2
     assert "holding winners" in successes[0]
     assert "FOMC minutes" in lesson
+    assert consolidation_note == ""  # not elite mode, no consolidation note
 
 
 def test_ael_parse_empty_output():
@@ -183,10 +184,11 @@ def test_ael_parse_empty_output():
     from marketmind.shadows.ael_evolution import AELEvolutionEngine
 
     engine = AELEvolutionEngine(state_db=None)
-    failures, successes, lesson = engine._parse_debrief("")
+    failures, successes, lesson, consolidation_note = engine._parse_debrief("")
     assert failures == []
     assert successes == []
     assert lesson == ""
+    assert consolidation_note == ""
 
 
 def test_ael_parse_no_pattern_match():
@@ -194,7 +196,34 @@ def test_ael_parse_no_pattern_match():
     from marketmind.shadows.ael_evolution import AELEvolutionEngine
 
     engine = AELEvolutionEngine(state_db=None)
-    failures, successes, lesson = engine._parse_debrief("Some random analysis text.")
+    failures, successes, lesson, consolidation_note = engine._parse_debrief("Some random analysis text.")
     assert failures == []
     assert successes == []
     assert lesson == ""
+    assert consolidation_note == ""
+
+
+def test_ael_parse_elite_consolidation_mode():
+    """ELITE consolidation output extracts SUCCESS_PATTERNS and CONSOLIDATION_NOTE."""
+    from marketmind.shadows.ael_evolution import AELEvolutionEngine
+
+    engine = AELEvolutionEngine(state_db=None)
+    content = (
+        "SUCCESS_PATTERNS:\n"
+        "- consistently sizing positions based on volatility regime\n"
+        "- rotating into defensive sectors before market downturns\n"
+        "CONSOLIDATION_NOTE:\n"
+        "This shadow demonstrates exceptional regime awareness. Its ability "
+        "to anticipate sector rotations 3-5 days ahead of market moves is "
+        "the primary driver of outperformance. Continue to trust these "
+        "instincts — no changes recommended."
+    )
+
+    failures, successes, lesson, consolidation_note = engine._parse_debrief(content)
+
+    assert len(successes) == 2
+    assert "volatility regime" in successes[0]
+    assert len(failures) == 0  # elite mode has no failure patterns
+    assert lesson == ""        # elite mode has no lesson
+    assert "regime awareness" in consolidation_note
+    assert "no changes recommended" in consolidation_note

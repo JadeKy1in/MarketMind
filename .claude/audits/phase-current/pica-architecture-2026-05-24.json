@@ -3,7 +3,7 @@
   "date": "2026-05-24",
   "scope": "notification + evolution + dashboard UI",
   "files_checked": {
-    "projects/marketmind/dashboard.html": "5bb0b301b76128e286c0fac7fa3a94e5cad8250e09e21b7ddee5f918724932d4",
+    "projects/marketmind/dashboard.html": "11310d29431048e3d2aa365633c5f6f81bd9482b7e88aa1359120318614df151",
     "projects/marketmind/evolution.html": "a43e8074c1727000d22e63618dcfbda95fb9b3060e7a7c45f4c4840b056e3c96",
     "projects/marketmind/evolution/stagnation_detector.py": "eb87ccd7eefad5d7e6ef2b3f83c74e81b73d3881bcfc3e99c7dc02450decde2b",
     "projects/marketmind/evolution/activity_monitor.py": "c2c02df2e7507dbad132851c6ad2b29ce48a9880f9718adc979b147d5e1cc20e"

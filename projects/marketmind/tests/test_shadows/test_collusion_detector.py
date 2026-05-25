@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 from marketmind.shadows.shadow_state import CollusionFlag
 from marketmind.config.settings import ShadowSettings
-from marketmind.shadows.shadow_agent import ShadowVote
+from marketmind.shadows.shadow_agent import ShadowDecision
 # Module under test (will be created)
 from marketmind.shadows.collusion_detector import CollusionDetector
 
@@ -25,10 +25,10 @@ def detector(settings):
 
 
 def make_votes(ticker, directions_and_confidences):
-    """Helper: create a list of ShadowVote objects from (direction, confidence) tuples."""
+    """Helper: create a list of ShadowDecision objects from (direction, confidence) tuples."""
     votes = []
     for i, (direction, confidence) in enumerate(directions_and_confidences):
-        votes.append(ShadowVote(
+        votes.append(ShadowDecision(
             shadow_id=f"shadow_{i:02d}",
             shadow_type="expert",
             date="2026-05-11",

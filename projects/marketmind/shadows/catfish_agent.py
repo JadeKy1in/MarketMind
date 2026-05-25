@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timezone
 
 from marketmind.shadows.shadow_agent import (
-    ShadowAgent, ShadowAnalysisOutput, ShadowVote, defang_text
+    ShadowAgent, ShadowAnalysisOutput, ShadowDecision, defang_text
 )
 from marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
 from marketmind.config.settings import ShadowSettings
@@ -34,7 +34,7 @@ class CatfishAgent(ShadowAgent):
         super().__init__(config, state_db, settings)
         self._last_trigger: dict | None = None
 
-    def check_consensus(self, votes: list[ShadowVote],
+    def check_consensus(self, votes: list[ShadowDecision],
                          ticker: str) -> tuple[bool, float, str]:
         """Check if there's >=80% consensus on a ticker's direction.
         Returns (triggered, agreement_pct, direction).
@@ -80,14 +80,14 @@ class CatfishAgent(ShadowAgent):
             return ShadowAnalysisOutput(
                 shadow_id=self.shadow_id,
                 date=today,
-                votes=[],
+                decisions=[],
                 insights=["NO_CONSENSUS_DETECTED"],
                 methodology_notes=CATFISH_SYSTEM_PROMPT[:200],
                 quota_used=0,
             )
 
     def _build_user_prompt(self, news_items: list[dict], market_data: dict,
-                           broadcast_messages: list | None = None) -> str:
+                           broadcast_messages: list | None = None, **kwargs) -> str:
         """Catfish-specific: construct the consensus challenge prompt."""
         trigger_ticker = market_data.get("catfish_trigger_ticker", "UNKNOWN")
         trigger_direction = market_data.get("catfish_trigger_direction", "UNKNOWN")

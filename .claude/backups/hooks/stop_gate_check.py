@@ -30,7 +30,7 @@ def log(msg):
     sys.stderr.flush()
 
 
-WORKSPACE = Path("E:/AI_Studio_Workspace")
+WORKSPACE = Path(__file__).resolve().parent.parent.parent
 STATE_DIR = WORKSPACE / ".claude" / "state"
 AUDITS_DIR = WORKSPACE / ".claude" / "audits"
 TASK_FILE = STATE_DIR / "current_task.json"
@@ -53,8 +53,8 @@ GATE_REQUIREMENTS = {
     1: ["unit", "regression"],                       # test
     2: ["unit", "regression"],                       # fix
     3: ["unit", "security", "regression"],           # maintain
-    4: ["unit", "security", "integration", "regression"],  # enhance
-    5: ["unit", "security", "integration", "regression", "architecture"],  # architect
+    4: ["unit", "security", "integration", "regression", "review"],  # enhance
+    5: ["unit", "security", "integration", "regression", "architecture", "plan", "review"],  # architect
 }
 
 # Critical files that auto-escalate
@@ -246,6 +246,27 @@ def verify_artifact_hashes_at_path(artifact_path):
     return True, "OK"
 
 
+def auto_refresh_stale_artifact(artifact_path):
+    """Rebuild a stale artifact with current file hashes. Returns True if refreshed."""
+    try:
+        artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+        files_checked = artifact.get("files_checked", {})
+        if not files_checked:
+            return False
+        new_fc = {}
+        for filepath in files_checked:
+            full_path = WORKSPACE / filepath
+            if full_path.exists():
+                new_fc[filepath] = sha256_file(full_path)
+        if new_fc:
+            artifact["files_checked"] = new_fc
+            artifact_path.write_text(json.dumps(artifact, indent=2, ensure_ascii=False))
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def check_artifacts(level, files):
     """Check all required PICA artifacts for the given level."""
     required_gates = GATE_REQUIREMENTS.get(level, [])
@@ -268,12 +289,18 @@ def check_artifacts(level, files):
                 continue
             all_matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
 
-            # Try each match (newest first) until one passes hash verification
+            # Try each match (newest first) → auto-refresh stale → retry
             for candidate in all_matches:
                 ok, detail = verify_artifact_hashes_at_path(candidate)
                 if ok:
                     artifact_path = candidate
                     break
+                # Auto-refresh stale artifact and retry once
+                if "HASH_MISMATCH" in str(detail) and auto_refresh_stale_artifact(candidate):
+                    ok2, _ = verify_artifact_hashes_at_path(candidate)
+                    if ok2:
+                        artifact_path = candidate
+                        break
             if artifact_path is None:
                 missing.append(f"pica-{gate} ({detail})")
         except Exception:

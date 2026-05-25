@@ -102,7 +102,7 @@ async def fetch_bluesky_posts(source, config) -> list:
     if not token:
         return items
 
-    query = "finance OR stocks OR market OR $AAPL OR $MSFT OR $NVDA OR $TSLA"
+    query = "finance OR stocks OR market OR AAPL OR MSFT OR NVDA OR TSLA"
     client_kwargs = {"timeout": 30.0, "follow_redirects": True}
     if config.proxy_url:
         client_kwargs["proxy"] = config.proxy_url

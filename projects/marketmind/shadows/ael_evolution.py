@@ -32,6 +32,7 @@ class AELDebriefResult:
     failure_patterns: list[str]       # LLM-identified failure causes
     success_patterns: list[str]       # LLM-identified success causes
     lessons_learned: str              # concise Pro-generated lesson text
+    consolidation_note: str = ""      # ELITE-only: reinforcement of winning patterns
     prompt_injected: bool = False     # was the lesson injected into prompt?
 
 
@@ -66,7 +67,11 @@ class ExperimentResult:
 class AELEvolutionEngine:
     """Manages AEL slow-layer evolution with controlled experiments."""
 
-    MAX_ACTIVE_LESSONS = 5   # per shadow cap on injected lessons
+    MAX_ACTIVE_LESSONS = 5  # per shadow (unchanged)
+    # Per-source caps (Phase 3):
+    # Weekly Flash: max 5 per shadow (FIFO, items <2 weeks evicted first)
+    # Monthly Pro: max 5 per shadow (this engine)
+    # Quarterly Pro: max 1 methodology rewrite per year per shadow
 
     # Shadow pairs for initial AEL experiment (Phase 7)
     EXPERIMENT_PAIRS = [
@@ -182,14 +187,29 @@ class AELEvolutionEngine:
         profitable = performances.get("profitable_trades", 0)
         losing = performances.get("losing_trades", 0)
 
-        system_prompt = (
-            "You are a diagnostic analyst reviewing a shadow agent's monthly trading "
-            "performance. Your job: identify the TOP 1-2 failure patterns and TOP 1-2 "
-            "success patterns from this month's data. Be specific and data-driven. "
-            "Output: FAILURE_PATTERNS: (bullet list), SUCCESS_PATTERNS: (bullet list), "
-            "LESSON: (1-2 sentence actionable lesson for the shadow to improve next month). "
-            "Keep LESSON under 80 words. Focus on PATTERNS, not individual trades."
-        )
+        # Check tier for consolidation mode (Phase 3)
+        latest_tier = "normal"
+        if self._state_db:
+            snap = self._state_db.get_latest_snapshot(shadow_id)
+            if snap and snap.achievement_tier:
+                latest_tier = snap.achievement_tier
+
+        if latest_tier == "elite":
+            system_prompt = (
+                "You are reviewing an ELITE shadow. This agent has sustained top-quartile "
+                "performance. Instead of critique, identify what drove this success and "
+                "produce a CONSOLIDATION note that reinforces the winning patterns. "
+                "Do NOT suggest changes. Output: SUCCESS_PATTERNS, CONSOLIDATION_NOTE."
+            )
+        else:
+            system_prompt = (
+                "You are a diagnostic analyst reviewing a shadow agent's monthly trading "
+                "performance. Your job: identify the TOP 1-2 failure patterns and TOP 1-2 "
+                "success patterns from this month's data. Be specific and data-driven. "
+                "Output: FAILURE_PATTERNS: (bullet list), SUCCESS_PATTERNS: (bullet list), "
+                "LESSON: (1-2 sentence actionable lesson for the shadow to improve next month). "
+                "Keep LESSON under 80 words. Focus on PATTERNS, not individual trades."
+            )
 
         user_prompt = (
             f"Shadow: {shadow_id}\n"
@@ -216,8 +236,8 @@ class AELEvolutionEngine:
             content = ""
 
         # Parse LLM output
-        failures, successes, lesson = self._parse_debrief(content)
-        if not lesson:
+        failures, successes, lesson, consolidation_note = self._parse_debrief(content)
+        if not lesson and not consolidation_note:
             lesson = f"Continue current strategy. WR={wr:.1%} with {total} trades."
 
         debrief = AELDebriefResult(
@@ -229,26 +249,31 @@ class AELEvolutionEngine:
             failure_patterns=failures,
             success_patterns=successes,
             lessons_learned=lesson,
+            consolidation_note=consolidation_note,
         )
         self._debrief_history.setdefault(shadow_id, []).append(debrief)
         return debrief
 
     @staticmethod
-    def _parse_debrief(text: str) -> tuple[list[str], list[str], str]:
-        """Parse structured output from Pro debrief."""
+    def _parse_debrief(text: str) -> tuple[list[str], list[str], str, str]:
+        """Parse structured output from Pro debrief.
+
+        Returns (failure_patterns, success_patterns, lesson, consolidation_note).
+        Consolidation note is only present in ELITE consolidation mode.
+        """
         import re
-        failures, successes, lesson = [], [], ""
+        failures, successes, lesson, consolidation_note = [], [], "", ""
 
         # Extract FAILURE_PATTERNS section
         fp_match = re.search(
-            r'FAILURE_PATTERNS?:?\s*\n(.*?)(?=SUCCESS_PATTERNS|LESSON|$)', text, re.DOTALL
+            r'FAILURE_PATTERNS?:?\s*\n(.*?)(?=SUCCESS_PATTERNS|LESSON|CONSOLIDATION_NOTE|$)', text, re.DOTALL
         )
         if fp_match:
             failures = [l.strip("-• ").strip() for l in fp_match.group(1).strip().split("\n") if l.strip()]
 
         # Extract SUCCESS_PATTERNS section
         sp_match = re.search(
-            r'SUCCESS_PATTERNS?:?\s*\n(.*?)(?=FAILURE_PATTERNS|LESSON|$)', text, re.DOTALL
+            r'SUCCESS_PATTERNS?:?\s*\n(.*?)(?=FAILURE_PATTERNS|LESSON|CONSOLIDATION_NOTE|$)', text, re.DOTALL
         )
         if sp_match:
             successes = [l.strip("-• ").strip() for l in sp_match.group(1).strip().split("\n") if l.strip()]
@@ -258,7 +283,12 @@ class AELEvolutionEngine:
         if l_match:
             lesson = l_match.group(1).strip()[:300]
 
-        return failures[:3], successes[:3], lesson
+        # Extract CONSOLIDATION_NOTE (ELITE consolidation mode)
+        cn_match = re.search(r'CONSOLIDATION_NOTE:?\s*\n?(.*?)$', text, re.DOTALL)
+        if cn_match:
+            consolidation_note = cn_match.group(1).strip()[:500]
+
+        return failures[:3], successes[:3], lesson, consolidation_note
 
     def inject_lesson(self, shadow_id: str, lesson: str) -> bool:
         """Inject a lesson into a shadow's active lesson list.

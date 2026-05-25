@@ -108,8 +108,8 @@ async def test_daredevil_analyze_with_mock_llm(temp_shadow_db):
             [{"headline": "Market drops on Fed surprise"}], {}
         )
 
-    assert len(output.votes) == 1
-    assert output.votes[0].ticker == "SPY"
+    assert len(output.decisions) == 1
+    assert output.decisions[0].ticker == "SPY"
 
 
 @pytest.mark.asyncio

@@ -4,7 +4,7 @@ Pure Python, zero LLM. Computes abnormal returns around figure events.
 Phase 1: daily frequency only. Phase 3: intraday [0, +30min] window.
 
 Based on standard event study methodology (MacKinlay 1997).
-Design: .claude/plans/market-figure-intelligence-module.md §6
+Design: docs/dev/plans/market-figure-intelligence-module.md §6
 """
 
 from __future__ import annotations

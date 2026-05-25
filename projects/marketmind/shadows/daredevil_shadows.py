@@ -5,7 +5,7 @@ import json
 import logging
 
 from marketmind.shadows.shadow_agent import (
-    ShadowAgent, ShadowAnalysisOutput, ShadowVote, defang_text
+    ShadowAgent, ShadowAnalysisOutput, ShadowDecision, defang_text
 )
 from marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
 from marketmind.config.settings import ShadowSettings
@@ -30,7 +30,7 @@ class DaredevilShadow(ShadowAgent):
         return await super()._analyze(news_items, market_data)
 
     def _build_user_prompt(self, news_items: list[dict], market_data: dict,
-                           broadcast_messages: list | None = None) -> str:
+                           broadcast_messages: list | None = None, **kwargs) -> str:
         """Daredevil-specific prompt: risk-on framing, forced direction constraints."""
         headlines = []
         for item in news_items[:20]:

@@ -1,17 +1,19 @@
 {
-  "generated": "2026-05-19T14:41:24Z",
+  "generated": "2026-05-24T02:23:15Z",
   "hooks": {
+    "cleanup_worktrees.py": "7fc8bffa57e09760352540ebce1e53bb20b25aaf78f8673a25a8a41ff8c94bd4",
     "config_guardian.py": "316f2b5def1983fa7236d4ed5ffb29a539fd969e33474b023150a6327caf974b",
+    "consistency_check.py": "927da28a9912ff9e1457def8eff9d37581cc88fd9d58541199bf089b8844433b",
     "conversation_archiver.py": "82418f24f2876fdb259853384b521664892e8e2dcb77cb1da0939833525307b2",
-    "danger_guard.py": "d4a1e1d13fed7761d60dd4b0bfe00a5d6684cba053f7f4e85a510bf9d7da1832",
-    "integrity_check.py": "1c67e47d01f6972fcc71cfcdb290895d9b0fb3c64b39b4b3ba078bef2177a3e1",
+    "danger_guard.py": "6b769be4e7c8fdbba7db2a2b024bf77407dd100eac2c76bcbf901a90f24944d0",
+    "integrity_check.py": "55d247920fcfb913843d47dd13aaf25ea7d4a728acdb8ca20b2b2d7498681c89",
     "pre_compact.py": "fc63571538555af0eb66ae866e004c6a6e622575ece15fe373ad5cd3a86cdba7",
-    "pre_session.py": "0957f5fac66b277e51faea18c126540af7ab258108d6da8abc8fae24f397edd4",
-    "recover_config.py": "4a3d1ed9c02d490b1d8bcc34d47168aecf80763829688e5148185763c7c3289f",
+    "pre_session.py": "7920dd6ee3a673a12d303ed378b93e175356117daf33335ae061f2d8b8749119",
+    "recover_config.py": "dbfd5523fccfcedb8c4f06c0a96b47a3c355f84df871ddc89c1b52d7f347af13",
     "session_activity_logger.py": "aae580fbcebdc1591da65029def6def9b551685e70b7d894398d365a1e66e768",
     "skill_profiler.py": "2d1969d63da6850b134412e7b4f706bdb212f576dc073a7a320f123091c52ab0",
     "startup_report.py": "042bb50a29b6d4f0ad067274fae5dd17a9e4ccb66ded9634e1426900c27546bd",
-    "stop_gate_check.py": "304eedc8e1b3723df0dd6b4afefbe6498033a1a03da3ee57b33a59716d96e5f9",
+    "stop_gate_check.py": "80708db6919b3017a723217ed6a50fab82860943470cac2d64b2b1c5abc1e159",
     "task_manifest.py": "5e6e24ae6d0578f43a90bdc6f49bf89da4687f6b1576dbf306f010dd3a263aa4",
     "time_anchor.py": "95b04717575e8d71a5f70750299d0a3bb754e03f8037eb3f905758060a037d7b"
   }

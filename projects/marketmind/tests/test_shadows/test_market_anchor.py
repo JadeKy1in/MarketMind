@@ -84,14 +84,18 @@ class TestMarketDataFetcher:
 class TestAccuracyGate:
 
     def test_elite_demoted_when_accuracy_below_50(self):
-        """ELITE shadow with market accuracy < 0.50 should be demoted to NORMAL."""
+        """ELITE shadow with market accuracy < 0.50 falls to EXCELLENT (not NORMAL).
+
+        Phase 1: market_accuracy < 0.50 blocks ELITE but shadow still qualifies
+        for EXCELLENT if it meets excellent thresholds. No longer demotes to NORMAL.
+        """
         engine = RankingEngine(ShadowSettings())
-        scores = [("2026-05-01", 0.78)] * 20 + [("2026-05-20", 0.82)] * 30
-        percentiles = [("2026-05-01", 0.55)] * 20 + [("2026-05-20", 0.88)] * 30
+        scores = [("2026-05-01", 0.78)] * 5 + [("2026-05-20", 0.82)] * 30
+        percentiles = [("2026-05-01", 0.55)] * 5 + [("2026-05-20", 0.88)] * 30
         tier = engine.determine_achievement_tier(
             scores, percentiles, 0.10, 0.85, market_accuracy=0.35
         )
-        assert tier == "normal"
+        assert tier == "excellent"  # Still qualifies for excellent
 
     def test_elite_retained_when_accuracy_above_50(self):
         """ELITE shadow with market accuracy >= 0.50 should retain tier."""

@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timezone
 
 from marketmind.shadows.shadow_agent import (
-    ShadowAgent, ShadowAnalysisOutput, ShadowVote, defang_text
+    ShadowAgent, ShadowAnalysisOutput, ShadowDecision, defang_text
 )
 from marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
 from marketmind.config.settings import ShadowSettings
@@ -80,7 +80,7 @@ class ExpertShadow(ShadowAgent):
         return await super()._analyze(filtered, market_data)
 
     def _build_user_prompt(self, news_items: list[dict], market_data: dict,
-                           broadcast_messages: list | None = None) -> str:
+                           broadcast_messages: list | None = None, **kwargs) -> str:
         """Expert-specific prompt: domain context, structured vote expectations."""
         filtered = self._filter_news_by_domain(news_items)
         headlines = []

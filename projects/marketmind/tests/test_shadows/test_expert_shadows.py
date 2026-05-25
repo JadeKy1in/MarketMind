@@ -171,12 +171,12 @@ async def test_expert_analyze_with_mock_llm_produces_votes(temp_shadow_db):
             [{"headline": "Gold hits new high as central banks stockpile"}], {}
         )
 
-    assert len(output.votes) == 2
-    assert output.votes[0].ticker == "GLD"
-    assert output.votes[0].direction == "long"
-    assert output.votes[0].confidence == 0.75
-    assert output.votes[1].ticker == "GDX"
-    assert output.votes[1].direction == "short"
+    assert len(output.decisions) == 2
+    assert output.decisions[0].ticker == "GLD"
+    assert output.decisions[0].direction == "long"
+    assert output.decisions[0].confidence == 0.75
+    assert output.decisions[1].ticker == "GDX"
+    assert output.decisions[1].direction == "short"
 
 
 @pytest.mark.asyncio
@@ -227,5 +227,5 @@ async def test_expert_empty_llm_response_graceful(temp_shadow_db):
                new_callable=AsyncMock, return_value=mock_result):
         output = await agent._analyze([{"headline": "Gold steady"}], {})
 
-    assert len(output.votes) == 0
+    assert len(output.decisions) == 0
     assert output.quota_used == 0  # 空内容不消耗配额

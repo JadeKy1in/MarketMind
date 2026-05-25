@@ -3,7 +3,7 @@
 Scans news items for mentions of key persons, classifies signal type,
 computes AWA scores, and emits FigureSignal objects for the main pipeline.
 
-Design spec: market-figure-intelligence-module.md §8
+Design spec: docs/dev/plans/market-figure-intelligence-module.md §8
   - Flash LLM ONLY for market-relevance classification — not for AWA scoring (§8.3)
   - AWA scoring delegated to awa_scorer.py (§8.3)
   - FigureSignal objects passed to BOTH main pipeline and shadow ecosystem (§8.1)
@@ -113,7 +113,7 @@ MARKET_RELEVANCE_SYSTEM_PROMPT = (
 class FigureSignal:
     """A signal emitted by a market-moving figure.
 
-    Fields match the canonical spec (market-figure-intelligence-module.md §8.2).
+    Fields match the canonical spec (docs/dev/plans/market-figure-intelligence-module.md §8.2).
     AWA scoring is computed by awa_scorer.py, not inline.
     """
     person_name: str

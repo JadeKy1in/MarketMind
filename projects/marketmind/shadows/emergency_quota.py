@@ -22,12 +22,14 @@ from marketmind.config.settings import ShadowSettings
 
 logger = logging.getLogger("marketmind.shadows.emergency_quota")
 
+EMERGENCY_BONUS_CAP = 5  # Phase 1: max permanent +1 from emergency quota
+
 
 @dataclass
 class EmergencyQuotaState:
     """Per-shadow state for emergency quota tracking."""
     shadow_id: str
-    state: str = "normal"              # "normal"|"pending"|"audit"|"penalized"|"rewarded"
+    state: str = "idle"                # "idle"|"pending"|"audit"|"penalized"|"rewarded"
     consecutive_failures: int = 0
     permanent_bonus: int = 0            # +1 for each profitable emergency
     permanent_penalty: int = 0          # -1 when 3 consecutive failures
@@ -63,7 +65,7 @@ class EmergencyQuotaAuditor:
 
         Requirements (Phase 2: exhaustion-based trigger):
         - Base quota must be exhausted (used >= total)
-        - Shadow must be in "normal" state (not currently penalized)
+        - Shadow must be in "idle" state (not currently penalized)
         - Shadow must exist in the DB
 
         The old confidence threshold is kept as a secondary check:
@@ -134,8 +136,8 @@ class EmergencyQuotaAuditor:
             state = self._get_or_create_state(shadow_id)
 
             if was_profitable:
-                # Reward: permanent +1 bonus, reset failures
-                state.permanent_bonus += 1
+                # Reward: permanent +1 bonus (capped), reset failures
+                state.permanent_bonus = min(state.permanent_bonus + 1, EMERGENCY_BONUS_CAP)
                 state.consecutive_failures = 0
                 state.state = "rewarded"
                 state.observation_days_remaining = 0
@@ -229,7 +231,7 @@ class EmergencyQuotaAuditor:
                     data = json.loads(raw)
                     self._shadow_states[shadow_id] = EmergencyQuotaState(
                         shadow_id=shadow_id,
-                        state=data.get("state", "normal"),
+                        state=data.get("state", "idle"),
                         consecutive_failures=data.get("consecutive_failures", 0),
                         permanent_bonus=data.get("permanent_bonus", 0),
                         permanent_penalty=data.get("permanent_penalty", 0),

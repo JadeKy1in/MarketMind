@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "capitol-trades": {
+      "command": "mcp-capitol-trades",
+      "type": "stdio"
+    }
+  }
+}

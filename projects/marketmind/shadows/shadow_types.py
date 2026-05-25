@@ -5,7 +5,14 @@ from dataclasses import dataclass, field
 
 
 @dataclass
-class ShadowVote:
+class ShadowDecision:
+    """A shadow's independent investment decision for a single ticker.
+
+    NOT a vote — each shadow makes its own trade judgment (long/short/abstain).
+    Renamed from ShadowVote to reflect that DD-001 (shadows do not vote on
+    collective decisions) is LOCKED. These are individual trade decisions,
+    NOT votes in a consensus mechanism.
+    """
     shadow_id: str
     shadow_type: str
     date: str
@@ -34,7 +41,7 @@ class PositionCheck:
 class ShadowAnalysisOutput:
     shadow_id: str
     date: str
-    votes: list[ShadowVote] = field(default_factory=list)
+    decisions: list[ShadowDecision] = field(default_factory=list)
     position_checks: list[PositionCheck] = field(default_factory=list)
     insights: list[str] = field(default_factory=list)
     methodology_notes: str = ""

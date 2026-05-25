@@ -33,7 +33,7 @@ async def update_shadow_memory(state_db, config, shadow_analyses: dict, today: s
             )
             store.ingest_observation_sync(shadow_id, obs, tier="episodic")
 
-        for vote in analysis.votes:
+        for vote in analysis.decisions:
             ticker = vote.ticker
             obs = ExternalObservation(
                 observation_id=f"vote:{shadow_id}:{today}:{ticker}:{hash(vote.thesis) & 0xFFFFFFFF:x}",

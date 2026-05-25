@@ -1,17 +1,1 @@
-{"type": "architect", "files": [
-  "README.md", "CLAUDE.md", "projects/marketmind/CLAUDE.md",
-  ".claude/state/current_task.json", ".claude/state/user_preferences.json",
-  ".claude/state/.preferences.hash", ".claude/state/proxy_mode.json",
-  ".claude/tools/proxy_mode.py",
-  "projects/marketmind/pipeline/scout.py",
-  "projects/marketmind/.claude/settings.local.json",
-  ".claude/settings.local.json",
-  ".claude/hooks/stop_gate_check.py",
-  ".claude/state/user_proxy_design.json",
-  "projects/singoo/CLAUDE.md",
-  "projects/marketmind/input/account_state.json",
-  ".gitignore",
-  "projects/marketmind/requirements.txt",
-  "projects/marketmind/.claude/hooks/stop_gate_check.py",
-  "projects/marketmind/regenerate_fixtures.py"
-], "risk": "low", "description": "2026-05-24: MEDIUM+LOW audit fixes: .gitignore patterns, python-dotenv removal, stop_gate plan/review gates, grandfathered comment on regenerate_fixtures.py"}
+{"type": "enhance", "files": ["shadows/ael_weekly_flash.py", "shadows/ael_evolution.py", "shadows/ael_quarterly_pro.py", "shadows/diversity_controller.py", "shadows/shadow_mother.py", "shadows/gate2_graduation.py", "pipeline/gate2_interaction.py", "shadows/elite_participation.py"], "risk": "high", "description": "Phase 3+4并行: 三层AEL+策略趋同+Gate2交互+毕业考试"}

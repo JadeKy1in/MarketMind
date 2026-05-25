@@ -105,13 +105,11 @@ SOURCES: list[Source] = [
            "https://trumpstruth.org/feed", "rss", 0.15, 1.0),
 
     # ── Insider / Smart Money (Phase G Layer 4) ─────────────────────
-    # House Stock Watcher S3 bucket DEAD as of 2026-05 — all regions return 403.
-    # Senate Stock Watcher API (senatestockwatcher.com) and CapitolTrades BFF
-    # (bff.capitoltrades.com) also confirmed DEAD (503/TLS errors). No free,
-    # programmatic congressional trade endpoint currently available.
+    # Congress trades revived 2026-05-25 via @anguslin/mcp-capitol-trades
+    # (real-time HTML scraping of capitoltrades.com via Node.js MCP subprocess).
     Source("Congress Trades", SourceTier.BEST_EFFORT,
-           "https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json",
-           "congress_api", 0.20, 1.0, status=SourceStatus.DEAD),
+           "https://www.capitoltrades.com/trades",
+           "congress_api", 0.20, 1.0, status=SourceStatus.WORKING),
     Source("SEC Form 4", SourceTier.BEST_EFFORT,
            "", "sec_form4", 0.20, 1.0),
     Source("SEC 13F", SourceTier.BEST_EFFORT,

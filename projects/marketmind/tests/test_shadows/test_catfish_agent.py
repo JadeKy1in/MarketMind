@@ -4,7 +4,7 @@ import pytest
 from marketmind.shadows.catfish_agent import (
     CatfishAgent, CATFISH_CONFIG, CATFISH_SYSTEM_PROMPT, create_catfish_agent
 )
-from marketmind.shadows.shadow_agent import ShadowVote
+from marketmind.shadows.shadow_agent import ShadowDecision
 from marketmind.shadows.shadow_state import ShadowConfig
 from marketmind.config.settings import ShadowSettings
 
@@ -33,7 +33,7 @@ def catfish(catfish_config, temp_shadow_db, settings):
 
 
 def make_vote(shadow_id, ticker, direction, confidence=0.5):
-    return ShadowVote(
+    return ShadowDecision(
         shadow_id=shadow_id, shadow_type="expert",
         date="2026-05-11", ticker=ticker, direction=direction,
         confidence=confidence, thesis="test", risk_note="test",
@@ -97,7 +97,7 @@ class TestCatfishAgent:
     @pytest.mark.asyncio
     async def test_catfish_analyze_without_trigger(self, catfish):
         output = await catfish._analyze([], {})
-        assert len(output.votes) == 0
+        assert len(output.decisions) == 0
         assert "NO_CONSENSUS_DETECTED" in str(output.insights)
 
     @pytest.mark.asyncio
@@ -114,9 +114,9 @@ class TestCatfishAgent:
         }
         with patch("marketmind.gateway.async_client.chat_with_integrity", new_callable=AsyncMock, return_value=mock_result):
             output = await catfish._analyze([{"headline": "Test"}], market_data)
-        assert len(output.votes) == 1
-        assert output.votes[0].direction == "short"  # opposes long consensus
-        assert output.votes[0].ticker == "SPY"
+        assert len(output.decisions) == 1
+        assert output.decisions[0].direction == "short"  # opposes long consensus
+        assert output.decisions[0].ticker == "SPY"
 
     def test_catfish_not_valid_counter(self, catfish):
         """Catfish methodology requires NO_VALID_COUNTER response when no legitimate argument."""

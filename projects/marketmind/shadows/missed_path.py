@@ -38,7 +38,7 @@ class MissedPathAgent(ShadowAgent):
         return ShadowAnalysisOutput(
             shadow_id=self.shadow_id,
             date=today,
-            votes=[],  # Read-only — no votes
+            decisions=[],  # Read-only agent — no trades
             methodology_notes="Missed path: tracking rejected direction counterfactually.",
         )
 

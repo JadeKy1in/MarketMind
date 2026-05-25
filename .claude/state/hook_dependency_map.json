@@ -1,0 +1,35 @@
+{
+  "generated": "2026-05-25T02:14:15Z",
+  "source": "integrity_check.py — auto-discovery (bat scan + docstring) merged with manual baseline",
+  "warnings": [],
+  "hooks": {
+    "pre_session.py": {
+      "external_callers": [
+        "start.bat:12"
+      ],
+      "recovery_via": [
+        "recover_config.py"
+      ],
+      "deletion_impact": "Pre-launch validator called by start.bat BEFORE Claude Code starts — not an orphan hook",
+      "discovery_method": "manual_baseline+docstring"
+    },
+    "recover_config.py": {
+      "external_callers": [
+        "start.bat:17 (error message path)",
+        "pre_session.py (recovery hint in error)",
+        "start.bat:17 (error recovery path)"
+      ],
+      "recovery_via": [
+        "config_guardian.py"
+      ],
+      "deletion_impact": "Standalone config recovery tool — essential when settings.json is corrupted",
+      "discovery_method": "manual_baseline+docstring"
+    },
+    "session_activity_logger.py": {
+      "external_callers": [],
+      "recovery_via": [],
+      "deletion_impact": "Session activity audit gap; historically wired in legacy hook chains",
+      "discovery_method": "manual_baseline"
+    }
+  }
+}

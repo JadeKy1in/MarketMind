@@ -26,6 +26,7 @@ BACKUPS_DIR = WORKSPACE / ".claude" / "backups" / "hooks"
 STATE_DIR = WORKSPACE / ".claude" / "state"
 SETTINGS_LOCAL = WORKSPACE / ".claude" / "settings.local.json"
 MANIFEST_PATH = BACKUPS_DIR / "hook_manifest.json"
+DEPENDENCY_MAP = STATE_DIR / "hook_dependency_map.json"
 
 # Expected hook scripts and their SHA256 (populated on first install)
 REQUIRED_HOOKS = [
@@ -50,6 +51,27 @@ REQUIRED_HOOK_EVENTS = {
     "PostToolUse": ["skill_profiler.py"],
     "Stop": ["stop_gate_check.py", "conversation_archiver.py"],
     "PreCompact": ["pre_compact.py"],
+}
+
+# Manual baseline: hook files referenced OUTSIDE the SessionStart/Stop hook chain.
+# These survive all auto-discovery and serve as the ground-truth "never delete" list.
+# Auto-discovery (bat scan + docstring parsing) supplements but never overrides this.
+MANUAL_BASELINE = {
+    "pre_session.py": {
+        "external_callers": ["start.bat:12"],
+        "recovery_via": ["recover_config.py"],
+        "deletion_impact": "start.bat fails → Claude Code cannot launch via bat file"
+    },
+    "recover_config.py": {
+        "external_callers": ["start.bat:17 (error message path)", "pre_session.py (recovery hint in error)"],
+        "recovery_via": ["config_guardian.py"],
+        "deletion_impact": "Config recovery becomes impossible without manual intervention"
+    },
+    "session_activity_logger.py": {
+        "external_callers": [],
+        "recovery_via": [],
+        "deletion_impact": "Session activity audit gap; historically wired in legacy hook chains"
+    },
 }
 
 
@@ -148,6 +170,170 @@ def check_settings_hooks():
     return missing
 
 
+def scan_launch_scripts():
+    """Scan workspace root for .bat/.cmd/.sh/.ps1 files referencing .claude/hooks/ files.
+
+    Returns {hook_name: [caller_ref, ...]} where caller_ref is like 'start.bat:12'.
+    This is the A in A+B: automatic discovery of script-level dependencies.
+    """
+    import re
+
+    discovered = {}
+    # Match paths containing .claude/hooks/<filename>.py in any quoting style
+    hook_ref_pattern = re.compile(r'\.claude[/\\]hooks[/\\]([a-zA-Z0-9_]+\.py)')
+
+    for glob_pat in ("*.bat", "*.cmd", "*.sh", "*.ps1"):
+        for script_path in WORKSPACE.glob(glob_pat):
+            try:
+                lines = script_path.read_text(encoding="utf-8", errors="replace").split("\n")
+                for i, line in enumerate(lines, 1):
+                    for m in hook_ref_pattern.finditer(line):
+                        hook_name = m.group(1)
+                        caller_ref = f"{script_path.name}:{i}"
+                        discovered.setdefault(hook_name, []).append(caller_ref)
+            except OSError:
+                pass
+
+    return discovered
+
+
+def scan_hook_docstrings():
+    """Scan hook file docstrings for @external-callers: annotations.
+
+    Parses the first docstring of each hook .py file looking for:
+        @external-callers: start.bat:12
+        @recovery: recover_config.py
+        @never-delete: reason
+
+    Returns {hook_name: {external_callers: [...], recovery_via: [...], never_delete_reason: str}}.
+    """
+    import re
+
+    discovered = {}
+    # Matches @tag: value lines, allowing leading whitespace
+    tag_pattern = re.compile(r'@(external-callers|recovery|never-delete):\s*(.+)')
+
+    for hook_name in REQUIRED_HOOKS:
+        hook_path = HOOKS_DIR / hook_name
+        if not hook_path.exists():
+            continue
+        try:
+            content = hook_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+
+        # Extract first docstring (top-level """...""")
+        ds_match = re.search(r'"""(.*?)"""', content, re.DOTALL)
+        if not ds_match:
+            continue
+
+        docstring = ds_match.group(1)
+        info = {}
+        for m in tag_pattern.finditer(docstring):
+            tag, value = m.group(1).strip(), m.group(2).strip()
+            if tag == "external-callers":
+                info.setdefault("external_callers", []).append(value)
+            elif tag == "recovery":
+                info.setdefault("recovery_via", []).append(value)
+            elif tag == "never-delete":
+                info["never_delete_reason"] = value
+
+        if info:
+            discovered[hook_name] = info
+
+    return discovered
+
+
+def build_dependency_map():
+    """Merge manual baseline + bat scan + docstring scan into a unified dependency map.
+
+    Returns (deps_dict, warnings_list).
+    Manual baseline entries are authoritative and survive all auto-discovery.
+    Auto-discovery supplements with new callers or flags stale entries.
+    """
+    discovered_scripts = scan_launch_scripts()
+    discovered_docstrings = scan_hook_docstrings()
+    warnings = []
+
+    # Start with manual baseline as ground truth
+    all_deps = {}
+    for hook_name, info in MANUAL_BASELINE.items():
+        all_deps[hook_name] = dict(info)
+        all_deps[hook_name]["discovery_method"] = "manual_baseline"
+
+    # Merge bat-scan discoveries
+    for hook_name, callers in discovered_scripts.items():
+        if hook_name not in all_deps:
+            # New dependency found — not in manual baseline
+            all_deps[hook_name] = {
+                "external_callers": callers,
+                "recovery_via": [],
+                "deletion_impact": "Discovered by script scan — not in manual baseline; consider adding",
+                "discovery_method": "bat_scan",
+            }
+            warnings.append(
+                f"{hook_name}: discovered external callers via bat scan [{', '.join(callers)}] "
+                f"— NOT in manual baseline, consider adding to MANUAL_BASELINE in integrity_check.py"
+            )
+        else:
+            # Already in baseline — cross-validate
+            baseline_callers = all_deps[hook_name].get("external_callers", [])
+            baseline_files = {c.split(":")[0] for c in baseline_callers}
+            for caller in callers:
+                caller_file = caller.split(":")[0]
+                if caller_file not in baseline_files:
+                    all_deps[hook_name].setdefault("discovered_extra_callers", []).append(caller)
+                    all_deps[hook_name]["discovery_method"] = (
+                        all_deps[hook_name].get("discovery_method", "") + "+bat_scan"
+                    )
+
+    # Merge docstring discoveries (supplement, never override)
+    for hook_name, info in discovered_docstrings.items():
+        if hook_name not in all_deps:
+            all_deps[hook_name] = {
+                "external_callers": info.get("external_callers", []),
+                "recovery_via": info.get("recovery_via", []),
+                "deletion_impact": info.get("never_delete_reason", "Docstring-annotated dependency"),
+                "discovery_method": "docstring",
+            }
+        else:
+            # Supplements manual baseline
+            for key in ("external_callers", "recovery_via"):
+                existing = set(all_deps[hook_name].get(key, []))
+                for v in info.get(key, []):
+                    if v not in existing:
+                        all_deps[hook_name].setdefault(key, []).append(v)
+            if "never_delete_reason" in info and "never_delete" not in all_deps[hook_name]:
+                all_deps[hook_name]["deletion_impact"] = info["never_delete_reason"]
+            all_deps[hook_name]["discovery_method"] = (
+                all_deps[hook_name].get("discovery_method", "") + "+docstring"
+            )
+
+    # Flag baseline entries with no external callers discovered (stale check)
+    for hook_name in MANUAL_BASELINE:
+        if hook_name not in discovered_scripts and hook_name not in discovered_docstrings:
+            baseline_callers = MANUAL_BASELINE[hook_name].get("external_callers", [])
+            if baseline_callers:
+                warnings.append(
+                    f"{hook_name}: baseline records callers {baseline_callers} "
+                    f"but none found by bat or docstring scan — caller may have changed"
+                )
+
+    return all_deps, warnings
+
+
+def save_dependency_map(deps, warnings):
+    """Write hook_dependency_map.json to .claude/state/."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    output = {
+        "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "source": "integrity_check.py — auto-discovery (bat scan + docstring) merged with manual baseline",
+        "warnings": warnings,
+        "hooks": deps,
+    }
+    DEPENDENCY_MAP.write_text(json.dumps(output, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+
+
 def ensure_state_dir():
     """Ensure .claude/state/ directory exists."""
     if not STATE_DIR.exists():
@@ -200,6 +386,14 @@ def main():
 
     # 3. Ensure state directory
     ensure_state_dir()
+
+    # 3b. Build external dependency map (A+B patch: auto-discovery cross-referenced with manual baseline)
+    deps, dep_warnings = build_dependency_map()
+    save_dependency_map(deps, dep_warnings)
+    if dep_warnings:
+        print(f"- [integrity_check] DEPENDENCY MAP ({len(dep_warnings)} warnings):")
+        for w in dep_warnings:
+            print(f"  {w}")
 
     # 4. Check session diff for unfinished business from previous session
     # (M2 fix: detect uncommitted changes without PICA artifacts)

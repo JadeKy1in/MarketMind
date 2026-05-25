@@ -100,15 +100,15 @@ def get_source_status() -> list[dict]:
     """Return source health from config/source_authority when available."""
     sources = []
     try:
-        from marketmind.config.source_authority import SOURCE_AUTHORITY
-        for name, cfg in SOURCE_AUTHORITY.items():
+        from marketmind.config.source_authority import SOURCES
+        for s in SOURCES:
             sources.append({
-                "name": name,
-                "ok": cfg.get("status", "active") == "active",
-                "tier": cfg.get("tier", 3),
+                "name": s.name,
+                "ok": str(s.status).lower() in ("working", "active"),
+                "tier": int(s.tier) if hasattr(s, 'tier') else 3,
             })
     except Exception:
-        logger.warning("SOURCE_AUTHORITY source status lookup failed", exc_info=True)
+        logger.warning("SOURCES source status lookup failed", exc_info=True)
     # Fallback: hardcoded list from config
     if not sources:
         for name, url, has_key in [
@@ -141,7 +141,7 @@ def get_health() -> dict:
 def get_shadow_overview() -> dict:
     db = _get_shadow_db()
     shadows = db.get_visible_shadows()
-    tiers: dict[str, int] = {"elite": 0, "excellent": 0, "normal": 0, "watch": 0, "endangered": 0}
+    tiers: dict[str, int] = {"elite": 0, "excellent": 0, "normal": 0, "endangered": 0}
     for s in shadows:
         snap = db.get_latest_snapshot(s.shadow_id)
         tier = snap.achievement_tier if snap and snap.achievement_tier else "normal"

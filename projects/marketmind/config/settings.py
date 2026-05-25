@@ -41,16 +41,20 @@ class ShadowSettings:
     composite_weights: dict = field(default_factory=lambda: {
         "mppm": 0.35, "calmar": 0.25, "omega": 0.20, "win_rate": 0.20
     })
+    # Phase 1: 5-tier → 4-tier (WATCH merged into ENDANGERED at 0.20)
     achievement_percentiles: dict = field(default_factory=lambda: {
-        "endangered": 0.15, "watch": 0.30, "excellent": 0.70, "elite": 0.85
+        "endangered": 0.20, "excellent": 0.70, "elite": 0.85
     })
     elite_consecutive_days: int = 30
     excellent_consecutive_days: int = 10
-    watch_consecutive_days: int = 10
-    endangered_consecutive_days: int = 20
+    endangered_consecutive_days: int = 14  # was 20 (ENDANGERED) and 10 (WATCH)
+    watch_consecutive_days: int = 14       # unused, kept for backward compat
     elite_deflated_sharpe_min: float = 0.8
     excellent_deflated_sharpe_min: float = 0.6
     watch_mdd_threshold: float = 0.30
+    # Absolute quality gates (anti all-ELITE degradation)
+    elite_absolute_sharpe_min: float = 0.6
+    excellent_absolute_sharpe_min: float = 0.4
 
     # Emergency quota
     emergency_confidence_threshold: int = 8

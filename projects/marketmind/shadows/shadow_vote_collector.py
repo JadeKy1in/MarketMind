@@ -87,15 +87,15 @@ async def collect_votes(
             try:
                 agent = create_shadow_agent(shadow_config, state_db, config)
                 output = await agent.run_daily_analysis(news_items, market_data)
-                if output.votes:
+                if output.decisions:
                     is_beta = shadow_config.status == "beta"
                     try:
                         if is_beta:
                             state_db.save_beta_analyses(
-                                shadow_config.shadow_id, today, output.votes)
+                                shadow_config.shadow_id, today, output.decisions)
                         else:
                             state_db.save_analyses(
-                                shadow_config.shadow_id, today, output.votes)
+                                shadow_config.shadow_id, today, output.decisions)
                     except Exception as e:
                         logger.error("Failed to save analyses for %s: %s",
                                      shadow_config.shadow_id, e)
@@ -105,7 +105,7 @@ async def collect_votes(
                     analysis_dict = {
                         "shadow_id": output.shadow_id,
                         "date": output.date,
-                        "vote_count": len(output.votes),
+                        "vote_count": len(output.decisions),
                         "insight_count": len(output.insights),
                         "quota_used": output.quota_used,
                         "latency_ms": output.latency_ms,
@@ -147,15 +147,15 @@ async def collect_votes(
             is_beta = (status == "beta")
             result.shadow_analyses[sid] = output
             if not is_beta:
-                result.votes_collected += len(output.votes)
-                all_votes.extend(output.votes)
+                result.decisions_collected += len(output.decisions)
+                all_votes.extend(output.decisions)
             try:
                 latest = state_db.get_latest_snapshot(sid)
                 if latest and latest.date == today:
                     state_db.update_snapshot_fields(
                         sid, today,
                         insights_generated=len(output.insights),
-                        votes_produced=len(output.votes),
+                        votes_produced=len(output.decisions),
                         flash_quota_used=output.quota_used,
                     )
             except Exception as e:

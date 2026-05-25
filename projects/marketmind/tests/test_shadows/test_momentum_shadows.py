@@ -146,10 +146,10 @@ async def test_momentum_analyze_with_mock_llm_produces_votes(temp_shadow_db):
             [{"headline": "Market continues uptrend on strong volume"}], {}
         )
 
-    assert len(output.votes) == 1
-    assert output.votes[0].ticker == "SPY"
-    assert output.votes[0].direction == "long"
-    assert output.votes[0].confidence == 0.70
+    assert len(output.decisions) == 1
+    assert output.decisions[0].ticker == "SPY"
+    assert output.decisions[0].direction == "long"
+    assert output.decisions[0].confidence == 0.70
 
 
 @pytest.mark.asyncio

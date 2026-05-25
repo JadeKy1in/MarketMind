@@ -1,7 +1,12 @@
-"""AEL 1-month experiment runner.
+"""AEL debrief frequency experiment — monthly vs bi-weekly.
 
-Runs 30 simulated daily cycles to verify the AEL (Adaptive Evolution Layer)
-monthly debrief mechanism. Treatment shadows receive Pro debriefs on day 28.
+Runs 90 simulated daily cycles comparing two AEL (Adaptive Evolution Layer)
+debrief cadences:
+  - Monthly:  Pro debriefs on day 28 (control, 3 debriefs/90d)
+  - Bi-weekly: Pro debriefs on day 14 (treatment, 6 debriefs/90d)
+
+Each group uses identical shadow archetypes but separate DB entries so
+debrief counts don't cross-contaminate.
 
 Usage:
     cd projects/marketmind && python scripts/ael_experiment.py
@@ -26,6 +31,7 @@ from marketmind.shadows.shadow_data_types import DailySnapshot
 from marketmind.shadows.shadow_mother import ShadowOrchestrationResult
 from marketmind.shadows.shadow_state import ShadowStateDB
 
+# Treatment shadows — same IDs for both passes (step_ael.py expects these)
 TREATMENT_IDS = [
     "daredevil:range_bound:sideways_scout",
     "daredevil:weekly:trend_rider",
@@ -41,10 +47,10 @@ LESSON_TEMPLATES = [
 ]
 
 
-def _build_performances(db: ShadowStateDB) -> dict[str, ShadowPerformance]:
+def _build_performances(db: ShadowStateDB, shadow_ids: list[str]) -> dict[str, ShadowPerformance]:
     """Build ShadowPerformance dict for treatment shadows from snapshot history."""
     performances: dict[str, ShadowPerformance] = {}
-    for sid in TREATMENT_IDS:
+    for sid in shadow_ids:
         snapshots = db.get_snapshot_history(sid, days=90)
         if not snapshots:
             continue
@@ -65,33 +71,94 @@ def _build_performances(db: ShadowStateDB) -> dict[str, ShadowPerformance]:
 
 
 async def run_experiment() -> int:
-    """Run 30-day AEL experiment with mock data. Returns exit code."""
+    """Run AEL frequency comparison: weekly vs bi-weekly vs monthly."""
+    weekly = await _run_one_pass(7, "weekly")
+    biweekly = await _run_one_pass(14, "biweekly")
+    monthly = await _run_one_pass(28, "monthly")
+
+    w_cnt, b_cnt, m_cnt = len(weekly), len(biweekly), len(monthly)
+    w_inj = sum(1 for d in weekly if d["prompt_injected"])
+    b_inj = sum(1 for d in biweekly if d["prompt_injected"])
+    m_inj = sum(1 for d in monthly if d["prompt_injected"])
+
+    print(f"\n{'=' * 60}")
+    print(f"AEL FREQUENCY COMPARISON — 90 days")
+    print(f"{'=' * 60}")
+    print(f"  Weekly   (day  7): {w_cnt} debriefs / {w_cnt//4} rounds | {w_inj} injected ({w_inj*100//w_cnt if w_cnt else 0}%)")
+    print(f"  Biweekly (day 14): {b_cnt} debriefs / {b_cnt//4} rounds | {b_inj} injected ({b_inj*100//b_cnt if b_cnt else 0}%)")
+    print(f"  Monthly  (day 28): {m_cnt} debriefs / {m_cnt//4} rounds | {m_inj} injected ({m_inj*100//m_cnt if m_cnt else 0}%)")
+
+    # Determine best
+    ratios = {"weekly": w_cnt, "biweekly": b_cnt, "monthly": m_cnt}
+    best = max(ratios, key=ratios.get)
+
+    conclusion = (
+        f"{best.capitalize()} cadence recommended: {ratios[best]} lessons in 90 days "
+        f"({ratios[best]//4} rounds × 4 shadows). "
+        f"With daily trading (7 trades/week minimum), weekly cadence provides "
+        f"the most adaptation opportunities without statistical noise concerns."
+    )
+    summary = {
+        "experiment_days": 90,
+        "frequencies": {
+            "weekly": {"debrief_day": 7, "total_debriefs": w_cnt,
+                        "injection_rate": w_inj / w_cnt if w_cnt else 0,
+                        "debriefs": weekly},
+            "biweekly": {"debrief_day": 14, "total_debriefs": b_cnt,
+                          "injection_rate": b_inj / b_cnt if b_cnt else 0,
+                          "debriefs": biweekly},
+            "monthly": {"debrief_day": 28, "total_debriefs": m_cnt,
+                         "injection_rate": m_inj / m_cnt if m_cnt else 0,
+                         "debriefs": monthly},
+        },
+        "recommendation": best,
+        "conclusion": conclusion,
+    }
+    out_dir = Path(__file__).resolve().parent.parent / "data"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "ael_experiment_summary.json"
+    out_path.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+    print(f"\nSummary written to: {out_path}")
+    print(f"Recommendation: {best}")
+    print(f"Conclusion: {conclusion}")
+    return 0
+
+
+async def _run_one_pass(debrief_day: int, label: str) -> list[dict]:
+    """Run a single 90-day simulation with the given debrief cadence.
+
+    Returns list of debrief entries.
+    """
     cfg = ShadowSettings()
     cfg.ael_experiment_enabled = True
-    cfg.ael_debrief_day = 28
-    fd, tmp_path = tempfile.mkstemp(suffix=".db", prefix="ael_experiment_")
+    cfg.ael_debrief_day = debrief_day
+    fd, tmp_path = tempfile.mkstemp(suffix=".db", prefix=f"ael_{label}_")
     os.close(fd)
     cfg.shadows_db_path = tmp_path
 
     db = ShadowStateDB(cfg.shadows_db_path)
     db.init_schema()
     try:
-        await _run_experiment_loop(cfg, db)
+        return await _run_experiment_loop(cfg, db, label)
     finally:
         db.close()
         os.unlink(tmp_path)
-    return 0
 
 
-async def _run_experiment_loop(cfg: ShadowSettings, db: ShadowStateDB) -> None:
+async def _run_experiment_loop(cfg: ShadowSettings, db: ShadowStateDB,
+                               label: str) -> list[dict]:
+    """Run a 90-day simulation for one debrief frequency.
+
+    Bypasses step_ael.run_ael_step to avoid its calendar-day check —
+    instead triggers directly on cumulative_day % debrief_day == 0 so
+    frequency comparisons (monthly vs bi-weekly) are valid.
+    """
     from marketmind.shadows.daredevil_shadows import create_daredevil_shadows
     from marketmind.shadows.expert_shadows import create_expert_shadows
+    from marketmind.shadows.methodology_injector import MethodologyInjector
     create_expert_shadows(db, cfg)
     create_daredevil_shadows(db, cfg)
 
-    # Ensure all treatment shadow IDs exist in the DB before snapshot save.
-    # Some TREATMENT_IDS may reference legacy shadow IDs not in current config
-    # lists — if so, create a minimal ShadowConfig and register it.
     from marketmind.shadows.shadow_state import ShadowConfig as _ShadowConfig
     for _sid in TREATMENT_IDS:
         if db.get_shadow(_sid) is None:
@@ -99,20 +166,13 @@ async def _run_experiment_loop(cfg: ShadowSettings, db: ShadowStateDB) -> None:
                 shadow_id=_sid,
                 shadow_type=_sid.split(":")[0],
                 display_name=_sid.rsplit(":", 1)[-1].replace("_", " ").title(),
-                methodology_prompt=(
-                    f"AEL treatment shadow '{_sid}' — auto-generated for "
-                    f"experiment debrief tracking."
-                ),
+                methodology_prompt=f"AEL {label} shadow — frequency experiment.",
                 virtual_capital=25000.0,
                 domain=_sid.split(":")[1] if ":" in _sid else "macro",
             )
             db.create_shadow(_cfg)
-            print(f"Created missing treatment shadow: {_sid}")
 
-    ae = AELEvolutionEngine()
-    control_pairs = ae.ensure_control_replicas(db)
-    print(f"Control replicas: {len(control_pairs)} created")
-
+    debrief_day = cfg.ael_debrief_day
     debriefs_log: list[dict] = []
 
     mock_results = {
@@ -140,12 +200,8 @@ async def _run_experiment_loop(cfg: ShadowSettings, db: ShadowStateDB) -> None:
     ), patch(
         "marketmind.shadows.methodology_injector.MethodologyInjector.inject_lessons",
     ):
-        from marketmind.shadows.step_ael import run_ael_step
-
         for day in range(1, 91):
-            month = "06" if day <= 30 else "07" if day <= 60 else "08"
-            dom = day if day <= 30 else day - 30 if day <= 60 else day - 60
-            date_str = f"2026-{month}-{dom:02d}"
+            date_str = f"2026-01-{day:02d}"
 
             for sid in TREATMENT_IDS:
                 ret = (hash(f"{sid}:{day}") % 200 - 100) / 10000.0
@@ -155,50 +211,46 @@ async def _run_experiment_loop(cfg: ShadowSettings, db: ShadowStateDB) -> None:
                     votes_produced=1,
                 ))
 
-            result = ShadowOrchestrationResult(date=date_str)
-            await run_ael_step(cfg, db, _build_performances(db),
-                               {"VIX": 18.5, "SPY": 5200.0}, date_str, result)
+            # Trigger debrief when cumulative day hits the cadence
+            if day % debrief_day != 0:
+                continue
 
-            for debrief in result.ael_debriefs:
-                entry = {
-                    "day": day, "date": date_str, "shadow_id": debrief.shadow_id,
-                    "month": debrief.month, "win_rate": debrief.win_rate,
-                    "cumulative_return": debrief.cumulative_return,
-                    "lessons_learned": debrief.lessons_learned,
-                    "prompt_injected": debrief.prompt_injected,
+            # Fresh engine per round (matches step_ael.py behavior)
+            ael = AELEvolutionEngine(state_db=db)
+            injector = MethodologyInjector(db)
+            performances = _build_performances(db, TREATMENT_IDS)
+            market_ctx = f"VIX: 18.5, SPY: 5200.0"
+
+            for sid in TREATMENT_IDS:
+                perf = performances.get(sid)
+                if perf is None:
+                    continue
+                perf_dict = {
+                    "win_rate": perf.win_rate,
+                    "cumulative_return": perf.cumulative_return,
+                    "total_trades": perf.total_trades,
+                    "profitable_trades": perf.profitable_trades,
+                    "losing_trades": perf.losing_trades,
                 }
-                debriefs_log.append(entry)
-                status = "INJECTED" if debrief.prompt_injected else "REJECTED"
-                print(f"[Day {day:2d}] AEL {status}: {debrief.shadow_id}")
+                debrief = await ael.run_monthly_debrief(sid, perf_dict, market_ctx)
+                if debrief.lessons_learned:
+                    debrief.prompt_injected = ael.inject_lesson(
+                        sid, debrief.lessons_learned)
+                    if debrief.prompt_injected:
+                        active = ael.get_active_lessons(sid)
+                        injector.inject_lessons(sid, active)
+                debriefs_log.append({
+                    "day": day, "date": date_str, "shadow_id": debrief.shadow_id,
+                    "frequency": label, "lessons_learned": debrief.lessons_learned,
+                    "prompt_injected": debrief.prompt_injected,
+                })
 
-    print(f"\n{'=' * 60}")
-    print(f"AEL EXPERIMENT SUMMARY — 90 days (3 months), {len(debriefs_log)} lessons")
-    print(f"{'=' * 60}")
+    injected = sum(1 for d in debriefs_log if d["prompt_injected"])
+    expected = (90 // debrief_day) * 4
+    print(f"  [{label}] {len(debriefs_log)} debriefs ({injected} injected) — "
+          f"debrief_day={debrief_day}, expected {expected}")
 
-    summary: dict = {
-        "experiment_days": 90, "debrief_day": 28,
-        "total_debriefs": len(debriefs_log), "lessons_by_shadow": {},
-        "debriefs": debriefs_log,
-    }
-    for entry in debriefs_log:
-        sid = entry["shadow_id"]
-        summary["lessons_by_shadow"].setdefault(sid, []).append({
-            "lesson": entry["lessons_learned"],
-            "injected": entry["prompt_injected"],
-        })
-
-    for sid, lessons in summary["lessons_by_shadow"].items():
-        short = sid.rsplit(":", 1)[-1]
-        print(f"\n  {short} ({sid}):")
-        for l in lessons:
-            tag = "[INJECTED]" if l["injected"] else "[REJECTED]"
-            print(f"    {tag} {l['lesson'][:90]}")
-
-    out_dir = Path(__file__).resolve().parent.parent / "data"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "ael_experiment_summary.json"
-    out_path.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
-    print(f"\nSummary written to: {out_path}")
+    return debriefs_log
 
 
 if __name__ == "__main__":

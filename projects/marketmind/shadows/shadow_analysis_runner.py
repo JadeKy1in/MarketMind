@@ -78,9 +78,9 @@ async def run_shadow_analyses(
                     ),
                     timeout=config.shadow_analysis_timeout_s,
                 )
-                if output.votes:
+                if output.decisions:
                     try:
-                        state_db.save_votes(sid, today, output.votes)
+                        state_db.save_votes(sid, today, output.decisions)
                     except Exception as e:
                         logger.error("Failed to save votes for %s: %s", sid, e)
                 try:
@@ -89,7 +89,7 @@ async def run_shadow_analyses(
                         state_db.update_snapshot_fields(
                             sid, today,
                             insights_generated=len(output.insights),
-                            votes_produced=len(output.votes),
+                            votes_produced=len(output.decisions),
                             flash_quota_used=output.quota_used,
                         )
                 except Exception as e:
@@ -114,8 +114,8 @@ async def run_shadow_analyses(
     for sid, output, err in results_list:
         if output is not None:
             shadow_analyses[sid] = output
-            votes_collected += len(output.votes)
-            all_votes.extend(output.votes)
+            votes_collected += len(output.decisions)
+            all_votes.extend(output.decisions)
         elif err is None and sid in completed_shadows:
             cached_raw = state_db.get_raw_output(sid, today)
             if cached_raw:

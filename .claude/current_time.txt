@@ -1,0 +1,3 @@
+Session start: 2026-05-25T02:14:15Z
+Training cutoff: 2026-01-01 (approx)
+Delta: ~4 months — prefer command output for dates after Jan 2026

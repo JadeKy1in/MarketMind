@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from marketmind.shadows.shadow_agent import ExternalObservation, MemoryQuery, ShadowVote
+from marketmind.shadows.shadow_agent import ExternalObservation, MemoryQuery, ShadowDecision
 from marketmind.shadows.knowledge_filter import KnowledgeFilter, KnowledgeVerdict, KnowledgeItem
 from marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
 from marketmind.shadows.shadow_memory import ShadowMemoryStore

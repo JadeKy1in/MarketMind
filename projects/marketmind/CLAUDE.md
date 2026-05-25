@@ -131,6 +131,14 @@ Each gate is silent unless violated — no manual confirmation, no prompts, no s
 
 **Key rule**: NEVER launch async work before sync decisions are resolved. User should know exactly what will run and what was decided.
 
+**Continuous Execution After Plan Approval (LOCKED — mechanical enforcement):**
+Once a plan is approved by the user AND task is declared in `current_task.json`:
+1. **Do NOT ask "要开始吗?" "要继续吗?" "要我做X吗?"** — the answer is always yes
+2. Execute all tasks sequentially without pausing for confirmation between steps
+3. Only stop when: BLOCKED (cannot resolve), ambiguity that genuinely prevents progress, or ALL tasks complete
+4. Routine "continue to next step" decisions have confidence >0.85 — auto-proceed
+5. This rule is MECHANICAL: PreToolUse hooks check for unnecessary AskUserQuestion calls during active task execution
+
 **Flash vs Pro routing:**
 - Flash: task classification, decision-point identification, confidence estimation
 - Pro: deep analysis, code generation, architecture planning

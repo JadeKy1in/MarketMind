@@ -14,7 +14,7 @@ from statistics import mean
 
 from marketmind.shadows.shadow_state import CollusionFlag
 from marketmind.config.settings import ShadowSettings
-from marketmind.shadows.shadow_agent import ShadowVote
+from marketmind.shadows.shadow_agent import ShadowDecision
 
 logger = logging.getLogger("marketmind.shadows.collusion_detector")
 
@@ -34,7 +34,7 @@ class CollusionDetector:
 
     # ── Public API ──────────────────────────────────────────────────────────
 
-    def compute_agreement_rate(self, votes: list[ShadowVote],
+    def compute_agreement_rate(self, votes: list[ShadowDecision],
                                ticker: str) -> dict[str, float]:
         """Compute agreement statistics for a single ticker across all shadows.
 
@@ -146,13 +146,13 @@ class CollusionDetector:
         else:
             return "herding"
 
-    def run_daily_check(self, date: str, votes: list[ShadowVote],
+    def run_daily_check(self, date: str, votes: list[ShadowDecision],
                         market_data: dict) -> list[CollusionFlag]:
         """Run the full daily collusion check across all tickers.
 
         Args:
             date: Date string (YYYY-MM-DD).
-            votes: List of ShadowVote objects from all shadows.
+            votes: List of ShadowDecision objects from all shadows.
             market_data: Dict keyed by ticker with market signal components.
 
         Returns:

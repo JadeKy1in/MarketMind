@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig
-from marketmind.shadows.shadow_agent import ShadowAgent, ShadowAnalysisOutput, ShadowVote
+from marketmind.shadows.shadow_agent import ShadowAgent, ShadowAnalysisOutput, ShadowDecision
 from marketmind.config.settings import ShadowSettings
 
 # Re-export types that consumers import from this module (preserve public API)
@@ -27,6 +27,94 @@ from marketmind.shadows.shadow_analysis_runner import run_shadow_analyses
 from marketmind.shadows.shadow_ranking_compute import compute_market_anchor, compute_rankings
 
 logger = logging.getLogger("marketmind.shadows.shadow_mother")
+
+# ── Domain coverage guard ────────────────────────────────────────────────────
+
+# Every domain that the shadow ecosystem should cover with >=1 shadow.
+ALL_REQUIRED_DOMAINS: set[str] = {
+    "gold", "crypto", "energy", "bonds", "volatility", "emerging",
+    "tech", "financials", "healthcare", "consumer", "industrials",
+    "metals", "real_estate", "fx", "macro", "short",
+}
+
+
+def get_all_active_domains(state_db: ShadowStateDB) -> set[str]:
+    """Collect unique domain names from all visible (active) shadows.
+
+    Args:
+        state_db: ShadowStateDB instance for querying shadow configs.
+
+    Returns:
+        Set of unique domain strings for currently visible shadows.
+    """
+    domains: set[str] = set()
+    for shadow in state_db.get_visible_shadows():
+        if shadow.domain:
+            domains.add(shadow.domain)
+    return domains
+
+
+def get_default_template(domain: str) -> ShadowConfig:
+    """Build a minimal BETA ShadowConfig for a given domain.
+
+    The returned config enters as shadow_type="beta", status="beta" so it
+    undergoes the full 20-day validation cycle before ranking eligibility.
+
+    Args:
+        domain: Domain name (e.g. "tech", "macro", "gold").
+
+    Returns:
+        ShadowConfig seeded with a generic domain-specific methodology prompt.
+    """
+    from datetime import timezone as _tz
+    ts = datetime.now(_tz).strftime("%Y%m%d%H%M%S")
+    shadow_id = f"beta:auto:{domain}_{ts}"
+    display_name = f"Auto-Seed {domain.title()}"
+    methodology_prompt = (
+        f"You are an autonomous BETA shadow covering the {domain} domain. "
+        f"You have been auto-seeded because all prior {domain} shadows were "
+        f"eliminated. Your methodology is under development. You analyze "
+        f"{domain}-specific news, fundamentals, and technicals. "
+        f"Output VOTE_START/VOTE_END blocks with direction, confidence "
+        f"(0.0-1.0), thesis (1 sentence), and risk_note (1 sentence)."
+    )
+    return ShadowConfig(
+        shadow_id=shadow_id,
+        shadow_type="beta",
+        display_name=display_name,
+        methodology_prompt=methodology_prompt,
+        virtual_capital=30000.0,
+        domain=domain,
+        temperature=0.35,
+        status="beta",
+    )
+
+
+def ensure_domain_coverage(state_db: ShadowStateDB) -> None:
+    """Guarantee at least one shadow per required domain.
+
+    After challenger trials may eliminate a domain's last shadow, this
+    function auto-seeds a BETA shadow for any depleted domain.
+
+    Args:
+        state_db: ShadowStateDB instance.
+    """
+    domains = get_all_active_domains(state_db)
+    for domain in sorted(ALL_REQUIRED_DOMAINS):
+        if domain not in domains:
+            config = get_default_template(domain)
+            config.shadow_type = "beta"
+            config.status = "beta"
+            try:
+                state_db.create_shadow(config)
+                logger.warning(
+                    "Domain %s depleted — auto-seeded BETA shadow (requires 20d validation)",
+                    domain,
+                )
+            except Exception as exc:
+                logger.error(
+                    "Failed to auto-seed BETA shadow for domain %s: %s", domain, exc
+                )
 
 
 @dataclass
@@ -439,6 +527,12 @@ class ShadowMother:
             await execute_challenger_trials(self.state_db, self.config, challenger, result)
         except Exception as e:
             logger.error("Challenger check failed: %s", e)
+
+        # 7.1 Domain coverage guard — auto-seed BETA if any domain depleted
+        try:
+            ensure_domain_coverage(self.state_db)
+        except Exception as e:
+            logger.error("Domain coverage guard failed: %s", e)
 
         # 7.5 Method breeding
         if today_day % 7 == 1:

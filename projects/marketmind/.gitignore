@@ -1,0 +1,47 @@
+# Secrets & API keys
+.env
+**/config.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Node
+node_modules/
+
+# IDE
+.vscode/
+.idea/
+
+# Generated reports & data
+output/reports/
+output/logs/
+data/velocity/
+data/methodology/
+data/event_store.jsonl
+projects/command_center/reports/
+data/
+output/
+
+# Cache & temp
+cache/
+*.log
+error_dump.log
+coverage/
+
+# Old Cline stuff (keep as reference but don't track changes)
+memory-bank/
+projects/robinhood/memory-bank/
+.clinerules
+projects/robinhood/.clinerules
+.cline/
+
+# Temp & sandbox
+temp_servers/
+sandbox/
+5.2.0

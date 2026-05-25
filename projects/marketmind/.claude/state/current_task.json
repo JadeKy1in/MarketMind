@@ -1,1 +1,1 @@
-{"type": "feat", "files": ["evolution/activity_monitor.py", "tests/test_evolution/test_activity_monitor.py"], "risk": "low", "description": "ActivityMonitor — emit alerts only on shadow activity level changes"}
+{"type": "fix", "files": ["api/data_providers.py", "dashboard.html"], "risk": "low", "description": "修复仪表盘: SOURCE_AUTHORITY→SOURCES导入名+5级→4级UI+空catch加错误日志"}

@@ -204,7 +204,7 @@ def test_get_shadow_state_returns_defaults_for_new_shadow(auditor):
     """get_shadow_state should return default EmergencyQuotaState for a new shadow."""
     state = auditor.get_shadow_state("expert:gold:test_auditor")
     assert state.shadow_id == "expert:gold:test_auditor"
-    assert state.state == "normal"
+    assert state.state == "idle"  # Phase 1: renamed from "normal"
     assert state.consecutive_failures == 0
     assert state.permanent_bonus == 0
     assert state.permanent_penalty == 0
@@ -269,5 +269,5 @@ def test_corrupted_runtime_state_graceful(temp_shadow_db, sample_expert_config):
     auditor = EmergencyQuotaAuditor(temp_shadow_db, settings)
     state = auditor.get_shadow_state(sample_expert_config.shadow_id)
     # Should fall back to defaults
-    assert state.state == "normal"
+    assert state.state == "idle"  # Phase 1: renamed from "normal"
     assert state.consecutive_failures == 0

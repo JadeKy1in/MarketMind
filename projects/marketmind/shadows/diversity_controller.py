@@ -330,6 +330,52 @@ class DiversityController:
 
         return False
 
+    # ── Strategy convergence detection ──────────────────────────────────────
+
+    def _get_recent_prompts_by_type(
+        self, shadow_type: str, versions: int = 3
+    ) -> list[str]:
+        """Retrieve methodology prompts for active shadows of a given type.
+
+        Args:
+            shadow_type: The shadow type to filter by (e.g. "expert", "daredevil").
+            versions: Max number of prompts to return (most recent first).
+
+        Returns:
+            List of methodology prompt strings, up to `versions` in length.
+        """
+        if self._state_db is None:
+            return []
+        try:
+            shadows = self._state_db.get_active_shadows(shadow_type)
+            prompts = [s.methodology_prompt for s in shadows if s.methodology_prompt]
+            return prompts[:versions]
+        except Exception:
+            return []
+
+    def compute_strategy_convergence(self, shadow_type: str) -> float:
+        """Compare methodology prompts within a shadow type for convergence.
+
+        High score (>0.7) = prompts becoming too similar = risk of herding.
+        Uses Jaccard similarity on word sets averaged across all prompt pairs.
+
+        Args:
+            shadow_type: The shadow type to evaluate (e.g. "expert").
+
+        Returns:
+            Mean pairwise Jaccard similarity in [0.0, 1.0].
+            Returns 0.0 if fewer than 2 prompts available.
+        """
+        prompts = self._get_recent_prompts_by_type(shadow_type, versions=3)
+        if len(prompts) < 2:
+            return 0.0
+        similarities = []
+        for i in range(len(prompts)):
+            for j in range(i + 1, len(prompts)):
+                sim = self._text_similarity(prompts[i], prompts[j])
+                similarities.append(sim)
+        return sum(similarities) / len(similarities) if similarities else 0.0
+
     # ── Master check: run all 5 layers ──────────────────────────────────────
 
     def check_diversity(
@@ -481,3 +527,25 @@ class DiversityController:
 
         r = cov / (std_x * std_y)
         return max(-1.0, min(1.0, r))
+
+    @staticmethod
+    def _text_similarity(text_a: str, text_b: str) -> float:
+        """Jaccard similarity on word sets between two text strings.
+
+        Tokenizes by whitespace + lowercasing. Returns 0.0 if both texts are
+        empty; 1.0 if word sets are identical.
+
+        Args:
+            text_a: First text string.
+            text_b: Second text string.
+
+        Returns:
+            Jaccard similarity in [0.0, 1.0].
+        """
+        words_a = set(text_a.lower().split())
+        words_b = set(text_b.lower().split())
+        if not words_a and not words_b:
+            return 0.0
+        intersection = words_a & words_b
+        union = words_a | words_b
+        return len(intersection) / len(union) if union else 0.0

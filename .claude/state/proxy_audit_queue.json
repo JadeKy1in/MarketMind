@@ -1,0 +1,34 @@
+[
+  {
+    "decision_id": "proxy-2026-05-23-002",
+    "audit_id": "audit-2026-05-23-111920",
+    "audit_date": "2026-05-23T11:19:20Z",
+    "severity": "minor",
+    "auditor_notes": "[created_technical_debt] Extraction without corresponding test — untested abstraction is technical debt.",
+    "status": "pending_review"
+  },
+  {
+    "decision_id": "proxy-2026-05-23-003",
+    "audit_id": "audit-2026-05-23-111920",
+    "audit_date": "2026-05-23T11:19:20Z",
+    "severity": "minor",
+    "auditor_notes": "[reasonable_developer_agree] Architecture decision with short rationale (50 chars) — lacks context for developer buy-in.",
+    "status": "pending_review"
+  },
+  {
+    "decision_id": "proxy-2026-05-23-005",
+    "audit_id": "audit-2026-05-23-111920",
+    "audit_date": "2026-05-23T11:19:20Z",
+    "severity": "minor",
+    "auditor_notes": "[reasonable_developer_agree] Critical decision with only one-line rationale — insufficient justification.",
+    "status": "pending_review"
+  },
+  {
+    "decision_id": "proxy-2026-05-23-007",
+    "audit_id": "audit-2026-05-23-111926",
+    "audit_date": "2026-05-23T11:19:26Z",
+    "severity": "warning",
+    "auditor_notes": "[reasonable_developer_agree] Developer overrode this decision: Name too long; use 'LiqRatShadow' instead | [confidence_justified] Confidence 0.85 on an overridden decision — overconfidence in action.",
+    "status": "pending_review"
+  }
+]

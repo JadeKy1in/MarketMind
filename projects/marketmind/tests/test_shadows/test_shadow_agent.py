@@ -3,7 +3,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from marketmind.shadows.shadow_agent import (
-    ShadowAgent, ShadowAnalysisOutput, ShadowVote, PositionCheck
+    ShadowAgent, ShadowAnalysisOutput, ShadowDecision, PositionCheck
 )
 from marketmind.shadows.shadow_state import (
     ShadowStateDB, ShadowConfig, VirtualTradeOpen, DailySnapshot

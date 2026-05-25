@@ -60,6 +60,13 @@
   .chat-input-wrap { padding:8px 14px; border-top:1px solid var(--bd); background:var(--card); }
   .chat-input { flex:1; background:var(--bg); border:1px solid var(--bd); color:var(--t1); padding:8px 10px; font:14px var(--sans); border-radius:3px; outline:none; resize:none; height:48px; }
   .chat-input:focus { border-color:var(--am); }
+  /* Phase 4: Multi-speaker UI */
+  .speaker-prefix { font:11px var(--mono); font-weight:600; padding:1px 6px; border-radius:2px; margin-right:4px; }
+  .speaker-moderator { color:var(--t3); }
+  .speaker-shadow { padding:1px 8px; }
+  .msg-body.speaker-msg { border-left:3px solid var(--am); padding-left:12px; }
+  .wait-indicator { display:inline-flex; align-items:center; gap:4px; color:var(--am); font:11px var(--mono); animation:pulse 1.5s infinite; }
+  .autocomplete-hint { color:var(--t3); font:11px var(--mono); padding:2px 0; display:none; }
   .btn-attach { width:32px; height:32px; min-width:32px; background:var(--card); border:1px solid var(--bd); color:var(--t2); border-radius:3px; cursor:pointer; font-size:18px; display:flex; align-items:center; justify-content:center; }
   .btn-attach:hover { border-color:var(--am); color:var(--am); }
   .btn-send { background:var(--am); color:#000; border:none; padding:8px 18px; font:12px var(--sans); font-weight:600; border-radius:3px; cursor:pointer; white-space:nowrap; }
@@ -297,6 +304,7 @@
         <button class="btn-send" onclick="sendMsg()">Send</button>
       </div>
       <div class="file-chips" id="fileChips"></div>
+      <div class="autocomplete-hint" id="acHint" style="padding-top:4px;"></div>
     </div>
   </div>
   <div class="scroll-log" id="scrollLog" style="display:none">
@@ -451,14 +459,52 @@ async function sendMsg(){
   }catch(e){msgs[msgs.length-1].status='failed';}
   renderChat();
 }
+// Phase 4: Shadow speaker colors (persistent per shadow)
+var SHADOW_COLORS = ['#5a8fd0','#5cb878','#c8a050','#e0556a','#8878c8','#50b8c8','#d07850','#78a860'];
+var _shadowColorMap = {};
+function shadowColor(name) {
+  if (!_shadowColorMap[name]) _shadowColorMap[name] = SHADOW_COLORS[Object.keys(_shadowColorMap).length % SHADOW_COLORS.length];
+  return _shadowColorMap[name];
+}
+function formatSpeaker(msg) {
+  // Detect [主持人·主AI], [shadow_name·domain], > user input
+  var m = msg.match(/^\[([^\]]+)\]/);
+  if (m) {
+    var speaker = m[1];
+    var c = speaker.includes('主持人') ? 'var(--t3)' : shadowColor(speaker);
+    var label = speaker.includes('主持人') ? 'moderator' : 'shadow';
+    return '<span class="speaker-prefix speaker-'+label+'" style="color:'+c+'">[' + speaker + ']</span> ' + msg.slice(m[0].length);
+  }
+  if (msg.startsWith('> ')) return '<span class="speaker-prefix" style="color:var(--t2)">▶ 用户</span> ' + msg.slice(2);
+  return msg;
+}
 function renderChat(){
   const c=document.getElementById('chatMsgs');
   if(!msgs.length){ c.innerHTML='<div class="msg-empty">Pipeline idle. You can chat with the main AI here.<br><br>Paste external info or attach files to inject into analysis.<br>Shift+Enter to send.</div>'; return; }
   c.innerHTML=msgs.map(m=>{
     const sc=m.status==='sent'?'var(--gr)':m.status==='failed'?'var(--rd)':'var(--am)';
-    return `<div class="msg"><div class="msg-meta"><span>${m.time}</span><span style="font-size:10px;color:${sc}">${m.status==='sent'?m.chars+'c':m.status}</span></div><div class="msg-body">${m.text.replace(/</g,"&lt;").replace(/>/g,"&gt;")}</div></div>`;
+    var body = m.text.replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    body = formatSpeaker(body);
+    var cls = body.includes('speaker-prefix') ? 'msg-body speaker-msg' : 'msg-body';
+    return `<div class="msg"><div class="msg-meta"><span>${m.time}</span><span style="font-size:10px;color:${sc}">${m.status==='sent'?m.chars+'c':m.status}</span></div><div class="${cls}">${body}</div></div>`;
   }).join(''); c.scrollTop=c.scrollHeight;
 }
+
+// Phase 4: shadow name autocomplete in chat input
+document.addEventListener('DOMContentLoaded', function() {
+  var input = document.getElementById('chatInput');
+  if (input) {
+    input.addEventListener('input', function() {
+      var hint = document.getElementById('acHint');
+      var v = input.value;
+      if (v.match(/shadow\s+\w*$/i)) {
+        var partial = v.replace(/.*shadow\s+/i, '');
+        var names = Object.keys(_shadowColorMap).filter(function(n) { return n.toLowerCase().includes(partial.toLowerCase()); });
+        if (hint) { hint.style.display = names.length ? 'block' : 'none'; hint.textContent = names.length ? '匹配: ' + names.join(', ') : ''; }
+      } else { if (hint) hint.style.display = 'none'; }
+    });
+  }
+});
 
 // ── Shadow detail (overlay) ───────────────────────────────────────
 async function loadShadowDetail(){
@@ -621,9 +667,9 @@ async function refresh(){
     document.getElementById('monthEst').textContent=`$${(cost.monthly_est||0).toFixed(2)}`;
 
     const tiers=shadows.tiers||{},maxT=Math.max(...Object.values(tiers),24);
-    document.getElementById('tierMini').innerHTML=['elite','excellent','normal','watch','endangered'].map(t=>{
+    document.getElementById('tierMini').innerHTML=['elite','excellent','normal','endangered'].map(t=>{
       const cnt=tiers[t]||0,cls=t==='elite'?'elite':t==='excellent'?'excel':t==='normal'?'norm':t==='watch'?'watch':'end';
-      const colors={'elite':'var(--am)','excellent':'var(--bl)','normal':'var(--t3)','watch':'var(--pu)','endangered':'var(--rd)'};
+      const colors={'elite':'var(--am)','excellent':'var(--bl)','normal':'var(--t3)','endangered':'var(--rd)'};
       return `<div class="tier-row"><span class="tier-lbl">${t.toUpperCase()}</span><span class="tier-cnt">${cnt}</span><div class="tier-b"><div class="tier-b-in" style="width:${maxT?cnt/maxT*100:0}%;background:${colors[t]}"></div></div></div>`;
     }).join('');
     document.getElementById('shadowCount').textContent=shadows.total||0;
@@ -650,7 +696,7 @@ async function refresh(){
       const ar=await fetch('/api/alerts').then(r=>r.json());
       if(ar.alerts)ar.alerts.forEach(a=>{if(!activeAlerts.find(x=>x.id===a.id))handleAlert(a);});
     }catch(e){}
-  }catch(e){}
+  }catch(e){console.error('MarketMind refresh failed:',e);}
 }
 let activeAlerts = [];
 const MAX_TOASTS = 3;

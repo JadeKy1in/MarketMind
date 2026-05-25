@@ -177,9 +177,9 @@ async def test_contrarian_analyze_with_mock_llm(temp_shadow_db):
             [{"headline": "Record inflows as retail piles into equities"}], {}
         )
 
-    assert len(output.votes) == 1
-    assert output.votes[0].ticker == "SPY"
-    assert output.votes[0].direction == "short"
+    assert len(output.decisions) == 1
+    assert output.decisions[0].ticker == "SPY"
+    assert output.decisions[0].direction == "short"
 
 
 @pytest.mark.asyncio

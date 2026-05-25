@@ -3,7 +3,7 @@
 Pure Python, zero LLM. Scores a figure's market-moving potential based on
 three dimensions per the Swiss Finance Institute signal theory framework.
 
-Design: .claude/plans/market-figure-intelligence-module.md §3
+Design: docs/dev/plans/market-figure-intelligence-module.md §3
   Final_Score = (Ability + 0.01) * (Willingness + 0.01) * (Acknowledgment + 0.01)
   Thresholds: >= 0.6 CRITICAL, 0.3-0.6 HIGH, < 0.3 LOW
 """

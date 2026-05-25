@@ -15,7 +15,7 @@ from marketmind.config.settings import ShadowSettings
 logger = logging.getLogger("marketmind.shadows.shadow_agent")
 
 from marketmind.shadows.shadow_types import (
-    ShadowVote, PositionCheck, ShadowAnalysisOutput,
+    ShadowDecision, PositionCheck, ShadowAnalysisOutput,
     ExternalObservation, MemoryQuery, CrystallizationResult
 )
 
@@ -114,20 +114,72 @@ class ShadowAgent:
 
     async def _analyze(self, news_items: list,
                         market_data: dict,
-                        broadcast_messages: list | None = None) -> ShadowAnalysisOutput:
-        """Execute analysis with LLM call using this shadow's methodology prompt.
+                        broadcast_messages: list | None = None,
+                        flash_assistant=None,
+                        is_gate2: bool = False) -> ShadowAnalysisOutput:
+        """Two-phase analysis: optional Flash research + Pro analysis.
 
-        Subclasses override _build_user_prompt() and _parse_output() to customize
-        domain filtering, prompt construction, and vote extraction. This base
-        implementation works for temp_event, challenger, and beta shadows that
-        use the config methodology_prompt directly.
+        Phase 2: Shadows can call Flash for research before Pro analysis.
+        Gate 2 mode: unlimited Flash calls for graduated shadows.
+
+        Args:
+            flash_assistant: FlashResearchAssistant instance (None = skip research).
+            is_gate2: If True, Flash calls are unlimited (graduated shadow).
         """
         from marketmind.gateway.async_client import chat_with_integrity
+        from marketmind.shadows.flash_research_assistant import (
+            FlashResearchAssistant, FlashResearchRequest,
+        )
 
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        user_prompt = self._build_user_prompt(news_items, market_data, broadcast_messages)
+        assistant = flash_assistant or FlashResearchAssistant(gate2_mode=is_gate2)
+
+        # Phase A: Flash research (quota-limited in training, unlimited in Gate 2)
+        flash_findings: list[dict] = []
+        quota_used = 0
+        quota_total = self.get_daily_quota()
+        if is_gate2:
+            quota_total = 999  # effectively unlimited
+
+        # Shadow self-directs research: check up to 2 key tickers
+        research_topics = self._identify_research_topics(news_items, market_data)
+        for topic in research_topics[:2]:
+            if not is_gate2 and quota_used >= quota_total:
+                break
+            result = await assistant.research(
+                self.shadow_id,
+                FlashResearchRequest(
+                    shadow_id=self.shadow_id, topic=topic,
+                    tool="fetch_market_snapshot",
+                    params={"ticker": topic, "days": 5},
+                ),
+                quota_used=quota_used, quota_total=quota_total,
+            )
+            if result.status == "ok":
+                flash_findings.append({"ticker": topic, "data": result.data,
+                                        "summary": result.summary})
+                quota_used += 1
+            elif result.status == "quota_exhausted":
+                break
+
+        # Track quota usage
+        if not is_gate2:
+            today_snapshot = self.state_db.get_latest_snapshot(self.shadow_id)
+            if today_snapshot:
+                self.state_db.update_snapshot_fields(
+                    self.shadow_id, today,
+                    flash_quota_used=quota_used,
+                )
+
+        # Build prompt with Flash findings included
+        user_prompt = self._build_user_prompt(
+            news_items, market_data, broadcast_messages,
+            flash_findings=flash_findings, quota_used=quota_used,
+            quota_total=quota_total, is_gate2=is_gate2,
+        )
         caller_agent = f"shadow:{self.config.shadow_type}:{self.config.display_name}"
 
+        # Phase B: Pro analysis
         try:
             result = await chat_with_integrity(
                 model=self.config.model,
@@ -147,7 +199,7 @@ class ShadowAgent:
         votes = self._parse_votes(content)
         insights = self._extract_insights(content, news_items)
 
-        # Persist raw LLM output for health monitoring (Phase 3)
+        # Persist raw LLM output
         if content:
             try:
                 token_count = result.get("usage", {}).get("total_tokens", 0)
@@ -160,16 +212,82 @@ class ShadowAgent:
         return ShadowAnalysisOutput(
             shadow_id=self.shadow_id,
             date=today,
-            votes=votes,
+            decisions=votes,
             insights=insights,
+            quota_used=quota_used,
             methodology_notes=self.config.methodology_prompt[:200],
-            quota_used=1 if content else 0,
             latency_ms=latency_ms,
         )
 
+    def _build_status_card(self) -> str:
+        """Build tier/quota/incentive status card injected into every prompt.
+
+        Phase 1: Shows tier, daily quota, promotion path, win-rate protection,
+        emergency quota rules, and graduation goal.
+        """
+        latest = self.state_db.get_latest_snapshot(self.shadow_id)
+        tier = latest.achievement_tier if latest else "normal"
+        wr = (latest.win_rate_pct / 100.0) if latest and latest.win_rate_pct else 0.0
+        quota = self.get_daily_quota()
+
+        next_tier = {
+            "endangered": "normal — raise percentile above 0.20 for 14 consecutive days",
+            "normal": "excellent — rank above 70th percentile for 10 consecutive days",
+            "excellent": "elite — rank above 85th percentile for 30 consecutive days",
+            "elite": "graduation — complete 4-stage qualification. ULTIMATE GOAL: Gate 2 discussion with user, UNLIMITED Flash access.",
+        }
+        grad_note = ""
+        if tier == "elite":
+            grad_note = (
+                "\n[GRADUATION REWARD] Once graduated, you will participate in Gate 2 "
+                "investment discussions with the user. During discussions, Flash calls "
+                "are UNLIMITED — you can freely research and present evidence to support "
+                "your analysis. This is your purpose as a shadow.\n"
+            )
+
+        return (
+            f"[YOUR STATUS]\n"
+            f"Tier: {tier.upper()}\n"
+            f"Daily Flash Quota: {quota} calls (training mode)\n"
+            f"Promotion Path: {next_tier.get(tier, 'unknown')}\n"
+            f"Win-Rate Protection: {'Active (>50%)' if wr >= 0.50 else 'Inactive (<50%)'}\n"
+            f"Integrity Score: {self.get_integrity_score()}/100\n"
+            f"{grad_note}"
+            f"[END STATUS]\n\n"
+        )
+
+    def _identify_research_topics(self, news_items: list,
+                                    market_data: dict) -> list[str]:
+        """Extract key tickers from news items for Flash research.
+
+        Returns up to 3 tickers mentioned in news headlines, prioritizing
+        those with high frequency or market-moving potential.
+        """
+        tickers: list[str] = []
+        seen: set[str] = set()
+        for item in news_items[:20]:
+            title = str(getattr(item, "title", "") or getattr(item, "headline", ""))
+            if not title:
+                continue
+            # Simple ticker extraction: $TICKER or standalone uppercase 1-5 chars
+            import re as _re
+            found = _re.findall(r'\$?([A-Z]{1,5})\b', title.upper())
+            for t in found:
+                if t not in seen and len(t) >= 2:
+                    tickers.append(t)
+                    seen.add(t)
+        return tickers[:3]
+
     def _build_user_prompt(self, news_items: list, market_data: dict,
-                           broadcast_messages: list | None = None) -> str:
-        """Build the user prompt from news, market data, and broadcast messages."""
+                           broadcast_messages: list | None = None,
+                           flash_findings: list | None = None,
+                           quota_used: int = 0, quota_total: int = 5,
+                           is_gate2: bool = False) -> str:
+        """Build the user prompt from news, market data, and broadcast messages.
+
+        Phase 1: Prepends status card with tier/quota/incentive visibility.
+        Phase 2: Appends Flash research findings and budget-ratio conditioning.
+        """
         headlines = []
         for item in news_items[:20]:
             h = (getattr(item, "headline", None) or
@@ -201,7 +319,31 @@ class ShadowAgent:
                     "5. Do NOT base your entire analysis on user opinions — use news/market data as primary source.\n"
                 )
 
+        status_card = self._build_status_card()
+
+        # Budget-ratio conditioning (Phase 2)
+        remaining = quota_total - quota_used
+        budget_line = ""
+        flash_section = ""
+        if not is_gate2:
+            budget_line = (
+                f"\n[BUDGET] Flash calls used: {quota_used}/{quota_total} "
+                f"({remaining} remaining). "
+                f"{'Quota low — prioritize critical research only.' if remaining <= 2 else 'Normal operation.'}"
+            )
+        else:
+            budget_line = "\n[BUDGET] Gate 2 mode — Flash calls UNLIMITED."
+
+        if flash_findings:
+            flash_section = "\n[FLASH RESEARCH FINDINGS]\n"
+            for f in flash_findings:
+                flash_section += f"  • {f['ticker']}: {f['summary']}\n"
+            flash_section += "[END FLASH FINDINGS]\n"
+
         return (
+            f"{status_card}"
+            f"{budget_line}\n"
+            f"{flash_section}"
             f"Today's market data:\n{tickers_context}\n\n"
             f"Relevant news headlines:\n{news_context}"
             f"{broadcast_context}\n\n"
@@ -212,7 +354,7 @@ class ShadowAgent:
         )
 
     @staticmethod
-    def _parse_votes(text: str) -> list[ShadowVote]:
+    def _parse_votes(text: str) -> list[ShadowDecision]:
         """Parse VOTE_START/VOTE_END blocks from LLM output."""
         votes = []
         pattern = re.compile(
@@ -234,7 +376,7 @@ class ShadowAgent:
             thesis = _extract_field(block, "thesis") or ""
             risk = _extract_field(block, "risk_note") or ""
             if ticker and direction:
-                votes.append(ShadowVote(
+                votes.append(ShadowDecision(
                     shadow_id="", shadow_type="unknown",
                     date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                     ticker=ticker, direction=direction,
@@ -396,11 +538,10 @@ class ShadowAgent:
 
     # Tier-based quota mapping (from design doc section 7.2)
     _TIER_QUOTA = {
-        "elite": 7,
-        "excellent": 6,
+        "elite": 10,
+        "excellent": 8,
         "normal": 5,
-        "watch": 3,
-        "endangered": 1,
+        "endangered": 2,
     }
 
     def get_daily_quota(self) -> int:

@@ -4,12 +4,19 @@ ELITE-tier shadows can contribute opinions during user-main AI discussions
 when their domain is activated. They analyze daily news at the same time as
 the main AI, wait to be "awakened" by user mention or domain trigger, and
 contribute analysis but NO decision authority.
+
+Extended to support graduated EXCELLENT shadows — EXCELLENT-tier shadows that
+pass gate2_qualified via GraduationEngine can also be awakened by domain triggers.
+Graduation is checked on-demand via is_graduated() which queries the full 4-stage
+pipeline (Tier 1 + Tier 2 + Stress Tests + Alpha Purity).
 """
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
+
+from marketmind.shadows.graduation_engine import GraduationEngine
 
 logger = logging.getLogger("marketmind.shadows.elite_participation")
 
@@ -111,12 +118,14 @@ class EliteRegistry:
         return None
 
     def get_eligible_contributors(
-        self, triggered_domains: list[str], elite_shadows: dict[str, str]
+        self, triggered_domains: list[str], elite_shadows: dict[str, str],
+        state_db=None,
     ) -> list[dict]:
-        """Get list of ELITE shadows eligible to contribute based on domain match.
+        """Get list of ELITE or graduated EXCELLENT shadows eligible to contribute.
 
         Returns list of {shadow_id, shadow_name, domain} dicts.
         Shadows that already contributed this session are excluded.
+        Graduated EXCELLENT shadows are discovered from state_db (optional).
         """
         eligible = []
         for domain in triggered_domains:
@@ -130,6 +139,33 @@ class EliteRegistry:
                             "shadow_id": sid,
                             "shadow_name": contrib.shadow_name,
                             "domain": domain,
+                        })
+        # Extend: include graduated EXCELLENT shadows from state_db
+        if state_db is not None:
+            for s in state_db.get_active_shadows():
+                if s.shadow_id in self._awakened:
+                    continue
+                if s.shadow_id in self._contributions:
+                    continue
+                if s.shadow_type in ("beta", "temp_event", "challenger", "missed_path", "catfish"):
+                    continue
+                snap = state_db.get_latest_snapshot(s.shadow_id)
+                tier = getattr(snap, "achievement_tier", "") if snap else ""
+                if not tier or tier.lower() not in ("elite", "excellent"):
+                    continue
+                if s.domain and s.domain in triggered_domains:
+                    if self.is_graduated(s.shadow_id, state_db):
+                        self.register_shadow_analysis(
+                            shadow_id=s.shadow_id,
+                            shadow_name=s.display_name,
+                            domain=s.domain,
+                            analysis_text="",
+                            confidence=0.0,
+                        )
+                        eligible.append({
+                            "shadow_id": s.shadow_id,
+                            "shadow_name": s.display_name,
+                            "domain": s.domain,
                         })
         return eligible
 
@@ -148,6 +184,21 @@ class EliteRegistry:
         contrib = self._contributions[shadow_id]
         contrib.trigger_type = "user_mention" if shadow_id else "domain_match"
         return contrib
+
+    def is_graduated(self, shadow_id: str, state_db) -> bool:
+        """Check if a shadow has passed Gate 2 graduation (gate2_qualified).
+
+        Queries the full GraduationEngine 4-stage pipeline (Tier 1 basic
+        competence + Tier 2 type-specific excellence + Stress Tests +
+        Alpha Purity). Returns True only if all stages pass.
+
+        This check works for both ELITE and EXCELLENT shadows — graduation
+        is tier-agnostic; any shadow that passes the 4-stage pipeline can
+        contribute opinions to Gate 2 discussions.
+        """
+        engine = GraduationEngine(state_db)
+        result = engine.evaluate(shadow_id)
+        return result.gate2_qualified
 
     def reset_session(self) -> None:
         """Reset the session — all shadows can contribute again in next session."""

@@ -52,7 +52,7 @@ class KnowledgeManager:
                 store.ingest_observation_sync(shadow_id, obs, tier="episodic")
 
             # Create observations from votes
-            for vote in analysis.votes:
+            for vote in analysis.decisions:
                 ticker = vote.ticker
                 obs = ExternalObservation(
                     observation_id=f"vote:{shadow_id}:{today}:{ticker}:{hash(vote.thesis) & 0xFFFFFFFF:x}",

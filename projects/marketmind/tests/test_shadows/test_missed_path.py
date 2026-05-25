@@ -35,7 +35,7 @@ def missed_agent(missed_path_config, temp_shadow_db, settings):
 @pytest.mark.asyncio
 async def test_missed_path_produces_no_votes(missed_agent):
     output = await missed_agent._analyze([], {})
-    assert len(output.votes) == 0
+    assert len(output.decisions) == 0
 
 
 @pytest.mark.asyncio
