@@ -1,7 +1,8 @@
 # MarketMind Restart Guide — 2026-05-25 EOD
 
 **Tests**: 2,049 pass, 0 fail, 0 skip | **CI**: green | **Branch**: master
-**All pushed**: no | **frontload_required**: true
+**Latest commit**: ebe5423a (all changes committed) | **All pushed**: no
+**frontload_required**: true
 
 ---
 
