@@ -203,10 +203,10 @@ class PostGraduationMonitor:
 
         # Map demotion level to shadow status
         status_map = {
-            "display_only": "watch",
+            "display_only": "endangered",
             "suspended": "paused",
         }
-        new_status = status_map.get(level, "watch")
+        new_status = status_map.get(level, "endangered")
 
         # Update shadow status in DB
         self.state_db.update_shadow_status(shadow_id, new_status)

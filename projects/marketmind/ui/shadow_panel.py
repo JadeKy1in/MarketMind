@@ -17,7 +17,6 @@ class ShadowPanel(ctk.CTkFrame):
         "elite": "#DAA520",
         "excellent": "#2E8B57",
         "normal": "#808080",
-        "watch": "#FF8C00",
         "endangered": "#DC143C",
     }
 
@@ -86,7 +85,7 @@ class ShadowPanel(ctk.CTkFrame):
             t = r.get("tier", "normal")
             tier_counts[t] = tier_counts.get(t, 0) + 1
         stats_parts = [f"{active_count} active"]
-        for tier in ["elite", "excellent", "normal", "watch", "endangered"]:
+        for tier in ["elite", "excellent", "normal", "endangered"]:
             if tier in tier_counts:
                 stats_parts.append(f"{tier.title()}: {tier_counts[tier]}")
         self._stats_label.configure(text="  |  ".join(stats_parts))

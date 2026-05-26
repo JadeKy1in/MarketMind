@@ -27,14 +27,14 @@ class ShadowConfig:
     min_trades_for_ranking: int = 5
     parent_shadow_id: str | None = None
     generation: int = 0
-    status: str = "active"           # "active" | "beta" | "retired" | "paused" | "watch" | "endangered" | "eliminated"
+    status: str = "active"           # "active" | "beta" | "retired" | "paused" | "endangered" | "eliminated"
     eliminated_at: str | None = None
     retired_at: str | None = None
     retirement_reason: str | None = None  # "challenger_loss" | "tier_degradation" | "methodology_obsolete" | "manual"
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     _VALID_TYPES = {"beta", "expert", "daredevil", "momentum", "contrarian", "temp_event", "challenger", "missed_path", "catfish"}
-    _VALID_STATUSES = {"active", "beta", "retired", "paused", "watch", "endangered", "eliminated"}
+    _VALID_STATUSES = {"active", "beta", "retired", "paused", "endangered", "eliminated"}
     _RETIREMENT_REASONS = {"challenger_loss", "tier_degradation", "methodology_obsolete", "manual"}
 
     def __post_init__(self):

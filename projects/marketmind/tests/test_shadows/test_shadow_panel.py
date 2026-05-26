@@ -22,8 +22,8 @@ def sample_rankings():
                "Metals Prospector", "Agriculture Watcher", "Real Estate Eye",
                "FX Strategist", "Rates Maven"]
     tiers = ["elite", "excellent", "excellent", "excellent", "normal",
-             "normal", "normal", "normal", "normal", "watch",
-             "watch", "watch", "watch", "endangered", "endangered"]
+             "normal", "normal", "normal", "normal", "normal",
+             "normal", "normal", "normal", "endangered", "endangered"]
     rankings = []
     for i, (domain, tier) in enumerate(zip(domains, tiers)):
         score = 0.95 - (i * 0.04)

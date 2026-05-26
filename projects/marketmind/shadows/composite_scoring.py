@@ -238,8 +238,8 @@ class CompositeScoring:
             return
 
         # Tier severity ordering (for downgrade logic)
-        tier_order = {"elite": 4, "excellent": 3, "normal": 2, "watch": 1, "endangered": 0}
-        reverse_tier = {4: "elite", 3: "excellent", 2: "normal", 1: "watch", 0: "endangered"}
+        tier_order = {"elite": 3, "excellent": 2, "normal": 1, "endangered": 0}
+        reverse_tier = {3: "elite", 2: "excellent", 1: "normal", 0: "endangered"}
 
         # For ELITE/EXCELLENT shadows: require surviving step-down
         # Sort by percentile_rank descending (most significant first) for Holm

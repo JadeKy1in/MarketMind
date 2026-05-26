@@ -90,7 +90,7 @@ def test_status_card_tier_color_mapping(mock_ctk):
     assert colors("elite") == "#DAA520"
     assert colors("excellent") == "#2E8B57"
     assert colors("normal") == "#808080"
-    assert colors("watch") == "#FF8C00"
+    assert colors("endangered") == "#DC143C"
     assert colors("endangered") == "#DC143C"
 
 

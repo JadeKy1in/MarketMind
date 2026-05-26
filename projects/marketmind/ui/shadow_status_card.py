@@ -16,7 +16,6 @@ class ShadowStatusCard(ctk.CTkFrame):
         "elite": "#DAA520",
         "excellent": "#2E8B57",
         "normal": "#808080",
-        "watch": "#FF8C00",
         "endangered": "#DC143C",
     }
 

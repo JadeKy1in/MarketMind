@@ -101,7 +101,7 @@ def test_portfolio_db_unavailable(client):
 # ── Shadows Overview ──────────────────────────────────────────────────
 
 def test_shadow_overview_returns_tiers(client):
-    mock = {"tiers": {"elite": 2, "excellent": 3, "normal": 5, "watch": 1, "endangered": 0},
+    mock = {"tiers": {"elite": 2, "excellent": 3, "normal": 6, "endangered": 0},
             "total": 11, "graduates": 2, "evolutions_today": 0, "challenger_trials": 0, "diversity": "normal"}
     with patch("marketmind.api.routes.get_shadow_overview", return_value=mock):
         r = client.get("/api/shadows/overview")

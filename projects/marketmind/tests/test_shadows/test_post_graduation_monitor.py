@@ -327,8 +327,8 @@ def test_apply_demotion_changes_status(monitor, temp_shadow_db):
     monitor.apply_demotion(shadow_id, "display_only", "CUSUM 5 alerts in 3 months")
 
     config_after = temp_shadow_db.get_shadow(shadow_id)
-    assert config_after.status == "watch", \
-        f"Expected status 'watch', got '{config_after.status}'"
+    assert config_after.status == "endangered", \
+        f"Expected status 'endangered', got '{config_after.status}'"
 
 
 def test_apply_demotion_suspended(monitor, temp_shadow_db):
