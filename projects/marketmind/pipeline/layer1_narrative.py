@@ -79,15 +79,23 @@ IMPORTANT: All numeric values must cite a verifiable source or be marked EST:. N
 
 
 @monitor(source="l1_narrative", impact=ImpactScope.MAIN_PIPELINE)
-async def analyze_layer1(signals: list[FlashSignal], news_items: list[NewsItem]) -> Layer1Result:
-    """Run Layer 1 narrative analysis on preprocessed signals."""
+async def analyze_layer1(signals: list[FlashSignal], news_items: list[NewsItem],
+                         calibration_context: str = "") -> Layer1Result:
+    """Run Layer 1 narrative analysis on preprocessed signals.
+
+    If calibration_context is provided (from past prediction accuracy),
+    it is prepended to the system prompt as a calibration hint.
+    """
     if not signals:
         return Layer1Result.empty_default()
     signal_text = _format_signals(signals, news_items)
     user_prompt = f"Analyze these market signals for narrative structure:\n\n{signal_text}"
+    sys_prompt = LAYER1_SYSTEM_PROMPT
+    if calibration_context:
+        sys_prompt = calibration_context + "\n\n" + LAYER1_SYSTEM_PROMPT
     try:
         result = await chat_pro(
-            system_prompt=LAYER1_SYSTEM_PROMPT,
+            system_prompt=sys_prompt,
             user_prompt=user_prompt,
             temperature=0.3,
             max_tokens=32768,

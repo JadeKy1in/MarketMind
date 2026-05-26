@@ -92,10 +92,19 @@ async def _do_flash_preprocessing(news_items: list, tracker: StageTracker) -> li
     return signals
 
 
-async def _do_l1_analysis(signals: list, news_items: list, tracker: StageTracker):
+async def _do_l1_analysis(signals: list, news_items: list, tracker: StageTracker,
+                          shadow_db=None):
     tracker.advance(3, "Layer 1: narrative analysis...")
     from marketmind.pipeline.layer1_narrative import analyze_layer1
-    result = await analyze_layer1(signals[:15], news_items)
+    # Inject calibration context from past prediction accuracy
+    calib = ""
+    if shadow_db is not None:
+        try:
+            from marketmind.pipeline.daily_calibration import get_calibration_context
+            calib = get_calibration_context(shadow_db, days=7)
+        except Exception:
+            pass
+    result = await analyze_layer1(signals[:15], news_items, calibration_context=calib)
     if result is None:
         from marketmind.pipeline.layer1_narrative import Layer1Result
         result = Layer1Result.empty_default()
@@ -273,7 +282,7 @@ async def run_daily_legacy(config, mock: bool = False, verbose: bool = False,
     # Steps 1-4: Shared pipeline core
     news_items = await _do_news_collection(config, tracker)
     signals = await _do_flash_preprocessing(news_items, tracker)
-    l1_result = await _do_l1_analysis(signals, news_items, tracker)
+    l1_result = await _do_l1_analysis(signals, news_items, tracker, shadow_db=shadow_db)
     l2_result, l3_result = await _do_l2_l3_parallel(l1_result, tracker)
 
     # Step 5: Shadow ecosystem run (BLOCKING — legacy behavior)
@@ -334,7 +343,7 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
     # Steps 1-4: Shared pipeline core
     news_items = await _do_news_collection(config, tracker)
     signals = await _do_flash_preprocessing(news_items, tracker)
-    l1_result = await _do_l1_analysis(signals, news_items, tracker)
+    l1_result = await _do_l1_analysis(signals, news_items, tracker, shadow_db=shadow_db)
     l2_result, l3_result = await _do_l2_l3_parallel(l1_result, tracker)
 
     # Step 5: Shadow ecosystem → NON-BLOCKING background launch (H1)
@@ -362,10 +371,34 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
     decision = await _do_decision(l1_result, l2_result, l3_result, red_team, resonance, tracker)
     await _do_daily_archive(config, l1_result, l2_result, resonance, tracker)
 
+    # Save today's prediction for tomorrow's calibration feedback loop
+    _save_daily_prediction(l1_result, l2_result, decision)
+
     print("\nMarketMind daily pipeline complete.")
     if _shadow_task and not _shadow_task.done():
         print("(Shadow ecosystem still running in background)")
     return 0
+
+
+def _save_daily_prediction(l1_result, l2_result, decision) -> None:
+    """Persist today's pipeline output for next-day calibration."""
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+        from marketmind.pipeline.daily_calibration import DailyPrediction, save_prediction
+        pred = DailyPrediction(
+            date=_dt.now(_tz.utc).strftime("%Y-%m-%d"),
+            l1_grade=getattr(l1_result, "event_grade", "E"),
+            l1_quadrant=getattr(l1_result, "matrix_quadrant", "observe_skip"),
+            l1_direction=getattr(l1_result, "sentiment_direction", "neutral"),
+            ticker_candidates=getattr(l2_result, "ticker_candidates", []) or [],
+            decisions=[
+                {"ticker": c.ticker, "direction": c.direction}
+                for c in getattr(decision, "decision_cards", [])
+            ],
+        )
+        save_prediction(pred)
+    except Exception:
+        pass
 
 
 async def run_shadows_only(config, verbose: bool = False) -> int:
