@@ -11,7 +11,7 @@ logger = logging.getLogger("marketmind.storage.archivist")
 
 
 class MarketMindArchive:
-    def __init__(self, base_dir: str | Path = "data/archive"):
+    def __init__(self, base_dir: str | Path = "data"):
         self.base_dir = Path(base_dir)
         self.db_path = Path(base_dir) / "archive.db"
         self._db: sqlite3.Connection | None = None
@@ -196,5 +196,5 @@ class MarketMindArchive:
         return entries
 
 
-def get_archivist(base_dir: str | Path = "data/archive") -> MarketMindArchive:
+def get_archivist(base_dir: str | Path = "data") -> MarketMindArchive:
     return MarketMindArchive(base_dir)
