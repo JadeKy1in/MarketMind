@@ -1,56 +1,51 @@
-# MarketMind Restart Guide — 2026-05-25 EOD
+# MarketMind Restart Guide — 2026-05-26 EOD
 
 **Tests**: 2,049 pass, 0 fail, 0 skip | **CI**: green | **Branch**: master
-**Latest commit**: ebe5423a (all changes committed) | **All pushed**: no
-**frontload_required**: true
+**Latest commits**: 862743cf → 0e00cd74 → a6ea164f → 1eee6be9 → cd44fe9c
+**All pushed**: no | **frontload_required**: true
 
 ---
 
 ## 重启指令
 
 > 继续 MarketMind 开发。阅读 `.claude/RESTART_GUIDE.md`。
-> 上次完成：影子生态全面优化方案 Phase 1-4 + 投票系统重命名 + 国会交易复活 + UI 多发言人
+> 上次完成：5→4 级合并彻底清理 + VOTE→DECISION 全量重命名 + --mock 模式 + 主管线自校准 + 实盘验证
 
 ---
 
-## 今日完成 (2026-05-25)
+## 今日完成 (2026-05-26)
 
-### Phase 1：配额+等级+激励
-- 5级→4级（合并 WATCH+ENDANGERED 为 ENDANGERED@20%）
-- 胜率地板保护（胜率>50% + 累计回报>0 + 仓位>1%）
-- 等级配额：ELITE=10 / EXCELLENT=8 / NORMAL=5 / ENDANGERED=2
-- 紧急配额上限+5，`"normal"`→`"idle"` 命名修正
-- 状态卡注入：每个影子 prompt 开头显示等级/配额/晋升路径/毕业目标
+### Session 1：Dashboard + 管线修复
+- `dashboard.html`: JS 语法错误（反引号→引号）+ 未定义 API 变量
+- `api/data_providers.py`: IntEnum str() 比较 bug → 所有信息源误判不可用
+- `config/settings.py`: 5→4 级 `watch` key 残留 → KeyError
+- `pipeline/orchestration.py`: L1/L2/L3/Decision None 防护
+- `shadow_analysis_runner.py`: `save_votes` → `save_analyses`
+- `shadow_agent.py`: `_extract_field` 正则加 `|` 分隔符
 
-### Phase 2：Flash 研究助理
-- `shadows/flash_research_assistant.py` — 影子→Flash 调用协议
-- 4 个 Flash 工具：市场快照、存档搜索、同行共识(N≥5)、缓存分析
-- 预算感知 prompt：影子看到剩余配额，自主规划
-- Gate 2 模式：毕业影子不限额 Flash
+### Session 1.5：决策数据链路修复
+- `api/data_providers.py`: `get_decision_history` 从 shadow DB 读取（替代损坏的 archive FTS）
 
-### Phase 3：三层 AEL + 策略趋同
-- `shadows/ael_weekly_flash.py` — 周度 Flash 战术复盘（Snorkel 规则）
-- `shadows/ael_evolution.py` — ELITE 巩固模式（不批判，只强化）
-- `shadows/ael_quarterly_pro.py` — 季度 Pro 结构审计（Q4 赢，2-of-3 门控）
-- `shadows/diversity_controller.py` — 同类型内策略趋同检测
-- `shadows/shadow_mother.py` — 领域人口守卫（最少 1 影子/领域）
+### Session 2：P1 VOTE→DECISION 全量重命名
+- `shadow_agent.py`: `VOTE_START/END` → `DECISION_START/END` + `_parse_votes` → `_parse_decisions`
+- 反向兼容正则：`(?:DECISION|VOTE)_START` / `(?:DECISION|VOTE)_END`
+- 6 个 prompt 文件 token 更新（daredevil, expert, momentum, contrarian, catfish, shadow_mother）
+- `shadow_mother.py` + `shadow_analysis_runner.py`: `votes_collected` → `decisions_collected`, `all_votes` → `all_decisions`
+- `orchestrator.py` + `shadow_ranking_compute.py` + `shadow_vote_collector.py`: `all_votes` → `all_decisions`
+- 4 个测试文件更新
 
-### Phase 4：交互式 Gate 2 + 毕业考试
-- `shadows/gate2_graduation.py` — 自定义毕业考试注册 + ELITE 回退模式
-- `pipeline/gate2_interaction.py` — 主持人防火墙 + 影子邀请 + 匿名互评
-- `shadows/elite_participation.py` — 扩展至 EXCELLENT 毕业影子
-- `dashboard.html` — 多发言人 UI（颜色前缀 + 自动补全 + ⏳等待态）
+### Session 2.5：P2 --mock 模式实现
+- `gateway/async_client.py`: 新增 `set_mock_mode()` + `chat_flash/chat_pro` 拦截
+- Mock 模式管线 6m27s → 46s（8x 加速）
+- `pipeline/orchestration.py`: `run_daily` 接入 `set_mock_mode(mock)`
 
-### 其他
-- `ShadowVote`→`ShadowDecision` 全量重命名（14 源文件 + 7 测试文件）
-- Congress Trades MCP 复活（`insider_sources.py` + `congress_mcp_client.py`）
-- Bluesky 认证验证通过
-- `danger_guard.py` 扩展：Bash/Agent 工作命令也需任务声明
-- `danger_guard.py` 新增：连续执行模式下阻止确认性 AskUserQuestion
-- 126 个开发文档迁移到 `docs/dev/`
-- MCP 配置：capitol-trades(项目级) + context7+chrome-devtools(全局)
-- CLAUDE.md 写入连续执行规则
-- 9 个 Agent worktree 已清理（0 残留）
+### Session 3：主管线自校准 + 实盘验证 + P3 + 5→4 合并清理
+- **新增** `pipeline/daily_calibration.py`: 保存每日预测，次日加载并对比实际市场（shadow DB next-day returns），生成校准上下文注入 L1 prompt
+- `pipeline/layer1_narrative.py`: `analyze_layer1` 接受 `calibration_context` 参数
+- **实盘验证**: 真实 API 管线 9/9 全通（3m45s），影子生态产出实际决策
+- **P3**: `storage/archivist.py` 默认路径 `"data/archive"` → `"data"`（统一存档数据库）
+- **5→4 合并清理**: 9 文件移除残留 `"watch"` 引用（composite_scoring, post_graduation_monitor, shadow_data_types, shadow_status_card, shadow_panel + 4 个测试）
+- `shadow_ranking_compute.py`: `market_accuracy` → `market_accuracies`
 
 ---
 
@@ -58,10 +53,11 @@
 
 | # | 任务 | 说明 |
 |:--:|------|------|
-| **1** | **Dashboard 验证** | `python api_server.py` → `http://localhost:8520`，Ctrl+Shift+R 强刷。验证多发言人 UI、影子数据显示、信息源数量恢复 35 |
-| **2** | **主管线进化机制核查** | 审计主管线（非影子）的迭代进化机制：Flash Triage→HVR→L1→L2→L3→RedTeam→Resonance→Decision，看看有哪些可以自我优化 |
-| 3 | 管线实盘验证 | `python app.py --mode daily`（需要 API 预算） |
-| 4 | 未提交代码 Git commit | 大量改动未提交，建议按 Phase 分批提交 |
+| **1** | **主管线迭代进化体系** | 审计 Flash Triage→HVR→L1→L2→L3→RedTeam→Resonance→Decision 的自我优化能力。影子有 AEL（三层：周度 Flash 复盘 + ELITE 巩固 + 季度 Pro 审计），主管线目前只有刚加的每日校准。可以设计类似的多层自优化机制 |
+| 2 | 影子生态投票→决策命名收尾 | `shadow_vote_collector.py` 文件名 + `collect_votes` 函数名 + 内部 `votes` 变量 → decisions 术语。该文件未在任何地方导入，可能是死代码，可审计后清理 |
+| 3 | 影子 AEL 进化机制验证 | 验证影子三层 AEL 是否正常运行：周度 Flash 复盘、ELITE 巩固模式、季度 Pro 审计 |
+| 4 | Dashboard Evolution 页面 | `evolution.html` 已存在但未验证是否正常显示数据 |
+| 5 | Git push | 4 个 commits 未推送（cd44fe9c, 1eee6be9, a6ea164f, 0e00cd74, 862743cf） |
 
 ---
 
@@ -70,27 +66,41 @@
 ```bash
 cd E:/AI_Studio_Workspace/projects/marketmind
 python api_server.py                    # Dashboard → http://localhost:8520
-python app.py --mode daily --mock -v    # 模拟分析
+python app.py --mode daily --mock -v    # Mock 管线 (~46s)
+python app.py --mode daily -v           # 实盘管线 (~4min, 需要 API 预算)
 python -m pytest tests/ -q -m "not slow" -p no:warnings  # 测试 (2,049 pass)
 ```
 
 ---
 
-## 新增模块
+## 关键架构变更 (本次 Session)
 
-| 模块 | 用途 |
+| 变更 | 影响 |
 |------|------|
-| `shadows/congress_mcp_client.py` | MCP 国会交易客户端 |
-| `shadows/flash_research_assistant.py` | Flash 研究助理（影子→Flash→工具） |
-| `shadows/ael_weekly_flash.py` | 周度 Flash 战术复盘 |
-| `shadows/ael_quarterly_pro.py` | 季度 Pro 结构审计 |
-| `shadows/gate2_graduation.py` | 毕业考试注册 + ELITE 回退 |
+| `--mock` 模式真正生效 | 管线从 6m27s → 46s，不消耗 API 预算 |
+| VOTE→DECISION 重命名 | 40+ 处引用，反向兼容 LLM 输出格式 |
+| 主管线自校准 | 新模块 `pipeline/daily_calibration.py`，每日保存预测 → 次日对比实际 → 注入 L1 |
+| 决策历史 API | 从 shadow DB 直接读取（不再依赖损坏的 archive FTS） |
+| 5→4 级合并完成 | 全量代码 `"watch"` 零残留 |
+| 存档路径统一 | `data/archive.db`（单一数据库） |
 
-## Dashboard UI 改动
+## 5→4 级说明
 
-`dashboard.html` 新增：发言人颜色前缀、影子颜色映射、`shadow <name>` 自动补全、⏳等待态样式。
-**如果页面数据不显示**：Ctrl+Shift+R 强刷清除缓存。
+WATCH(30%) 和 ENDANGERED(15%) 合并为统一的 ENDANGERED(20%)，14 天连续触发。Dashboard 显示 4 个等级条（ELITE / EXCELLENT / NORMAL / ENDANGERED）。此合并现已彻底完成——所有源文件、UI、测试均无 `"watch"` 残留。
 
-## 5级→4级说明
+## 管线架构 (2026-05-26)
 
-WATCH(30%) 和 ENDANGERED(15%) 合并为统一的 ENDANGERED(20%)，14 天连续触发。Dashboard 同步改为显示 4 个等级条（不再显示 WATCH）。这是方案 §1 的设计决策。
+```
+[0/9] Shadow Mother → 25 shadows init
+[1/9] Scout → RSS fetch (33 sources, ~40s)
+[2/9] Flash → chat_flash (signal extraction)
+[3/9] L1 → chat_pro (narrative + calibration context)
+[4/9] L2+L3 → chat_pro parallel (fundamental + technical)
+[5/9] Shadows → background launch (non-blocking)
+[6/9] Red Team → chat_pro (adversarial challenges)
+[7/9] Resonance → statistical validation
+[8/9] Decision → chat_pro (synthesis + no-trade check)
+[9/9] Archive → save session + calibration prediction
+```
+
+反馈环：Step 9 保存预测 → 次日 Step 3 注入校准上下文 → 后续分析据此调整。
