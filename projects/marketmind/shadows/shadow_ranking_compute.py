@@ -149,7 +149,7 @@ def compute_rankings(
 
         if performances:
             rankings = engine.rank_shadows(performances, {}, today,
-                                            market_accuracy=market_accuracy if market_accuracy else None,
+                                            market_accuracies=market_accuracy if market_accuracy else None,
                                             wfe_results=None)
             result["rankings"] = rankings
             for rr in rankings:
