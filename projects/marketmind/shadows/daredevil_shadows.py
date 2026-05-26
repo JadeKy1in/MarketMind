@@ -63,7 +63,7 @@ class DaredevilShadow(ShadowAgent):
             f"{constraints}\n\n"
             f"Market data: {json.dumps(market_data) if market_data else 'None'}\n\n"
             f"News headlines:\n{news_context}\n\n"
-            f"Output your trades using VOTE_START/VOTE_END blocks. "
+            f"Output your trades using DECISION_START/DECISION_END blocks. "
             f"ticker, direction (long/short), confidence (0.35-1.0), thesis, risk_note."
         )
 
@@ -84,7 +84,7 @@ DAREDEVIL_SHADOW_CONFIGS: list[ShadowConfig] = [
             "in ranges. Key signals: volume contraction near boundaries, RSI "
             "divergence, Bollinger Band squeezes. Risk: breakout breakage. "
             "ALWAYS find range-bound tickers regardless of broad market regime. "
-            "Prefer large-cap liquid names. Output VOTE_START/VOTE_END blocks."
+            "Prefer large-cap liquid names. Output DECISION_START/DECISION_END blocks."
         ),
         virtual_capital=25000.0, domain="macro", temperature=0.45,
         max_positions=4, max_drawdown_limit=0.30, min_trades_for_ranking=50,
@@ -101,7 +101,7 @@ DAREDEVIL_SHADOW_CONFIGS: list[ShadowConfig] = [
             "breadth washout readings, credit spread blowout. Counter-intuitive: "
             "fade the panic when VIX starts declining from peak. Risk: catching "
             "a falling knife in genuine crash. ALWAYS find high-VIX tickers. "
-            "Prefer large-cap liquid names. Output VOTE_START/VOTE_END blocks."
+            "Prefer large-cap liquid names. Output DECISION_START/DECISION_END blocks."
         ),
         virtual_capital=30000.0, domain="macro", temperature=0.6,
         max_positions=3, max_drawdown_limit=0.40, min_trades_for_ranking=50,
@@ -118,7 +118,7 @@ DAREDEVIL_SHADOW_CONFIGS: list[ShadowConfig] = [
             "trend strength, volatility drag estimation, overnight gap risk. "
             "Never hold through volatility events — decay destroys you. "
             "Position size max 10% due to extreme risk. ALWAYS trade LETFs. "
-            "Output VOTE_START/VOTE_END blocks."
+            "Output DECISION_START/DECISION_END blocks."
         ),
         virtual_capital=20000.0, domain="macro", temperature=0.5,
         max_positions=2, max_drawdown_limit=0.45, min_trades_for_ranking=50,
@@ -135,7 +135,7 @@ DAREDEVIL_SHADOW_CONFIGS: list[ShadowConfig] = [
             "put/call ratio extremes, COT report positioning, analyst consensus "
             "uniformity. Buy when fear is consensus, short when greed is. "
             "Risk: trends can persist longer than contrarians stay solvent. "
-            "Use tight stops. Output VOTE_START/VOTE_END blocks."
+            "Use tight stops. Output DECISION_START/DECISION_END blocks."
         ),
         virtual_capital=20000.0, domain="contrarian", temperature=0.6,
         max_positions=4, max_drawdown_limit=0.35, min_trades_for_ranking=50,
@@ -153,7 +153,7 @@ DAREDEVIL_SHADOW_CONFIGS: list[ShadowConfig] = [
             "Buy breakouts, add on pullbacks, exit when momentum diverges. "
             "Risk: trend exhaustion and violent reversals. ALWAYS find "
             "trending tickers regardless of broad market. Prefer large-cap. "
-            "Output VOTE_START/VOTE_END blocks."
+            "Output DECISION_START/DECISION_END blocks."
         ),
         virtual_capital=30000.0, domain="macro", temperature=0.4,
         max_positions=3, max_drawdown_limit=0.30, min_trades_for_ranking=50,
@@ -170,7 +170,7 @@ DAREDEVIL_SHADOW_CONFIGS: list[ShadowConfig] = [
             "signals for cyclical vs defensive rotation, fund flow data. "
             "Go long strongest 2 sectors, short weakest 2. Rotate weekly. "
             "Risk: sector correlations converge in crashes. Output "
-            "VOTE_START/VOTE_END blocks with sector-level analysis."
+            "DECISION_START/DECISION_END blocks with sector-level analysis."
         ),
         virtual_capital=30000.0, domain="macro", temperature=0.4,
         max_positions=4, max_drawdown_limit=0.30, min_trades_for_ranking=50,
@@ -188,7 +188,7 @@ DAREDEVIL_SHADOW_CONFIGS: list[ShadowConfig] = [
             "Exception: not required to trade large-cap. Trade small/mid-cap "
             "with adequate daily volume (>$1M notional). Risk: cannot exit "
             "quickly — must use limit orders, account for slippage. "
-            "Output VOTE_START/VOTE_END blocks."
+            "Output DECISION_START/DECISION_END blocks."
         ),
         virtual_capital=15000.0, domain="macro", temperature=0.45,
         max_positions=5, max_drawdown_limit=0.35, min_trades_for_ranking=50,
@@ -208,7 +208,7 @@ DAREDEVIL_SHADOW_CONFIGS: list[ShadowConfig] = [
             "You only activate when at least 2 pre-crash signals are present. "
             "If conditions don't warrant crash positioning, report 'NO_CRASH_SETUP' "
             "and abstain. Analyze: valuations → correlations → breadth → credit → "
-            "sentiment extremes. Output VOTE_START/VOTE_END blocks."
+            "sentiment extremes. Output DECISION_START/DECISION_END blocks."
         ),
         virtual_capital=30000.0, domain="short", temperature=0.5,
         max_positions=3, max_drawdown_limit=0.40, min_trades_for_ranking=50,

@@ -96,6 +96,9 @@ async def _do_l1_analysis(signals: list, news_items: list, tracker: StageTracker
     tracker.advance(3, "Layer 1: narrative analysis...")
     from marketmind.pipeline.layer1_narrative import analyze_layer1
     result = await analyze_layer1(signals[:15], news_items)
+    if result is None:
+        from marketmind.pipeline.layer1_narrative import Layer1Result
+        result = Layer1Result.empty_default()
     _record_z0_l1(result)
     tracker.result(f"grade={result.event_grade}, quadrant={result.matrix_quadrant}")
     return result
@@ -110,6 +113,12 @@ async def _do_l2_l3_parallel(l1_result, tracker: StageTracker):
     l2_task = analyze_layer2(l1_result)
     l3_task = analyze_layer3(tickers, {})
     l2, l3 = await asyncio.gather(l2_task, l3_task)
+    if l2 is None:
+        from marketmind.pipeline.layer2_fundamental import Layer2Result
+        l2 = Layer2Result()
+    if l3 is None:
+        from marketmind.pipeline.layer3_technical import Layer3Result
+        l3 = Layer3Result()
     tracker.result(f"L2: {len(l2.ticker_candidates)} candidates, "
                    f"L3: {len(l3.results)} tickers ({len(l3.green_lights)} green)")
     return l2, l3
@@ -149,6 +158,9 @@ async def _do_decision(l1_result, l2_result, l3_result, red_team, resonance, tra
     from marketmind.pipeline.decision import generate_decision
     decision = await generate_decision(l1=l1_result, l2=l2_result, l3=l3_result,
                                         red_team=red_team, resonance=resonance)
+    if decision is None:
+        from marketmind.pipeline.decision import DecisionOutput
+        decision = DecisionOutput()
     tracker.result(f"cards={len(decision.decision_cards)}, "
                    f"no_trade={'present' if decision.no_trade_card else 'none'}")
     return decision
@@ -164,8 +176,9 @@ async def _do_daily_archive(config, l1_result, l2_result, resonance, tracker: St
             date=dt.now().isoformat()[:10],
             category="daily_session",
             title="MarketMind Daily",
-            content=f"MarketMind daily: {l1_result.event_grade} | {l2_result.macro_quadrant} | "
-                    f"resonance={resonance.verdict}",
+            content=f"MarketMind daily: {getattr(l1_result, 'event_grade', 'E')} | "
+                    f"{getattr(l2_result, 'macro_quadrant', 'unknown')} | "
+                    f"resonance={getattr(resonance, 'verdict', 'unknown')}",
         )
     tracker.result("Session archived")
 
@@ -310,6 +323,8 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
     For the legacy blocking behavior, use run_daily_legacy().
     """
     init_gateway(config.deepseek_api_key, config.deepseek_base_url)
+    from marketmind.gateway.async_client import set_mock_mode
+    set_mock_mode(mock)
 
     tracker = StageTracker(verbose)
     global _shadow_task, _shadow_result
@@ -404,7 +419,7 @@ async def run_shadows_only(config, verbose: bool = False) -> int:
     print(f"Shadows complete: {result.active_shadows} shadows, "
           f"{result.temp_shadows_created} temp created")
     if verbose:
-        print(f"  Votes collected: {result.votes_collected}")
+        print(f"  Decisions collected: {result.decisions_collected}")
         print(f"  Ecosystem alerts: {len(result.ecosystem_alerts)}")
         if result.rankings:
             print(f"  Rankings computed for {len(result.rankings)} shadows")

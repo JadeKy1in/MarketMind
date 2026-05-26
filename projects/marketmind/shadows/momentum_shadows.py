@@ -55,7 +55,7 @@ class MomentumShadow(ShadowAgent):
         return (
             f"Market data: {json.dumps(market_data) if market_data else 'None'}\n\n"
             f"News headlines:\n{news_context}\n\n"
-            f"Output your momentum trades using VOTE_START/VOTE_END blocks. "
+            f"Output your momentum trades using DECISION_START/DECISION_END blocks. "
             f"For each vote include: ticker, direction (long/short), "
             f"confidence (0.0-1.0), thesis (1 sentence), risk_note (1 sentence).\n"
             f"Momentum strategy rules:\n"
@@ -94,7 +94,7 @@ MOMENTUM_SHADOW_CONFIGS: list[ShadowConfig] = [
             "- Max 3 trades per day; 3 consecutive losses → cooldown 1 day\n"
             "- Skip FOMC/CPI/NFP data release mornings\n\n"
             "Risk: tight stops mandatory. Never hold through major data releases. "
-            "Prefer liquid large-cap names. Output VOTE_START/VOTE_END blocks. "
+            "Prefer liquid large-cap names. Output DECISION_START/DECISION_END blocks. "
             "Direction is REQUIRED every day."
         ),
         virtual_capital=25000.0, domain="macro", temperature=0.50,
@@ -123,7 +123,7 @@ MOMENTUM_SHADOW_CONFIGS: list[ShadowConfig] = [
             "- Trailing stops: 2× ATR(14) from entry\n"
             "- Never fight the trend — no counter-trend entries\n"
             "- Risk: trend exhaustion and sharp reversals. Exit when ADX starts declining.\n\n"
-            "Output VOTE_START/VOTE_END blocks. Direction is REQUIRED every day."
+            "Output DECISION_START/DECISION_END blocks. Direction is REQUIRED every day."
         ),
         virtual_capital=30000.0, domain="macro", temperature=0.40,
         max_positions=4, max_drawdown_limit=0.30, min_trades_for_ranking=50,
@@ -152,7 +152,7 @@ MOMENTUM_SHADOW_CONFIGS: list[ShadowConfig] = [
             "- Size positions at 50% of normal on rumored-but-unconfirmed events\n"
             "- Exit on day 5 or when event drift exhausts (whichever comes first)\n"
             "- Risk: event risk can compound — never hold through competing events\n\n"
-            "Output VOTE_START/VOTE_END blocks. Direction is REQUIRED every day."
+            "Output DECISION_START/DECISION_END blocks. Direction is REQUIRED every day."
         ),
         virtual_capital=25000.0, domain="macro", temperature=0.45,
         max_positions=4, max_drawdown_limit=0.30, min_trades_for_ranking=50,
@@ -180,7 +180,7 @@ MOMENTUM_SHADOW_CONFIGS: list[ShadowConfig] = [
             "- Rotate weekly — reassess every Monday\n"
             "- Position size: equal weight per sector, rebalance weekly\n"
             "- Risk: sector correlations converge in crashes — reduce all positions to 50% when VIX > 25\n\n"
-            "Output VOTE_START/VOTE_END blocks. Direction is REQUIRED every day."
+            "Output DECISION_START/DECISION_END blocks. Direction is REQUIRED every day."
         ),
         virtual_capital=30000.0, domain="macro", temperature=0.40,
         max_positions=4, max_drawdown_limit=0.30, min_trades_for_ranking=50,

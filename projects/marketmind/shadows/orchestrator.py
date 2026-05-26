@@ -150,7 +150,7 @@ class Orchestrator:
 
     async def step_surveillance(
         self,
-        all_votes: list,
+        all_decisions: list,
         market_data: dict,
         today: str,
         result: "ShadowOrchestrationResult",
@@ -163,7 +163,7 @@ class Orchestrator:
         try:
             from marketmind.shadows.collusion_detector import CollusionDetector
             collusion = CollusionDetector(self.config)
-            collusion_flags = collusion.run_daily_check(today, all_votes, market_data)
+            collusion_flags = collusion.run_daily_check(today, all_decisions, market_data)
             result.collusion_flags = collusion_flags
             for flag in collusion_flags:
                 self.state_db.record_collusion_flag(flag)
@@ -189,7 +189,7 @@ class Orchestrator:
         try:
             from marketmind.shadows.ecosystem_auditor import EcosystemAuditor
             auditor = EcosystemAuditor()
-            ecosystem_alerts = auditor.run_audit(all_votes, today)
+            ecosystem_alerts = auditor.run_audit(all_decisions, today)
             result.ecosystem_alerts = ecosystem_alerts
             if ecosystem_alerts:
                 logger.info("Ecosystem audit: %d blind-spot alerts", len(ecosystem_alerts))
@@ -212,7 +212,7 @@ class Orchestrator:
                 tokens = self.state_db.get_token_history(config.shadow_id, days=30)
                 if tokens:
                     token_data[config.shadow_id] = tokens
-            eco_snapshot = eco_health.run_daily_check(all_votes, token_data, today)
+            eco_snapshot = eco_health.run_daily_check(all_decisions, token_data, today)
             result.ecosystem_health_snapshot = {
                 "date": eco_snapshot.date,
                 "active_shadows": eco_snapshot.active_shadows,

@@ -26,7 +26,7 @@ async def run_shadow_analyses(
     checkpoints after completion.
 
     Returns:
-        (shadow_analyses: dict, votes_collected: int, all_votes: list)
+        (shadow_analyses: dict, decisions_collected: int, all_decisions: list)
     """
     # Read broadcast messages
     broadcast_messages: list = []
@@ -59,7 +59,7 @@ async def run_shadow_analyses(
                 logger.debug("Replaying cached output for %s", sid)
 
     from marketmind.shadows.shadow_agent import create_shadow_agent
-    all_votes: list = []
+    all_decisions: list = []
     semaphore = asyncio.Semaphore(config.max_concurrent_shadows)
 
     async def _run_one(cfg):
@@ -80,7 +80,7 @@ async def run_shadow_analyses(
                 )
                 if output.decisions:
                     try:
-                        state_db.save_votes(sid, today, output.decisions)
+                        state_db.save_analyses(sid, today, output.decisions)
                     except Exception as e:
                         logger.error("Failed to save votes for %s: %s", sid, e)
                 try:
@@ -110,12 +110,12 @@ async def run_shadow_analyses(
     results_list = await asyncio.gather(*tasks)
 
     shadow_analyses: dict = {}
-    votes_collected = 0
+    decisions_collected = 0
     for sid, output, err in results_list:
         if output is not None:
             shadow_analyses[sid] = output
-            votes_collected += len(output.decisions)
-            all_votes.extend(output.decisions)
+            decisions_collected += len(output.decisions)
+            all_decisions.extend(output.decisions)
         elif err is None and sid in completed_shadows:
             cached_raw = state_db.get_raw_output(sid, today)
             if cached_raw:
@@ -127,4 +127,4 @@ async def run_shadow_analyses(
     except Exception as e:
         logger.debug("Checkpoint cleanup failed for %s: %s", today, e)
 
-    return shadow_analyses, votes_collected, all_votes
+    return shadow_analyses, decisions_collected, all_decisions

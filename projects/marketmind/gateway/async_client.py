@@ -224,6 +224,24 @@ class DeepSeekGateway:
 
 _gateway: DeepSeekGateway | None = None
 _budget: TokenBudget | None = None
+_mock_mode: bool = False
+
+
+def set_mock_mode(enabled: bool = True) -> None:
+    """Enable/disable mock LLM mode — chat_flash/chat_pro return minimal
+    valid responses without making any API calls."""
+    global _mock_mode
+    _mock_mode = enabled
+
+
+_MOCK_PRO_RESPONSE = {
+    "content": "{}",
+    "usage": {"total_tokens": 0, "prompt_tokens": 0, "completion_tokens": 0},
+}
+_MOCK_FLASH_RESPONSE = {
+    "content": "[]",
+    "usage": {"total_tokens": 0, "prompt_tokens": 0, "completion_tokens": 0},
+}
 
 
 def init_gateway(api_key: str, base_url: str = DEEPSEEK_BASE,
@@ -296,6 +314,8 @@ async def chat_flash(
     """Internal: raw Flash call without integrity protocol injection.
     Shadow agents MUST use chat_with_integrity() instead.
     Note: Flash model does NOT support thinking/reasoning_effort."""
+    if _mock_mode:
+        return dict(_MOCK_FLASH_RESPONSE)
     gw = await get_gateway()
     budget = await get_budget()
     estimated = max_tokens + 1024
@@ -326,6 +346,8 @@ async def chat_pro(
 ) -> dict[str, Any]:
     """Internal: raw Pro call without integrity protocol injection.
     Shadow agents MUST use chat_with_integrity() instead."""
+    if _mock_mode:
+        return dict(_MOCK_PRO_RESPONSE)
     gw = await get_gateway()
     budget = await get_budget()
     estimated = max_tokens + 2048

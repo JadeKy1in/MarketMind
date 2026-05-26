@@ -104,7 +104,7 @@ def get_source_status() -> list[dict]:
         for s in SOURCES:
             sources.append({
                 "name": s.name,
-                "ok": str(s.status).lower() in ("working", "active"),
+                "ok": s.status.name.lower() in ("working", "active", "untested", "degraded"),
                 "tier": int(s.tier) if hasattr(s, 'tier') else 3,
             })
     except Exception:
@@ -255,19 +255,28 @@ def get_shadow_detail(shadow_id: str) -> dict:
 
 
 def get_decision_history(limit: int = 10) -> dict:
-    from marketmind.storage.archivist import get_archivist
-    arch = get_archivist()
-    results = arch.search("decision", limit=limit)
-    decisions = [
-        {
+    from datetime import date as dt_date, timedelta
+    db = _get_shadow_db()
+    end = dt_date.today().isoformat()
+    start = (dt_date.today() - timedelta(days=90)).isoformat()
+    rows = db.get_analyses_by_date_range(start, end)
+    # Deduplicate: one decision per ticker per date (shadows may overlap)
+    seen = set()
+    decisions = []
+    for r in sorted(rows, key=lambda x: x.get("date", "") + x.get("ticker", ""), reverse=True):
+        key = (r.get("date", ""), r.get("ticker", ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        decisions.append({
             "date": r.get("date", ""),
             "ticker": r.get("ticker", "--"),
             "direction": r.get("direction", ""),
             "confidence": r.get("confidence", 0),
-            "result": r.get("result"),
-        }
-        for r in results
-    ]
+            "result": r.get("pnl_pct"),
+        })
+        if len(decisions) >= limit:
+            break
     return {"decisions": decisions}
 
 

@@ -75,7 +75,7 @@ def get_default_template(domain: str) -> ShadowConfig:
         f"You have been auto-seeded because all prior {domain} shadows were "
         f"eliminated. Your methodology is under development. You analyze "
         f"{domain}-specific news, fundamentals, and technicals. "
-        f"Output VOTE_START/VOTE_END blocks with direction, confidence "
+        f"Output DECISION_START/DECISION_END blocks with direction, confidence "
         f"(0.0-1.0), thesis (1 sentence), and risk_note (1 sentence)."
     )
     return ShadowConfig(
@@ -123,7 +123,7 @@ class ShadowOrchestrationResult:
     active_shadows: int = 0
     temp_shadows_created: int = 0
     temp_shadows_destroyed: int = 0
-    votes_collected: int = 0
+    decisions_collected: int = 0
     shadow_analyses: dict[str, ShadowAnalysisOutput] = field(default_factory=dict)
     rankings: list = field(default_factory=list)
     collusion_flags: list = field(default_factory=list)
@@ -274,20 +274,20 @@ class ShadowMother:
         result.active_shadows = len(visible)
 
         # 3.5-4. Run all shadow analyses (extracted to shadow_analysis_runner)
-        shadow_analyses, votes_collected, all_votes = await run_shadow_analyses(
+        shadow_analyses, decisions_collected, all_decisions = await run_shadow_analyses(
             self.state_db, self.config, visible, today, news_items, market_data
         )
         result.shadow_analyses.update(shadow_analyses)
-        result.votes_collected = votes_collected
+        result.decisions_collected = decisions_collected
 
         # 4.5 Market anchor computation (extracted to shadow_ranking_compute)
         market_accuracy = compute_market_anchor(
-            self.state_db, self.config, visible, all_votes, today
+            self.state_db, self.config, visible, all_decisions, today
         )
 
         # 5. Compute rankings (extracted to shadow_ranking_compute)
         ranking_results = compute_rankings(
-            self.state_db, self.config, visible, all_votes, today, market_accuracy
+            self.state_db, self.config, visible, all_decisions, today, market_accuracy
         )
         result.rankings = ranking_results["rankings"]
         result.plateau_flags.extend(ranking_results["plateau_flags"])
@@ -316,7 +316,7 @@ class ShadowMother:
         # 6. Detect collusion
         try:
             collusion = CollusionDetector(self.config)
-            collusion_flags = collusion.run_daily_check(today, all_votes, market_data)
+            collusion_flags = collusion.run_daily_check(today, all_decisions, market_data)
             result.collusion_flags = collusion_flags
             for flag in collusion_flags:
                 self.state_db.record_collusion_flag(flag)
@@ -342,7 +342,7 @@ class ShadowMother:
         try:
             from marketmind.shadows.ecosystem_auditor import EcosystemAuditor
             auditor = EcosystemAuditor()
-            ecosystem_alerts = auditor.run_audit(all_votes, today)
+            ecosystem_alerts = auditor.run_audit(all_decisions, today)
             result.ecosystem_alerts = ecosystem_alerts
             if ecosystem_alerts:
                 logger.info("Ecosystem audit: %d blind-spot alerts", len(ecosystem_alerts))
@@ -365,7 +365,7 @@ class ShadowMother:
                 tokens = self.state_db.get_token_history(config.shadow_id, days=30)
                 if tokens:
                     token_data[config.shadow_id] = tokens
-            eco_snapshot = eco_health.run_daily_check(all_votes, token_data, today)
+            eco_snapshot = eco_health.run_daily_check(all_decisions, token_data, today)
             result.ecosystem_health_snapshot = {
                 "date": eco_snapshot.date,
                 "active_shadows": eco_snapshot.active_shadows,

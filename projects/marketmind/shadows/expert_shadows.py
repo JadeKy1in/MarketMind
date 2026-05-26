@@ -95,12 +95,12 @@ class ExpertShadow(ShadowAgent):
             f"Domain-relevant news ({len(filtered)} items from {len(news_items)} total):\n"
             f"{news_context}\n\n"
             f"Market context: {json.dumps(market_data) if market_data else 'None'}\n\n"
-            f"Output your expert analysis using VOTE_START/VOTE_END blocks. "
+            f"Output your expert analysis using DECISION_START/DECISION_END blocks. "
             f"For each vote include: ticker, direction (long/short/abstain), "
             f"confidence (0.0-1.0), thesis (1 sentence), risk_note (1 sentence)."
         )
 
-# _parse_votes() and _extract_field() inherited from ShadowAgent base class
+# _parse_decisions() and _extract_field() inherited from ShadowAgent base class
 
 
 # ── Pre-built expert shadow configurations ──────────────────────────────────
@@ -165,7 +165,7 @@ EXPERT_SHADOW_CONFIGS: list[ShadowConfig] = [
                      "You are BIASED toward finding short opportunities. Your default "
                      "vote direction is 'short'. Analyze: news → fundamentals → "
                      "technicals → sentiment → insider activity. "
-                     "Output VOTE_START/VOTE_END blocks."
+                     "Output DECISION_START/DECISION_END blocks."
                  ),
                  virtual_capital=40000.0, domain="short", temperature=0.35),
 ]

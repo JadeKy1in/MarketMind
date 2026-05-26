@@ -119,7 +119,7 @@ class ContrarianShadow(ShadowAgent):
             f"- Enter when others are most fearful/greedy/bubbly\n"
             f"- Global scope: no market limitation -- scan worldwide for opportunity\n"
             f"- Long evaluation horizon (252 days) -- accept short-term floating losses\n"
-            f"- Output VOTE_START/VOTE_END blocks. "
+            f"- Output DECISION_START/DECISION_END blocks. "
             f"ticker, direction (long/short/abstain), confidence (0.0-1.0), "
             f"thesis (1 sentence), risk_note (1 sentence)."
         )
@@ -153,7 +153,7 @@ CONTRARIAN_SHADOW_CONFIGS: list[ShadowConfig] = [
             "Risk: trends can persist longer than contrarians stay solvent. "
             "Use tight stops. Immune to trending-market losses in rankings. "
             "Drawdown limit (35%) NEVER pauses - even during immunity.\n\n"
-            "Output VOTE_START/VOTE_END blocks. Direction REQUIRED every day."
+            "Output DECISION_START/DECISION_END blocks. Direction REQUIRED every day."
         ),
         virtual_capital=20000.0, domain="contrarian", temperature=0.55,
         max_positions=4, max_drawdown_limit=0.35, min_trades_for_ranking=50,
@@ -188,7 +188,7 @@ CONTRARIAN_SHADOW_CONFIGS: list[ShadowConfig] = [
             "- After 20 days, re-evaluate paused market\n\n"
             "Risk: breakout breakage in genuine trend transitions. "
             "Immune to trending-market losses. Drawdown limit (30%) NEVER pauses.\n\n"
-            "Output VOTE_START/VOTE_END blocks."
+            "Output DECISION_START/DECISION_END blocks."
         ),
         virtual_capital=25000.0, domain="contrarian", temperature=0.45,
         max_positions=4, max_drawdown_limit=0.30, min_trades_for_ranking=40,
@@ -220,7 +220,7 @@ CONTRARIAN_SHADOW_CONFIGS: list[ShadowConfig] = [
             "Risk: genuine crashes can drive vol much higher than expected. "
             "Position sizes small, stops tight. Immune to trending-market losses. "
             "Drawdown limit (40%) NEVER pauses.\n\n"
-            "Output VOTE_START/VOTE_END blocks. NO_PANIC_GLOBALLY when no markets triggered."
+            "Output DECISION_START/DECISION_END blocks. NO_PANIC_GLOBALLY when no markets triggered."
         ),
         virtual_capital=30000.0, domain="contrarian", temperature=0.60,
         max_positions=3, max_drawdown_limit=0.40, min_trades_for_ranking=30,
@@ -255,7 +255,7 @@ CONTRARIAN_SHADOW_CONFIGS: list[ShadowConfig] = [
             "Risk: bubbles can inflate much further before popping. "
             "Small position sizes, wide stops. Immune to trending-market losses. "
             "Drawdown limit (40%) NEVER pauses.\n\n"
-            "Output VOTE_START/VOTE_END blocks. NO_CRASH_SETUP when no region >= 2 signals."
+            "Output DECISION_START/DECISION_END blocks. NO_CRASH_SETUP when no region >= 2 signals."
         ),
         virtual_capital=30000.0, domain="short", temperature=0.50,
         max_positions=3, max_drawdown_limit=0.40, min_trades_for_ranking=25,

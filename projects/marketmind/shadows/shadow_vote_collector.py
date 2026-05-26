@@ -73,7 +73,7 @@ async def collect_votes(
         logger.info("All shadows already completed — nothing to run")
         return []
 
-    all_votes: list = []
+    all_decisions: list = []
     semaphore = asyncio.Semaphore(config.max_concurrent_shadows)
 
     async def _run_one(shadow_config):
@@ -148,7 +148,7 @@ async def collect_votes(
             result.shadow_analyses[sid] = output
             if not is_beta:
                 result.decisions_collected += len(output.decisions)
-                all_votes.extend(output.decisions)
+                all_decisions.extend(output.decisions)
             try:
                 latest = state_db.get_latest_snapshot(sid)
                 if latest and latest.date == today:
@@ -161,4 +161,4 @@ async def collect_votes(
             except Exception as e:
                 logger.debug("Snapshot update failed for %s: %s", sid, e)
 
-    return all_votes
+    return all_decisions

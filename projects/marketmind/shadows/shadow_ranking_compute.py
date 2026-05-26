@@ -17,7 +17,7 @@ def compute_market_anchor(
     state_db: ShadowStateDB,
     config: ShadowSettings,
     visible: list[ShadowConfig],
-    all_votes: list,
+    all_decisions: list,
     today: str,
 ) -> dict[str, float]:
     """Compute market accuracy anchor for each shadow.
@@ -31,7 +31,7 @@ def compute_market_anchor(
         from marketmind.shadows.market_data_fetcher import MarketDataFetcher
         mdf = MarketDataFetcher()
         all_tickers: set[str] = set()
-        for vote in all_votes:
+        for vote in all_decisions:
             ticker = getattr(vote, "ticker", None) or vote.get("ticker", "")
             if ticker:
                 all_tickers.add(ticker)
@@ -91,7 +91,7 @@ def compute_rankings(
     state_db: ShadowStateDB,
     config: ShadowSettings,
     visible: list[ShadowConfig],
-    all_votes: list,
+    all_decisions: list,
     today: str,
     market_accuracy: dict[str, float],
 ) -> dict:

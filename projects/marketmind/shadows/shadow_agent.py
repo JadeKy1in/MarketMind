@@ -27,6 +27,9 @@ from marketmind.shadows.shadow_types import (
 # Module-level constant so pipeline layers can import it directly (Batch 2).
 _DEFANG = [
     # Original control-sequence tokens
+    ("DECISION_START", "DECISION​_START"),
+    ("DECISION_END", "DECISION​_END"),
+    # Backward compat with old VOTE_* tokens (pre-2026-05-26 rename)
     ("VOTE_START", "VOTE​_START"),
     ("VOTE_END", "VOTE​_END"),
     ("EXIT_DECISION:", "EXIT​_DECISION:"),
@@ -196,7 +199,7 @@ class ShadowAgent:
             content = ""
             latency_ms = 0
 
-        votes = self._parse_votes(content)
+        decisions = self._parse_decisions(content)
         insights = self._extract_insights(content, news_items)
 
         # Persist raw LLM output
@@ -212,7 +215,7 @@ class ShadowAgent:
         return ShadowAnalysisOutput(
             shadow_id=self.shadow_id,
             date=today,
-            decisions=votes,
+            decisions=decisions,
             insights=insights,
             quota_used=quota_used,
             methodology_notes=self.config.methodology_prompt[:200],
@@ -347,18 +350,23 @@ class ShadowAgent:
             f"Today's market data:\n{tickers_context}\n\n"
             f"Relevant news headlines:\n{news_context}"
             f"{broadcast_context}\n\n"
-            f"Analyze these inputs from your perspective and output your vote(s) "
-            f"using VOTE_START/VOTE_END blocks. "
-            f"For each vote include: ticker, direction (long/short/abstain), "
+            f"Analyze these inputs from your perspective and output your decision(s) "
+            f"using DECISION_START/DECISION_END blocks. "
+            f"For each decision include: ticker, direction (long/short/abstain), "
             f"confidence (0.0-1.0), thesis (1 sentence), risk_note (1 sentence)."
         )
 
     @staticmethod
-    def _parse_votes(text: str) -> list[ShadowDecision]:
-        """Parse VOTE_START/VOTE_END blocks from LLM output."""
-        votes = []
+    def _parse_decisions(text: str) -> list[ShadowDecision]:
+        """Parse DECISION_START/DECISION_END blocks from LLM output.
+
+        Also accepts legacy VOTE_START/VOTE_END tokens for backward compatibility
+        with existing test fixtures and pre-2026-05-26 analysis data.
+        """
+        decisions = []
+        # Match both new DECISION_* and legacy VOTE_* tokens
         pattern = re.compile(
-            r'VOTE_START\s*\n(.*?)\nVOTE_END', re.DOTALL
+            r'(?:DECISION|VOTE)_START\s*\n(.*?)\n(?:DECISION|VOTE)_END', re.DOTALL
         )
         for match in pattern.finditer(text):
             block = match.group(1)
@@ -376,7 +384,7 @@ class ShadowAgent:
             thesis = _extract_field(block, "thesis") or ""
             risk = _extract_field(block, "risk_note") or ""
             if ticker and direction:
-                votes.append(ShadowDecision(
+                decisions.append(ShadowDecision(
                     shadow_id="", shadow_type="unknown",
                     date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                     ticker=ticker, direction=direction,
@@ -384,11 +392,11 @@ class ShadowAgent:
                     thesis=thesis[:200], risk_note=risk[:200],
                     emergency_flag=confidence >= 0.8,
                 ))
-        return votes
+        return decisions
 
     @staticmethod
     def _extract_insights(text: str, news_items: list) -> list[str]:
-        """Extract non-vote insights from LLM output."""
+        """Extract non-decision insights from LLM output."""
         insights = []
         for line in text.split("\n"):
             line = line.strip()
@@ -396,7 +404,7 @@ class ShadowAgent:
                 insights.append(line[:300])
         if not insights:
             insights.append(f"Scanned {len(news_items)} news items, "
-                          f"produced {len(re.findall(r'VOTE_START', text))} votes")
+                          f"produced {len(re.findall(r'(?:DECISION|VOTE)_START', text))} decisions")
         return insights[:5]
 
     # ── Virtual portfolio ────────────────────────────────────────────────
@@ -608,7 +616,7 @@ class ShadowAgent:
 
 
 def _extract_field(block: str, field: str) -> str | None:
-    match = re.search(rf'{re.escape(field)}:\s*([^,\n]+)', block, re.IGNORECASE)
+    match = re.search(rf'{re.escape(field)}:\s*([^,|\n]+)', block, re.IGNORECASE)
     return match.group(1).strip() if match else None
 
 

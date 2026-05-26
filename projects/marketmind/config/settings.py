@@ -200,6 +200,6 @@ class MarketMindConfig:
             if self.shadow.virtual_slippage_atr_pct < 0:
                 errors.append("shadow.virtual_slippage_atr_pct must be >= 0")
             pcts = self.shadow.achievement_percentiles
-            if not (pcts["endangered"] < pcts["watch"] < pcts["excellent"] < pcts["elite"]):
-                errors.append("achievement_percentiles must be strictly ordered: endangered < watch < excellent < elite")
+            if not (pcts["endangered"] < pcts["excellent"] < pcts["elite"]):
+                errors.append("achievement_percentiles must be strictly ordered: endangered < excellent < elite")
         return errors

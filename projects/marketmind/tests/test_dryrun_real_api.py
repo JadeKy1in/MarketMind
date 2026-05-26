@@ -127,8 +127,8 @@ async def test_stage5_shadows_real():
         result = await mother.orchestrate_daily_cycle(news_dicts, {})
         elapsed = time.time() - t0
         assert result.active_shadows > 0, "Must have active shadows"
-        assert result.votes_collected > 0, "Must have votes collected"
-        print(f"PASS: {result.active_shadows} shadows, {result.votes_collected} votes in {elapsed:.1f}s")
+        assert result.decisions_collected > 0, "Must have votes collected"
+        print(f"PASS: {result.active_shadows} shadows, {result.decisions_collected} votes in {elapsed:.1f}s")
     finally:
         db.close()
         _os.unlink(tmp)

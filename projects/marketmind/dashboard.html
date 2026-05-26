@@ -438,7 +438,7 @@ async function startPipeline(mock=true){
 	var btn=document.getElementById("btnRun");
 	btn.textContent='⚡ Running...'; btn.classList.add('running'); btn.disabled=true;
 	try{
-		var r=await fetch(API+'/api/pipeline/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mock:mock})});
+		var r=await fetch('/api/pipeline/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mock:mock})});
 		var d=await r.json();
 		if(d.status==='started'){ console.log('Pipeline started, PID:',d.pid); }
 		else { alert('Pipeline start failed: '+d.detail); btn.textContent='▶ Run'; btn.classList.remove('running'); btn.disabled=false; }
@@ -521,7 +521,7 @@ async function loadShadowDetail(){
       return `<div class="${cardClass}"><div class="shadow-card-header"><span class="shadow-name" style="cursor:pointer;text-decoration:underline" onclick="event.stopPropagation();loadIndividualShadow('${s.shadow_id||''}')">` +
         (s.cn_name||s.name) + ' <span style="font-weight:400;color:var(--t3);font-size:11px">' + (s.name||'') + '</span></span><span class="shadow-tier-tag t-' + s.tier + '">' + (tierNames[s.tier]||s.tier.toUpperCase()) + '</span></div>' +
         (s.desc ? '<div style="font:10px var(--mono);color:var(--t3);margin-top:2px;margin-bottom:6px">' + s.desc + '</div>' : '') +
-        '<div class="shadow-stats"><div class="shadow-stat"><span>Composite</span><span class="shadow-stat-val">' + s.score.toFixed(2) + '</span></div></div></div>`;
+        '<div class="shadow-stats"><div class="shadow-stat"><span>Composite</span><span class="shadow-stat-val">' + s.score.toFixed(2) + '</span></div></div></div>';
     }).join('');
     document.getElementById('shadowDetail').innerHTML=html||'<div class="muted">No shadow data available</div>';
   }catch(e){}

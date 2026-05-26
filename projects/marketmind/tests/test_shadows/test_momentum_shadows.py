@@ -169,4 +169,4 @@ async def test_momentum_prompt_includes_trend_context(temp_shadow_db):
     )
     assert "Momentum strategy rules" in prompt
     assert "trend continuation" in prompt.lower()
-    assert "VOTE_START/VOTE_END" in prompt
+    assert "DECISION_START/DECISION_END" in prompt

@@ -78,11 +78,11 @@ class TestExpertShadow:
             assert len(filtered) == 3
             db.close()
 
-    def test_parse_votes_empty_output(self, expert):
-        votes = expert._parse_votes("No signal today.")
-        assert len(votes) == 0
+    def test_parse_decisions_empty_output(self, expert):
+        decisions = expert._parse_decisions("No signal today.")
+        assert len(decisions) == 0
 
-    def test_parse_votes_single_vote(self, expert):
+    def test_parse_decisions_single_vote(self, expert):
         text = """VOTE_START
 ticker: GLD
 direction: long
@@ -90,14 +90,14 @@ confidence: 0.75
 thesis: Real rates falling support gold rally
 risk_note: DXY strength could cap upside
 VOTE_END"""
-        votes = expert._parse_votes(text)
-        assert len(votes) == 1
-        assert votes[0].ticker == "GLD"
-        assert votes[0].direction == "long"
-        assert votes[0].confidence == 0.75
-        assert votes[0].emergency_flag is False
+        decisions = expert._parse_decisions(text)
+        assert len(decisions) == 1
+        assert decisions[0].ticker == "GLD"
+        assert decisions[0].direction == "long"
+        assert decisions[0].confidence == 0.75
+        assert decisions[0].emergency_flag is False
 
-    def test_parse_votes_emergency_flag(self, expert):
+    def test_parse_decisions_emergency_flag(self, expert):
         text = """VOTE_START
 ticker: SPY
 direction: short
@@ -105,9 +105,9 @@ confidence: 0.90
 thesis: Credit event risk elevated
 risk_note: Central bank intervention possible
 VOTE_END"""
-        votes = expert._parse_votes(text)
-        assert len(votes) == 1
-        assert votes[0].emergency_flag is True
+        decisions = expert._parse_decisions(text)
+        assert len(decisions) == 1
+        assert decisions[0].emergency_flag is True
 
 
 def test_all_16_configs_unique_ids():

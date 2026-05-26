@@ -110,7 +110,7 @@ class CatfishAgent(ShadowAgent):
             f"verifiable data. If no legitimate counter-argument exists, state "
             f"'NO_VALID_COUNTER' — never fabricate.\n\n"
             f"News headlines:\n{news_context}\n\n"
-            f"Output using VOTE_START/VOTE_END blocks with confidence 0.3-0.6."
+            f"Output using DECISION_START/DECISION_END blocks with confidence 0.3-0.6."
         )
 
 
