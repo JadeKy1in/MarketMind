@@ -54,17 +54,17 @@ def compute_market_anchor(
                             )
                         except Exception:
                             pass
-            all_saved_votes = state_db.get_votes_by_date_range(
+            all_saved_analyses = state_db.get_analyses_by_date_range(
                 lookback_start, today
             )
-            votes_by_shadow: dict[str, list[dict]] = {}
-            for v in all_saved_votes:
+            analyses_by_shadow: dict[str, list[dict]] = {}
+            for v in all_saved_analyses:
                 sid_v = v.get("shadow_id", "")
                 if sid_v:
-                    votes_by_shadow.setdefault(sid_v, []).append(v)
+                    analyses_by_shadow.setdefault(sid_v, []).append(v)
 
             for cfg in visible:
-                shadow_votes = votes_by_shadow.get(cfg.shadow_id, [])
+                shadow_votes = analyses_by_shadow.get(cfg.shadow_id, [])
                 if not shadow_votes:
                     continue
                 ticker_counts = Counter(
@@ -149,8 +149,7 @@ def compute_rankings(
 
         if performances:
             rankings = engine.rank_shadows(performances, {}, today,
-                                            market_accuracies=market_accuracy if market_accuracy else None,
-                                            wfe_results=None)
+                                            market_accuracies=market_accuracy if market_accuracy else None)
             result["rankings"] = rankings
             for rr in rankings:
                 agent_config = state_db.get_shadow(rr.shadow_id)

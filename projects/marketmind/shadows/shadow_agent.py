@@ -380,7 +380,7 @@ class ShadowAgent:
                 direction = _dm.get(direction, direction)
                 if direction not in ("long", "short", "abstain"):
                     direction = "abstain"
-            confidence = float(_extract_field(block, "confidence") or 0.5)
+            confidence = _safe_float(_extract_field(block, "confidence") or 0.5)
             thesis = _extract_field(block, "thesis") or ""
             risk = _extract_field(block, "risk_note") or ""
             if ticker and direction:
@@ -483,7 +483,7 @@ class ShadowAgent:
                 content = result.get("content", "")
                 decision = _extract_field(content, "EXIT_DECISION")
                 reason = _extract_field(content, "EXIT_REASON") or ""
-                conf = float(_extract_field(content, "CONFIDENCE") or 0.5)
+                conf = _safe_float(_extract_field(content, "CONFIDENCE") or 0.5)
 
                 should_exit = (decision or "").lower().strip() == "exit"
                 results.append(PositionCheck(
@@ -618,6 +618,29 @@ class ShadowAgent:
 def _extract_field(block: str, field: str) -> str | None:
     match = re.search(rf'{re.escape(field)}:\s*([^,|\n]+)', block, re.IGNORECASE)
     return match.group(1).strip() if match else None
+
+
+def _safe_float(raw: str | None, default: float = 0.5) -> float:
+    """Parse a float from LLM output, handling noisy formats.
+
+    LLMs sometimes return 'EST:0.35', '0.62 (EST based on...)',
+    or other non-numeric noise. Extract the first numeric substring.
+    """
+    if raw is None:
+        return default
+    # Try direct parse first
+    try:
+        return float(raw)
+    except (ValueError, TypeError):
+        pass
+    # Extract first numeric pattern (handles 'EST:0.35', '0.62 (comment)', etc.)
+    match = re.search(r'[-+]?\d*\.?\d+', str(raw))
+    if match:
+        try:
+            return float(match.group())
+        except (ValueError, TypeError):
+            pass
+    return default
 
 
 def create_shadow_agent(config: ShadowConfig, state_db: ShadowStateDB,
