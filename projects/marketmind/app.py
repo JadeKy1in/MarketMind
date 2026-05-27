@@ -35,6 +35,8 @@ def main():
                         help="Backtest end date (YYYY-MM-DD)")
     parser.add_argument("--output", type=str, default=None, metavar="PATH",
                         help="Backtest output path (JSON)")
+    parser.add_argument("--playground", action="store_true",
+                        help="Run Playground experimental agents after main pipeline")
     args = parser.parse_args()
 
     config = MarketMindConfig.from_env()
@@ -50,19 +52,56 @@ def main():
 
     if args.shadow_only:
         from marketmind.pipeline.orchestration import run_shadows_only
-        return asyncio.run(run_shadows_only(config, verbose=args.verbose))
+        ret = asyncio.run(run_shadows_only(config, verbose=args.verbose))
+        asyncio.run(_run_playground_if_requested(args))
+        return ret
     elif args.mode == "shadows":
         from marketmind.pipeline.orchestration import run_shadows_only
-        return asyncio.run(run_shadows_only(config, verbose=args.verbose))
+        ret = asyncio.run(run_shadows_only(config, verbose=args.verbose))
+        asyncio.run(_run_playground_if_requested(args))
+        return ret
     elif args.mode == "interactive":
-        return asyncio.run(run_interactive(config, mock=args.mock, verbose=args.verbose,
-                                           shadow_count=0 if args.no_shadows else args.shadows))
+        ret = asyncio.run(run_interactive(config, mock=args.mock, verbose=args.verbose,
+                                          shadow_count=0 if args.no_shadows else args.shadows))
+        asyncio.run(_run_playground_if_requested(args))
+        return ret
     elif args.mode == "gui":
         from marketmind.pipeline.orchestration import run_gui
         return run_gui(config)
     else:
         from marketmind.pipeline.orchestration import _run_daily_with_shadows
-        return asyncio.run(_run_daily_with_shadows(config, args))
+        ret = asyncio.run(_run_daily_with_shadows(config, args))
+        asyncio.run(_run_playground_if_requested(args))
+        return ret
+
+
+async def _run_playground_if_requested(args, news_items=None):
+    """Run Playground experimental agents if --playground flag is set."""
+    if not args.playground:
+        return
+    from marketmind.playground.playground_runner import run_all_agents
+    print("\n" + "=" * 60)
+    print("  [PLAYGROUND] Running experimental agents...")
+    print("=" * 60)
+    result = await run_all_agents(
+        news_items=news_items,
+        mock=args.mock,
+        fetch_playground_sources=not args.mock,
+    )
+    print(f"  Agents: {result.agents_attempted} attempted, "
+          f"{result.agents_succeeded} succeeded, {result.agents_failed} failed")
+    if result.decisions:
+        total_calls = sum(len(d.directional_calls) for d in result.decisions)
+        print(f"  Directional calls: {total_calls}")
+        for d in result.decisions:
+            for call in d.directional_calls:
+                print(f"    {call['ticker']} {call['direction']} "
+                      f"(confidence={call['confidence']:.2f}) "
+                      f"research_backed={call.get('research_backed', False)}")
+    if result.errors:
+        for e in result.errors:
+            print(f"  [ERROR] {e['agent_id']}: {e['error'][:200]}")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

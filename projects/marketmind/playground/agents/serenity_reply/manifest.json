@@ -1,0 +1,21 @@
+{
+  "agent_id": "serenity_reply",
+  "display_name": "Serenity Semiconductor Analyst",
+  "description": "Distilled thinking framework of @aleabitoreddit. Analyzes AI/semiconductor supply chain bottlenecks to produce directional calls on small-cap semiconductor stocks. Based on 5 mental models (chokepoint theory, bottleneck game theory, NVIDIA signal reading, information asymmetry, positive-sum markets) and 8 decision heuristics.",
+  "output_character": "directional call on individual semiconductor/technology stocks — bullish/bearish with confidence and a bottleneck-focused thesis",
+  "public_data_sources": [
+    "RSS news (semiconductor/technology focus)",
+    "public market price data",
+    "SEC EDGAR filings",
+    "public company announcements"
+  ],
+  "requires_proprietary_data": false,
+  "primary_metric": "direction_accuracy",
+  "secondary_metrics": ["sharpe_ratio", "max_drawdown", "profit_factor"],
+  "min_sample_size": 20,
+  "min_observation_days": 60,
+  "target_pipeline_node": "decision_signal_source",
+  "version": "1.0.0",
+  "author": "leslieyeo/serenity-reply (distilled by Nuwa Skill Creation)",
+  "tags": ["semiconductor", "supply-chain", "small-cap", "bottleneck-analysis", "external-analyst-persona"]
+}

@@ -10,6 +10,12 @@ from marketmind.pipeline.methodology_rules import (
 from marketmind.pipeline.methodology_evolution import (
     RuleValidator,
     RuleEvolver,
+    StageAttributionAnalyzer,
+    StageAttribution,
+    AttributionBatch,
+    _format_metrics_for_attribution,
+    _parse_attribution_response,
+    run_cross_stage_attribution,
 )
 
 
@@ -238,4 +244,95 @@ class TestDynamicPromptAssembly:
         registry = RuleRegistry()
         prompt = assemble_dynamic_prompt(registry, "Default instructions")
         assert "Default instructions" in prompt
+
+
+# ── Cross-stage attribution tests ─────────────────────────────────────────
+
+
+class TestStageAttribution:
+    def test_format_metrics_for_attribution(self):
+        metrics = [
+            {"date": "2026-05-20", "flash_high_impact": 5, "flash_avg_impact": 3.5,
+             "hvr_signals_found": 2, "hvr_articles_investigated": 8,
+             "l1_grade": "B", "l1_quadrant": "buy_cautious", "l1_direction": "bullish",
+             "l2_ticker_candidates": 4, "l3_green_lights": 2, "l3_yellow_lights": 3,
+             "l3_red_lights": 5, "red_team_challenges": 3, "red_team_severe": 1,
+             "resonance_dsr": 0.70, "resonance_pbo": 0.05, "resonance_passed": True,
+             "decision_cards": 2, "decision_no_trade": False},
+        ]
+        formatted = _format_metrics_for_attribution(metrics)
+        assert "2026-05-20" in formatted
+        assert "flash" in formatted.lower()
+
+    def test_format_metrics_empty(self):
+        assert "No metrics" in _format_metrics_for_attribution([])
+
+    def test_parse_attribution_valid(self):
+        content = '{"primary_failure_stage": "red_team", "confidence": 0.75, "evidence": "Challenges misdirected", "suggested_rule_change": "Require 2+ severe challenges before downgrading", "rule_category": "risk_management"}'
+        parsed = _parse_attribution_response(content)
+        assert parsed is not None
+        assert parsed["primary_failure_stage"] == "red_team"
+        assert parsed["confidence"] == 0.75
+
+    def test_parse_attribution_invalid(self):
+        assert _parse_attribution_response("not json") is None
+
+    def test_attribution_to_hypothesis_converts(self):
+        from marketmind.pipeline.methodology_rules import RuleImpactHypothesis
+        analyzer = StageAttributionAnalyzer()
+        attr = StageAttribution(
+            primary_failure_stage="l1_narrative",
+            confidence=0.80,
+            evidence="L1 consistently over-graded events",
+            suggested_rule_change="Cap event grade at B when price_in < 0.5",
+            rule_category="quality",
+        )
+        hyp = analyzer.attribution_to_hypothesis(attr)
+        assert hyp is not None
+        assert hyp.suspected_impact == "negative"
+        assert hyp.confidence == 0.80
+        assert "grade" in hyp.evidence_summary.lower()
+
+    def test_attribution_to_hypothesis_skips_none_suggestion(self):
+        analyzer = StageAttributionAnalyzer()
+        attr = StageAttribution(
+            primary_failure_stage="none",
+            confidence=0.70,
+            evidence="No single stage at fault",
+            suggested_rule_change="none",
+            rule_category="quality",
+        )
+        hyp = analyzer.attribution_to_hypothesis(attr)
+        assert hyp is None
+
+    def test_attribution_to_hypothesis_skips_low_confidence(self):
+        analyzer = StageAttributionAnalyzer()
+        attr = StageAttribution(
+            primary_failure_stage="flash_triage",
+            confidence=0.40,
+            evidence="Maybe flash",
+            suggested_rule_change="Change threshold",
+            rule_category="quality",
+        )
+        hyp = analyzer.attribution_to_hypothesis(attr)
+        assert hyp is None
+
+    @pytest.mark.asyncio
+    async def test_analyzer_skips_high_accuracy(self):
+        analyzer = StageAttributionAnalyzer()
+        result = await analyzer.analyze_period([{"date": "x"}] * 10, 0.60, 18, 30)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_analyzer_skips_insufficient_samples(self):
+        analyzer = StageAttributionAnalyzer()
+        result = await analyzer.analyze_period([{"date": "x"}] * 3, 0.30, 3, 5)
+        assert result is None
+
+
+@pytest.mark.asyncio
+async def test_run_cross_stage_attribution_insufficient_data():
+    """Returns None when fewer than 7 days of metrics."""
+    result = await run_cross_stage_attribution([{"date": "2026-05-20"}])
+    assert result is None
 

@@ -1,1 +1,1 @@
-{"type": "fix", "files": ["api/data_providers.py", "dashboard.html"], "risk": "low", "description": "修复仪表盘: SOURCE_AUTHORITY→SOURCES导入名+5级→4级UI+空catch加错误日志"}
+{"type": "enhance", "files": ["app.py", "pipeline/pipeline_metrics.py", "pipeline/weekly_tactical_audit.py", "pipeline/daily_calibration.py", "pipeline/methodology_evolution.py", "pipeline/orchestration.py"], "risk": "medium", "description": "Playground接入app.py --playground、影子命名收尾、主管线三层迭代进化体系实现"}

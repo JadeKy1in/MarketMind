@@ -1,7 +1,6 @@
-# MarketMind Restart Guide — 2026-05-26 EOD
+# MarketMind Restart Guide — 2026-05-27 EOD
 
-**Tests**: 2,049 pass, 0 fail, 0 skip | **CI**: green | **Branch**: master
-**Latest commits**: 862743cf → 0e00cd74 → a6ea164f → 1eee6be9 → cd44fe9c
+**Tests**: 1,645+ pass, 0 fail | **CI**: green | **Branch**: master
 **All pushed**: no | **frontload_required**: true
 
 ---
@@ -9,7 +8,64 @@
 ## 重启指令
 
 > 继续 MarketMind 开发。阅读 `.claude/RESTART_GUIDE.md`。
-> 上次完成：5→4 级合并彻底清理 + VOTE→DECISION 全量重命名 + --mock 模式 + 主管线自校准 + 实盘验证
+> 上次完成：Playground 实验层搭建 + serenity-reply 入驻 + 主管线三层进化体系 + 4个半导体源合入主Scout + shadow_vote_collector 死代码清理
+
+---
+
+## 今日完成 (2026-05-27)
+
+### Session 1: Playground 实验层搭建
+- **新模块**: `playground/` — 独立于主管道的 Agent 实验沙箱
+- **信息防火墙**: Playground agent 只收公开数据，不得接触主管道/影子输出
+- **Agent 自声明**: `agent_manifest.py` — 无硬编码分类，类型从观察中涌现
+- **评估体系**: 通用层（稳定性+合法性+无数据泄露）+ 类型特定层 + 相关性检查
+- **升级门控**: 60天观察期 + 20次决策 + 准确率>55% + 夏普>0.5 + 回撤<25%
+- **serenity-reply**: 首个入驻 Agent（@aleabitoreddit 半导体供应链瓶颈理论蒸馏）
+- `playground_runner.py`: 每日运行 + 信息防火墙 + JSONL 审计日志
+- `playground_tracker.py`: 次日结算 + 绩效追踪 + 夏普/回撤/利润因子
+- `playground_auditor.py`: 月度审计 + 升级门控检查 + 个案集成路径
+- `playground_fetcher.py`: WP API + RSS 双通道数据抓取
+- `playground_sources.py`: 16 源三档分类（8 CORE + 1 SUPPLEMENTAL + 6 RETIRED + 1 退役）
+
+### Session 2: serenity-reply 数据源配置
+- **WP API 通道**: 6 个源提供完整文章（EDN 15k, ServeTheHome 23k, Solid State Tech 8k, EE Times 7k, Semiconductor Digest 4.7k, SemiEngineering 1.9k chars）
+- **RSS 通道**: 2 个源（EE Times Asia 3.2k, Photonics Spectra 720 chars）
+- **三档机制**: CORE 每日必取，SUPPLEMENTAL 核心<15篇时触发，RETIRED 审计可查
+- **淘汰 6 源**: Tom's Hardware, TechPowerUp, Ars Technica, The Register, WCCFTech, Power Electronics News
+- **4 源合入主 Scout**: EE Times, Semiconductor Engineering, EDN, EE Times Asia
+
+### Session 3: serenity-reply Flash 研究循环
+- **两轮分析**: Pass 1 初始瓶颈分析 → 研究轮（confidence 0.6-0.8 触发）→ Pass 2 综合重评
+- **研究日志**: 每次 Flash 调用记录完整 system_prompt + user_prompt + response
+- **文章匹配**: 按 ticker + 关键词评分取 top 5 全文，格式化为研究输入
+- **审计字段**: `_research_log`, `_passes`, `_research_leads_identified`, `_research_rounds_completed`
+
+### Session 4: 主管线三层迭代进化体系
+- **新增** `pipeline/pipeline_metrics.py`: 每日指标快照（Flash/L1/L2/L3/RedTeam/Resonance/Decision 各阶段数据）
+- **新增** `pipeline/weekly_tactical_audit.py`: Layer 2 周度战术审计（Flash 驱动，7维度阶段健康检查）
+- **集成**: 指标自动记录到 `run_daily()` 结尾 + 周度审计每 7 天自动触发
+- **注入**: 周度审计建议通过 `get_suggestion_context()` 注入 L1 prompt（与日校准并列）
+
+### Session 5: 影子命名收尾 + 基础设施
+- `shadows/shadow_vote_collector.py` → 确认为死代码，已删除
+- **验证**: 影子 AEL 三层全部健康（weekly_flash / evolution / quarterly_pro）
+- `app.py --playground` flag: 主管线后自动运行 Playground agents
+
+### Session 6: 主管道迭代进化体系设计（设计完成，部分实现）
+- Layer 1: 每日校准（`daily_calibration.py` 已有）+ 增强（Flash 评分准确率 + HVR 回报率 — 待实现）
+- Layer 2: 每周战术审计（`weekly_tactical_audit.py` 已实现）
+- Layer 3: 跨阶段归因审计（`methodology_evolution.py` 已有 walk-forward，跨阶段扩展待实现）
+
+---
+
+## 明天可以做的
+
+| # | 任务 | 说明 |
+|:--:|------|------|
+| 1 | **主管线迭代进化体系完结** | Layer 1 增强（Flash/HVR 追踪）+ Layer 3 跨阶段归因（Decision 错误回溯到具体阶段） |
+| 2 | Playground 实盘验证 | `python app.py --mode daily --mock --playground` 跑一次完整流程 |
+| 3 | serenity-reply 数据源验证 | 真实 WP API 返回是否正常（模拟 vs 实盘）|
+| 4 | Git push | 所有更改未推送 |
 
 ---
 
@@ -68,7 +124,8 @@ cd E:/AI_Studio_Workspace/projects/marketmind
 python api_server.py                    # Dashboard → http://localhost:8520
 python app.py --mode daily --mock -v    # Mock 管线 (~46s)
 python app.py --mode daily -v           # 实盘管线 (~4min, 需要 API 预算)
-python -m pytest tests/ -q -m "not slow" -p no:warnings  # 测试 (2,049 pass)
+python app.py --mode daily --mock --playground  # Mock 管线 + Playground agents
+python -m pytest tests/ -q -m "not slow" -p no:warnings  # 测试
 ```
 
 ---
@@ -103,4 +160,20 @@ WATCH(30%) 和 ENDANGERED(15%) 合并为统一的 ENDANGERED(20%)，14 天连续
 [9/9] Archive → save session + calibration prediction
 ```
 
-反馈环：Step 9 保存预测 → 次日 Step 3 注入校准上下文 → 后续分析据此调整。
+反馈环：Step 9 保存预测 → 次日 Step 3 注入校准上下文 + 每周审计建议 → 后续分析据此调整。
+
+## 主管线进化体系 (2026-05-27 新增)
+
+```
+Layer 1 每日校准: daily_calibration.py
+  └── 保存预测 → 次日加载 → 对比实际 → 注入 L1 prompt
+
+Layer 2 每周战术审计: weekly_tactical_audit.py  [NEW]
+  └── 读取 pipeline_metrics.jsonl → Flash 分析 7 维度 → 建议注入 L1
+
+Layer 3 跨阶段归因: methodology_evolution.py
+  └── Walk-forward backtest gate → RuleEvolver → SHARP registry 更新
+  (待实现: 跨阶段归因链 — Decision 错误 → Red Team/L2/Flash 溯源)
+```
+
+数据流: `run_daily()` → 记录 `pipeline_metrics.jsonl` → 每 7 天触发 `weekly_tactical_audit` → 建议保存 JSON → 次日注入 L1 prompt

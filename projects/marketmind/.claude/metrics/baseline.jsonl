@@ -455,3 +455,135 @@
 {"timestamp": "2026-05-25T15:20:52.782857+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
 {"timestamp": "2026-05-25T15:21:24.344216+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
 {"timestamp": "2026-05-25T15:21:53.544513+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T01:15:08.312393+00:00", "source_count": 33, "rss_article_count": 378, "api_article_count": 30, "rss_health_score": 0.939, "pre_dedup_total": 408, "post_dedup_total": 376, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-26T01:15:43.483061+00:00", "source_count": 33, "rss_article_count": 378, "api_article_count": 30, "rss_health_score": 0.939, "pre_dedup_total": 408, "post_dedup_total": 376, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-26T01:16:40.771422+00:00", "source_count": 33, "rss_article_count": 378, "api_article_count": 30, "rss_health_score": 0.939, "pre_dedup_total": 408, "post_dedup_total": 376, "issues": ["Reddit WSB: 3"]}
+{"timestamp": "2026-05-26T01:17:14.439355+00:00", "source_count": 32, "rss_article_count": 378, "api_article_count": 30, "rss_health_score": 0.969, "pre_dedup_total": 408, "post_dedup_total": 376, "issues": []}
+{"timestamp": "2026-05-26T01:21:09.949951+00:00", "source_count": 32, "rss_article_count": 378, "api_article_count": 30, "rss_health_score": 0.969, "pre_dedup_total": 408, "post_dedup_total": 376, "issues": []}
+{"timestamp": "2026-05-26T01:26:00.982088+00:00", "source_count": 32, "rss_article_count": 378, "api_article_count": 30, "rss_health_score": 0.969, "pre_dedup_total": 408, "post_dedup_total": 376, "issues": []}
+{"timestamp": "2026-05-26T01:30:23.818429+00:00", "source_count": 32, "rss_article_count": 378, "api_article_count": 30, "rss_health_score": 0.969, "pre_dedup_total": 408, "post_dedup_total": 377, "issues": []}
+{"timestamp": "2026-05-26T01:34:43.985553+00:00", "source_count": 32, "rss_article_count": 378, "api_article_count": 29, "rss_health_score": 0.969, "pre_dedup_total": 407, "post_dedup_total": 376, "issues": []}
+{"timestamp": "2026-05-26T01:35:05.652698+00:00", "source_count": 32, "rss_article_count": 378, "api_article_count": 29, "rss_health_score": 0.969, "pre_dedup_total": 407, "post_dedup_total": 376, "issues": []}
+{"timestamp": "2026-05-26T01:35:26.625936+00:00", "source_count": 32, "rss_article_count": 378, "api_article_count": 29, "rss_health_score": 0.969, "pre_dedup_total": 407, "post_dedup_total": 376, "issues": []}
+{"timestamp": "2026-05-26T02:37:59.843734+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T02:38:28.466668+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T02:38:55.589884+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T02:43:31.916999+00:00", "source_count": 33, "rss_article_count": 378, "api_article_count": 30, "rss_health_score": 0.939, "pre_dedup_total": 408, "post_dedup_total": 364, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-26T02:44:39.093825+00:00", "source_count": 33, "rss_article_count": 378, "api_article_count": 30, "rss_health_score": 0.939, "pre_dedup_total": 408, "post_dedup_total": 13, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-26T02:44:59.043935+00:00", "type": "flash", "articles_in": 50, "signals_out": 49}
+{"timestamp": "2026-05-26T02:45:09.503725+00:00", "type": "flash", "articles_in": 13, "signals_out": 0}
+{"timestamp": "2026-05-26T02:46:59.063103+00:00", "type": "l1", "event_grade": "N/A", "matrix_quadrant": "N/A", "sentiment": "N/A"}
+{"timestamp": "2026-05-26T02:50:22.782104+00:00", "source_count": 33, "rss_article_count": 378, "api_article_count": 30, "rss_health_score": 0.939, "pre_dedup_total": 408, "post_dedup_total": 8, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-26T02:50:46.015585+00:00", "type": "flash", "articles_in": 8, "signals_out": 8}
+{"timestamp": "2026-05-26T02:52:15.497815+00:00", "type": "l1", "event_grade": "D", "matrix_quadrant": "core_opportunity", "sentiment": "neutral"}
+{"timestamp": "2026-05-26T02:56:20.742861+00:00", "source_count": 33, "rss_article_count": 378, "api_article_count": 29, "rss_health_score": 0.939, "pre_dedup_total": 407, "post_dedup_total": 20, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-26T02:57:13.896771+00:00", "type": "flash", "articles_in": 20, "signals_out": 5}
+{"timestamp": "2026-05-26T03:00:08.505635+00:00", "source_count": 33, "rss_article_count": 378, "api_article_count": 29, "rss_health_score": 0.939, "pre_dedup_total": 407, "post_dedup_total": 9, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-26T03:00:36.686894+00:00", "type": "flash", "articles_in": 9, "signals_out": 9}
+{"timestamp": "2026-05-26T03:02:36.709870+00:00", "type": "l1", "event_grade": "N/A", "matrix_quadrant": "N/A", "sentiment": "N/A"}
+{"timestamp": "2026-05-26T03:11:27.601669+00:00", "source_count": 33, "rss_article_count": 378, "api_article_count": 29, "rss_health_score": 0.939, "pre_dedup_total": 407, "post_dedup_total": 18, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-26T03:12:14.149210+00:00", "type": "flash", "articles_in": 18, "signals_out": 3}
+{"timestamp": "2026-05-26T03:13:54.746557+00:00", "type": "l1", "event_grade": "E", "matrix_quadrant": "core_opportunity", "sentiment": "bearish"}
+{"timestamp": "2026-05-26T03:34:01.004580+00:00", "source_count": 33, "rss_article_count": 378, "api_article_count": 29, "rss_health_score": 0.939, "pre_dedup_total": 407, "post_dedup_total": 21, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-26T03:34:40.525874+00:00", "type": "flash", "articles_in": 21, "signals_out": 21}
+{"timestamp": "2026-05-26T03:36:33.826114+00:00", "type": "l1", "event_grade": "D", "matrix_quadrant": "core_opportunity", "sentiment": "bearish"}
+{"timestamp": "2026-05-26T03:44:20.170905+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T03:44:39.372164+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T03:44:58.543089+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T10:09:50.844458+00:00", "source_count": 33, "rss_article_count": 378, "api_article_count": 29, "rss_health_score": 0.939, "pre_dedup_total": 407, "post_dedup_total": 212, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-26T10:11:36.563185+00:00", "type": "flash", "articles_in": 50, "signals_out": 20}
+{"timestamp": "2026-05-26T10:13:36.586815+00:00", "type": "l1", "event_grade": "E", "matrix_quadrant": "observe_skip", "sentiment": "neutral"}
+{"timestamp": "2026-05-26T10:18:48.513026+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T10:19:07.760619+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T10:19:28.174483+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T10:35:05.258548+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T10:35:26.128265+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T10:35:47.043290+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T10:39:15.994864+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 76, "issues": []}
+{"timestamp": "2026-05-26T10:40:34.136887+00:00", "type": "flash", "articles_in": 50, "signals_out": 50}
+{"timestamp": "2026-05-26T10:42:11.500211+00:00", "type": "l1", "event_grade": "D", "matrix_quadrant": "core_opportunity", "sentiment": "bearish"}
+{"timestamp": "2026-05-26T10:52:23.869168+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T10:52:43.487358+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T10:53:02.765737+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T10:55:49.547846+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 33, "issues": []}
+{"timestamp": "2026-05-26T10:55:49.557270+00:00", "type": "flash", "articles_in": 33, "signals_out": 0}
+{"timestamp": "2026-05-26T10:55:49.559667+00:00", "type": "l1", "event_grade": "E", "matrix_quadrant": "observe_skip", "sentiment": "neutral"}
+{"timestamp": "2026-05-26T12:08:41.122501+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T12:09:03.178156+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T12:09:27.175190+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T12:12:45.021630+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T12:13:05.008779+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T12:13:25.480075+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T12:16:13.698305+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 130, "issues": []}
+{"timestamp": "2026-05-26T12:16:13.718530+00:00", "type": "flash", "articles_in": 50, "signals_out": 0}
+{"timestamp": "2026-05-26T12:16:13.726711+00:00", "type": "l1", "event_grade": "E", "matrix_quadrant": "observe_skip", "sentiment": "neutral"}
+{"timestamp": "2026-05-26T12:16:57.704209+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 9, "issues": []}
+{"timestamp": "2026-05-26T12:16:57.709608+00:00", "type": "flash", "articles_in": 9, "signals_out": 0}
+{"timestamp": "2026-05-26T12:16:57.715925+00:00", "type": "l1", "event_grade": "E", "matrix_quadrant": "observe_skip", "sentiment": "neutral"}
+{"timestamp": "2026-05-26T12:19:49.287817+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T12:20:11.967716+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T12:20:32.804139+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T12:31:45.555966+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T12:32:07.916742+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T12:32:30.158979+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T12:55:51.687086+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 95, "issues": []}
+{"timestamp": "2026-05-26T12:55:51.698580+00:00", "type": "flash", "articles_in": 50, "signals_out": 0}
+{"timestamp": "2026-05-26T12:55:51.704802+00:00", "type": "l1", "event_grade": "E", "matrix_quadrant": "observe_skip", "sentiment": "neutral"}
+{"timestamp": "2026-05-26T13:00:29.078417+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 15, "issues": []}
+{"timestamp": "2026-05-26T13:01:03.732050+00:00", "type": "flash", "articles_in": 15, "signals_out": 0}
+{"timestamp": "2026-05-26T13:01:03.737211+00:00", "type": "l1", "event_grade": "E", "matrix_quadrant": "observe_skip", "sentiment": "neutral"}
+{"timestamp": "2026-05-26T13:09:03.543802+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T13:09:23.221991+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T13:09:41.697096+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T13:16:48.004913+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T13:17:07.651854+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-26T13:17:27.106367+00:00", "source_count": 33, "rss_article_count": 383, "api_article_count": 29, "rss_health_score": 0.97, "pre_dedup_total": 412, "post_dedup_total": 381, "issues": []}
+{"timestamp": "2026-05-27T03:54:54.434960+00:00", "source_count": 37, "rss_article_count": 408, "api_article_count": 30, "rss_health_score": 0.946, "pre_dedup_total": 438, "post_dedup_total": 400, "issues": ["Euronews Economy: 0 articles (URL may be broken)", "Reddit WSB: 2"]}
+{"timestamp": "2026-05-27T03:55:55.024128+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.946, "pre_dedup_total": 448, "post_dedup_total": 410, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-27T03:56:00.137507+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.946, "pre_dedup_total": 448, "post_dedup_total": 410, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-27T03:56:59.931850+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.946, "pre_dedup_total": 448, "post_dedup_total": 410, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-27T03:57:10.373121+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.946, "pre_dedup_total": 448, "post_dedup_total": 410, "issues": ["Reddit WSB: 3"]}
+{"timestamp": "2026-05-27T03:58:12.079326+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.946, "pre_dedup_total": 448, "post_dedup_total": 410, "issues": ["Reddit WSB: 3"]}
+{"timestamp": "2026-05-27T03:59:02.534120+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.972, "pre_dedup_total": 448, "post_dedup_total": 410, "issues": []}
+{"timestamp": "2026-05-27T04:02:17.597392+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.972, "pre_dedup_total": 448, "post_dedup_total": 410, "issues": []}
+{"timestamp": "2026-05-27T04:03:41.470123+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 420, "issues": []}
+{"timestamp": "2026-05-27T04:04:05.546220+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 420, "issues": []}
+{"timestamp": "2026-05-27T04:04:30.972101+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 420, "issues": []}
+{"timestamp": "2026-05-27T04:05:23.144419+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 420, "issues": []}
+{"timestamp": "2026-05-27T04:05:45.713034+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 420, "issues": []}
+{"timestamp": "2026-05-27T04:06:10.771883+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 420, "issues": []}
+{"timestamp": "2026-05-27T04:07:02.141796+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.972, "pre_dedup_total": 448, "post_dedup_total": 410, "issues": []}
+{"timestamp": "2026-05-27T04:11:25.675801+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.972, "pre_dedup_total": 448, "post_dedup_total": 410, "issues": []}
+{"timestamp": "2026-05-27T04:15:23.447888+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 29, "rss_health_score": 0.972, "pre_dedup_total": 447, "post_dedup_total": 415, "issues": []}
+{"timestamp": "2026-05-27T04:15:47.113494+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 29, "rss_health_score": 0.972, "pre_dedup_total": 447, "post_dedup_total": 415, "issues": []}
+{"timestamp": "2026-05-27T04:16:12.910792+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 29, "rss_health_score": 0.972, "pre_dedup_total": 447, "post_dedup_total": 415, "issues": []}
+{"timestamp": "2026-05-27T04:19:10.922973+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.946, "pre_dedup_total": 448, "post_dedup_total": 409, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-27T04:20:01.533764+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.946, "pre_dedup_total": 448, "post_dedup_total": 409, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-27T04:21:20.564467+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.946, "pre_dedup_total": 448, "post_dedup_total": 409, "issues": ["Reddit WSB: 3"]}
+{"timestamp": "2026-05-27T04:22:14.738445+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.972, "pre_dedup_total": 448, "post_dedup_total": 409, "issues": []}
+{"timestamp": "2026-05-27T04:24:56.587932+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.946, "pre_dedup_total": 448, "post_dedup_total": 409, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-27T04:25:49.398652+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.946, "pre_dedup_total": 448, "post_dedup_total": 410, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-27T04:27:10.952270+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.946, "pre_dedup_total": 448, "post_dedup_total": 410, "issues": ["Reddit WSB: 3"]}
+{"timestamp": "2026-05-27T04:27:15.947684+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.972, "pre_dedup_total": 448, "post_dedup_total": 410, "issues": []}
+{"timestamp": "2026-05-27T04:27:59.324376+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.972, "pre_dedup_total": 448, "post_dedup_total": 410, "issues": []}
+{"timestamp": "2026-05-27T04:32:17.099959+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.972, "pre_dedup_total": 448, "post_dedup_total": 409, "issues": []}
+{"timestamp": "2026-05-27T04:32:39.200383+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.972, "pre_dedup_total": 448, "post_dedup_total": 409, "issues": []}
+{"timestamp": "2026-05-27T04:36:36.627668+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.972, "pre_dedup_total": 448, "post_dedup_total": 409, "issues": []}
+{"timestamp": "2026-05-27T04:38:00.713953+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.972, "pre_dedup_total": 448, "post_dedup_total": 409, "issues": []}
+{"timestamp": "2026-05-27T04:40:22.466150+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 29, "rss_health_score": 0.972, "pre_dedup_total": 447, "post_dedup_total": 415, "issues": []}
+{"timestamp": "2026-05-27T04:40:45.337683+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 29, "rss_health_score": 0.972, "pre_dedup_total": 447, "post_dedup_total": 415, "issues": []}
+{"timestamp": "2026-05-27T04:41:09.775236+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 29, "rss_health_score": 0.972, "pre_dedup_total": 447, "post_dedup_total": 415, "issues": []}
+{"timestamp": "2026-05-27T04:41:33.912440+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.972, "pre_dedup_total": 448, "post_dedup_total": 410, "issues": []}
+{"timestamp": "2026-05-27T04:44:51.657365+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.946, "pre_dedup_total": 448, "post_dedup_total": 409, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-27T04:45:45.179042+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.946, "pre_dedup_total": 448, "post_dedup_total": 408, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-27T04:47:08.468553+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.946, "pre_dedup_total": 448, "post_dedup_total": 409, "issues": ["Reddit WSB: 3"]}
+{"timestamp": "2026-05-27T04:47:42.396442+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 29, "rss_health_score": 0.972, "pre_dedup_total": 447, "post_dedup_total": 415, "issues": []}
+{"timestamp": "2026-05-27T04:48:03.716829+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.972, "pre_dedup_total": 448, "post_dedup_total": 409, "issues": []}
+{"timestamp": "2026-05-27T04:48:07.200419+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 29, "rss_health_score": 0.972, "pre_dedup_total": 447, "post_dedup_total": 415, "issues": []}
+{"timestamp": "2026-05-27T04:48:31.409638+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 29, "rss_health_score": 0.972, "pre_dedup_total": 447, "post_dedup_total": 415, "issues": []}
+{"timestamp": "2026-05-27T04:51:21.390386+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.972, "pre_dedup_total": 448, "post_dedup_total": 409, "issues": []}
+{"timestamp": "2026-05-27T04:56:51.546237+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.972, "pre_dedup_total": 448, "post_dedup_total": 409, "issues": []}
+{"timestamp": "2026-05-27T05:00:12.927141+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 30, "rss_health_score": 0.972, "pre_dedup_total": 448, "post_dedup_total": 408, "issues": []}
+{"timestamp": "2026-05-27T05:05:04.676698+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 29, "rss_health_score": 0.972, "pre_dedup_total": 447, "post_dedup_total": 415, "issues": []}
+{"timestamp": "2026-05-27T05:05:24.847806+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 29, "rss_health_score": 0.972, "pre_dedup_total": 447, "post_dedup_total": 415, "issues": []}
+{"timestamp": "2026-05-27T05:05:46.665547+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 29, "rss_health_score": 0.972, "pre_dedup_total": 447, "post_dedup_total": 415, "issues": []}

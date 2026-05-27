@@ -104,6 +104,14 @@ async def _do_l1_analysis(signals: list, news_items: list, tracker: StageTracker
             calib = get_calibration_context(shadow_db, days=7)
         except Exception:
             pass
+        # Layer 2: weekly tactical audit suggestions
+        try:
+            from marketmind.pipeline.weekly_tactical_audit import get_suggestion_context
+            weekly = get_suggestion_context(shadow_db)
+            if weekly:
+                calib = (calib or "") + "\n" + weekly
+        except Exception:
+            pass
     result = await analyze_layer1(signals[:15], news_items, calibration_context=calib)
     if result is None:
         from marketmind.pipeline.layer1_narrative import Layer1Result
@@ -374,6 +382,16 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
     # Save today's prediction for tomorrow's calibration feedback loop
     _save_daily_prediction(l1_result, l2_result, decision)
 
+    # Record pipeline metrics for weekly tactical audit
+    _record_pipeline_metrics(
+        flash_results=signals, l1_result=l1_result, l2_result=l2_result,
+        l3_result=l3_result, red_team_report=red_team, resonance=resonance,
+        decision=decision, mock=mock,
+    )
+
+    # Trigger weekly audit if due (every 7 days)
+    await _maybe_run_weekly_audit(shadow_db)
+
     print("\nMarketMind daily pipeline complete.")
     if _shadow_task and not _shadow_task.done():
         print("(Shadow ecosystem still running in background)")
@@ -397,6 +415,73 @@ def _save_daily_prediction(l1_result, l2_result, decision) -> None:
             ],
         )
         save_prediction(pred)
+    except Exception:
+        pass
+
+
+def _record_pipeline_metrics(flash_results=None, l1_result=None, l2_result=None,
+                             l3_result=None, red_team_report=None, resonance=None,
+                             decision=None, mock: bool = False) -> None:
+    """Record daily pipeline metrics for weekly tactical audit."""
+    try:
+        from marketmind.pipeline.pipeline_metrics import (
+            PipelineMetrics, collect_metrics_from_session, record_metrics,
+        )
+        m = collect_metrics_from_session(
+            flash_results=flash_results, l1_result=l1_result, l2_result=l2_result,
+            l3_result=l3_result, red_team_report=red_team_report, resonance=resonance,
+            decision=decision, mock=mock,
+        )
+        record_metrics(m)
+    except Exception:
+        pass
+
+
+async def _maybe_run_weekly_audit(shadow_db) -> None:
+    """Run weekly tactical audit if 7+ days since last audit."""
+    from pathlib import Path
+    from datetime import datetime as _dt, timezone as _tz, timedelta
+
+    audit_dir = Path(__file__).resolve().parent.parent / ".claude" / "metrics"
+    audit_path = audit_dir / "weekly_audit_latest.json"
+
+    if audit_path.exists():
+        try:
+            with open(audit_path, "r", encoding="utf-8") as f:
+                last = __import__('json').loads(f.read())
+            last_date = last.get("week_end", "")
+            if last_date:
+                last_dt = _dt.strptime(last_date, "%Y-%m-%d").date()
+                if (_dt.now(_tz.utc).date() - last_dt).days < 7:
+                    return  # Not due yet
+        except Exception:
+            pass
+
+    try:
+        from marketmind.pipeline.weekly_tactical_audit import (
+            run_weekly_audit, save_latest_audit,
+        )
+        result = await run_weekly_audit(shadow_db)
+        if result and result.suggestions:
+            save_latest_audit(result)
+            logger.info("Weekly audit complete: %d suggestions", len(result.suggestions))
+    except Exception:
+        pass
+
+    # Layer 3: Cross-stage attribution (when direction accuracy is poor)
+    try:
+        from marketmind.pipeline.methodology_evolution import run_cross_stage_attribution
+        from marketmind.pipeline.pipeline_metrics import load_recent_metrics
+        metrics = load_recent_metrics(days=30)
+        attrib_batch = await run_cross_stage_attribution(metrics, shadow_db=shadow_db)
+        if attrib_batch and attrib_batch.attributions:
+            for attr in attrib_batch.attributions:
+                logger.info("Attribution: %s (confidence=%.2f) — %s",
+                            attr.primary_failure_stage, attr.confidence,
+                            attr.evidence[:150])
+            if attrib_batch.hypotheses:
+                logger.info("Attribution: %d hypotheses generated for RuleValidator",
+                            len(attrib_batch.hypotheses))
     except Exception:
         pass
 

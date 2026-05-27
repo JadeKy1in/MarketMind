@@ -83,6 +83,16 @@ SOURCES: list[Source] = [
     # ── Commodities / Futures ─────────────────────────────────────
     Source("Investing.com", SourceTier.BEST_EFFORT, "https://www.investing.com/rss/news_1063.rss", "rss", 0.40, 1.0),
 
+    # ── Semiconductor / Technology (Phase J: Playground→Main pipeline merge) ──
+    # EE Times: Global electronics industry — AI chips, processors, TSMC, Huawei.
+    # Semiconductor Engineering: Deep chip engineering — GPU inference, technical papers, EDA.
+    # EDN: Component-level electronics design — circuit protection, SoC, medical electronics.
+    # EE Times Asia: Asian supply chain — Indonesia smartphone, ASE packaging, EUV lithography.
+    Source("EE Times", SourceTier.PRIMARY, "https://www.eetimes.com/feed/", "rss", 0.88, 2.0),
+    Source("Semiconductor Engineering", SourceTier.PRIMARY, "https://semiengineering.com/feed/", "rss", 0.90, 2.0),
+    Source("EDN", SourceTier.RELIABLE, "https://www.edn.com/feed/", "rss", 0.80, 2.0),
+    Source("EE Times Asia", SourceTier.RELIABLE, "https://www.eetasia.com/feed/", "rss", 0.78, 2.0),
+
     # ── Social Media (BEST_EFFORT) ────────────────────────────────
     # Reliability weights are domain-reasoned, not backtest-optimized (Law 3 compliance).
     # Swiss Finance Institute (2026): finfluencer picks = -2.3% returns; fading them = +6.8% alpha.
