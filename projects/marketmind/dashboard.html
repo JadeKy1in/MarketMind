@@ -544,28 +544,37 @@ async function loadShadowDetail(){
     html+='</div>';
 
     if(all_shadows.length){
-      // Ranking: V2 composite (30%MPPM+20%Calmar+15%Omega+15%WR+20%Brier) + Bayesian haircut
+      // Tier distribution panel — cross-domain ranking is invalid (different volatility regimes)
+      const tiers={elite:[],excellent:[],normal:[],endangered:[]};
+      const allTiers={elite:0,excellent:0,normal:0,endangered:0};
+      all_shadows.forEach(s=>{
+        const t=s.tier||'normal';
+        if(tiers[t]) tiers[t].push(s);
+        allTiers[t]=(allTiers[t]||0)+1;
+      });
+      const tierDefs=[
+        {key:'elite',label:'ELITE · 精英',color:'var(--am)',desc:'Top quartile sustained · 顶级持续表现'},
+        {key:'excellent',label:'EXCELLENT · 优秀',color:'var(--bl)',desc:'Above median sustained · 优秀持续表现'},
+        {key:'normal',label:'NORMAL · 普通',color:'var(--t3)',desc:'Median range · 中间区间'},
+        {key:'endangered',label:'ENDANGERED · 濒危',color:'var(--rd)',desc:'Bottom 20% sustained · 持续底部，面临淘汰'},
+      ];
+      html+='<div class="sd-section"><div class="sd-section-title">Tier Distribution · 等级分布</div>';
+      html+='<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">';
+      tierDefs.forEach(td=>{
+        const count=allTiers[td.key]||0;
+        const maxCount=Math.max(...Object.values(allTiers),1);
+        const barW=Math.max(4,count/maxCount*100);
+        html+=`<div style="flex:1;min-width:80px">`
+          +`<div style="font:10px var(--mono);color:${td.color};margin-bottom:2px">${td.label}</div>`
+          +`<div style="font:18px var(--mono);color:${td.color}">${count}</div>`
+          +`<div style="height:3px;background:var(--bd);border-radius:2px;margin-top:2px"><div style="width:${barW}%;height:100%;background:${td.color};border-radius:2px"></div></div>`
+          +`<div style="font:8px var(--mono);color:var(--t3);margin-top:2px">${td.desc}</div>`
+          +`</div>`;
+      });
+      html+='</div>';
       const hasData=all_shadows.filter(s=>s.has_data&&s.trades>0);
-      html+='<div class="sd-section"><div class="sd-section-title">Rankings · 排名 <span style="font-weight:400;font-size:10px;color:var(--t3)">V2 Composite · Bayesian校准</span></div>';
-      if(hasData.length>=3){
-        const ranked=[...hasData].sort((a,b)=>(b.score||0)-(a.score||0));
-        html+='<table class="sd-table" style="margin-bottom:8px"><thead><tr><th>#</th><th>影子</th><th>Composite</th><th>WR</th><th>Cumul</th><th>Trades</th><th>Tier</th></tr></thead><tbody>';
-        ranked.slice(0,10).forEach((s,i)=>{
-          const tierLabel={elite:'ELITE',excellent:'EXC',normal:'NORM',endangered:'ENDG'}[s.tier]||'--';
-          const tierCls=s.tier==='elite'?'elite':s.tier==='excellent'?'excellent':s.tier==='endangered'?'endangered':'';
-          html+=`<tr><td style="color:var(--am)">#${i+1}</td><td>${s.cn_name||s.name}</td>`
-            +`<td style="color:var(--t2);font-weight:500">${s.score.toFixed(3)}</td>`
-            +`<td style="color:${(s.win_rate||0)>=0.55?'var(--gr)':'var(--rd)'}">${((s.win_rate||0)*100).toFixed(0)}%</td>`
-            +`<td style="color:${(s.cumulative_return_pct||0)>=0?'var(--gr)':'var(--rd)'}">${(s.cumulative_return_pct||0)>=0?'+':''}${(s.cumulative_return_pct||0).toFixed(1)}%</td>`
-            +`<td>${s.trades||0}</td>`
-            +`<td><span class="sc-tier ${tierCls}">${tierLabel}</span></td></tr>`;
-        });
-        html+='</tbody></table>';
-        html+='<div style="font:9px var(--mono);color:var(--t3);margin-bottom:12px">'
-          +'Composite = 30% MPPM + 20% Calmar + 15% Omega + 15% WR + 20% Brier. '
-          +'Bayesian haircut applied for small samples. Cross-domain calibrated.</div>';
-      } else {
-        html+='<div class="sd-empty">Ranking inactive — insufficient trade data from settled decisions.<br>排名未激活 — 需要至少3个影子有已结算交易记录。</div>';
+      if(!hasData.length){
+        html+='<div class="sd-empty">All shadows at baseline — no settled trade data yet. Tiers will differentiate as trades accumulate.<br>所有影子处于基线状态 — 尚无结算交易数据。等级将随交易积累而分化。</div>';
       }
       html+='</div>';
 
