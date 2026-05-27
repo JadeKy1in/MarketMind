@@ -279,3 +279,107 @@ async def run_all_agents(
         " [enhanced_data]" if has_enhanced_data else "",
     )
     return result
+
+
+def generate_daily_report(result: RunResult, output_dir: Path | None = None) -> Path | None:
+    """Generate a Markdown daily report summarizing all Playground agent outputs.
+
+    Written to playground/data/daily/YYYY-MM-DD.md.
+    Returns the path to the generated report, or None if no decisions to report.
+    """
+    from datetime import datetime, timezone
+
+    if not result.decisions:
+        return None
+
+    pg_dir = output_dir or DEFAULT_PLAYGROUND_DIR
+    daily_dir = pg_dir / "data" / "daily"
+    daily_dir.mkdir(parents=True, exist_ok=True)
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    report_path = daily_dir / f"{today}.md"
+
+    lines: list[str] = []
+    lines.append(f"# Playground Daily · {today}")
+    lines.append("")
+
+    for d in result.decisions:
+        output = d.output
+        calls = d.directional_calls
+        agent_id = d.agent_id
+        passes = output.get("_passes", 1)
+        rleads = output.get("_research_leads_identified", 0)
+        rrounds = output.get("_research_rounds_completed", 0)
+        has_enhanced = d.metadata.get("enhanced_data", False) if isinstance(d.metadata, dict) else False
+
+        # Agent header
+        lines.append(f"## {agent_id}")
+        lines.append("")
+        lines.append(f"- **研究轮次**: Pass {passes}/2"
+                     f"{' (🔬 深度研究)' if rrounds > 0 else ''}")
+        lines.append(f"- **数据质量**: {'enhanced_data' if has_enhanced else 'standard'}")
+        lines.append(f"- **研究线索**: {rleads} 条识别, {rrounds} 轮完成")
+        lines.append("")
+
+        # Directional calls
+        if calls:
+            lines.append("### 方向判断")
+            lines.append("")
+            lines.append("| 标的 | 方向 | 置信度 | 研究支持 | 框架 |")
+            lines.append("|------|------|:--:|:--:|------|")
+            for call in calls:
+                rb = "🔬 是" if call.get("research_backed") else "—"
+                lines.append(
+                    f"| {call['ticker']} | {call['direction']} "
+                    f"| {call['confidence']:.2f} | {rb} "
+                    f"| {call.get('mental_model_used', '—')} |"
+                )
+            lines.append("")
+            # Theses
+            for call in calls:
+                thesis = call.get("thesis", "")
+                if thesis:
+                    lines.append(f"- **{call['ticker']}**: {thesis}")
+            lines.append("")
+        else:
+            reason = output.get("no_calls_reason", "No signals found")
+            lines.append(f"**无方向判断** — {reason}")
+            lines.append("")
+
+        # Supply chain observations
+        obs = output.get("supply_chain_observations", [])
+        if obs:
+            lines.append("### 供应链观察")
+            lines.append("")
+            for o in obs[:5]:
+                lines.append(f"- {o}")
+            lines.append("")
+
+        # Research summary
+        rsum = output.get("research_summary", "")
+        if rsum:
+            lines.append(f"**研究摘要**: {rsum}")
+            lines.append("")
+
+        # Research log summary
+        rlog = output.get("_research_log", [])
+        if rlog:
+            lines.append("### 研究日志")
+            lines.append("")
+            for i, entry in enumerate(rlog):
+                label = entry.get("label", f"call_{i}")
+                has_error = bool(entry.get("error"))
+                resp_len = len(entry.get("response", ""))
+                status = "✗ 失败" if has_error else f"✓ ({resp_len} chars)"
+                lines.append(f"- **{label}**: {status}")
+            lines.append("")
+
+        lines.append("---")
+        lines.append("")
+
+    # Write report
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+    logger.info("Playground daily report written: %s", report_path)
+    return report_path

@@ -79,7 +79,13 @@ async def _run_playground_if_requested(args, config, news_items=None):
     """Run Playground experimental agents if --playground flag is set."""
     if not args.playground:
         return
-    from marketmind.playground.playground_runner import run_all_agents
+    # Re-init gateway: the previous asyncio.run() closed the event loop,
+    # invalidating the httpx client. We need a fresh client for this loop.
+    from marketmind.gateway.async_client import init_gateway
+    init_gateway(config.deepseek_api_key, config.deepseek_base_url)
+    from marketmind.playground.playground_runner import run_all_agents, generate_daily_report
+    from marketmind.playground.playground_tracker import load_performance_history
+
     print("\n" + "=" * 60)
     print("  [PLAYGROUND] Running experimental agents...")
     print("=" * 60)
@@ -88,20 +94,66 @@ async def _run_playground_if_requested(args, config, news_items=None):
         mock=args.mock,
         fetch_playground_sources=not args.mock,
     )
-    print(f"  Agents: {result.agents_attempted} attempted, "
+
+    print(f"\n  Agents: {result.agents_attempted} attempted, "
           f"{result.agents_succeeded} succeeded, {result.agents_failed} failed")
-    if result.decisions:
-        total_calls = sum(len(d.directional_calls) for d in result.decisions)
-        print(f"  Directional calls: {total_calls}")
-        for d in result.decisions:
-            for call in d.directional_calls:
-                print(f"    {call['ticker']} {call['direction']} "
-                      f"(confidence={call['confidence']:.2f}) "
-                      f"research_backed={call.get('research_backed', False)}")
+
+    for d in result.decisions:
+        agent_id = d.agent_id
+        calls = d.directional_calls
+        output = d.output
+
+        # Load historical performance for reliability context
+        perf_history = load_performance_history(agent_id)
+        hist_acc = None
+        if perf_history:
+            latest = perf_history[-1]
+            hist_acc = latest.get("direction_accuracy")
+
+        print(f"\n  {'─' * 56}")
+        print(f"  {agent_id}")
+        if hist_acc is not None:
+            acc_str = f"{hist_acc:.0%}"
+            tag = " ✓" if hist_acc >= 0.55 else " ⚠"
+            obs_days = perf_history[-1].get("observation_days", 0) if perf_history else 0
+            print(f"  历史准确率: {acc_str}{tag} | day {obs_days} | {len(perf_history)} snapshots")
+        else:
+            obs_days = perf_history[-1].get("observation_days", 0) if perf_history else 0
+            print(f"  历史准确率: — (观察中, day {obs_days}/60)")
+
+        data_tag = "enhanced_data" if d.metadata.get("enhanced_data") else "standard"
+        print(f"  数据质量: {data_tag} | research_passes: {output.get('_passes', 1)}")
+
+        if calls:
+            print(f"  方向判断 ({len(calls)}):")
+            for call in calls:
+                icon = "🔬" if call.get("research_backed") else "📡"
+                print(f"    {icon} {call['ticker']} {call['direction']:<8} "
+                      f"conf={call['confidence']:.2f}")
+                thesis = call.get('thesis', '')
+                if thesis:
+                    print(f"       {thesis[:120]}")
+        else:
+            reason = output.get("no_calls_reason", "No signals found")[:120]
+            print(f"  无方向判断 — {reason}")
+
+        # Observations
+        obs = output.get("supply_chain_observations", [])
+        if obs:
+            print(f"  供应链观察 ({len(obs)}):")
+            for o in obs[:3]:
+                print(f"    · {o[:100]}")
+
     if result.errors:
+        print(f"\n  [ERRORS]")
         for e in result.errors:
-            print(f"  [ERROR] {e['agent_id']}: {e['error'][:200]}")
-    print("=" * 60)
+            print(f"    ✗ {e['agent_id']}: {e['error'][:150]}")
+
+    print("\n" + "=" * 60)
+
+    # Generate daily markdown report
+    if not args.mock:
+        generate_daily_report(result)
 
 
 if __name__ == "__main__":
