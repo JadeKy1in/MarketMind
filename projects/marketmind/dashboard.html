@@ -91,6 +91,21 @@
   .t-watch { color:var(--pu); background:rgba(136,120,200,.12); }
   .shadow-card.top-performer { background:rgba(92,184,120,.08); border-left:2px solid var(--gr); }
   .shadow-card.low-performer { background:rgba(224,85,106,.08); border-left:2px solid var(--rd); }
+  /* Compact shadow cards */
+  .shadow-summary-bar { display:flex; gap:14px; flex-wrap:wrap; font:11px var(--mono); color:var(--t2); margin-bottom:8px; }
+  .shadow-card-sm { display:flex; justify-content:space-between; align-items:center; padding:8px 10px; margin-bottom:4px; background:var(--card); border:1px solid var(--bd); border-radius:4px; cursor:pointer; transition:border-color .2s; }
+  .shadow-card-sm:hover { border-color:var(--t2); }
+  .sc-sm-left { flex:1; min-width:0; }
+  .sc-sm-name { font:12px var(--mono); color:var(--t1); }
+  .sc-sm-desc { font:10px var(--sans); color:var(--t3); margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sc-sm-tags { display:flex; gap:4px; margin-top:3px; }
+  .sc-tag { font:8px var(--mono); color:var(--t3); background:rgba(255,255,255,.04); padding:1px 5px; border-radius:2px; }
+  .sc-sm-right { text-align:right; flex-shrink:0; margin-left:12px; }
+  .sc-tier { font:9px var(--mono); padding:2px 6px; border-radius:2px; text-transform:uppercase; }
+  .sc-tier.elite { color:var(--am); background:rgba(200,160,80,.15); }
+  .sc-tier.excellent { color:var(--bl); background:rgba(90,143,208,.15); }
+  .sc-tier.endangered { color:var(--rd); background:rgba(224,85,106,.15); }
+  .sc-score { display:block; font:14px var(--mono); color:var(--t2); margin-top:2px; cursor:help; }
   .shadow-stats { display:grid; grid-template-columns:1fr 1fr 1fr; gap:4px; font:11px var(--mono); }
   .shadow-stat { display:flex; justify-content:space-between; padding:2px 0; color:var(--t3); }
   .shadow-stat-val { color:var(--t2); }
@@ -332,7 +347,7 @@
 
   <!-- Decision Card (shown when decision exists) -->
   <div class="side-section" id="decSection" style="display:none">
-    <div class="side-hdr" style="cursor:default;color:var(--am)">Active Decision · 当前决策</div>
+    <div class="side-hdr" style="cursor:default;color:var(--am)">Main Pipeline · 主管道结论</div>
     <div class="dec-card" id="decCard"></div>
   </div>
 
@@ -512,18 +527,50 @@ async function loadShadowDetail(){
   try{
     const [overview,rankings]=await Promise.all([fetch('/api/shadows/overview').then(r=>r.json()),fetch('/api/shadows/rankings').then(r=>r.json())]);
     const tiers=overview.tiers||{}, all_shadows=rankings.rankings||[];
-    let html='<div style="font-size:12px;margin-bottom:12px;display:flex;gap:20px">';
-    html+=`<span>Total: ${overview.total||0}</span><span>Graduates: ${overview.graduates||0}</span><span>Trials: ${overview.challenger_trials||0}</span><span>Evolutions: ${overview.evolutions_today||0}</span></div>`;
-    if(all_shadows.length) html+='<div style="font-size:11px;color:var(--t3);margin-bottom:8px">ALL SHADOWS · 全部影子</div>'+all_shadows.map((s,idx)=>{
-      const tierNames={elite:'ELITE · 精英',excellent:'EXCELLENT · 优秀',normal:'NORMAL · 普通',watch:'WATCH · 观察',endangered:'ENDANGERED · 濒危'};
-      let cardClass='shadow-card';
-      if(idx<5) cardClass+=' top-performer';
-      else if(idx>=all_shadows.length-5) cardClass+=' low-performer';
-      return `<div class="${cardClass}"><div class="shadow-card-header"><span class="shadow-name" style="cursor:pointer;text-decoration:underline" onclick="event.stopPropagation();loadIndividualShadow('${s.shadow_id||''}')">` +
-        (s.cn_name||s.name) + ' <span style="font-weight:400;color:var(--t3);font-size:11px">' + (s.name||'') + '</span></span><span class="shadow-tier-tag t-' + s.tier + '">' + (tierNames[s.tier]||s.tier.toUpperCase()) + '</span></div>' +
-        (s.desc ? '<div style="font:10px var(--mono);color:var(--t3);margin-top:2px;margin-bottom:6px">' + s.desc + '</div>' : '') +
-        '<div class="shadow-stats"><div class="shadow-stat"><span>Composite</span><span class="shadow-stat-val">' + s.score.toFixed(2) + '</span></div></div></div>';
-    }).join('');
+    const tierLabel={elite:'ELITE',excellent:'EXCELLENT',normal:'NORMAL',watch:'WATCH',endangered:'ENDANGERED'};
+    const tierColor={elite:'var(--am)',excellent:'var(--bl)',normal:'var(--t3)',watch:'var(--am)',endangered:'var(--rd)'};
+
+    // Summary bar
+    let html='<div class="shadow-summary-bar">';
+    html+=`<span>${overview.total||0} shadows</span>`;
+    ['elite','excellent','normal','endangered'].forEach(t=>{
+      html+=`<span style="color:${tierColor[t]}">${tierLabel[t]}: ${tiers[t]||0}</span>`;
+    });
+    html+=`<span style="color:var(--t3)">Graduates: ${overview.graduates||0}</span>`;
+    html+='</div>';
+
+    if(all_shadows.length){
+      // Group by type
+      const groups={expert:[],daredevil:[],catfish:[],beta:[],temp_event:[],challenger:[]};
+      all_shadows.forEach(s=>{
+        const t=s.shadow_type||'other';
+        (groups[t]=groups[t]||[]).push(s);
+      });
+      const groupLabels={expert:'Experts · 专家',daredevil:'Daredevils · 敢死队',catfish:'Catfish · 鲶鱼'};
+
+      Object.keys(groups).forEach(gt=>{
+        const list=groups[gt];
+        if(!list.length) return;
+        html+=`<div style="font:10px var(--mono);color:var(--t3);margin:12px 0 6px;letter-spacing:1px">${groupLabels[gt]||gt.toUpperCase()}</div>`;
+        html+=list.map(s=>{
+          const tCls=s.tier==='elite'?'elite':s.tier==='excellent'?'excellent':s.tier==='endangered'?'endangered':'';
+          return `<div class="shadow-card-sm" onclick="event.stopPropagation();loadIndividualShadow('${s.shadow_id||''}')">`
+            +`<div class="sc-sm-left">`
+              +`<div class="sc-sm-name">${s.cn_name||s.name} <span style="font-weight:400;color:var(--t3);font-size:11px">${s.name||''}</span></div>`
+              +`<div class="sc-sm-desc">${s.desc||''}</div>`
+              +`<div class="sc-sm-tags">`
+                +`<span class="sc-tag">${s.domain_cn||s.domain||''}</span>`
+                +`<span class="sc-tag">${s.shadow_type||''}</span>`
+              +`</div>`
+            +`</div>`
+            +`<div class="sc-sm-right">`
+              +`<span class="sc-tier ${tCls}">${tierLabel[s.tier]||s.tier.toUpperCase()}</span>`
+              +`<span class="sc-score" title="Composite: win rate x sharpe x recency x consistency">${s.score.toFixed(2)}</span>`
+            +`</div>`
+          +`</div>`;
+        }).join('');
+      });
+    }
     document.getElementById('shadowDetail').innerHTML=html||'<div class="muted">No shadow data available</div>';
   }catch(e){}
 }
@@ -639,7 +686,7 @@ async function loadReview(){
   try{
     const history=await fetch('/api/history/decisions').then(r=>r.json());
     const decs=history.decisions||[];
-    let html='<div style="font-size:11px;color:var(--t3);margin-bottom:8px">RECENT DECISIONS ('+decs.length+')</div>';
+    let html='<div style="font-size:11px;color:var(--t3);margin-bottom:8px">SHADOW DECISIONS · 影子后台 ('+decs.length+')</div>';
     if(decs.length){
       const wins=decs.filter(d=>(d.result||0)>0).length;
       html+=`<div style="font-size:13px;margin-bottom:12px;display:flex;gap:20px"><span>Win rate: <b style="color:var(--gr)">${(wins/decs.length*100).toFixed(0)}%</b></span><span>Avg conf: <b style="color:var(--t2)">${(decs.reduce((s,d)=>s+(d.confidence||0),0)/decs.length*100).toFixed(0)}%</b></span></div>`;
@@ -652,7 +699,7 @@ async function loadReview(){
 // ── Periodic refresh ──────────────────────────────────────────────
 async function refresh(){
   try{
-    const [health,cost,shadows,history]=await Promise.all([fetch('/api/health').then(r=>r.json()),fetch('/api/cost').then(r=>r.json()),fetch('/api/shadows/overview').then(r=>r.json()),fetch('/api/history/decisions').then(r=>r.json())]);
+    const [health,cost,shadows,history,pipeline]=await Promise.all([fetch('/api/health').then(r=>r.json()),fetch('/api/cost').then(r=>r.json()),fetch('/api/shadows/overview').then(r=>r.json()),fetch('/api/history/decisions').then(r=>r.json()),fetch('/api/pipeline/decision').then(r=>r.json())]);
     document.getElementById('sysMsg').textContent=health.status==='ok'?'Ready 就绪':'Degraded 降级';
     document.getElementById('sysDot').className='dot '+(health.status==='ok'?'ok':'warn');
     document.getElementById('sysDot').className='dot '+(health.status==='ok'?'ok':'warn');
@@ -676,14 +723,36 @@ async function refresh(){
     document.getElementById('shadowCount').textContent=shadows.total||0;
     document.getElementById('reviewLabel').textContent=shadows.total?'click to view':'no data';
 
-    // Check for decision
-    const decs=history.decisions||[];
-    if(decs.length>0){
-      const last=decs[decs.length-1];
+    // Show main pipeline conclusion (NOT shadow decisions)
+    if(pipeline && pipeline.found){
       document.getElementById('decSection').style.display='block';
-      document.getElementById('decCard').innerHTML=`<div class="dec-card-header"><span class="dec-ticker">${last.ticker||'--'}</span><span style="font:10px var(--mono);color:var(--t3)">${(last.date||'').slice(0,10)}</span></div><div style="font:14px var(--sans);color:var(--t2);margin-bottom:2px"><span class="dec-dir-${last.direction==='long'?'long':'short'}">${(last.direction||'').toUpperCase()}</span> @ ${last.confidence?(last.confidence*100).toFixed(0):'--'}% confidence</div><div class="dec-details"><span>Result: <b style="color:${(last.result||0)>0?'var(--gr)':'var(--rd)'}">${last.result?(last.result>0?'+':'')+last.result.toFixed(1)+'%':'pending'}</b></span></div>`;
+      var pd=pipeline;
+      var gradeColor={'A':'var(--gr)','B':'var(--bl)','C':'var(--am)','D':'var(--rd)','E':'var(--rd)'}[pd.l1_grade]||'var(--t3)';
+      var quadrantLabel={'core_opportunity':'核心机会','buy_high_confidence':'高置信买入','buy_cautious':'谨慎买入','observe_skip':'观望跳过','risk_off':'避险'}[pd.l1_quadrant]||pd.l1_quadrant;
+      var html='<div class="dec-card-header">'
+        +'<span class="dec-ticker" style="color:'+gradeColor+'">L1: '+pd.l1_grade+'级 '+quadrantLabel+'</span>'
+        +'<span style="font:10px var(--mono);color:var(--t3)">'+pd.date+'</span></div>';
+
+      if(pd.has_no_trade){
+        html+='<div style="font:14px var(--sans);color:var(--am);margin-bottom:2px">NO TRADE · 今日不交易</div>';
+        html+='<div class="dec-details" style="font:11px var(--sans);color:var(--t3)">';
+        html+='Flash: '+pd.flash_scored+' signals ('+pd.flash_high_impact+' high impact) | ';
+        html+='L3: '+pd.l3_green+'G / '+pd.l3_yellow+'Y / '+pd.l3_red+'R | ';
+        html+='Red Team: '+pd.red_team_challenges+' challenges | ';
+        html+='Resonance: '+(pd.resonance_passed?'PASS':'FAIL');
+        html+='</div>';
+      } else {
+        html+='<div style="font:14px var(--sans);color:var(--t2);margin-bottom:2px">'+pd.decision_count+' decision cards</div>';
+        html+='<div class="dec-details">';
+        (pd.decisions||[]).forEach(function(d){
+          html+='<span style="color:var(--t2)">'+d.ticker+' '+d.direction+'</span> ';
+        });
+        html+='</div>';
+      }
+      document.getElementById('decCard').innerHTML=html;
     } else {
-      document.getElementById('decSection').style.display='none';
+      document.getElementById('decSection').style.display='block';
+      document.getElementById('decCard').innerHTML='<div class="muted">No pipeline run today — run: python app.py --mode daily</div>';
     }
 
     // Log

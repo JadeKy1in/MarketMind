@@ -168,10 +168,14 @@ def get_shadow_rankings() -> dict:
         top_all.append({
             "shadow_id": s.shadow_id,
             "name": s.display_name,
+            "cn_name": meta.get("cn_name", s.display_name),
+            "desc": meta.get("desc", ""),
+            "domain_cn": meta.get("domain_cn", ""),
+            "shadow_type": getattr(s, "shadow_type", ""),
+            "domain": getattr(s, "domain", ""),
             "tier": snap.achievement_tier if snap and snap.achievement_tier else "normal",
             "score": round(snap.composite_score, 2) if snap and snap.composite_score else 0.0,
-            "cn_name": meta["cn_name"],
-            "desc": meta["desc"],
+            "status": getattr(s, "status", "active"),
         })
     return {"rankings": top_all}
 
@@ -305,6 +309,68 @@ def get_pipeline_evolution() -> dict:
     history = store.get_history("pipeline", "main_pipeline", limit=12)
     baseline = store.get_baseline("pipeline", "main_pipeline")
     return {"history": history, "baseline": baseline}
+
+
+def get_main_pipeline_decision() -> dict:
+    """Read today's main pipeline conclusion from calibration data."""
+    import json
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    calib_path = Path(__file__).resolve().parent.parent / ".claude" / "calibration" / f"{today}.json"
+
+    if not calib_path.exists():
+        return {"found": False, "message": "No pipeline run today yet"}
+
+    try:
+        with open(calib_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return {"found": False, "message": "Failed to read calibration data"}
+
+    # Also read latest pipeline metrics for stage-level detail
+    metrics_path = Path(__file__).resolve().parent.parent / ".claude" / "metrics" / "pipeline_metrics.jsonl"
+    latest_metrics = {}
+    if metrics_path.exists():
+        try:
+            with open(metrics_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    m = json.loads(line)
+                    if m.get("date") == today:
+                        latest_metrics = m
+        except Exception:
+            pass
+
+    decisions = data.get("decisions", [])
+    has_no_trade = len(decisions) == 0
+
+    return {
+        "found": True,
+        "date": data.get("date", today),
+        "l1_grade": data.get("l1_grade", "?"),
+        "l1_quadrant": data.get("l1_quadrant", "?"),
+        "l1_direction": data.get("l1_direction", "?"),
+        "ticker_candidates": data.get("ticker_candidates", []),
+        "decisions": decisions,
+        "has_no_trade": has_no_trade,
+        "decision_count": len(decisions),
+        # Stage-level metrics
+        "flash_scored": latest_metrics.get("flash_total_scored", 0),
+        "flash_high_impact": latest_metrics.get("flash_high_impact", 0),
+        "l3_green": latest_metrics.get("l3_green_lights", 0),
+        "l3_yellow": latest_metrics.get("l3_yellow_lights", 0),
+        "l3_red": latest_metrics.get("l3_red_lights", 0),
+        "red_team_challenges": latest_metrics.get("red_team_challenges", 0),
+        "resonance_passed": latest_metrics.get("resonance_passed", False),
+        "resonance_verdict": latest_metrics.get("resonance_verdict", ""),
+        # Flash source-level detail
+        "flash_high_impact_count": data.get("flash_high_impact_count", 0),
+        "flash_avg_impact": data.get("flash_avg_impact", 0.0),
+    }
 
 
 def get_playground_data() -> dict:
