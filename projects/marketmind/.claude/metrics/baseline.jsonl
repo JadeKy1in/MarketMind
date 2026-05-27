@@ -587,3 +587,60 @@
 {"timestamp": "2026-05-27T05:05:04.676698+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 29, "rss_health_score": 0.972, "pre_dedup_total": 447, "post_dedup_total": 415, "issues": []}
 {"timestamp": "2026-05-27T05:05:24.847806+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 29, "rss_health_score": 0.972, "pre_dedup_total": 447, "post_dedup_total": 415, "issues": []}
 {"timestamp": "2026-05-27T05:05:46.665547+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 29, "rss_health_score": 0.972, "pre_dedup_total": 447, "post_dedup_total": 415, "issues": []}
+{"timestamp": "2026-05-27T05:14:17.418291+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 308, "issues": []}
+{"timestamp": "2026-05-27T05:14:17.446785+00:00", "type": "flash", "articles_in": 50, "signals_out": 0}
+{"timestamp": "2026-05-27T05:14:17.462636+00:00", "type": "l1", "event_grade": "E", "matrix_quadrant": "observe_skip", "sentiment": "neutral"}
+{"timestamp": "2026-05-27T05:30:41.244720+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 420, "issues": []}
+{"timestamp": "2026-05-27T05:31:05.810886+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 420, "issues": []}
+{"timestamp": "2026-05-27T05:31:28.668380+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 420, "issues": []}
+{"timestamp": "2026-05-27T05:32:39.688898+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 38, "issues": []}
+{"timestamp": "2026-05-27T05:32:39.701030+00:00", "type": "flash", "articles_in": 38, "signals_out": 0}
+{"timestamp": "2026-05-27T05:32:39.709640+00:00", "type": "l1", "event_grade": "E", "matrix_quadrant": "observe_skip", "sentiment": "neutral"}
+{"timestamp": "2026-05-27T05:34:41.389801+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 8, "issues": []}
+{"timestamp": "2026-05-27T05:35:02.670231+00:00", "type": "flash", "articles_in": 8, "signals_out": 8}
+{"timestamp": "2026-05-27T05:36:15.712338+00:00", "type": "l1", "event_grade": "B", "matrix_quadrant": "trend_opportunity", "sentiment": "bullish"}
+{"timestamp": "2026-05-27T05:46:13.839982+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 18, "issues": []}
+{"timestamp": "2026-05-27T05:47:01.584294+00:00", "type": "flash", "articles_in": 18, "signals_out": 18}
+{"timestamp": "2026-05-27T05:48:45.448791+00:00", "type": "l1", "event_grade": "A", "matrix_quadrant": "core_opportunity", "sentiment": "neutral"}
+{"timestamp": "2026-05-27T06:13:44.614156+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 45, "issues": []}
+{"timestamp": "2026-05-27T06:13:44.624078+00:00", "type": "flash", "articles_in": 45, "signals_out": 0}
+{"timestamp": "2026-05-27T06:13:44.633157+00:00", "type": "l1", "event_grade": "E", "matrix_quadrant": "observe_skip", "sentiment": "neutral"}
+{"timestamp": "2026-05-27T06:15:12.219080+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 3, "issues": []}
+{"timestamp": "2026-05-27T06:15:22.289260+00:00", "type": "flash", "articles_in": 3, "signals_out": 3}
+{"timestamp": "2026-05-27T06:16:28.178339+00:00", "type": "l1", "event_grade": "D", "matrix_quadrant": "observe_skip", "sentiment": "neutral"}
+{"timestamp": "2026-05-27T06:33:54.926030+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 416, "issues": []}
+{"timestamp": "2026-05-27T06:34:52.560526+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 416, "issues": []}
+{"timestamp": "2026-05-27T06:36:17.780119+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 417, "issues": []}
+{"timestamp": "2026-05-27T06:37:16.652463+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 417, "issues": []}
+{"timestamp": "2026-05-27T06:40:50.863918+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 414, "issues": []}
+{"timestamp": "2026-05-27T06:46:50.517573+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 19, "rss_health_score": 0.946, "pre_dedup_total": 442, "post_dedup_total": 405, "issues": ["GNews: 2"]}
+{"timestamp": "2026-05-27T06:49:47.597328+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 19, "rss_health_score": 0.946, "pre_dedup_total": 442, "post_dedup_total": 406, "issues": ["GNews: 2"]}
+{"timestamp": "2026-05-27T06:58:32.349432+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 420, "issues": []}
+{"timestamp": "2026-05-27T06:58:54.390370+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 420, "issues": []}
+{"timestamp": "2026-05-27T06:59:15.376419+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 420, "issues": []}
+{"timestamp": "2026-05-27T09:00:09.184295+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 27, "rss_health_score": 0.973, "pre_dedup_total": 450, "post_dedup_total": 143, "issues": []}
+{"timestamp": "2026-05-27T09:00:09.199237+00:00", "type": "flash", "articles_in": 50, "signals_out": 0}
+{"timestamp": "2026-05-27T09:00:09.209457+00:00", "type": "l1", "event_grade": "E", "matrix_quadrant": "observe_skip", "sentiment": "neutral"}
+{"timestamp": "2026-05-27T09:02:14.929254+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 27, "rss_health_score": 0.973, "pre_dedup_total": 450, "post_dedup_total": 407, "issues": []}
+{"timestamp": "2026-05-27T09:03:12.580526+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 27, "rss_health_score": 0.973, "pre_dedup_total": 450, "post_dedup_total": 407, "issues": []}
+{"timestamp": "2026-05-27T09:05:01.799286+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 27, "rss_health_score": 0.973, "pre_dedup_total": 450, "post_dedup_total": 407, "issues": []}
+{"timestamp": "2026-05-27T09:06:03.705538+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 27, "rss_health_score": 0.973, "pre_dedup_total": 450, "post_dedup_total": 408, "issues": []}
+{"timestamp": "2026-05-27T09:11:35.824250+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 26, "rss_health_score": 0.973, "pre_dedup_total": 449, "post_dedup_total": 408, "issues": []}
+{"timestamp": "2026-05-27T09:16:56.241077+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 26, "rss_health_score": 0.973, "pre_dedup_total": 449, "post_dedup_total": 407, "issues": []}
+{"timestamp": "2026-05-27T09:20:46.233287+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 26, "rss_health_score": 0.973, "pre_dedup_total": 449, "post_dedup_total": 407, "issues": []}
+{"timestamp": "2026-05-27T09:27:03.766548+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 420, "issues": []}
+{"timestamp": "2026-05-27T09:27:37.880652+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 420, "issues": []}
+{"timestamp": "2026-05-27T09:28:14.867684+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 420, "issues": []}
+{"timestamp": "2026-05-27T09:38:38.489085+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 26, "rss_health_score": 0.973, "pre_dedup_total": 449, "post_dedup_total": 73, "issues": []}
+{"timestamp": "2026-05-27T09:38:38.502132+00:00", "type": "flash", "articles_in": 50, "signals_out": 0}
+{"timestamp": "2026-05-27T09:38:38.513118+00:00", "type": "l1", "event_grade": "E", "matrix_quadrant": "observe_skip", "sentiment": "neutral"}
+{"timestamp": "2026-05-27T09:40:18.413131+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 26, "rss_health_score": 0.973, "pre_dedup_total": 444, "post_dedup_total": 402, "issues": ["MercoPress: 0 articles (URL may be broken)"]}
+{"timestamp": "2026-05-27T09:41:22.394192+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 26, "rss_health_score": 0.973, "pre_dedup_total": 449, "post_dedup_total": 407, "issues": []}
+{"timestamp": "2026-05-27T09:42:52.626240+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 26, "rss_health_score": 0.973, "pre_dedup_total": 444, "post_dedup_total": 402, "issues": ["MercoPress: 0 articles (URL may be broken)"]}
+{"timestamp": "2026-05-27T09:43:55.310449+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 26, "rss_health_score": 0.973, "pre_dedup_total": 444, "post_dedup_total": 402, "issues": ["MercoPress: 0 articles (URL may be broken)"]}
+{"timestamp": "2026-05-27T09:49:23.749562+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 26, "rss_health_score": 0.973, "pre_dedup_total": 444, "post_dedup_total": 402, "issues": ["MercoPress: 0 articles (URL may be broken)"]}
+{"timestamp": "2026-05-27T09:55:46.470075+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 26, "rss_health_score": 0.973, "pre_dedup_total": 449, "post_dedup_total": 407, "issues": []}
+{"timestamp": "2026-05-27T09:59:55.233301+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 26, "rss_health_score": 0.973, "pre_dedup_total": 449, "post_dedup_total": 408, "issues": []}
+{"timestamp": "2026-05-27T10:04:22.474621+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 420, "issues": []}
+{"timestamp": "2026-05-27T10:04:44.944671+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 420, "issues": []}
+{"timestamp": "2026-05-27T10:05:09.967468+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 420, "issues": []}

@@ -1,1 +1,1 @@
-{"type": "enhance", "files": ["app.py", "pipeline/pipeline_metrics.py", "pipeline/weekly_tactical_audit.py", "pipeline/daily_calibration.py", "pipeline/methodology_evolution.py", "pipeline/orchestration.py"], "risk": "medium", "description": "Playground接入app.py --playground、影子命名收尾、主管线三层迭代进化体系实现"}
+{"type": "enhance", "files": ["dashboard.html", "api/data_providers.py"], "risk": "low", "description": "影子排名系统恢复+中英双语methodology显示"}

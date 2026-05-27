@@ -15,6 +15,7 @@ from marketmind.api.data_providers import (
     get_decision_history,
     get_health,
     get_log_entries,
+    get_main_pipeline_decision,
     get_playground_data,
     get_portfolio,
     get_shadow_detail,
@@ -177,6 +178,14 @@ async def playground_page():
     headers = dict(_CACHE_PREVENT_HEADERS)
     headers["ETag"] = f'"{int(PLAYGROUND_PATH.stat().st_mtime)}"'
     return HTMLResponse(content=content, headers=headers)
+
+
+@app.get("/api/pipeline/decision")
+async def pipeline_decision():
+    try:
+        return JSONResponse(get_main_pipeline_decision())
+    except Exception:
+        return JSONResponse({"found": False, "message": "Error reading pipeline decision"})
 
 
 @app.get("/api/playground")
