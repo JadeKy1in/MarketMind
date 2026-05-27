@@ -382,6 +382,9 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
     # Save today's prediction for tomorrow's calibration feedback loop
     _save_daily_prediction(l1_result, l2_result, decision)
 
+    # Save full reasoning brief for dashboard drill-down
+    _save_decision_brief(l1_result, l2_result, l3_result, red_team, resonance, decision)
+
     # Record pipeline metrics for weekly tactical audit
     _record_pipeline_metrics(
         flash_results=signals, l1_result=l1_result, l2_result=l2_result,
@@ -415,6 +418,90 @@ def _save_daily_prediction(l1_result, l2_result, decision) -> None:
             ],
         )
         save_prediction(pred)
+    except Exception:
+        pass
+
+
+def _save_decision_brief(l1_result, l2_result, l3_result, red_team, resonance, decision) -> None:
+    """Save full reasoning chain for dashboard drill-down."""
+    import json
+    from datetime import datetime as _dt, timezone as _tz
+    from pathlib import Path
+
+    try:
+        today = _dt.now(_tz.utc).strftime("%Y-%m-%d")
+        brief_dir = Path(__file__).resolve().parent.parent / ".claude" / "briefs"
+        brief_dir.mkdir(parents=True, exist_ok=True)
+
+        # L1
+        l1_text = ""
+        if l1_result:
+            l1_text = getattr(l1_result, 'raw_analysis', '') or ''
+        # L2
+        l2_tickers = []
+        if l2_result:
+            candidates = getattr(l2_result, 'ticker_candidates', []) or []
+            l2_tickers = [str(t) for t in candidates[:10]]
+        # L3
+        l3_green = []
+        l3_yellow = []
+        l3_red = []
+        if l3_result:
+            for r in getattr(l3_result, 'green_lights', []) or []:
+                l3_green.append(getattr(r, 'ticker', '?'))
+            for r in getattr(l3_result, 'yellow_lights', []) or []:
+                l3_yellow.append(getattr(r, 'ticker', '?'))
+            for r in getattr(l3_result, 'red_lights', []) or []:
+                l3_red.append(getattr(r, 'ticker', '?'))
+        # Red Team
+        rt_challenges = []
+        if red_team:
+            for c in getattr(red_team, 'challenges', []) or []:
+                rt_challenges.append({
+                    "severity": getattr(c, 'severity', 'medium'),
+                    "challenge": getattr(c, 'challenge', '')[:300],
+                })
+        # Resonance
+        res_verdict = ""
+        res_dsr = 0.0
+        if resonance:
+            res_verdict = getattr(resonance, 'verdict', '') or ''
+            res_dsr = getattr(resonance, 'dsr', 0.0) or 0.0
+        # Decision
+        dec_summary = ""
+        dec_cards = []
+        has_no_trade = False
+        if decision:
+            dec_summary = getattr(decision, 'summary', '') or ''
+            for c in getattr(decision, 'decision_cards', []) or []:
+                dec_cards.append({
+                    "ticker": getattr(c, 'ticker', ''),
+                    "direction": getattr(c, 'direction', ''),
+                    "confidence": getattr(c, 'position_size_pct', 0),
+                    "thesis": getattr(c, 'thesis', '')[:200],
+                })
+            ntc = getattr(decision, 'no_trade_card', None)
+            if ntc:
+                has_no_trade = True
+                dec_summary = getattr(ntc, 'thesis', '') or dec_summary
+
+        brief = {
+            "date": today,
+            "has_no_trade": has_no_trade,
+            "decision_summary": dec_summary[:500],
+            "decision_cards": dec_cards,
+            "l1_analysis": l1_text[:1500],
+            "l2_ticker_candidates": l2_tickers,
+            "l3_green": l3_green,
+            "l3_yellow": l3_yellow,
+            "l3_red": l3_red,
+            "red_team_challenges": rt_challenges,
+            "resonance_verdict": res_verdict,
+            "resonance_dsr": res_dsr,
+        }
+        fpath = brief_dir / f"{today}.json"
+        with open(fpath, "w", encoding="utf-8") as f:
+            json.dump(brief, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
 

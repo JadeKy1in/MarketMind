@@ -165,6 +165,7 @@ def get_shadow_rankings() -> dict:
     for s in shadows[:25]:
         snap = db.get_latest_snapshot(s.shadow_id)
         meta = get_shadow_meta(s.shadow_id)
+        has_data = snap and snap.votes_produced > 0 if snap else False
         top_all.append({
             "shadow_id": s.shadow_id,
             "name": s.display_name,
@@ -176,6 +177,13 @@ def get_shadow_rankings() -> dict:
             "tier": snap.achievement_tier if snap and snap.achievement_tier else "normal",
             "score": round(snap.composite_score, 2) if snap and snap.composite_score else 0.0,
             "status": getattr(s, "status", "active"),
+            # Real performance (only meaningful when has_data)
+            "has_data": has_data,
+            "win_rate": round(snap.win_rate_pct, 3) if has_data else None,
+            "cumulative_return_pct": round(snap.cumulative_return_pct, 4) if snap and snap.cumulative_return_pct is not None else None,
+            "sharpe": round(snap.sharpe_ratio, 3) if snap and snap.sharpe_ratio is not None else None,
+            "max_drawdown_pct": round(snap.max_drawdown_pct, 4) if snap and snap.max_drawdown_pct is not None else None,
+            "trades": snap.votes_produced if snap else 0,
         })
     return {"rankings": top_all}
 
@@ -203,9 +211,15 @@ def get_shadow_detail(shadow_id: str) -> dict:
     # Latest snapshot for summary stats
     latest = db.get_latest_snapshot(shadow_id)
 
+    from marketmind.shadows.shadow_metadata import get_shadow_meta
+    meta = get_shadow_meta(shadow_id)
+
     return {
         "shadow_id": config.shadow_id,
         "display_name": config.display_name,
+        "cn_name": meta.get("cn_name", config.display_name),
+        "desc": meta.get("desc", ""),
+        "method_bilingual": meta.get("method_bilingual", ""),
         "shadow_type": config.shadow_type,
         "domain": config.domain,
         "methodology_prompt": config.methodology_prompt,
@@ -312,13 +326,14 @@ def get_pipeline_evolution() -> dict:
 
 
 def get_main_pipeline_decision() -> dict:
-    """Read today's main pipeline conclusion from calibration data."""
+    """Read today's main pipeline conclusion + full reasoning brief."""
     import json
     from datetime import datetime, timezone
     from pathlib import Path
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     calib_path = Path(__file__).resolve().parent.parent / ".claude" / "calibration" / f"{today}.json"
+    brief_path = Path(__file__).resolve().parent.parent / ".claude" / "briefs" / f"{today}.json"
 
     if not calib_path.exists():
         return {"found": False, "message": "No pipeline run today yet"}
@@ -328,6 +343,15 @@ def get_main_pipeline_decision() -> dict:
             data = json.load(f)
     except Exception:
         return {"found": False, "message": "Failed to read calibration data"}
+
+    # Load reasoning brief
+    brief = None
+    if brief_path.exists():
+        try:
+            with open(brief_path, "r", encoding="utf-8") as f:
+                brief = json.load(f)
+        except Exception:
+            pass
 
     # Also read latest pipeline metrics for stage-level detail
     metrics_path = Path(__file__).resolve().parent.parent / ".claude" / "metrics" / "pipeline_metrics.jsonl"
@@ -370,6 +394,8 @@ def get_main_pipeline_decision() -> dict:
         # Flash source-level detail
         "flash_high_impact_count": data.get("flash_high_impact_count", 0),
         "flash_avg_impact": data.get("flash_avg_impact", 0.0),
+        # Full reasoning chain
+        "brief": brief,
     }
 
 

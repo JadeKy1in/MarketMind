@@ -86,46 +86,58 @@ SHADOW_META: dict[str, dict[str, str]] = {
         "domain_cn": "做空策略",
     },
 
-    # ── Daredevil Shadows (8) ─────────────────────────────────────────
+    # ── Daredevil Shadows (8, grouped by domain) ──────────────────────
+    # Domain: 横盘(range_bound) + 动量(momentum) — 原"动量"组
     "daredevil:range_bound:sideways_scout": {
         "cn_name": "侧翼侦察兵",
         "desc": "横盘市场(VIX<20)·期权卖方·区间交易·均值回归",
         "domain_cn": "横盘",
+        "method_bilingual": "在低波动横盘市场中寻找区间交易机会，卖出期权获取时间价值 / Sell options & trade ranges in low-VIX sideways markets",
     },
     "daredevil:momentum:trend_chaser": {
         "cn_name": "趋势追逐者",
         "desc": "趋势市场(ADX>25)·突破交易·ETF动量轮动",
         "domain_cn": "动量",
+        "method_bilingual": "识别并追踪强趋势，利用ADX和价格动量进行突破交易 / Chase strong trends using ADX & price momentum for breakout trades",
     },
+    # Domain: 逆向(contrarian) + 恐慌(panic) — 原"敢死队"组
     "daredevil:contrarian:herd_fader": {
         "cn_name": "羊群逆行者",
         "desc": "情绪极端(共识>80%)·逆向抄底·恐慌买入",
         "domain_cn": "逆向",
+        "method_bilingual": "在共识极端时逆势操作，检测市场情绪极值进行逆向布局 / Fade extreme consensus, buy when herd panics",
     },
     "daredevil:panic:vol_surfer": {
         "cn_name": "波动冲浪者",
         "desc": "恐慌市场(VIX>30)·VXX对冲·尾部风险·崩盘后恢复",
         "domain_cn": "恐慌",
+        "method_bilingual": "在VIX>30恐慌环境中交易波动率产品，对冲尾部风险 / Trade vol products in panic regimes, hedge tail risk",
     },
+    # Domain: short + leveraged — 原"敢死队"高风险组
     "daredevil:crash:hunter": {
         "cn_name": "崩盘猎手",
         "desc": "崩盘预警·过度杠杆·流动性危机·系统性风险指标",
         "domain_cn": "做空",
+        "method_bilingual": "检测系统性风险信号，在市场崩盘前建立空头头寸 / Detect systemic risk, short before crashes",
     },
     "daredevil:leveraged:lever_hunter": {
         "cn_name": "杠杆猎手",
         "desc": "杠杆ETF(TQQQ/SQQQ/SOXL)·波动衰减·再平衡风险",
         "domain_cn": "杠杆",
+        "method_bilingual": "交易杠杆ETF，管理波动衰减和再平衡风险 / Trade leveraged ETFs, manage volatility decay & rebalancing risk",
     },
+    # Domain: low_liq + sector — 特种环境组
     "daredevil:low_liq:depth_diver": {
         "cn_name": "深潜者",
         "desc": "低流动性市场·宽买卖价差·小盘股·场外交易",
         "domain_cn": "低流动性",
+        "method_bilingual": "在低流动性环境中寻找深度价值，管理买卖价差和流动性风险 / Hunt deep value in illiquid markets, manage bid-ask spreads",
     },
     "daredevil:sector:sector_spinner": {
         "cn_name": "板块旋转器",
         "desc": "板块轮动·相对强度·行业ETF·经济周期映射",
         "domain_cn": "板块轮动",
+        "method_bilingual": "追踪板块轮动，利用相对强度和经济周期在各行业ETF间切换 / Track sector rotation, rotate across sector ETFs by relative strength",
     },
 
     # ── Catfish (1) ───────────────────────────────────────────────────

@@ -106,6 +106,10 @@
   .sc-tier.excellent { color:var(--bl); background:rgba(90,143,208,.15); }
   .sc-tier.endangered { color:var(--rd); background:rgba(224,85,106,.15); }
   .sc-score { display:block; font:14px var(--mono); color:var(--t2); margin-top:2px; cursor:help; }
+  .sd-method-bilingual { font:12px var(--sans); color:var(--t2); background:rgba(90,143,208,.08); border-left:2px solid var(--bl); padding:8px 12px; border-radius:4px; line-height:1.6; }
+  .brief-section { margin-bottom:8px; }
+  .brief-label { font:10px var(--mono); color:var(--t3); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px; }
+  .brief-text { font:11px var(--sans); color:var(--t2); line-height:1.5; }
   .shadow-stats { display:grid; grid-template-columns:1fr 1fr 1fr; gap:4px; font:11px var(--mono); }
   .shadow-stat { display:flex; justify-content:space-between; padding:2px 0; color:var(--t3); }
   .shadow-stat-val { color:var(--t2); }
@@ -540,21 +544,42 @@ async function loadShadowDetail(){
     html+='</div>';
 
     if(all_shadows.length){
-      // Group by type
-      const groups={expert:[],daredevil:[],catfish:[],beta:[],temp_event:[],challenger:[]};
+      // Assign rank order
+      all_shadows.sort((a,b)=>b.score-a.score);
+      all_shadows.forEach((s,i)=>{s._rank=i+1;});
+
+      // Build groups with subgroup support for daredevils
+      const groups={expert:[],daredevil_momentum:[],daredevil_contrarian:[],daredevil_highrisk:[],daredevil_special:[],catfish:[]};
       all_shadows.forEach(s=>{
         const t=s.shadow_type||'other';
-        (groups[t]=groups[t]||[]).push(s);
+        if(t==='expert') groups.expert.push(s);
+        else if(t==='daredevil'){
+          const d=s.domain||'';
+          if(d==='macro'||d==='momentum') groups.daredevil_momentum.push(s);
+          else if(d==='contrarian'||d==='panic') groups.daredevil_contrarian.push(s);
+          else if(d==='short'||d==='leveraged') groups.daredevil_highrisk.push(s);
+          else groups.daredevil_special.push(s);
+        }
+        else if(t==='catfish') groups.catfish.push(s);
+        else (groups[t]=groups[t]||[]).push(s);
       });
-      const groupLabels={expert:'Experts · 专家',daredevil:'Daredevils · 敢死队',catfish:'Catfish · 鲶鱼'};
+      const groupDefs=[
+        {key:'expert',label:'Experts · 专家 (16)',cls:''},
+        {key:'daredevil_momentum',label:'Daredevils · 敢死队 — 动量/横盘 (2)',cls:''},
+        {key:'daredevil_contrarian',label:'Daredevils · 敢死队 — 逆向/恐慌 (2)',cls:''},
+        {key:'daredevil_highrisk',label:'Daredevils · 敢死队 — 高风险 (2)',cls:''},
+        {key:'daredevil_special',label:'Daredevils · 敢死队 — 特种环境 (2)',cls:''},
+        {key:'catfish',label:'Catfish · 鲶鱼 (1)',cls:''},
+      ];
 
-      Object.keys(groups).forEach(gt=>{
-        const list=groups[gt];
+      groupDefs.forEach(g=>{
+        const list=groups[g.key]||[];
         if(!list.length) return;
-        html+=`<div style="font:10px var(--mono);color:var(--t3);margin:12px 0 6px;letter-spacing:1px">${groupLabels[gt]||gt.toUpperCase()}</div>`;
+        html+=`<div style="font:10px var(--mono);color:var(--t3);margin:12px 0 6px;letter-spacing:1px">${g.label}</div>`;
         html+=list.map(s=>{
           const tCls=s.tier==='elite'?'elite':s.tier==='excellent'?'excellent':s.tier==='endangered'?'endangered':'';
           return `<div class="shadow-card-sm" onclick="event.stopPropagation();loadIndividualShadow('${s.shadow_id||''}')">`
+            +`<span style="font:10px var(--mono);color:var(--t3);width:24px;flex-shrink:0">#${s._rank}</span>`
             +`<div class="sc-sm-left">`
               +`<div class="sc-sm-name">${s.cn_name||s.name} <span style="font-weight:400;color:var(--t3);font-size:11px">${s.name||''}</span></div>`
               +`<div class="sc-sm-desc">${s.desc||''}</div>`
@@ -565,7 +590,10 @@ async function loadShadowDetail(){
             +`</div>`
             +`<div class="sc-sm-right">`
               +`<span class="sc-tier ${tCls}">${tierLabel[s.tier]||s.tier.toUpperCase()}</span>`
-              +`<span class="sc-score" title="Composite: win rate x sharpe x recency x consistency">${s.score.toFixed(2)}</span>`
+              +(s.has_data
+                ? `<div style="font:12px var(--mono);margin-top:2px"><span style="color:${(s.win_rate||0)>=0.55?'var(--gr)':'var(--rd)'}">WR ${((s.win_rate||0)*100).toFixed(0)}%</span>`
+                  +`<span style="color:var(--t3);font-size:10px;margin-left:4px">${(s.cumulative_return_pct||0)>=0?'+':''}${(s.cumulative_return_pct||0).toFixed(1)}%</span></div>`
+                : `<div style="font:10px var(--mono);color:var(--t3);margin-top:2px" title="Composite: ${s.score.toFixed(2)} — 数据不足，仅供参考">No trades</div>`)
             +`</div>`
           +`</div>`;
         }).join('');
@@ -596,11 +624,15 @@ async function loadIndividualShadow(shadowId){
     }
     html+='</div>';
 
-    // Methodology prompt
-    if(d.methodology_prompt){
-      html+='<div class="sd-section"><div class="sd-section-title">Methodology · 分析方法</div>';
-      html+=`<div class="sd-prompt">${d.methodology_prompt.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div></div>`;
+    // Methodology — bilingual summary first, then full prompt
+    html+='<div class="sd-section"><div class="sd-section-title">Methodology · 分析方法</div>';
+    if(d.method_bilingual){
+      html+=`<div class="sd-method-bilingual">${d.method_bilingual.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`;
     }
+    if(d.methodology_prompt){
+      html+=`<div class="sd-prompt" style="margin-top:8px">${d.methodology_prompt.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`;
+    }
+    html+='</div>';
 
     // Config summary
     html+='<div class="sd-section"><div class="sd-section-title">Config · 配置</div>';
@@ -727,11 +759,14 @@ async function refresh(){
     if(pipeline && pipeline.found){
       document.getElementById('decSection').style.display='block';
       var pd=pipeline;
+      var brief=pd.brief;
       var gradeColor={'A':'var(--gr)','B':'var(--bl)','C':'var(--am)','D':'var(--rd)','E':'var(--rd)'}[pd.l1_grade]||'var(--t3)';
       var quadrantLabel={'core_opportunity':'核心机会','buy_high_confidence':'高置信买入','buy_cautious':'谨慎买入','observe_skip':'观望跳过','risk_off':'避险'}[pd.l1_quadrant]||pd.l1_quadrant;
-      var html='<div class="dec-card-header">'
+      var clickHint=' style="cursor:pointer" onclick="var e=document.getElementById(\'decBrief\');e.style.display=e.style.display==\'none\'?\'block\':\'none\'" title="Click for reasoning · 点击查看推理"';
+      var html='<div'+clickHint+'>';
+      html+='<div class="dec-card-header">'
         +'<span class="dec-ticker" style="color:'+gradeColor+'">L1: '+pd.l1_grade+'级 '+quadrantLabel+'</span>'
-        +'<span style="font:10px var(--mono);color:var(--t3)">'+pd.date+'</span></div>';
+        +'<span style="font:10px var(--mono);color:var(--t3)">'+pd.date+' ▸</span></div>';
 
       if(pd.has_no_trade){
         html+='<div style="font:14px var(--sans);color:var(--am);margin-bottom:2px">NO TRADE · 今日不交易</div>';
@@ -749,6 +784,31 @@ async function refresh(){
         });
         html+='</div>';
       }
+      html+='</div>';
+
+      // Expandable reasoning brief
+      html+='<div id="decBrief" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--bd)">';
+      if(brief){
+        if(brief.decision_summary){
+          html+='<div style="font:12px var(--sans);color:var(--t2);margin-bottom:8px;line-height:1.5"><b>结论:</b> '+brief.decision_summary.replace(/</g,'&lt;')+'</div>';
+        }
+        html+='<div class="brief-section"><div class="brief-label">L1 · 宏观叙事</div><div class="brief-text">'+(brief.l1_analysis||'No L1 analysis').replace(/</g,'&lt;').substring(0,800)+'</div></div>';
+        if(brief.l2_ticker_candidates&&brief.l2_ticker_candidates.length){
+          html+='<div class="brief-section"><div class="brief-label">L2 · 标的候选</div><div class="brief-text">'+brief.l2_ticker_candidates.join(', ')+'</div></div>';
+        }
+        html+='<div class="brief-section"><div class="brief-label">L3 · 技术灯</div><div class="brief-text">🟢 '+(brief.l3_green||[]).join(', ')+'<br>🟡 '+(brief.l3_yellow||[]).join(', ')+'<br>🔴 '+(brief.l3_red||[]).join(', ')+'</div></div>';
+        if(brief.red_team_challenges&&brief.red_team_challenges.length){
+          html+='<div class="brief-section"><div class="brief-label">Red Team · 对抗挑战</div>';
+          brief.red_team_challenges.forEach(function(c){
+            html+='<div class="brief-text" style="margin-bottom:4px"><b>['+c.severity+']</b> '+c.challenge.replace(/</g,'&lt;')+'</div>';
+          });
+          html+='</div>';
+        }
+        html+='<div class="brief-section"><div class="brief-label">Resonance · 统计验证</div><div class="brief-text">Verdict: '+brief.resonance_verdict+' | DSR: '+brief.resonance_dsr.toFixed(2)+'</div></div>';
+      } else {
+        html+='<div class="muted">Detailed reasoning not available for this run. Run a new pipeline to generate.</div>';
+      }
+      html+='</div>';
       document.getElementById('decCard').innerHTML=html;
     } else {
       document.getElementById('decSection').style.display='block';
