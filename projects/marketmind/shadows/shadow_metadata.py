@@ -140,11 +140,11 @@ SHADOW_META: dict[str, dict[str, str]] = {
         "method_bilingual": "追踪板块轮动，利用相对强度和经济周期在各行业ETF间切换 / Track sector rotation, rotate across sector ETFs by relative strength",
     },
 
-    # ── Catfish (1) ───────────────────────────────────────────────────
+    # ── Catfish — REPLACED by ecosystem_auditor.py (mechanism, not shadow) ──
     "catfish:primary:minority_enforcer": {
-        "cn_name": "鲶鱼少数派",
-        "desc": "刻意反对·共识质疑·认知偏差检测·魔鬼代言人",
-        "domain_cn": "对抗",
+        "cn_name": "鲶鱼少数派 [已退役]",
+        "desc": "已被EcosystemAuditor取代——不再作为影子运行。盲点扫描机制替代了共识质疑功能。",
+        "domain_cn": "退役",
     },
 }
 

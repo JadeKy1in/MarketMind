@@ -113,10 +113,8 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
         shadow_db.init_schema()
         from marketmind.shadows.expert_shadows import create_expert_shadows
         from marketmind.shadows.daredevil_shadows import create_daredevil_shadows
-        from marketmind.shadows.catfish_agent import create_catfish_agent
         create_expert_shadows(shadow_db, config.shadow)
         create_daredevil_shadows(shadow_db, config.shadow)
-        create_catfish_agent(shadow_db, config.shadow)
         mother = ShadowMother(config.shadow, shadow_db)
 
     # 0.5 Economic calendar check (before news — informs pipeline confidence)
