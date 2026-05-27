@@ -249,7 +249,8 @@ def _init_shadow_ecosystem(config, shadow_count: int | None, tracker: StageTrack
     from marketmind.shadows.daredevil_shadows import create_daredevil_shadows
     create_expert_shadows(db, config.shadow)
     create_daredevil_shadows(db, config.shadow)
-    # Catfish replaced by EcosystemAuditor (mechanism, not a shadow) — see ecosystem_auditor.py
+    from marketmind.shadows.zombie_detector import detect_zombies
+    detect_zombies(db)
     mother = ShadowMother(config.shadow, db)
     tracker.result(f"Shadow ecosystem initialized with {len(db.get_visible_shadows())} shadows")
     if getattr(config.shadow, 'scheduler_enabled', False):
@@ -589,11 +590,13 @@ async def run_shadows_only(config, verbose: bool = False) -> int:
     shadow_db = ShadowStateDB(config.shadow.shadows_db_path)
     shadow_db.init_schema()
 
-    # Initialize permanent shadows (experts + daredevils + catfish)
+    # Initialize permanent shadows (16 experts + 8 daredevils)
     from marketmind.shadows.expert_shadows import create_expert_shadows
     from marketmind.shadows.daredevil_shadows import create_daredevil_shadows
     create_expert_shadows(shadow_db, config.shadow)
     create_daredevil_shadows(shadow_db, config.shadow)
+    from marketmind.shadows.zombie_detector import detect_zombies
+    detect_zombies(shadow_db)
 
     mother = ShadowMother(config.shadow, shadow_db)
     print(f"Shadow ecosystem: {len(shadow_db.get_visible_shadows())} shadows initialized")
