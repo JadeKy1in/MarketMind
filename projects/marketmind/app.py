@@ -53,17 +53,17 @@ def main():
     if args.shadow_only:
         from marketmind.pipeline.orchestration import run_shadows_only
         ret = asyncio.run(run_shadows_only(config, verbose=args.verbose))
-        asyncio.run(_run_playground_if_requested(args))
+        asyncio.run(_run_playground_if_requested(args, config))
         return ret
     elif args.mode == "shadows":
         from marketmind.pipeline.orchestration import run_shadows_only
         ret = asyncio.run(run_shadows_only(config, verbose=args.verbose))
-        asyncio.run(_run_playground_if_requested(args))
+        asyncio.run(_run_playground_if_requested(args, config))
         return ret
     elif args.mode == "interactive":
         ret = asyncio.run(run_interactive(config, mock=args.mock, verbose=args.verbose,
                                           shadow_count=0 if args.no_shadows else args.shadows))
-        asyncio.run(_run_playground_if_requested(args))
+        asyncio.run(_run_playground_if_requested(args, config))
         return ret
     elif args.mode == "gui":
         from marketmind.pipeline.orchestration import run_gui
@@ -71,11 +71,11 @@ def main():
     else:
         from marketmind.pipeline.orchestration import _run_daily_with_shadows
         ret = asyncio.run(_run_daily_with_shadows(config, args))
-        asyncio.run(_run_playground_if_requested(args))
+        asyncio.run(_run_playground_if_requested(args, config))
         return ret
 
 
-async def _run_playground_if_requested(args, news_items=None):
+async def _run_playground_if_requested(args, config, news_items=None):
     """Run Playground experimental agents if --playground flag is set."""
     if not args.playground:
         return

@@ -147,13 +147,23 @@ def collect_metrics_from_session(
             impacts: list[float] = []
             counts: dict[str, int] = {}
             for r in flash_results:
-                scores = r.scores if hasattr(r, 'scores') else r.get("scores", {})
-                classification = r.classification if hasattr(r, 'classification') else r.get("classification", "?")
-                impacts.append(scores.get("market_impact", 0))
-                counts[classification] = counts.get(classification, 0) + 1
-            m.flash_avg_impact = sum(impacts) / len(impacts)
-            m.flash_high_impact = sum(1 for i in impacts if i >= 5)
-            m.flash_classification_counts = counts
+                # FlashSignal (flash_preprocessor.py): event_grade A-E
+                if hasattr(r, 'event_grade') and not hasattr(r, 'scores'):
+                    g = getattr(r, 'event_grade', 'E') or 'E'
+                    impacts.append({'A': 9, 'B': 7, 'C': 5, 'D': 3, 'E': 1}.get(g[0] if g else 'E', 1))
+                    et = getattr(r, 'event_type', 'unknown') or 'unknown'
+                    counts[et] = counts.get(et, 0) + 1
+                # TriageResult (flash_triage.py): scores dict
+                elif hasattr(r, 'scores'):
+                    impacts.append(r.scores.get("market_impact", 0))
+                    counts[getattr(r, 'classification', '?')] = counts.get(getattr(r, 'classification', '?'), 0) + 1
+                elif isinstance(r, dict):
+                    impacts.append(r.get("scores", {}).get("market_impact", 0))
+                    counts[r.get("classification", "?")] = counts.get(r.get("classification", "?"), 0) + 1
+            if impacts:
+                m.flash_avg_impact = sum(impacts) / len(impacts)
+                m.flash_high_impact = sum(1 for i in impacts if i >= 5)
+                m.flash_classification_counts = counts
 
     if hvr_results:
         m.hvr_articles_investigated = hvr_results.get("articles_investigated", 0)
