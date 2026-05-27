@@ -544,33 +544,21 @@ async function loadShadowDetail(){
     html+='</div>';
 
     if(all_shadows.length){
-      // Assign rank order
-      all_shadows.sort((a,b)=>b.score-a.score);
-      all_shadows.forEach((s,i)=>{s._rank=i+1;});
-
-      // Build groups with subgroup support for daredevils
-      const groups={expert:[],daredevil_momentum:[],daredevil_contrarian:[],daredevil_highrisk:[],daredevil_special:[],catfish:[]};
+      // Group by shadow_type only (don't guess subgroups)
+      const groups={expert:[],daredevil:[],catfish:[],other:[]};
       all_shadows.forEach(s=>{
         const t=s.shadow_type||'other';
         if(t==='expert') groups.expert.push(s);
-        else if(t==='daredevil'){
-          const d=s.domain||'';
-          if(d==='macro'||d==='momentum') groups.daredevil_momentum.push(s);
-          else if(d==='contrarian'||d==='panic') groups.daredevil_contrarian.push(s);
-          else if(d==='short'||d==='leveraged') groups.daredevil_highrisk.push(s);
-          else groups.daredevil_special.push(s);
-        }
+        else if(t==='daredevil') groups.daredevil.push(s);
         else if(t==='catfish') groups.catfish.push(s);
-        else (groups[t]=groups[t]||[]).push(s);
+        else groups.other.push(s);
       });
       const groupDefs=[
-        {key:'expert',label:'Experts · 专家 (16)',cls:''},
-        {key:'daredevil_momentum',label:'Daredevils · 敢死队 — 动量/横盘 (2)',cls:''},
-        {key:'daredevil_contrarian',label:'Daredevils · 敢死队 — 逆向/恐慌 (2)',cls:''},
-        {key:'daredevil_highrisk',label:'Daredevils · 敢死队 — 高风险 (2)',cls:''},
-        {key:'daredevil_special',label:'Daredevils · 敢死队 — 特种环境 (2)',cls:''},
-        {key:'catfish',label:'Catfish · 鲶鱼 (1)',cls:''},
+        {key:'expert',label:'Experts · 专家 ('+groups.expert.length+')'},
+        {key:'daredevil',label:'Daredevils · 敢死队 ('+groups.daredevil.length+')'},
+        {key:'catfish',label:'Catfish · 鲶鱼 ('+groups.catfish.length+')'},
       ];
+      if(groups.other.length) groupDefs.push({key:'other',label:'Other ('+groups.other.length+')'});
 
       groupDefs.forEach(g=>{
         const list=groups[g.key]||[];
@@ -579,7 +567,6 @@ async function loadShadowDetail(){
         html+=list.map(s=>{
           const tCls=s.tier==='elite'?'elite':s.tier==='excellent'?'excellent':s.tier==='endangered'?'endangered':'';
           return `<div class="shadow-card-sm" onclick="event.stopPropagation();loadIndividualShadow('${s.shadow_id||''}')">`
-            +`<span style="font:10px var(--mono);color:var(--t3);width:24px;flex-shrink:0">#${s._rank}</span>`
             +`<div class="sc-sm-left">`
               +`<div class="sc-sm-name">${s.cn_name||s.name} <span style="font-weight:400;color:var(--t3);font-size:11px">${s.name||''}</span></div>`
               +`<div class="sc-sm-desc">${s.desc||''}</div>`
