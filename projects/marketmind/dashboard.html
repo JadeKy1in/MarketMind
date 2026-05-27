@@ -544,19 +544,40 @@ async function loadShadowDetail(){
     html+='</div>';
 
     if(all_shadows.length){
+      // Ranking: show top 5 when data available, otherwise inactive notice
+      const hasData=all_shadows.filter(s=>s.has_data&&s.trades>0);
+      html+='<div class="sd-section"><div class="sd-section-title">Rankings · 排名</div>';
+      if(hasData.length>=3){
+        const ranked=[...hasData].sort((a,b)=>{
+          const sa=(a.win_rate||0)*0.4+(a.sharpe||0)*0.3+(a.cumulative_return_pct||0)*0.3;
+          const sb=(b.win_rate||0)*0.4+(b.sharpe||0)*0.3+(b.cumulative_return_pct||0)*0.3;
+          return sb-sa;
+        });
+        html+='<table class="sd-table" style="margin-bottom:12px"><thead><tr><th>#</th><th>影子</th><th>WR</th><th>Sharpe</th><th>Cumul</th><th>Trades</th></tr></thead><tbody>';
+        ranked.slice(0,5).forEach((s,i)=>{
+          html+=`<tr><td style="color:var(--am)">#${i+1}</td><td>${s.cn_name||s.name}</td>`
+            +`<td style="color:${(s.win_rate||0)>=0.55?'var(--gr)':'var(--rd)'}">${((s.win_rate||0)*100).toFixed(0)}%</td>`
+            +`<td>${(s.sharpe||0).toFixed(2)}</td>`
+            +`<td style="color:${(s.cumulative_return_pct||0)>=0?'var(--gr)':'var(--rd)'}">${(s.cumulative_return_pct||0)>=0?'+':''}${(s.cumulative_return_pct||0).toFixed(1)}%</td>`
+            +`<td>${s.trades||0}</td></tr>`;
+        });
+        html+='</tbody></table>';
+      } else {
+        html+='<div class="sd-empty">Ranking inactive — insufficient trade data. Requires at least 3 shadows with settled trades.<br>排名未激活 — 需要至少3个影子有已结算交易记录。</div>';
+      }
+      html+='</div>';
+
       // Group by shadow_type only (don't guess subgroups)
-      const groups={expert:[],daredevil:[],catfish:[],other:[]};
+      const groups={expert:[],daredevil:[],other:[]};
       all_shadows.forEach(s=>{
         const t=s.shadow_type||'other';
         if(t==='expert') groups.expert.push(s);
         else if(t==='daredevil') groups.daredevil.push(s);
-        else if(t==='catfish') groups.catfish.push(s);
         else groups.other.push(s);
       });
       const groupDefs=[
         {key:'expert',label:'Experts · 专家 ('+groups.expert.length+')'},
         {key:'daredevil',label:'Daredevils · 敢死队 ('+groups.daredevil.length+')'},
-        {key:'catfish',label:'Catfish · 鲶鱼 ('+groups.catfish.length+')'},
       ];
       if(groups.other.length) groupDefs.push({key:'other',label:'Other ('+groups.other.length+')'});
 
