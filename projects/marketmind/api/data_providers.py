@@ -307,6 +307,136 @@ def get_pipeline_evolution() -> dict:
     return {"history": history, "baseline": baseline}
 
 
+def get_playground_data() -> dict:
+    """Return Playground agent data: manifests, performance, audit status."""
+    import json
+    from pathlib import Path
+
+    pg_dir = Path(__file__).resolve().parent.parent / "playground"
+    agents_dir = pg_dir / "agents"
+    data_dir = pg_dir / "data"
+
+    agents: list[dict] = []
+    if not agents_dir.exists():
+        return {"agents": [], "total": 0, "status_counts": {}}
+
+    for agent_dir in sorted(agents_dir.iterdir()):
+        if not agent_dir.is_dir():
+            continue
+        mf = agent_dir / "manifest.json"
+        if not mf.exists():
+            continue
+        try:
+            with open(mf, "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+        except Exception:
+            continue
+
+        aid = manifest.get("agent_id", agent_dir.name)
+        entry = {
+            "agent_id": aid,
+            "display_name": manifest.get("display_name", aid),
+            "description": manifest.get("description", ""),
+            "output_character": manifest.get("output_character", ""),
+            "tags": manifest.get("tags", []),
+            "version": manifest.get("version", "1.0.0"),
+            "target_pipeline_node": manifest.get("target_pipeline_node", ""),
+            "data_sources": manifest.get("public_data_sources", []),
+            "status": "observing",
+            "days_observing": 0,
+            "total_decisions": 0,
+            "settled_calls": 0,
+            "correct_calls": 0,
+            "direction_accuracy": None,
+            "sharpe_ratio": None,
+            "cumulative_pnl_bps": 0,
+            "win_rate": None,
+            "profit_factor": None,
+            "max_drawdown_bps": None,
+            "last_audit": None,
+            "performance_history": [],
+        }
+
+        # Performance
+        perf_path = data_dir / "playground_performance.jsonl"
+        if perf_path.exists():
+            try:
+                ph: list[dict] = []
+                with open(perf_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        p = json.loads(line)
+                        if p.get("agent_id") == aid:
+                            ph.append(p)
+                if ph:
+                    lp = ph[-1]
+                    entry.update({
+                        "direction_accuracy": lp.get("direction_accuracy"),
+                        "sharpe_ratio": lp.get("sharpe_ratio"),
+                        "cumulative_pnl_bps": lp.get("cumulative_pnl_bps", 0),
+                        "total_decisions": lp.get("total_calls", 0),
+                        "days_observing": lp.get("observation_days", 0),
+                        "settled_calls": lp.get("settled_calls", 0),
+                        "correct_calls": lp.get("correct_calls", 0),
+                        "max_drawdown_bps": lp.get("max_drawdown_bps"),
+                        "win_rate": lp.get("win_rate"),
+                        "profit_factor": lp.get("profit_factor"),
+                        "performance_history": [
+                            {"date": p.get("computed_at", "")[:10],
+                             "accuracy": p.get("direction_accuracy"),
+                             "sharpe": p.get("sharpe_ratio"),
+                             "pnl": p.get("cumulative_pnl_bps"),
+                             "calls": p.get("total_calls", 0)}
+                            for p in ph[-12:]
+                        ],
+                    })
+            except Exception:
+                pass
+
+        # Audit
+        audit_path = data_dir / "playground_audits.jsonl"
+        if audit_path.exists():
+            try:
+                with open(audit_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        ad = json.loads(line)
+                        if ad.get("agent_id") == aid:
+                            entry["last_audit"] = ad
+            except Exception:
+                pass
+
+        # Status from audit
+        la = entry.get("last_audit")
+        if la:
+            rec = la.get("recommendation", "")
+            if rec == "CANDIDATE_FOR_UPGRADE":
+                entry["status"] = "candidate"
+            elif rec == "MARK_STAGNANT":
+                entry["status"] = "stagnant"
+            elif entry["days_observing"] >= 60:
+                entry["status"] = "evaluating"
+        elif entry["days_observing"] >= 60:
+            entry["status"] = "evaluating"
+
+        agents.append(entry)
+
+    # Sort: candidate > evaluating > observing > stagnant
+    order = {"candidate": 0, "evaluating": 1, "observing": 2, "stagnant": 3}
+    agents.sort(key=lambda a: order.get(a["status"], 5))
+
+    counts: dict[str, int] = {}
+    for a in agents:
+        s = a["status"]
+        counts[s] = counts.get(s, 0) + 1
+
+    return {"agents": agents, "total": len(agents), "status_counts": counts}
+
+
 def get_stagnation_report() -> dict:
     import json
     from marketmind.evolution.stagnation_detector import (

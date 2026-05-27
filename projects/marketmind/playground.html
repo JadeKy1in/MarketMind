@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate, max-age=0">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🧪 Playground · 实验沙箱</title>
+<style>
+  :root {
+    --bg:#0a0c0f; --card:#111418; --bd:#252830; --t1:#e8eaed; --t2:#9aa0b0; --t3:#6a7280;
+    --gr:#5cb878; --rd:#e0556a; --am:#c8a050; --bl:#5a8fd0; --pu:#9b6bcf; --cy:#3db8b0;
+    --mono:'SF Mono','Cascadia Code','Consolas',monospace;
+    --sans:'PingFang SC','SF Pro SC',sans-serif;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--t1); font:14px/1.5 var(--sans); padding:20px; }
+  [lang] { font-family: var(--sans); }
+
+  .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
+  .header h1 { font:16px var(--mono); color:var(--cy); }
+  .header a { color:var(--bl); text-decoration:none; font:12px var(--mono); margin-left:16px; }
+  .header-right { display:flex; align-items:center; gap:12px; }
+
+  .summary-bar { display:flex; gap:12px; margin-bottom:24px; flex-wrap:wrap; }
+  .summary-chip { background:var(--card); border:1px solid var(--bd); border-radius:6px; padding:8px 16px; min-width:100px; }
+  .summary-chip .num { font:22px var(--mono); }
+  .summary-chip .label { font:10px var(--mono); color:var(--t3); text-transform:uppercase; }
+  .summary-chip.candidate { border-color:var(--gr); }
+  .summary-chip.observing { border-color:var(--bl); }
+  .summary-chip.stagnant { border-color:var(--am); }
+  .summary-chip.retired { border-color:var(--t3); }
+
+  .filters { display:flex; gap:6px; margin-bottom:16px; flex-wrap:wrap; }
+  .filter-btn { background:var(--card); border:1px solid var(--bd); color:var(--t2); padding:4px 14px; border-radius:3px; cursor:pointer; font:12px var(--mono); transition:all .2s; }
+  .filter-btn:hover { border-color:var(--am); color:var(--t1); }
+  .filter-btn.active { border-color:var(--cy); color:var(--cy); background:#0d1a1a; }
+
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px; }
+
+  .agent-card { background:var(--card); border:2px solid var(--bd); border-radius:6px; padding:16px; cursor:pointer; transition:all .3s; }
+  .agent-card:hover { border-color:var(--t2); }
+  .agent-card.candidate { border-color:var(--gr); box-shadow:0 0 12px rgba(92,184,120,0.15); }
+  .agent-card.observing, .agent-card.evaluating { border-color:var(--bl); }
+  .agent-card.stagnant { border-color:var(--am); opacity:0.7; }
+  .agent-card.expanded { border-color:var(--cy); grid-column:1/-1; }
+
+  .card-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px; }
+  .card-name { font:14px var(--mono); color:var(--t1); }
+  .card-desc { font:11px var(--sans); color:var(--t3); margin-top:2px; }
+
+  .status-badge { font:10px var(--mono); padding:3px 8px; border-radius:3px; text-transform:uppercase; letter-spacing:0.5px; }
+  .status-badge.candidate { background:rgba(92,184,120,0.2); color:var(--gr); }
+  .status-badge.observing { background:rgba(90,143,208,0.2); color:var(--bl); }
+  .status-badge.evaluating { background:rgba(155,107,207,0.2); color:var(--pu); }
+  .status-badge.stagnant { background:rgba(200,160,80,0.2); color:var(--am); }
+
+  .card-metrics { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px; }
+  .mini-metric { font:11px var(--mono); }
+  .mini-metric .val { color:var(--t1); font-size:14px; }
+  .mini-metric .lbl { color:var(--t3); font-size:9px; }
+
+  .progress-bar { height:4px; background:var(--bd); border-radius:2px; margin-top:8px; overflow:hidden; }
+  .progress-fill { height:100%; border-radius:2px; transition:width .5s; }
+  .progress-fill.observing { background:var(--bl); }
+  .progress-fill.candidate { background:var(--gr); }
+  .progress-fill.warning { background:var(--am); }
+
+  .card-tags { display:flex; gap:4px; margin-top:8px; flex-wrap:wrap; }
+  .tag { font:9px var(--mono); color:var(--t3); background:rgba(255,255,255,0.04); padding:2px 6px; border-radius:2px; }
+
+  .expand-section { display:none; margin-top:16px; padding-top:12px; border-top:1px solid var(--bd); }
+  .agent-card.expanded .expand-section { display:block; }
+
+  .detail-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; margin-bottom:12px; }
+  .detail-metric { background:rgba(255,255,255,0.03); border-radius:4px; padding:10px; }
+  .detail-metric .val { font:18px var(--mono); color:var(--t1); }
+  .detail-metric .lbl { font:9px var(--mono); color:var(--t3); text-transform:uppercase; margin-bottom:2px; }
+  .val.good { color:var(--gr); }
+  .val.warn { color:var(--am); }
+  .val.bad { color:var(--rd); }
+
+  .gate-table { width:100%; border-collapse:collapse; margin-top:8px; font:11px var(--mono); }
+  .gate-table th, .gate-table td { padding:4px 8px; text-align:left; border-bottom:1px solid var(--bd); }
+  .gate-table th { color:var(--t3); font-size:9px; text-transform:uppercase; }
+  .gate-table .pass { color:var(--gr); }
+  .gate-table .fail { color:var(--rd); }
+
+  .audit-notes { font:11px var(--sans); color:var(--t2); margin-top:6px; }
+  .audit-notes li { margin-left:16px; margin-bottom:2px; }
+
+  .empty-state { color:var(--t3); font-size:14px; text-align:center; padding:60px 0; grid-column:1/-1; }
+
+  .refresh-btn { background:var(--card); border:1px solid var(--bd); color:var(--t1); padding:4px 12px; border-radius:3px; cursor:pointer; font:12px var(--mono); }
+  .refresh-btn:hover { border-color:var(--am); }
+
+  @media (max-width:640px) {
+    .grid { grid-template-columns:1fr; }
+    .summary-bar { flex-wrap:wrap; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🧪 Playground · 实验沙箱</h1>
+  <div class="header-right">
+    <span id="lastUpdated" style="color:var(--t3);font:11px var(--mono)"></span>
+    <button class="refresh-btn" onclick="loadAll()">⟳ Refresh</button>
+    <a href="/">← Dashboard</a>
+    <a href="/evolution">Evolution</a>
+  </div>
+</div>
+
+<div class="summary-bar" id="summaryBar"></div>
+<div class="filters" id="filters"></div>
+<div class="grid" id="agentGrid">
+  <div class="empty-state">Loading agents...</div>
+</div>
+
+<script>
+var allAgents = [];
+var currentFilter = 'all';
+
+function fmtPct(v) { return v != null ? (v*100).toFixed(1)+'%' : '—'; }
+function fmtBps(v) { return v != null ? (v>0?'+':'') + (v/100).toFixed(2) + '%' : '—'; }
+function fmtNum(v, d) { d = d || 2; return v != null ? v.toFixed(d) : '—'; }
+
+async function loadAll() {
+  try {
+    var resp = await fetch('/api/playground');
+    var data = await resp.json();
+    allAgents = data.agents || [];
+    renderSummary(data);
+    renderFilters();
+    renderGrid();
+    document.getElementById('lastUpdated').textContent = 'Updated: ' + new Date().toLocaleString();
+  } catch(e) {
+    document.getElementById('agentGrid').innerHTML =
+      '<div class="empty-state">Error loading Playground data — is the API server running?<br>'
+      + '启动 API: python api_server.py</div>';
+  }
+}
+
+function renderSummary(data) {
+  var counts = data.status_counts || {};
+  var chips = [
+    {label:'Total Agents', num:data.total||0, cls:''},
+    {label:'Observing', num:counts.observing||0, cls:'observing'},
+    {label:'Evaluating', num:counts.evaluating||0, cls:'observing'},
+    {label:'Candidate', num:counts.candidate||0, cls:'candidate'},
+    {label:'Stagnant', num:counts.stagnant||0, cls:'stagnant'},
+  ];
+  document.getElementById('summaryBar').innerHTML = chips.map(function(c) {
+    return '<div class="summary-chip ' + c.cls + '">'
+      + '<div class="num">' + c.num + '</div>'
+      + '<div class="label">' + c.label + '</div></div>';
+  }).join('');
+}
+
+function renderFilters() {
+  var statuses = ['all'];
+  allAgents.forEach(function(a) { if (statuses.indexOf(a.status) < 0) statuses.push(a.status); });
+  document.getElementById('filters').innerHTML = statuses.map(function(s) {
+    var labels = {all:'All', observing:'Observing', evaluating:'Evaluating', candidate:'Candidates', stagnant:'Stagnant'};
+    return '<button class="filter-btn' + (s===currentFilter?' active':'')
+      + '" onclick="setFilter(\'' + s + '\')">' + (labels[s]||s) + '</button>';
+  }).join('');
+}
+
+function setFilter(f) { currentFilter = f; renderFilters(); renderGrid(); }
+
+function renderGrid() {
+  var filtered = allAgents.filter(function(a) {
+    return currentFilter === 'all' || a.status === currentFilter;
+  });
+  if (filtered.length === 0) {
+    document.getElementById('agentGrid').innerHTML =
+      '<div class="empty-state">No agents match filter &ldquo;' + currentFilter + '&rdquo;</div>';
+    return;
+  }
+  document.getElementById('agentGrid').innerHTML = filtered.map(renderCard).join('');
+}
+
+function renderCard(a) {
+  var statusLabel = {candidate:'Candidate · 候选升级', evaluating:'Evaluating · 评估中',
+    observing:'Observing · 观察中', stagnant:'Stagnant · 停滞', active:'Active'}[a.status] || a.status;
+  var minDays = 60;
+  var progress = Math.min(100, (a.days_observing||0) / minDays * 100);
+  var progressCls = progress >= 100 ? (a.status==='candidate'?'candidate':'warning') : 'observing';
+
+  var metrics = [
+    {lbl:'Direction Acc', val:fmtPct(a.direction_accuracy), cls: (a.direction_accuracy||0)>=0.55?'good':((a.total_decisions||0)<10?'':'warn')},
+    {lbl:'Sharpe', val:fmtNum(a.sharpe_ratio), cls: (a.sharpe_ratio||0)>=0.5?'good':((a.total_decisions||0)<10?'':'warn')},
+    {lbl:'Calls / Settled', val: (a.total_decisions||0)+' / '+(a.settled_calls||0), cls:''},
+    {lbl:'Cumulative PnL', val:fmtBps(a.cumulative_pnl_bps), cls: (a.cumulative_pnl_bps||0)>0?'good':''},
+  ];
+
+  var tags = (a.tags||[]).slice(0,5).map(function(t) { return '<span class="tag">'+t+'</span>'; }).join('');
+  var audit = a.last_audit;
+
+  return '<div class="agent-card ' + a.status + '" id="card-' + a.agent_id + '" onclick="toggleCard(\'' + a.agent_id + '\')">'
+    + '<div class="card-header">'
+      + '<div>'
+        + '<div class="card-name">' + (a.display_name || a.agent_id) + '</div>'
+        + '<div class="card-desc">' + (a.description||'').substring(0,120) + '</div>'
+      + '</div>'
+      + '<span class="status-badge ' + a.status + '">' + statusLabel + '</span>'
+    + '</div>'
+    + '<div class="progress-bar"><div class="progress-fill ' + progressCls + '" style="width:' + progress + '%"></div></div>'
+    + '<div style="font:9px var(--mono);color:var(--t3);margin-top:2px">'
+      + a.days_observing + '/' + minDays + ' days · ' + a.output_character.substring(0,60) + '</div>'
+    + '<div class="card-metrics">'
+      + metrics.map(function(m) {
+          return '<div class="mini-metric"><span class="val ' + m.cls + '">' + m.val + '</span>'
+            + '<br><span class="lbl">' + m.lbl + '</span></div>';
+        }).join('')
+    + '</div>'
+    + (tags ? '<div class="card-tags">' + tags + '</div>' : '')
+    + '<div class="expand-section">'
+      + renderDetail(a, audit)
+    + '</div>'
+  + '</div>';
+}
+
+function renderDetail(a, audit) {
+  var html = '<div class="detail-grid">';
+
+  // All metrics
+  var allMetrics = [
+    {lbl:'Direction Accuracy', val:fmtPct(a.direction_accuracy)},
+    {lbl:'Sharpe Ratio', val:fmtNum(a.sharpe_ratio)},
+    {lbl:'Win Rate', val:fmtPct(a.win_rate)},
+    {lbl:'Profit Factor', val:fmtNum(a.profit_factor)},
+    {lbl:'Max Drawdown', val:fmtBps(a.max_drawdown_bps)},
+    {lbl:'Cumulative PnL', val:fmtBps(a.cumulative_pnl_bps)},
+    {lbl:'Total Calls', val:a.total_decisions||0},
+    {lbl:'Settled Calls', val:a.settled_calls||0},
+    {lbl:'Correct Calls', val:a.correct_calls||0},
+    {lbl:'Days Observing', val:a.days_observing||0},
+    {lbl:'Version', val:a.version||'1.0.0'},
+    {lbl:'Integration Target', val:a.target_pipeline_node||'TBD'},
+  ];
+  allMetrics.forEach(function(m) {
+    html += '<div class="detail-metric"><div class="lbl">' + m.lbl + '</div>'
+      + '<div class="val">' + m.val + '</div></div>';
+  });
+  html += '</div>';
+
+  // Performance history sparkline (text)
+  if (a.performance_history && a.performance_history.length > 0) {
+    html += '<div style="font:10px var(--mono);color:var(--t3);margin-bottom:8px">Performance Trend (recent snapshots)</div>';
+    var accs = a.performance_history.map(function(p) { return p.accuracy; }).filter(function(v) { return v != null; });
+    if (accs.length > 0) {
+      html += '<div style="font:11px var(--mono);color:var(--t2);margin-bottom:10px">';
+      accs.forEach(function(v, i) {
+        var bar = Math.max(1, Math.round(v * 40));
+        html += '<span style="display:inline-block;width:8px;margin-right:1px;background:'
+          + (v >= 0.55 ? 'var(--gr)' : v >= 0.40 ? 'var(--am)' : 'var(--rd)')
+          + ';height:' + bar + 'px;vertical-align:bottom;" title="' + fmtPct(v) + '"></span>';
+      });
+      html += ' ' + fmtPct(accs[accs.length-1]) + '</div>';
+    }
+  }
+
+  // Audit gates
+  if (audit) {
+    html += '<div style="font:10px var(--mono);color:var(--t3);margin-bottom:4px">Latest Audit: '
+      + (audit.audit_date||'?') + ' — ' + (audit.recommendation||'?') + '</div>';
+    if (audit.gates) {
+      html += '<table class="gate-table"><tr><th>Gate</th><th>Status</th></tr>';
+      var gateLabels = {sufficient_history:'History ≥ 60d', sufficient_samples:'Samples ≥ 20',
+        accuracy_ok:'Accuracy > 55% + sig', sharpe_ok:'Sharpe > 0.5',
+        drawdown_ok:'Drawdown < 25%', correlation_ok:'Correlation < 0.7'};
+      Object.keys(audit.gates).forEach(function(k) {
+        html += '<tr><td>' + (gateLabels[k]||k) + '</td>'
+          + '<td class="' + (audit.gates[k]?'pass':'fail') + '">'
+          + (audit.gates[k]?'✓ PASS':'✗ FAIL') + '</td></tr>';
+      });
+      html += '</table>';
+    }
+    if (audit.notes && audit.notes.length > 0) {
+      html += '<ul class="audit-notes">';
+      audit.notes.forEach(function(n) { html += '<li>' + n + '</li>'; });
+      html += '</ul>';
+    }
+  }
+
+  // Retired sources
+  if (a.retired_sources && a.retired_sources.length > 0) {
+    html += '<div style="font:10px var(--mono);color:var(--am);margin-top:8px">⚠ Retired sources: '
+      + a.retired_sources.join(', ') + '</div>';
+  }
+
+  return html;
+}
+
+function toggleCard(id) {
+  var card = document.getElementById('card-' + id);
+  if (!card) return;
+  var wasExpanded = card.classList.contains('expanded');
+  // Collapse all
+  document.querySelectorAll('.agent-card.expanded').forEach(function(c) { c.classList.remove('expanded'); });
+  // Toggle clicked
+  if (!wasExpanded) card.classList.add('expanded');
+}
+
+loadAll();
+setInterval(loadAll, 60000);
+</script>
+</body>
+</html>

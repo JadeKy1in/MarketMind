@@ -15,6 +15,7 @@ from marketmind.api.data_providers import (
     get_decision_history,
     get_health,
     get_log_entries,
+    get_playground_data,
     get_portfolio,
     get_shadow_detail,
     get_shadow_overview,
@@ -32,6 +33,7 @@ _alm.set_broadcast_fn(broadcast_alert)
 
 DASHBOARD_PATH = Path(__file__).parent.parent / "dashboard.html"
 EVOLUTION_PATH = Path(__file__).parent.parent / "evolution.html"
+PLAYGROUND_PATH = Path(__file__).parent.parent / "playground.html"
 
 
 _CACHE_PREVENT_HEADERS = {
@@ -167,6 +169,23 @@ async def evolution_stagnation():
         return JSONResponse(get_stagnation_report())
     except Exception:
         return JSONResponse({"stagnation": {}})
+
+
+@app.get("/playground", response_class=HTMLResponse)
+async def playground_page():
+    content = PLAYGROUND_PATH.read_text(encoding="utf-8")
+    headers = dict(_CACHE_PREVENT_HEADERS)
+    headers["ETag"] = f'"{int(PLAYGROUND_PATH.stat().st_mtime)}"'
+    return HTMLResponse(content=content, headers=headers)
+
+
+@app.get("/api/playground")
+async def playground_api():
+    try:
+        return JSONResponse(get_playground_data())
+    except Exception:
+        logger.warning("playground endpoint failed", exc_info=True)
+        return JSONResponse({"agents": [], "total": 0, "status_counts": {}})
 
 
 @app.get("/api/health")
