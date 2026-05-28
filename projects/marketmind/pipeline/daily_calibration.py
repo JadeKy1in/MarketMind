@@ -18,7 +18,7 @@ from pathlib import Path
 
 logger = logging.getLogger("marketmind.pipeline.calibration")
 
-SHADOW_DB_CACHE: dict[str, int] = {}
+SHADOW_DB_CACHE: dict[str, float] = {}
 
 
 @dataclass
@@ -44,10 +44,13 @@ def _calibration_dir() -> Path:
 
 @dataclass
 class CalibrationContext:
-    """Enhanced calibration context with stage-level metrics."""
+    """Enhanced calibration context with stage-level metrics and evolution awareness."""
     direction_accuracy: float | None = None
     direction_correct: int = 0
     direction_total: int = 0
+    # Magnitude-weighted scoring (P3): rewards calls that are both correct AND large
+    magnitude_score: float | None = None  # sum(expected_sign * actual_return) / n
+    magnitude_mean_return: float | None = None  # avg |return| on correct calls
     grade_distribution: dict[str, int] = field(default_factory=dict)
     quadrant_accuracy: dict[str, tuple[int, int]] = field(default_factory=dict)
     # Flash quality
@@ -55,6 +58,8 @@ class CalibrationContext:
     flash_high_impact_validation_rate: float | None = None
     # HVR ROI
     hvr_roi_ratio: float | None = None
+    # L3 evolution awareness: recent rule changes from Layer 3
+    recent_evolutions: list[dict] = field(default_factory=list)
     # Summary
     warning_flags: list[str] = field(default_factory=list)
 
@@ -127,6 +132,9 @@ def compute_calibration_context(shadow_db, days: int = 7) -> CalibrationContext:
 
     correct = 0
     total = 0
+    magnitude_sum = 0.0
+    magnitude_sum_correct = 0.0
+    magnitude_n_correct = 0
     grade_counts: dict[str, int] = {}
     quadrant_hits: dict[str, tuple[int, int]] = {}
     flash_validated = 0
@@ -140,7 +148,6 @@ def compute_calibration_context(shadow_db, days: int = 7) -> CalibrationContext:
         # Flash impact validation: high-impact days should have decisive returns
         if pred.flash_high_impact_count > 0:
             flash_total += 1
-            # Check if any decision on this day was correct
             day_correct = False
             for dec in pred.decisions:
                 ticker = dec.get("ticker", "")
@@ -166,12 +173,18 @@ def compute_calibration_context(shadow_db, days: int = 7) -> CalibrationContext:
             if not ticker or direction == "abstain":
                 continue
             total += 1
-            actual_sign = _get_next_day_sign(shadow_db, ticker, pred.date)
+            actual_return = _get_next_day_return(shadow_db, ticker, pred.date)
+            actual_sign = 1 if (actual_return or 0) > 0 else (-1 if (actual_return or 0) < 0 else 0)
             expected = 1 if direction == "long" else -1
-            if actual_sign is not None and actual_sign != 0:
+            if actual_return is not None and actual_sign != 0:
                 is_correct = (expected > 0 and actual_sign > 0) or (expected < 0 and actual_sign < 0)
                 if is_correct:
                     correct += 1
+                # P3: Magnitude-weighted score
+                magnitude_sum += expected * actual_return
+                if is_correct:
+                    magnitude_sum_correct += abs(actual_return)
+                    magnitude_n_correct += 1
                 q = pred.l1_quadrant
                 c, t = quadrant_hits.get(q, (0, 0))
                 quadrant_hits[q] = (c + (1 if is_correct else 0), t + 1)
@@ -179,6 +192,8 @@ def compute_calibration_context(shadow_db, days: int = 7) -> CalibrationContext:
     ctx.direction_correct = correct
     ctx.direction_total = total
     ctx.direction_accuracy = correct / total if total > 0 else None
+    ctx.magnitude_score = magnitude_sum / total if total > 0 else None
+    ctx.magnitude_mean_return = magnitude_sum_correct / magnitude_n_correct if magnitude_n_correct > 0 else None
     ctx.grade_distribution = grade_counts
 
     if quadrant_hits:
@@ -189,6 +204,9 @@ def compute_calibration_context(shadow_db, days: int = 7) -> CalibrationContext:
 
     if hvr_articles_total > 0:
         ctx.hvr_roi_ratio = hvr_signals_total / hvr_articles_total
+
+    # L3 evolution awareness: load recent rule changes
+    ctx.recent_evolutions = _load_recent_evolutions(days=days)
 
     # Warning flags
     if ctx.direction_accuracy is not None and ctx.direction_accuracy < 0.40:
@@ -211,6 +229,14 @@ def compute_calibration_context(shadow_db, days: int = 7) -> CalibrationContext:
             ctx.warning_flags.append("HVR investigation ROI < 10% — HVR may be over-investigating without finding signals.")
         elif ctx.hvr_roi_ratio > 0.50:
             ctx.warning_flags.append("HVR investigation ROI > 50% — investigation is productive.")
+
+    # P3: Magnitude-weighted warnings
+    if ctx.direction_accuracy is not None and ctx.magnitude_score is not None:
+        if ctx.direction_accuracy > 0.55 and (ctx.magnitude_score or 0) < 0:
+            ctx.warning_flags.append(
+                "Direction accuracy > 55% but magnitude score is negative — "
+                "correct on small moves, wrong on large moves. Risk of adverse selection."
+            )
 
     return ctx
 
@@ -239,24 +265,92 @@ def _format_context(ctx: CalibrationContext) -> str:
     if ctx.flash_high_impact_validation_rate is not None:
         lines.append(f"- Flash high-impact validation rate: {ctx.flash_high_impact_validation_rate:.0%}")
 
+    if ctx.magnitude_score is not None:
+        lines.append(f"- Magnitude-weighted score: {ctx.magnitude_score:+.4f} "
+                     f"(avg expected_return × actual_return)")
+    if ctx.magnitude_mean_return is not None:
+        lines.append(f"- Avg return on correct calls: {ctx.magnitude_mean_return:.4f}")
+
     if ctx.hvr_roi_ratio is not None:
         lines.append(f"- HVR investigation ROI: {ctx.hvr_roi_ratio:.0%} (signals found / articles investigated)")
 
     for flag in ctx.warning_flags:
         lines.append(f"  {'⚠' if '>' not in flag.split('—')[0] else '✓'} {flag}")
 
+    if ctx.recent_evolutions:
+        lines.append("")
+        lines.append("## Recent Methodology Evolutions (from Layer 3)")
+        lines.append("The following rules were recently changed. Factor these into today's analysis:")
+        for ev in ctx.recent_evolutions[:5]:
+            rid = ev.get("rule_id", "?")
+            reason = ev.get("reason", "")[:150]
+            lines.append(f"- [{rid}] {reason}")
+
     lines.append("Use this calibration to adjust confidence and methodology.")
     return "\n".join(lines)
 
 
+def _evolution_log_path() -> Path:
+    return Path(__file__).resolve().parent.parent / ".claude" / "metrics" / "evolutions.jsonl"
+
+
+def _load_recent_evolutions(days: int = 7) -> list[dict]:
+    """Load recent L3 rule evolutions for calibration context.
+
+    These show L1/Decision prompts what rules have recently changed,
+    closing the L3 → L1 feedback loop.
+    """
+    log_path = _evolution_log_path()
+    if not log_path.exists():
+        return []
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days))
+    recent: list[dict] = []
+    try:
+        with open(log_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    entry_date = entry.get("date", "")
+                    if entry_date >= cutoff.strftime("%Y-%m-%d"):
+                        recent.append(entry)
+                except json.JSONDecodeError:
+                    continue
+    except Exception:
+        logger.debug("Failed to load evolution log", exc_info=True)
+    return recent
+
+
 def _get_next_day_sign(shadow_db, ticker: str, date: str) -> int | None:
-    cache_key = f"{ticker}:{date}"
+    cache_key = f"sign:{ticker}:{date}"
     if cache_key in SHADOW_DB_CACHE:
-        return SHADOW_DB_CACHE[cache_key]
+        cached = SHADOW_DB_CACHE[cache_key]
+        return cached if cached != 0 else None
     try:
         sign = shadow_db.get_next_day_return_sign(ticker, date)
         SHADOW_DB_CACHE[cache_key] = sign if sign is not None else 0
         return sign
     except Exception:
         SHADOW_DB_CACHE[cache_key] = 0
+        return None
+
+
+def _get_next_day_return(shadow_db, ticker: str, date: str) -> float | None:
+    """Get next trading day's actual return for magnitude-weighted scoring.
+
+    Uses a separate cache key prefix to avoid collision with _get_next_day_sign.
+    """
+    cache_key = f"ret:{ticker}:{date}"
+    if cache_key in SHADOW_DB_CACHE:
+        cached = SHADOW_DB_CACHE[cache_key]
+        return cached if cached != 0.0 else None
+    try:
+        ret = shadow_db.get_next_day_return(ticker, date)
+        SHADOW_DB_CACHE[cache_key] = ret if ret is not None else 0.0
+        return ret
+    except Exception:
+        SHADOW_DB_CACHE[cache_key] = 0.0
         return None

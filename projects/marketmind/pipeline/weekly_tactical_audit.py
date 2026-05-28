@@ -44,8 +44,13 @@ class WeeklyAuditResult:
     raw_response: str = ""
 
 
-def _build_audit_prompt(metrics: list[dict]) -> str:
-    """Build the audit user prompt from a week of pipeline metrics."""
+def _build_audit_prompt(metrics: list[dict], calibration_context: dict | None = None) -> str:
+    """Build the audit user prompt from a week of pipeline metrics.
+
+    When calibration_context is provided, settlement data (direction accuracy,
+    Flash validation rate, HVR ROI) is included so the auditor can correlate
+    operational metrics with actual outcomes.
+    """
     if not metrics:
         return "No pipeline data available for this week."
 
@@ -67,18 +72,70 @@ def _build_audit_prompt(metrics: list[dict]) -> str:
             f"passed={m.get('resonance_passed',False)}), "
             f"Decision(cards={m.get('decision_cards',0)} no_trade={m.get('decision_no_trade',False)})"
         )
+
+    if calibration_context:
+        lines.append("")
+        lines.append("## Settlement Data (outcome validation)")
+        if calibration_context.get("direction_accuracy") is not None:
+            lines.append(
+                f"- Direction Accuracy: {calibration_context['direction_correct']}/"
+                f"{calibration_context['direction_total']} "
+                f"({calibration_context['direction_accuracy']:.0%})"
+            )
+        if calibration_context.get("flash_high_impact_validation_rate") is not None:
+            lines.append(
+                f"- Flash High-Impact Validation Rate: "
+                f"{calibration_context['flash_high_impact_validation_rate']:.0%}"
+            )
+        if calibration_context.get("hvr_roi_ratio") is not None:
+            lines.append(
+                f"- HVR Investigation ROI: {calibration_context['hvr_roi_ratio']:.0%} "
+                f"(signals / articles)"
+            )
+        for w in calibration_context.get("warning_flags", []):
+            lines.append(f"- Warning: {w}")
+
     return "\n".join(lines)
 
 
-AUDIT_SYSTEM_PROMPT = """You are a pipeline performance auditor. Review the past week's metrics for each stage and identify:
+def _load_settlement_context(shadow_db, days: int) -> dict | None:
+    """Load settlement data from daily_calibration for the audit period.
 
-1. **Flash Triage**: Are high-impact scores being validated by downstream? Is the impact threshold calibrated?
-2. **HVR Investigation**: Is investigation producing incremental signals, or just burning API budget?
-3. **L1 Narrative**: Are grade assignments consistent? Is the quadrant useful? Is price_in_score meaningful?
+    Returns a dict with direction_accuracy, flash_high_impact_validation_rate,
+    hvr_roi_ratio, and warning_flags — or None if no calibration data exists.
+    """
+    if shadow_db is None:
+        return None
+    try:
+        from marketmind.pipeline.daily_calibration import compute_calibration_context
+        ctx = compute_calibration_context(shadow_db, days=days)
+        if ctx.direction_total == 0:
+            return None
+        result: dict = {
+            "direction_accuracy": ctx.direction_accuracy,
+            "direction_correct": ctx.direction_correct,
+            "direction_total": ctx.direction_total,
+            "flash_high_impact_validation_rate": ctx.flash_high_impact_validation_rate,
+            "hvr_roi_ratio": ctx.hvr_roi_ratio,
+            "warning_flags": ctx.warning_flags,
+        }
+        return {k: v for k, v in result.items() if v is not None or k == "warning_flags"}
+    except Exception:
+        logger.debug("Failed to load settlement context", exc_info=True)
+        return None
+
+
+AUDIT_SYSTEM_PROMPT = """You are a pipeline performance auditor. Review the past week's metrics for each stage. Use BOTH operational metrics AND settlement data (actual market outcomes) to assess performance.
+
+1. **Flash Triage**: Are high-impact scores validated by actual outcomes? Is the impact threshold calibrated? Check the Flash Validation Rate in settlement data.
+2. **HVR Investigation**: Is investigation producing incremental signals, or just burning API budget? Check HVR ROI in settlement data.
+3. **L1 Narrative**: Are grade assignments consistent with direction accuracy? Is the quadrant useful? Is price_in_score meaningful?
 4. **L2/L3 Ticker Selection**: Green-light rate (green / total) — too strict (all red) or too loose (all green)?
 5. **Red Team**: Are challenges being generated? Are severe challenges correlated with actual poor outcomes?
 6. **Resonance**: Is DSR threshold appropriate? False-positive rate vs missed opportunity rate?
-7. **Decision**: No-trade rate — too high (paralysis) or too low (overconfidence)?
+7. **Decision**: No-trade rate — too high (paralysis) or too low (overconfidence)? Cross-reference with direction accuracy.
+
+IMPORTANT: When settlement data is available, use it as the PRIMARY signal. A stage can look busy but be wrong. A quiet stage that's consistently accurate is healthier than a busy stage that's 30% accurate.
 
 For each stage, provide 1 finding. Then produce 1-2 actionable suggestions for next week.
 
@@ -98,8 +155,14 @@ Output JSON:
 async def run_weekly_audit(shadow_db=None) -> WeeklyAuditResult | None:
     """Run the weekly tactical audit using Flash.
 
-    Loads the past 7 days of pipeline metrics, sends them to Flash for
-    analysis, and returns structured findings with actionable suggestions.
+    Loads the past 7 days of pipeline metrics and settlement data, sends
+    both to Flash for analysis. Returns structured findings with actionable
+    suggestions.
+
+    Settlement data (direction accuracy, Flash validation rate, HVR ROI)
+    is injected from daily_calibration so the auditor can correlate
+    operational metrics with actual market outcomes — not just "how busy
+    was the pipeline" but "how correct was the pipeline."
 
     Returns None if insufficient data (fewer than 3 days of metrics).
     """
@@ -112,11 +175,15 @@ async def run_weekly_audit(shadow_db=None) -> WeeklyAuditResult | None:
     week_start = (today - timedelta(days=REVIEW_WINDOW_DAYS)).isoformat()
     week_end = today.isoformat()
 
+    # Load settlement data from daily_calibration for the same period
+    calibration_context = _load_settlement_context(shadow_db, days=REVIEW_WINDOW_DAYS)
+
     user_prompt = (
         f"Week: {week_start} to {week_end}\n"
         f"Days with data: {len(metrics)}\n\n"
-        f"{_build_audit_prompt(metrics)}\n\n"
-        f"Audit each stage and provide suggestions. Return ONLY JSON."
+        f"{_build_audit_prompt(metrics, calibration_context)}\n\n"
+        f"Audit each stage using BOTH operational metrics AND settlement outcomes. "
+        f"Return ONLY JSON."
     )
 
     try:

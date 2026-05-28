@@ -137,7 +137,9 @@ class RuleEvolver:
             parent_rule_id=rule_id,
         )
 
-        self.registry.retire(rule_id, f"Evolved: {field_name} {old_value}->{new_value}")
+        reason = f"Evolved: {field_name} {old_value}->{new_value}"
+        self.registry.retire(rule_id, reason)
+        record_evolution(rule_id, reason, "evolved")
         self.registry.register(evolved)
         return evolved
 
@@ -161,7 +163,11 @@ class RuleEvolver:
 
     def remove_constraint(self, rule_id: str, reason: str) -> bool:
         """Remove a rule that backtest validation has shown to be harmful."""
-        return self.registry.retire(rule_id, f"Removed: {reason}")
+        full_reason = f"Removed: {reason}"
+        if self.registry.retire(rule_id, full_reason):
+            record_evolution(rule_id, full_reason, "removed")
+            return True
+        return False
 
     def apply_evolution(self, hypotheses: list[RuleImpactHypothesis],
                         outcome_data: dict[str, list[dict]]) -> list[str]:
@@ -176,6 +182,7 @@ class RuleEvolver:
             if should_retire:
                 if self.registry.retire(h.rule_id, reason):
                     modified.append(h.rule_id)
+                    record_evolution(h.rule_id, reason, "retired")
                     logger.info("Rule retired by evolution: %s — %s", h.rule_id, reason)
         return modified
 
@@ -388,6 +395,37 @@ def _parse_attribution_response(content: str) -> dict | None:
     return None
 
 
+# ── Evolution log (L3 → L1 feedback) ─────────────────────────────────────────
+
+def _evolution_log_path() -> Path:
+    from pathlib import Path as _Path
+    return _Path(__file__).resolve().parent.parent / ".claude" / "metrics" / "evolutions.jsonl"
+
+
+def record_evolution(rule_id: str, reason: str, action: str = "retired") -> None:
+    """Record a rule evolution in the append-only log for L1 awareness.
+
+    This closes the L3 → L1 feedback loop: when Layer 3 retires or evolves
+    a rule, L1's calibration context picks it up and injects it into prompts
+    so the pipeline knows a fix was applied.
+    """
+    import json as _json
+    from datetime import datetime as _dt, timezone as _tz
+    log_path = _evolution_log_path()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "rule_id": rule_id,
+        "action": action,
+        "reason": reason,
+        "date": _dt.now(_tz.utc).strftime("%Y-%m-%d"),
+    }
+    try:
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(_json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        logger.debug("Failed to write evolution log entry for %s", rule_id, exc_info=True)
+
+
 # ── Orchestrator hook ───────────────────────────────────────────────────────
 
 async def run_cross_stage_attribution(
@@ -400,10 +438,11 @@ async def run_cross_stage_attribution(
     Intended to be called from the orchestrator after the weekly tactical
     audit (Layer 2), or monthly as a standalone diagnostic.
 
-    1. Loads calibration context for the same period
-    2. If direction accuracy is poor (< 45%), runs Flash attribution analysis
-    3. Converts attribution findings into RuleImpactHypotheses
-    4. Returns the batch for downstream validation by RuleValidator
+    1. Loads calibration context for short (7d) and long (30d) windows
+    2. Only triggers when accuracy is SUSTAINED below 45% — a single bad
+       day is not enough (P1 fix: prevents noise-triggered attributions)
+    3. Runs Flash attribution analysis to identify failure stage
+    4. Converts findings into RuleImpactHypotheses for RuleValidator
 
     Args:
         metrics: Pipeline metrics from recent days (typically 7-30).
@@ -418,12 +457,32 @@ async def run_cross_stage_attribution(
 
     try:
         from marketmind.pipeline.daily_calibration import compute_calibration_context
-        calibration = compute_calibration_context(shadow_db, days=min(len(metrics), 30))
+        cal_short = compute_calibration_context(shadow_db, days=7)
+        cal_long = compute_calibration_context(shadow_db, days=min(len(metrics), 30))
     except Exception:
         return None
 
-    if calibration.direction_accuracy is None or calibration.direction_accuracy >= 0.45:
-        return None  # No systematic failure to attribute
+    # P1: Sustained poor performance gate
+    # Both short and long windows must trend below threshold.
+    # Short bad + long recovering (> 0.50) = blip, skip.
+    if cal_short.direction_accuracy is None or cal_short.direction_total < 10:
+        return None
+    if cal_short.direction_accuracy >= 0.45:
+        return None
+    if cal_long.direction_accuracy is not None and cal_long.direction_accuracy >= 0.50:
+        logger.info(
+            "Attribution suppressed: short-term accuracy %.0f%% < 45%% but "
+            "long-term accuracy %.0f%% >= 50%% — likely temporary blip",
+            cal_short.direction_accuracy * 100, cal_long.direction_accuracy * 100,
+        )
+        return None
+
+    logger.info(
+        "Attribution triggered: sustained low accuracy — "
+        "short=%.0f%% long=%.0f%%",
+        cal_short.direction_accuracy * 100,
+        cal_long.direction_accuracy * 100 if cal_long.direction_accuracy else 0,
+    )
 
     analyzer = StageAttributionAnalyzer(registry)
-    return await analyzer.run_attribution_cycle(metrics, calibration)
+    return await analyzer.run_attribution_cycle(metrics, cal_long)
