@@ -1,6 +1,6 @@
-# MarketMind Restart Guide — 2026-05-27 EOD
+# MarketMind Restart Guide — 2026-05-28 EOD
 
-**Tests**: all passing | **CI**: green | **Branch**: master
+**Tests**: 2,129 passing (excl. dryrun) | **CI**: green | **Branch**: master
 **All pushed**: yes | **frontload_required**: false
 
 ---
@@ -8,8 +8,8 @@
 ## 重启指令
 
 > 继续 MarketMind 开发。阅读 `.claude/RESTART_GUIDE.md`。
-> 上次完成：全量 UI 重设计 + 僵尸检测 + 信息流验证 + 实盘全量跑通。
-> **下次主要任务**：人工审核主管线 AI 迭代进化体系是否合理 + 调试 UI 界面和交互逻辑。
+> 上次完成：进化体系 P0-P3 修复 + Playground 入驻指南 + README 全面更新 + dryrun 修复。
+> **下次主要任务**：UI 调试（Dashboard 面板、影子卡片、Playground 页面交互逻辑）+ 等数据积累。
 
 ---
 
@@ -36,60 +36,56 @@ python app.py --mode daily --playground -v
 # 交互模式 (Socratic 对话 + 决策确认)
 python app.py --mode interactive -v
 
-# 测试
+# 测试 (全量，跳过实盘)
+python -m pytest tests/ -q -p no:warnings --ignore=tests/test_dryrun_real_api.py --ignore=tests/test_playground/test_fetcher.py
+
+# 测试 (含实盘，需 API key + 网络正常)
 python -m pytest tests/ -q -p no:warnings
 ```
 
 ---
 
-## 今日完成 (2026-05-27)
+## 今日完成 (2026-05-28)
 
-### Playground 实验层
-- `playground/` 7 模块：agent 自声明、WP API+RSS 双通道、信息防火墙、次日结算、升级门控、月度审计
-- serenity-reply 首个入驻：两轮 Flash 分析 + 研究循环 + 审计日志
-- 8 CORE 半导体源 (6 WP API + 2 RSS)，1 SUPPLEMENTAL，6 RETIRED
-- 4 源合入主 Scout (EE Times, Semiconductor Engineering, EDN, EE Times Asia)
-- Playground 日报：`playground/data/daily/YYYY-MM-DD.md`
-- Dashboard: `/playground` 卡片式 UI，状态驱动配色
-
-### 主管线三层进化体系
-- Layer 1: `daily_calibration.py` 增强 (Flash 验证率 + HVR ROI)
-- Layer 2: `pipeline_metrics.py` 日记录 + `weekly_tactical_audit.py` 周审计
-- Layer 3: `methodology_evolution.py` 跨阶段归因 (准确率 <45% 触发)
-- 全部接入 orchestrator：指标记录 → 周审计 → 归因 → L1 prompt 注入
-
-### Dashboard UI 重设计
-- 主管道结论面板：点击展开完整推理链 (L1/L2/L3/Red Team/Resonance/Decision)
-- 影子生态：24 影子 (16 Experts + 8 Daredevils)，中英双语 methodology
-- Tier 分布面板替代跨域排名 (不同波动率体质的影子不可直接比序数)
-- Catfish 影子退役 (被 `ecosystem_auditor.py` 机制取代)
-- 僵尸检测：`zombie_detector.py` 每次启动自动对比代码 vs DB
+### 进化体系审查与修复 (P0-P3)
+- **P0**: `weekly_tactical_audit.py` — 结算数据注入（方向准确率、Flash 验证率、HVR ROI）。之前周审计只看操作指标（"管线忙不忙"），现在能看到"管线对不对"。
+- **P1**: `methodology_evolution.py` — 归因触发改为双窗口确认。7 天准确率 <45% AND 30 天 <50% 才触发，单日波动被抑制。日志记录抑制原因。
+- **P2**: L3→L1 反馈闭环。规则演化（退休/进化/移除）写入 `evolutions.jsonl`，`CalibrationContext` 加载并注入 L1 prompt。管线知道自己最近的规则变更。
+- **P3**: 结算机制从二元方向判断升级为 magnitude-weighted scoring。新增 `magnitude_score`（avg expected×actual return）和 `magnitude_mean_return`（正确调用的平均幅度）。检测 adverse selection（小赚大亏）。
+- 3 文件修改：`daily_calibration.py`、`weekly_tactical_audit.py`、`methodology_evolution.py`
 
 ### Bug 修复
-- Playground gateway event loop 冲突 (新 loop 中 re-init)
-- `pipeline_metrics` FlashSignal 类型兼容
-- 影子 VOTE→DECISION 重命名遗漏 (`get_votes_by_date_range`, `wfe_results`)
-- 影子 LLM float 解析 (`_safe_float` 处理 `EST:0.35` 等噪声)
+- `decision.py:281` — 合成失败时返回带 `no_trade_card` 的 fallback，不再返回 `None`
+- `test_dryrun_real_api.py` — fixture scope 改为 `function`，每次测试前重置 CircuitBreaker，防级联熔断
+- `shadow_ranking_compute.py:198` — WalkForwardValidator 导入路径修复 (`ranking_engine` → `walk_forward`)
+- `walk_forward.py` — 添加 `min_career_days` property
 
-### 实盘验证
-- 全链路跑通：37 主 Scout 源 → Flash 18 信号 → L1 grade=A → L3 0 green → no-trade
-- serenity-reply 成功调用 Flash 产出 1388 字符分析
-- Playground 日报和市场简报正常生成
+### Playground 入驻指南
+- `docs/playground-agent-onboarding.md` — 中英双语完整文档
+- 覆盖：架构、manifest.json 规范、adapter.py 接口、数据源注册、测试模板、6 关升级门控、serenity_reply 参考实现
+
+### README 全面更新
+- 根目录 `README.md`：当前架构（10 阶段 + Playground + 自进化三层）、24 影子、37 信源、项目结构、入驻指南链接
+- GitHub Description：中英双语
 
 ---
 
 ## 当前架构快照
 
 ```
-主管线: Scout(37源) → Flash → L1 → L2+L3 → Shadows → RedTeam → Resonance → Decision
-         ↑                                    ↑
+主管线: Scout(37源) → Flash → HVR → L1 → L2+L3 → Shadows → RedTeam → Resonance → Decision
+         │                                    │
    每日校准 + 周审计建议注入            非阻塞后台启动
-         ↑                                    ↑
-   pipeline_metrics 记录               zombie_detector 启动检查
+         │         │                          │
+   Calibration   周审计                 zombie_detector
+   (含L3演化通知) (含结算数据)           启动代码vsDB检查
+         │
+   L3 归因分析 (双窗口确认, <45%持续才触发)
 
-Playground: WP API(6) + RSS(2) → serenity-reply adapter → Flash 两轮分析
-              ↓                                    ↓
-        信息防火墙 (无主管道数据)            research_log 审计
+Playground: WP API(6) + RSS(2) → agent.adapter.analyze() → daily report + audit log
+               │                       │
+        信息防火墙               serenity-reply (2轮Flash)
+        (无主管道数据)
 
 影子生态: 24 shadows (16 Experts + 8 Daredevils)
          Tier: ELITE/EXCELLENT/NORMAL/ENDANGERED
@@ -98,9 +94,21 @@ Playground: WP API(6) + RSS(2) → serenity-reply adapter → Flash 两轮分析
 
 ---
 
-## 给下次开发
+## 已知问题
 
-1. **人工审核主管线进化体系**：检查 `daily_calibration.py` + `weekly_tactical_audit.py` + `methodology_evolution.py` 的 Layer 3 跨阶段归因是否合理
-2. **UI 调试**：Dashboard 面板、影子卡片、Playground 页面的交互逻辑
-3. **等数据积累**：多跑几天管线让 metrics/排名/Tier 有真实数据
-4. **Playground 入驻指南**：新 agent 在 `playground/agents/` 下新建目录 + manifest.json + adapter.py
+| 问题 | 严重度 | 说明 |
+|:--|:--|:--|
+| 网络/代理不稳定 | 中 | `test_fetcher` + 部分 dryrun 测试在网络差时失败。所有 HTTP 源返回 0 条。非代码 bug |
+| Reddit WSB 403 | 低 | Reddit 封锁了 RSS endpoint，返回 403 Blocked |
+| SHADOW_DB_CACHE 泄漏 | 低 | 模块级 dict 永不过期，长期运行会累积。影响小（仅缓存 ticker:date 对） |
+| tune_threshold 字符串替换 | 低 | 用字符串替换改规则阈值，多出现时会损坏。当前规则数量少，暂无实际风险 |
+
+---
+
+## 待办 (优先级排序)
+
+1. **UI 调试** — Dashboard 面板展开/折叠、影子卡片 Tier 配色、Playground 页面交互逻辑
+2. **数据积累** — 多跑几天 mock/实盘管线让 metrics/Tier 有真实数据
+3. **Playground 入驻流程实操** — 按入驻指南创建一个新 agent 验证流程完整性
+4. **结算机制进一步强化** — 添加 market beta 剥离 (`_get_next_day_return` 减去同期 SPY 收益)
+5. **tune_threshold 结构化** — 改为字段级操作，不用字符串替换
