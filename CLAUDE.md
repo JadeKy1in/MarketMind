@@ -119,6 +119,57 @@ Session Start → Flash frontload (decision points) → Sync decisions → Async
 |---------|------|--------|
 | MarketMind | `projects/marketmind/` | Active — 1,998 tests, 0 fail |
 | Singoo | `projects/singoo/` | Active — 89 tests, PoC complete |
+| Alloomi | `E:/Alloomi/` | Active — 产品战略分析，共识轨+非共识轨完成，HTML V1 生成中 |
+
+---
+
+## HARD GATE #4: Session End — Restart Guide (LOCKED — mandatory)
+
+**Before ending ANY session where substantive work was done (analysis, code, files created/modified), you MUST write a Restart Guide.**
+
+This is NOT optional. The cost of rewriting a restart guide is 5 minutes. The cost of losing context is hours of reconstruction.
+
+### Restart Guide Must Include
+
+1. **What was completed this session** — specific deliverables, files, key decisions
+2. **Current state snapshot** — what's working, what's broken, what's in progress
+3. **Pending work** — ordered checklist of next tasks with dependencies
+4. **Key file inventory** — paths to all important files (reports, scripts, data)
+5. **Unresolved decisions** — what needs user input before proceeding
+6. **Restart first sentence** — a copy-paste ready prompt the user can send to resume
+
+### File Naming
+
+`RESTART_GUIDE_{YYYYMMDD}_{descriptor}.md` in the project root.
+
+### Progress Preservation Checklist (execute before writing guide)
+
+| # | Check | Action |
+|:--:|------|------|
+| 1 | All modified files saved? | Run `git status` in project dir; verify no unsaved changes |
+| 2 | Build scripts produce output? | Re-run build scripts; verify output files exist and are non-empty |
+| 3 | Key deliverables accessible? | List all output files with sizes; verify >0 bytes |
+| 4 | Old files untouched? | Confirm original source files still exist and weren't corrupted |
+| 5 | Chunk/index files consistent? | If using chunk system, verify index.json matches actual chunk files |
+| 6 | Cross-references valid? | Check that file paths referenced in reports actually exist |
+| 7 | Restart guide written? | Must pass all 6 sections above |
+| 8 | CLAUDE.md project list updated? | If new project started or status changed, update Active Projects table |
+
+### Context Preservation
+
+**Useful context that MUST be saved to the restart guide (not left in conversation memory):**
+
+- Multi-step reasoning chains that led to key decisions
+- User preferences expressed during the session (e.g., "I prefer cards over tables")
+- Failed approaches that were tried and abandoned (so they aren't retried)
+- Agent team configurations that worked well (so they can be reused)
+- Build script logic and architecture decisions
+- Known bugs or limitations in current output
+
+**What NOT to save** (ephemeral, belongs in conversation):
+- Individual tool call outputs
+- Intermediate debugging steps
+- Agent spawn/destroy logs
 
 ---
 
@@ -129,3 +180,4 @@ Session Start → Flash frontload (decision points) → Sync decisions → Async
 - Add `node_modules`, `__pycache__`, `.env` to git
 - Skip the PreToolUse task declaration before editing code
 - Launch async work before sync decisions are resolved
+- **End a session without writing a Restart Guide if substantive work was done**
