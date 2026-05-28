@@ -278,7 +278,16 @@ async def generate_decision(
         return decision
     except Exception as e:
         logger.warning("Decision generation failed: %s", e)
-        return DecisionOutput(summary="Decision synthesis failed")
+        return DecisionOutput(
+            no_trade_card=NoTradeCard(
+                thesis="Decision synthesis failed due to API or system error.",
+                supporting_evidence=[f"Error: {str(e)[:200]}"],
+                counterfactual="A successful LLM call producing a decision synthesis.",
+                structural_advantages=["Safe default when synthesis is unavailable", "Preserves capital"],
+                no_trade_score=100.0,
+            ),
+            summary="Decision synthesis failed — falling back to no-trade for safety."
+        )
 
 
 def _build_decision_prompt(

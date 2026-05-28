@@ -49,6 +49,10 @@ class WalkForwardValidator:
         self.purge_days = purge_days
         self.test_days = test_days
 
+    @property
+    def min_career_days(self) -> int:
+        return self._MIN_CAREER_DAYS
+
     def validate(self, shadow_id: str,
                  daily_snapshots: list) -> WalkForwardResult:
         career_days = len(daily_snapshots)

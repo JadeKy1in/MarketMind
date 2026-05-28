@@ -4,13 +4,20 @@ import asyncio
 import time
 
 
-@pytest.fixture(scope="module", autouse=True)
+@pytest.fixture(scope="function", autouse=True)
 def _init_gateway():
-    """Initialize DeepSeek gateway once for all dry-run tests."""
+    """Initialize DeepSeek gateway and reset circuit breaker before each test.
+
+    Uses function scope so each test starts with a fresh circuit breaker,
+    preventing cascade failures when network/proxy is unstable.
+    """
     from marketmind.config.settings import MarketMindConfig
-    from marketmind.gateway.async_client import init_gateway
+    from marketmind.gateway.async_client import init_gateway, get_gateway
     config = MarketMindConfig.from_env()
     init_gateway(config.deepseek_api_key, config.deepseek_base_url)
+    g = get_gateway()
+    if hasattr(g, 'circuit_breaker') and g.circuit_breaker:
+        g.circuit_breaker.reset()
 
 
 @pytest.mark.slow

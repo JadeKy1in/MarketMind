@@ -195,7 +195,7 @@ def compute_rankings(
 
             wfe_ratios: dict[str, float] = {}
             try:
-                from marketmind.shadows.ranking_engine import WalkForwardValidator
+                from marketmind.shadows.walk_forward import WalkForwardValidator
                 wf_validator = WalkForwardValidator()
                 for cfg in visible:
                     snapshots = state_db.get_snapshot_history(
