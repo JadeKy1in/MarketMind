@@ -74,3 +74,4 @@ Python · FastAPI · asyncio · httpx · DeepSeek · SQLite · yfinance · scipy
 - **[CLAUDE.md](CLAUDE.md)** — Workspace conventions · 工作区规范
 - **[projects/marketmind/CLAUDE.md](projects/marketmind/CLAUDE.md)** — Architecture guide · 架构指南
 - **[.claude/RESTART_GUIDE.md](.claude/RESTART_GUIDE.md)** — Session restart · 会话重启
+- **[docs/playground-agent-onboarding.md](docs/playground-agent-onboarding.md)** — Playground agent 入驻指南（中英双语）
