@@ -1,0 +1,14 @@
+{
+  "date": "2026-05-26",
+  "l1_grade": "E",
+  "l1_quadrant": "observe_skip",
+  "l1_direction": "neutral",
+  "ticker_candidates": [
+    "XLK",
+    "XLY",
+    "XLI",
+    "XLB",
+    "XLF"
+  ],
+  "decisions": []
+}

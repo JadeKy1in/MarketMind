@@ -1,0 +1,26 @@
+{
+  "week_start": "2026-05-20",
+  "week_end": "2026-05-27",
+  "suggestions": [
+    "Calibrate L3 green-light threshold to allow a small fraction of trades based on historical performance.",
+    "Integrate HVR to actively investigate Flash high-impact scores and produce signals for L1."
+  ],
+  "flash_findings": [
+    "Flash scored high-impact items on one day but downstream stages (HVR, L1) failed to validate them."
+  ],
+  "l1_findings": [
+    "L1 grades are uniformly low (D/E) and quadrant is always observe_skip, providing no actionable direction."
+  ],
+  "l2_l3_findings": [
+    "L2/L3 green-light rate is 0% (all red), indicating an overly restrictive filter blocking all candidates."
+  ],
+  "red_team_findings": [
+    "Red Team generated challenges only on the day with Flash activity, but with no trades, correlation with outcomes is unverifiable."
+  ],
+  "resonance_findings": [
+    "Resonance consistently fails (DSR=0.50, PBO=1.00, passed=False), suggesting a static threshold that never met."
+  ],
+  "decision_findings": [
+    "Decision stage shows 100% no-trade rate, indicating paralysis caused by upstream filters."
+  ]
+}
