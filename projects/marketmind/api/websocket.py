@@ -46,14 +46,18 @@ class _ConnectionManager:
 _manager = _ConnectionManager()
 
 
-async def broadcast_stage(stage: str, pct: float, status: str = "running") -> None:
+async def broadcast_stage(stage: str, pct: float, status: str = "running",
+                          stage_num: int = 0) -> None:
     """Broadcast pipeline stage progress to all connected dashboard clients."""
-    await _manager.broadcast({
+    payload: dict = {
         "type": "stage",
         "stage": stage,
         "pct": round(pct, 1),
         "status": status,
-    })
+    }
+    if stage_num:
+        payload["stage_num"] = stage_num
+    await _manager.broadcast(payload)
 
 
 async def broadcast_log(level: str, message: str) -> None:

@@ -22,9 +22,8 @@ from marketmind.api.data_providers import (
     get_shadow_overview,
     get_shadow_rankings,
 )
-from marketmind.api.websocket import ws_endpoint
+from marketmind.api.websocket import broadcast_alert, broadcast_stage, ws_endpoint
 from marketmind.notification.alert_manager import get_alert_manager
-from marketmind.api.websocket import broadcast_alert
 
 app = FastAPI(title="MarketMind", version="2.0")
 app.websocket("/ws")(ws_endpoint)
@@ -197,6 +196,18 @@ async def playground_api():
         return JSONResponse({"agents": [], "total": 0, "status_counts": {}})
 
 
+@app.post("/api/pipeline/progress")
+async def pipeline_progress(request: dict):
+    """Receive progress updates from pipeline subprocess and broadcast via WS."""
+    await broadcast_stage(
+        stage=request.get("stage", ""),
+        pct=request.get("pct", 0),
+        status=request.get("status", "running"),
+        stage_num=request.get("stage_num", 0),
+    )
+    return JSONResponse({"ok": True})
+
+
 @app.get("/api/health")
 async def health():
     return JSONResponse(get_health())
@@ -211,9 +222,10 @@ async def pipeline_run(request: dict):
     from pathlib import Path
     from marketmind.api.data_providers import add_log_entry
 
-    mock = request.get("mock", True) if request else True
+    mock = request.get("mock", False) if request else False
+    lang = request.get("lang", "zh") if request else "zh"
     project_dir = Path(__file__).resolve().parent.parent
-    cmd = [sys.executable, "app.py", "--mode", "daily"]
+    cmd = [sys.executable, "app.py", "--mode", "daily", "--lang", lang]
     if mock:
         cmd.append("--mock")
     cmd.append("-v")
@@ -222,8 +234,7 @@ async def pipeline_run(request: dict):
     try:
         proc = subprocess.Popen(
             cmd, cwd=str(project_dir),
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, encoding="utf-8", errors="replace",
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         # Non-blocking: fire and forget, pipeline broadcasts progress via WS
         return JSONResponse({

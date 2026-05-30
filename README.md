@@ -7,7 +7,7 @@ MarketMind 每天早上从 37 个全球信息源采集新闻，通过 10 阶段 
 
 MarketMind collects news from 37 global sources daily, runs deep analysis through a 10-stage LLM pipeline, and delivers structured investment decisions. 24 independent AI shadows analyze, vote, rank, and evolve in a tiered ecosystem. The Playground sandbox lets external agents run behind an information firewall, tracked for performance, graduating through 6 audit gates into the main pipeline. A 3-layer self-evolution system continuously optimizes the pipeline.
 
-**[→ 项目代码 / Source](projects/marketmind/)** | **1,998 tests · 0 fail · 0 skip**
+**[→ 项目代码 / Source](projects/marketmind/)** | **2,149 tests · 0 fail · 0 skip**
 
 **MarketMind does not trade for you. You remain the final decision maker.**
 **MarketMind 不替你交易。你始终是最终决策者。**
@@ -25,16 +25,16 @@ python api_server.py
 # Evolution:  http://localhost:8520/evolution
 
 # Mock 管线（不消耗 API, ~1min）
-python app.py --mode daily --mock -v
+python app.py --mode daily --mock --lang zh -v
 
 # Mock + Playground agent
-python app.py --mode daily --mock --playground -v
+python app.py --mode daily --mock --playground --lang zh -v
 
 # 实盘管线（真实 API, ~7min）
-python app.py --mode daily --playground -v
+python app.py --mode daily --playground --lang zh -v
 
 # 交互模式（Socratic 对话 + 决策确认）
-python app.py --mode interactive -v
+python app.py --mode interactive --lang zh -v
 
 # 全量测试
 python -m pytest tests/ -q -p no:warnings
@@ -75,7 +75,8 @@ Playground / 实验沙箱 (isolated, information firewall)
 | 影子 / Shadows | 24 (16 Experts + 8 Daredevils) |
 | Playground Agent | 1 (serenity-reply) |
 | 自进化层 / Self-Evolution | 3 (calibration → weekly audit → cross-stage attribution) |
-| 测试 / Tests | 1,998 pass · 0 fail · 0 skip |
+| 语言 / Languages | 9 (中文, English, Español, Français, Русский, العربية, 日本語, 한국어, Deutsch) |
+| 测试 / Tests | 2,149 pass · 0 fail · 0 skip |
 
 ---
 
@@ -134,12 +135,12 @@ Isolated agent sandbox — external analytical frameworks run behind an informat
 ## 测试 / Tests
 
 ```
-1,998 passed, 0 failed, 0 skipped
+2,149 passed, 0 failed, 0 skipped
 ├── Pipeline:    1,019  (Scout, Flash, L1-L3, Red Team, Resonance, Decision)
 ├── Shadows:       492  (Agent, Ranking, Challenger, Crystallization, Memory)
-├── API:            16  (Routes, WebSocket, Data Providers)
+├── API:            34  (Routes, WebSocket, Data Providers)
 ├── 实盘:            5  (全管线真实 LLM，CI 跳过)
-└── 其他:          466  (Storage, Config, Gateway, UI, Tools)
+└── 其他:          599  (Storage, Config, Gateway, UI, Tools)
 ```
 
 ---

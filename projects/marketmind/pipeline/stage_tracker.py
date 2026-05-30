@@ -4,7 +4,31 @@ Extracted from pipeline/orchestration.py for modular compliance (grandfather red
 """
 from __future__ import annotations
 
+import os
 import time
+import urllib.request
+
+
+_PROGRESS_URL = os.environ.get(
+    "MARKETMIND_PROGRESS_URL", "http://localhost:8520/api/pipeline/progress"
+)
+_TOTAL_STAGES = 9
+
+
+def _report_stage_progress(stage: int, stage_name: str, status: str = "running") -> None:
+    """Fire-and-forget HTTP POST to dashboard API server. Silently ignore failures."""
+    pct = min(stage / _TOTAL_STAGES * 100, 100.0)
+    payload = f'{{"stage":"{stage_name}","pct":{pct:.1f},"status":"{status}","stage_num":{stage}}}'
+    try:
+        req = urllib.request.Request(
+            _PROGRESS_URL,
+            data=payload.encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=2)
+    except Exception:
+        pass  # dashboard not running — no one listening
 
 
 class StageTracker:
@@ -33,6 +57,10 @@ class StageTracker:
 
         self.start_times[stage] = now
         self._stage_msgs[stage] = msg
+
+        # Report progress to dashboard via HTTP (fire-and-forget)
+        stage_name = msg.split(":")[0].strip() if ":" in msg else msg
+        _report_stage_progress(stage, stage_name)
 
         if self.verbose:
             timing = ""

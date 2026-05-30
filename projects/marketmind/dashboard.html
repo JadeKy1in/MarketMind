@@ -38,8 +38,10 @@
   .pbar-dot.done { background:var(--gr); } .pbar-dot.run { background:var(--am); animation:pulse 1.2s infinite; } .pbar-dot.wait { background:var(--bd); }
   .pbar-track { flex:1; height:2px; background:var(--bd); border-radius:1px; }
   .pbar-fill { height:100%; border-radius:1px; background:var(--am); width:0%; transition:width .5s; }
-  .pbar-label { color:var(--t2); white-space:nowrap; font-size:10px; }
+  .pbar-label { color:var(--t1); white-space:nowrap; font-size:12px; font-weight:600; }
+  .pbar-label .stage-num { color:var(--am); font-size:11px; margin-right:4px; }
   .pbar-pct { font:13px var(--mono); color:var(--t1); min-width:36px; text-align:right; }
+  .pbar-elapsed { color:var(--t3); font-size:10px; min-width:50px; text-align:right; }
 
   /* Main */
   .main { flex:1; display:flex; flex-direction:column; min-width:0; position:relative; }
@@ -205,6 +207,8 @@
     font:11px var(--mono); font-weight:600; border-radius:3px; cursor:pointer; margin-right:4px; }
   .btn-run:hover { opacity:.85; }
   .btn-run.running { background:var(--am); animation:pulse 1.2s infinite; }
+  .btn-run.mock { background:var(--t3); color:var(--bg); }
+  .btn-run.mock:hover { background:var(--t2); }
   .bell-btn { position:relative; cursor:pointer; font-size:16px; margin-left:8px; user-select:none; }
   .bell-badge { position:absolute; top:-6px; right:-8px; background:var(--rd); color:#fff;
     font:9px var(--mono); padding:1px 5px; border-radius:8px; min-width:16px; text-align:center; }
@@ -236,14 +240,26 @@
 <div class="header">
   <div class="h-l">
     <span class="logo">MarketMind <span>v2.0</span></span>
-    <button class="btn-run" id="btnRun" onclick="startPipeline()" title="Start daily analysis with mock data">▶ Run</button>
+    <button class="btn-run" id="btnRun" onclick="startPipeline(false)" title="实盘分析（消耗API）">▶ 开始分析</button>
+    <button class="btn-run mock" id="btnMock" onclick="startPipeline(true)" title="模拟数据测试">MOCK</button>
     <span class="dot ok" id="sysDot"></span>
-    <span style="font-size:11px;color:var(--t3)" id="sysMsg">Ready 就绪</span>
+    <span style="font-size:11px;color:var(--t3)" id="sysMsg">就绪</span>
     <span class="alert-badge" id="alertBadge">ALERT</span>
-    <a href="/evolution" style="color:var(--bl);text-decoration:none;font:11px var(--mono);margin-left:8px;" title="进化追踪">📈 Evolution</a>
-    <a href="/playground" style="color:var(--cy);text-decoration:none;font:11px var(--mono);margin-left:8px;" title="实验沙箱">🧪 Playground</a>
+    <a href="/evolution" style="color:var(--bl);text-decoration:none;font:11px var(--mono);margin-left:8px;" title="进化追踪">📈 进化</a>
+    <a href="/playground" style="color:var(--cy);text-decoration:none;font:11px var(--mono);margin-left:8px;" title="实验沙箱">🧪 实验场</a>
   </div>
   <div class="h-r">
+    <select id="langSelect" onchange="setLang(this.value)" style="background:var(--bg);border:1px solid var(--bd);color:var(--t2);font:11px var(--mono);padding:2px 6px;border-radius:3px;outline:none;cursor:pointer;margin-right:4px">
+      <option value="zh">中文</option>
+      <option value="en">English</option>
+      <option value="es">Español</option>
+      <option value="fr">Français</option>
+      <option value="ru">Русский</option>
+      <option value="ar">العربية</option>
+      <option value="ja">日本語</option>
+      <option value="ko">한국어</option>
+      <option value="de">Deutsch</option>
+    </select>
     <select id="tzSelect" onchange="tz=this.value;tick();localStorage.setItem('mktz',tz)"
       style="background:var(--bg);border:1px solid var(--bd);color:var(--t2);font:11px var(--mono);padding:2px 6px;border-radius:3px;outline:none;cursor:pointer">
       <option value="UTC">UTC  —  标准</option>
@@ -278,7 +294,8 @@
   <div class="pbar" id="pbar">
     <span class="pbar-pct" id="pct">idle</span>
     <div class="pbar-track"><div class="pbar-fill" id="pfill"></div></div>
-    <span class="pbar-label" id="pstage">Pipeline not running</span>
+    <span class="pbar-label" id="pstage"><span class="stage-num"></span>Pipeline not running</span>
+    <span class="pbar-elapsed" id="pelapsed"></span>
   </div>
 
   <div class="crit-banner" id="critBanner" style="display:none">
@@ -410,6 +427,84 @@
 // ── Clock ────────────────────────────────────────────────────────
 let tz = localStorage.getItem('mktz') || 'Asia/Shanghai';
 document.getElementById('tzSelect').value = tz;
+let lang = localStorage.getItem('mklang') || 'zh';
+document.getElementById('langSelect').value = lang;
+function setLang(v){lang=v;localStorage.setItem('mklang',v);}
+const L={
+  zh:{start:'▶ 开始分析',mock:'MOCK',ready:'就绪',running:'⚡ 运行中...',idle:'空闲',notRunning:'管道未运行',
+    stage:'阶段',elapsed:'耗时',stuck:'卡死?',done:'完成',err:'失败',noTrade:'今日不交易',
+    paperTrade:'虚拟投资',paperLabel:'今日观望跳过，选出最有把握方向进行虚拟投资（用于复盘）',
+    l1:'宏观叙事',l3:'技术灯',redTeam:'对抗挑战',resonance:'统计验证',
+    flash:'信号',highImpact:'高影响',candidates:'候选',challenges:'挑战',
+    conclusion:'结论',verdict:'判定',dsr:'方向胜率',ticker:'标的',direction:'方向',
+    confidence:'置信度',thesis:'核心逻辑',green:'绿灯',yellow:'黄灯',red:'红灯'
+  },
+  en:{start:'▶ Start',mock:'MOCK',ready:'Ready',running:'⚡ Running...',idle:'idle',notRunning:'Pipeline not running',
+    stage:'Stage',elapsed:'Elapsed',stuck:'STUCK?',done:'done',err:'ERR',noTrade:'NO TRADE TODAY',
+    paperTrade:'Paper Trade',paperLabel:'Wait-and-skip today. Best-conviction virtual trade for later review.',
+    l1:'Macro Narrative',l3:'Tech Lights',redTeam:'Red Team',resonance:'Resonance',
+    flash:'signals',highImpact:'high impact',candidates:'candidates',challenges:'challenges',
+    conclusion:'Conclusion',verdict:'Verdict',dsr:'DSR',ticker:'Ticker',direction:'Direction',
+    confidence:'Confidence',thesis:'Thesis',green:'Green',yellow:'Yellow',red:'Red'
+  },
+  ja:{start:'▶ 分析開始',mock:'MOCK',ready:'準備完了',running:'⚡ 実行中...',idle:'待機',notRunning:'未実行',
+    stage:'段階',elapsed:'経過',stuck:'停止?',done:'完了',err:'失敗',noTrade:'本日取引なし',
+    paperTrade:'仮想投資',paperLabel:'本日は様子見。最も確信度の高い方向で仮想投資（復習用）。',
+    l1:'マクロ分析',l3:'テクニカル',redTeam:'レッドチーム',resonance:'共振検証',
+    flash:'シグナル',highImpact:'高影響',candidates:'候補',challenges:'挑戦',
+    conclusion:'結論',verdict:'判定',dsr:'方向勝率',ticker:'銘柄',direction:'方向',
+    confidence:'確信度',thesis:'論拠',green:'緑',yellow:'黄',red:'赤'
+  },
+  ko:{start:'▶ 분석 시작',mock:'MOCK',ready:'준비 완료',running:'⚡ 실행 중...',idle:'대기',notRunning:'미실행',
+    stage:'단계',elapsed:'경과',stuck:'멈춤?',done:'완료',err:'실패',noTrade:'금일 거래 없음',
+    paperTrade:'가상 투자',paperLabel:'금일 관망. 가장 확신 높은 방향으로 가상 투자 (복기용).',
+    l1:'매크로 분석',l3:'기술적 분석',redTeam:'레드팀',resonance:'공명 검증',
+    flash:'시그널',highImpact:'고영향',candidates:'후보',challenges:'도전',
+    conclusion:'결론',verdict:'판정',dsr:'방향승률',ticker:'종목',direction:'방향',
+    confidence:'신뢰도',thesis:'논거',green:'초록',yellow:'노랑',red:'빨강'
+  },
+  es:{start:'▶ Iniciar',mock:'MOCK',ready:'Listo',running:'⚡ Ejecutando...',idle:'inactivo',notRunning:'Sin ejecutar',
+    stage:'Etapa',elapsed:'Transcurrido',stuck:'¿ATASCADO?',done:'hecho',err:'ERROR',noTrade:'SIN OPERACIÓN',
+    paperTrade:'Inversión Virtual',paperLabel:'Esperar hoy. Mejor dirección de convicción para revisión posterior.',
+    l1:'Narrativa Macro',l3:'Luces Técnicas',redTeam:'Equipo Rojo',resonance:'Resonancia',
+    flash:'señales',highImpact:'alto impacto',candidates:'candidatos',challenges:'desafíos',
+    conclusion:'Conclusión',verdict:'Veredicto',dsr:'Tasa de Acierto',ticker:'Activo',direction:'Dirección',
+    confidence:'Confianza',thesis:'Tesis',green:'Verde',yellow:'Amarillo',red:'Rojo'
+  },
+  fr:{start:'▶ Démarrer',mock:'MOCK',ready:'Prêt',running:'⚡ En cours...',idle:'inactif',notRunning:'Non exécuté',
+    stage:'Étape',elapsed:'Écoulé',stuck:'BLOQUÉ?',done:'terminé',err:'ERREUR',noTrade:'PAS DE TRANSACTION',
+    paperTrade:'Investissement Virtuel',paperLabel:'Attente aujourd\'hui. Meilleure conviction pour examen ultérieur.',
+    l1:'Récit Macro',l3:'Feux Techniques',redTeam:'Équipe Rouge',resonance:'Résonance',
+    flash:'signaux',highImpact:'fort impact',candidates:'candidats',challenges:'défis',
+    conclusion:'Conclusion',verdict:'Verdict',dsr:'Taux de Réussite',ticker:'Actif',direction:'Direction',
+    confidence:'Confiance',thesis:'Thèse',green:'Vert',yellow:'Jaune',red:'Rouge'
+  },
+  ru:{start:'▶ Запуск',mock:'MOCK',ready:'Готов',running:'⚡ Выполнение...',idle:'ожидание',notRunning:'Не запущен',
+    stage:'Этап',elapsed:'Прошло',stuck:'ЗАВИС?',done:'готово',err:'ОШИБКА',noTrade:'БЕЗ СДЕЛОК',
+    paperTrade:'Виртуальная Инвестиция',paperLabel:'Сегодня ожидание. Лучшее направление для последующего анализа.',
+    l1:'Макро Анализ',l3:'Тех. Сигналы',redTeam:'Красная Команда',resonance:'Резонанс',
+    flash:'сигналов',highImpact:'выс. влияние',candidates:'кандидатов',challenges:'вызовов',
+    conclusion:'Вывод',verdict:'Вердикт',dsr:'Точность',ticker:'Актив',direction:'Направление',
+    confidence:'Уверенность',thesis:'Тезис',green:'Зелёный',yellow:'Жёлтый',red:'Красный'
+  },
+  ar:{start:'▶ ابدأ',mock:'MOCK',ready:'جاهز',running:'⚡ قيد التشغيل...',idle:'خامل',notRunning:'غير قيد التشغيل',
+    stage:'مرحلة',elapsed:'انقضى',stuck:'متوقف؟',done:'تم',err:'خطأ',noTrade:'لا تداول اليوم',
+    paperTrade:'استثمار افتراضي',paperLabel:'انتظار اليوم. أفضل اتجاه للمراجعة لاحقاً.',
+    l1:'تحليل كلي',l3:'إشارات فنية',redTeam:'الفريق الأحمر',resonance:'رنين',
+    flash:'إشارات',highImpact:'تأثير عالي',candidates:'مرشحين',challenges:'تحديات',
+    conclusion:'خلاصة',verdict:'حكم',dsr:'دقة الاتجاه',ticker:'أصل',direction:'اتجاه',
+    confidence:'ثقة',thesis:'أطروحة',green:'أخضر',yellow:'أصفر',red:'أحمر'
+  },
+  de:{start:'▶ Start',mock:'MOCK',ready:'Bereit',running:'⚡ Läuft...',idle:'inaktiv',notRunning:'Nicht gestartet',
+    stage:'Phase',elapsed:'Verstrichen',stuck:'FESTGEFAHREN?',done:'fertig',err:'FEHLER',noTrade:'KEIN HANDEL',
+    paperTrade:'Virtuelle Investition',paperLabel:'Heute abwarten. Beste Richtung für spätere Überprüfung.',
+    l1:'Makro-Analyse',l3:'Technische Signale',redTeam:'Rotes Team',resonance:'Resonanz',
+    flash:'Signale',highImpact:'hohe Wirkung',candidates:'Kandidaten',challenges:'Herausforderungen',
+    conclusion:'Fazit',verdict:'Urteil',dsr:'Trefferquote',ticker:'Wert',direction:'Richtung',
+    confidence:'Vertrauen',thesis:'These',green:'Grün',yellow:'Gelb',red:'Rot'
+  }
+};
+function t(key){return (L[lang]||L.zh)[key]||L.zh[key]||key;}
 const tzLabel={UTC:'UTC','Asia/Shanghai':'Beijing','Asia/Hong_Kong':'HK','America/New_York':'NY','America/Chicago':'Chicago','America/Denver':'Denver','America/Los_Angeles':'LA','Europe/London':'London','Europe/Berlin':'Berlin','Europe/Moscow':'Moscow','Asia/Tokyo':'Tokyo','Asia/Singapore':'SG','Australia/Sydney':'Sydney','Asia/Dubai':'Dubai'};
 function tick(){
   try {
@@ -454,15 +549,25 @@ function removeFile(idx){
 }
 document.getElementById('fileInput').addEventListener('change',updateFileChips);
 
-async function startPipeline(mock=true){
-	var btn=document.getElementById("btnRun");
-	btn.textContent='⚡ Running...'; btn.classList.add('running'); btn.disabled=true;
+async function startPipeline(mock=false){
+	document.getElementById("btnRun").disabled=true;
+	document.getElementById("btnMock").disabled=true;
+	document.getElementById("btnRun").textContent=t('running'); document.getElementById("btnRun").classList.add('running');
+	document.getElementById("btnMock").textContent=t('running'); document.getElementById("btnMock").classList.add('running');
+	// Reset progress bar
+	document.getElementById('pct').textContent='...';document.getElementById('pct').style.color='var(--t1)';
+	document.getElementById('pstage').innerHTML=t('notRunning');document.getElementById('pfill').style.width='0%';
+	document.getElementById('pelapsed').textContent='';window._pipelineRunning=true;window._lastProgressTs=Date.now();window._stageStartTs=null;window._lastStageNum=null;
 	try{
-		var r=await fetch('/api/pipeline/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mock:mock})});
+		var r=await fetch('/api/pipeline/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mock:mock,lang:lang})});
 		var d=await r.json();
 		if(d.status==='started'){ console.log('Pipeline started, PID:',d.pid); }
-		else { alert('Pipeline start failed: '+d.detail); btn.textContent='▶ Run'; btn.classList.remove('running'); btn.disabled=false; }
-	}catch(e){ alert('Error: '+e.message); btn.textContent='▶ Run'; btn.classList.remove('running'); btn.disabled=false; }
+		else { alert('Pipeline start failed: '+d.detail); resetButtons(); }
+	}catch(e){ alert('Error: '+e.message); resetButtons(); }
+	function resetButtons(){
+		document.getElementById("btnRun").textContent=t('start'); document.getElementById("btnRun").classList.remove('running'); document.getElementById("btnRun").disabled=false;
+		document.getElementById("btnMock").textContent=t('mock'); document.getElementById("btnMock").classList.remove('running'); document.getElementById("btnMock").disabled=false;
+	}
 }
 
 async function sendMsg(){
@@ -776,62 +881,96 @@ async function refresh(){
 
     // Show main pipeline conclusion (NOT shadow decisions)
     if(pipeline && pipeline.found){
+      // Preserve expand state across refresh cycles
+      var wasExpanded = window._decExpanded || false;
       document.getElementById('decSection').style.display='block';
       var pd=pipeline;
       var brief=pd.brief;
       var gradeColor={'A':'var(--gr)','B':'var(--bl)','C':'var(--am)','D':'var(--rd)','E':'var(--rd)'}[pd.l1_grade]||'var(--t3)';
-      var quadrantLabel={'core_opportunity':'核心机会','buy_high_confidence':'高置信买入','buy_cautious':'谨慎买入','observe_skip':'观望跳过','risk_off':'避险'}[pd.l1_quadrant]||pd.l1_quadrant;
-      var clickHint=' style="cursor:pointer" onclick="var e=document.getElementById(\'decBrief\');e.style.display=e.style.display==\'none\'?\'block\':\'none\'" title="Click for reasoning · 点击查看推理"';
+      var quadrantLabels={core_opportunity:'核心机会',buy_high_confidence:'高置信买入',buy_cautious:'谨慎买入',observe_skip:'观望跳过',risk_off:'避险'};
+      var quadrantLabel=quadrantLabels[pd.l1_quadrant]||pd.l1_quadrant;
+      var clickHint=' style="cursor:pointer" onclick="var e=document.getElementById(\'decBrief\');var show=e.style.display==\'none\';e.style.display=show?\'block\':\'none\';window._decExpanded=show;" title="点击展开推理详情"';
       var html='<div'+clickHint+'>';
-      html+='<div class="dec-card-header">'
-        +'<span class="dec-ticker" style="color:'+gradeColor+'">L1: '+pd.l1_grade+'级 '+quadrantLabel+'</span>'
-        +'<span style="font:10px var(--mono);color:var(--t3)">'+pd.date+' ▸</span></div>';
+      // Header
+      html+='<div class="dec-card-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+        +'<span style="font:12px var(--mono);font-weight:600;color:'+gradeColor+'">L1: <b>'+pd.l1_grade+'级</b> '+quadrantLabel+'</span>'
+        +'<span style="font:10px var(--mono);color:var(--t3)">'+pd.date+' ▸ 点击展开</span></div>';
 
-      if(pd.has_no_trade){
-        html+='<div style="font:14px var(--sans);color:var(--am);margin-bottom:2px">NO TRADE · 今日不交易</div>';
-        html+='<div class="dec-details" style="font:11px var(--sans);color:var(--t3)">';
-        html+='Flash: '+pd.flash_scored+' signals ('+pd.flash_high_impact+' high impact) | ';
-        html+='L3: '+pd.l3_green+'G / '+pd.l3_yellow+'Y / '+pd.l3_red+'R | ';
-        html+='Red Team: '+pd.red_team_challenges+' challenges | ';
-        html+='Resonance: '+(pd.resonance_passed?'PASS':'FAIL');
-        html+='</div>';
+      html+='<div style="background:var(--bg);border-radius:4px;padding:10px 12px;margin-bottom:6px">';
+      // Summary line
+      html+='<div style="font:13px var(--sans);color:var(--t1);margin-bottom:6px;line-height:1.5">';
+      if(brief&&brief.decision_summary){
+        html+=brief.decision_summary.replace(/</g,'&lt;').substring(0,300);
       } else {
-        html+='<div style="font:14px var(--sans);color:var(--t2);margin-bottom:2px">'+pd.decision_count+' decision cards</div>';
-        html+='<div class="dec-details">';
-        (pd.decisions||[]).forEach(function(d){
-          html+='<span style="color:var(--t2)">'+d.ticker+' '+d.direction+'</span> ';
+        var noTradeLabel=pd.has_no_trade?t('noTrade'):pd.decision_count+' decision cards';
+        html+=noTradeLabel;
+      }
+      html+='</div>';
+      // Stats row
+      html+='<div style="display:flex;gap:12px;flex-wrap:wrap;font:10px var(--mono);color:var(--t3)">'
+        +'<span>Flash: '+pd.flash_scored+' '+t('flash')+' ('+pd.flash_high_impact+' '+t('highImpact')+')</span>'
+        +'<span>L3: '+pd.l3_green+t('green')+'/'+pd.l3_yellow+t('yellow')+'/'+pd.l3_red+t('red')+'</span>'
+        +'<span>Red Team: '+pd.red_team_challenges+' '+t('challenges')+'</span>'
+        +'<span>Resonance: '+(pd.resonance_passed?'PASS':'FAIL')+'</span>'
+        +'</div>';
+      html+='</div>';
+
+      // Paper trade card: when no_trade, show best-conviction virtual trade
+      if(pd.has_no_trade){
+        html+='<div style="background:var(--card);border:1px dashed var(--am);border-radius:4px;padding:8px 12px;margin-top:6px">';
+        html+='<div style="font:10px var(--mono);color:var(--am);margin-bottom:4px;font-weight:600">📝 '+t('paperTrade')+'</div>';
+        html+='<div style="font:11px var(--sans);color:var(--t2);margin-bottom:4px">'+t('paperLabel')+'</div>';
+        if(brief&&brief.paper_trade){
+          html+='<div style="font:13px var(--mono);font-weight:600;color:var(--t1)">'+brief.paper_trade.ticker+' <span style="color:'+(brief.paper_trade.direction==='long'?'var(--gr)':'var(--rd)')+'">'+brief.paper_trade.direction.toUpperCase()+'</span>'
+            +' <span style="font:11px;color:var(--t3)">conf '+(brief.paper_trade.confidence||0).toFixed(2)+'</span></div>';
+          if(brief.paper_trade.thesis){
+            html+='<div style="font:11px var(--sans);color:var(--t3);margin-top:2px">'+brief.paper_trade.thesis.substring(0,200)+'</div>';
+          }
+        } else {
+          html+='<div style="font:11px var(--sans);color:var(--t3)">虚拟投资建议将在管线运行后生成</div>';
+        }
+        html+='</div>';
+      }
+
+      if(!pd.has_no_trade&&pd.decisions&&pd.decisions.length){
+        html+='<div style="font:11px var(--mono);color:var(--t2);margin-top:6px">';
+        pd.decisions.forEach(function(d){
+          html+='<span style="display:inline-block;background:var(--bg);padding:2px 8px;border-radius:3px;margin:2px 4px 2px 0;font-size:12px">'+d.ticker+' <b style="color:'+(d.direction==='long'?'var(--gr)':'var(--rd)')+'">'+d.direction.toUpperCase()+'</b></span>';
         });
         html+='</div>';
       }
       html+='</div>';
 
       // Expandable reasoning brief
-      html+='<div id="decBrief" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--bd)">';
+      html+='<div id="decBrief" style="display:none;margin-top:10px;padding:10px 12px;background:var(--bg);border-radius:4px">';
       if(brief){
         if(brief.decision_summary){
-          html+='<div style="font:12px var(--sans);color:var(--t2);margin-bottom:8px;line-height:1.5"><b>结论:</b> '+brief.decision_summary.replace(/</g,'&lt;')+'</div>';
+          html+='<div style="font:12px var(--sans);color:var(--t2);margin-bottom:10px;line-height:1.6"><b>'+t('conclusion')+':</b> '+brief.decision_summary.replace(/</g,'&lt;')+'</div>';
         }
-        html+='<div class="brief-section"><div class="brief-label">L1 · 宏观叙事</div><div class="brief-text">'+(brief.l1_analysis||'No L1 analysis').replace(/</g,'&lt;').substring(0,800)+'</div></div>';
+        html+='<div class="brief-section"><div class="brief-label">📊 '+t('l1')+'</div><div class="brief-text" style="line-height:1.6">'+(brief.l1_analysis||'无 L1 宏观分析数据').replace(/</g,'&lt;').substring(0,800)+'</div></div>';
         if(brief.l2_ticker_candidates&&brief.l2_ticker_candidates.length){
-          html+='<div class="brief-section"><div class="brief-label">L2 · 标的候选</div><div class="brief-text">'+brief.l2_ticker_candidates.join(', ')+'</div></div>';
+          html+='<div class="brief-section"><div class="brief-label">🎯 '+t('candidates')+'</div><div class="brief-text">'+brief.l2_ticker_candidates.join(', ')+'</div></div>';
         }
-        html+='<div class="brief-section"><div class="brief-label">L3 · 技术灯</div><div class="brief-text">🟢 '+(brief.l3_green||[]).join(', ')+'<br>🟡 '+(brief.l3_yellow||[]).join(', ')+'<br>🔴 '+(brief.l3_red||[]).join(', ')+'</div></div>';
+        var g=(brief.l3_green||[]).join(', ')||'—', y=(brief.l3_yellow||[]).join(', ')||'—', r=(brief.l3_red||[]).join(', ')||'—';
+        html+='<div class="brief-section"><div class="brief-label">🚦 '+t('l3')+'</div><div class="brief-text">🟢 '+t('green')+': '+g+'<br>🟡 '+t('yellow')+': '+y+'<br>🔴 '+t('red')+': '+r+'</div></div>';
         if(brief.red_team_challenges&&brief.red_team_challenges.length){
-          html+='<div class="brief-section"><div class="brief-label">Red Team · 对抗挑战</div>';
+          html+='<div class="brief-section"><div class="brief-label">🛡️ '+t('redTeam')+'</div>';
           brief.red_team_challenges.forEach(function(c){
-            html+='<div class="brief-text" style="margin-bottom:4px"><b>['+c.severity+']</b> '+c.challenge.replace(/</g,'&lt;')+'</div>';
+            html+='<div class="brief-text" style="margin-bottom:4px"><b>['+c.severity+']</b> '+c.challenge.replace(/</g,'&lt;').substring(0,300)+'</div>';
           });
           html+='</div>';
         }
-        html+='<div class="brief-section"><div class="brief-label">Resonance · 统计验证</div><div class="brief-text">Verdict: '+brief.resonance_verdict+' | DSR: '+brief.resonance_dsr.toFixed(2)+'</div></div>';
+        html+='<div class="brief-section"><div class="brief-label">📈 '+t('resonance')+'</div><div class="brief-text">'+t('verdict')+': <b>'+brief.resonance_verdict+'</b> | '+t('dsr')+': '+brief.resonance_dsr.toFixed(2)+'</div></div>';
       } else {
-        html+='<div class="muted">Detailed reasoning not available for this run. Run a new pipeline to generate.</div>';
+        html+='<div class="muted">本运行无详细推理数据，请重新运行管线。</div>';
       }
       html+='</div>';
       document.getElementById('decCard').innerHTML=html;
+      // Restore expand state after refresh rebuild
+      if(wasExpanded){var db=document.getElementById('decBrief');if(db){db.style.display='block';window._decExpanded=true;}}
     } else {
       document.getElementById('decSection').style.display='block';
-      document.getElementById('decCard').innerHTML='<div class="muted">No pipeline run today — run: python app.py --mode daily</div>';
+      document.getElementById('decCard').innerHTML='<div class="muted">今日尚无管线运行 — 运行: python app.py --mode daily</div>';
     }
 
     // Log
@@ -957,17 +1096,35 @@ refresh(); setInterval(refresh,5000);
         var d=JSON.parse(e.data);
         if(d.type==='stage'){
           var pctEl=document.getElementById('pct'),pfillEl=document.getElementById('pfill'),pstageEl=document.getElementById('pstage');
+          var pelapsedEl=document.getElementById('pelapsed');
+          var tsNow=Date.now();
+          window._lastProgressTs=tsNow;
           if(d.status==='done'){
-            pctEl.textContent='done';pctEl.style.color='var(--gr)';pstageEl.textContent=d.stage;
+            pctEl.textContent=t('done');pctEl.style.color='var(--gr)';pstageEl.innerHTML='<span class="stage-num">9/9</span>'+d.stage;
             pfillEl.style.width='100%';pfillEl.style.background='var(--gr)';
+            pelapsedEl.textContent='';window._pipelineRunning=false;window._stageStartTs=null;
+            // Reset buttons
+            document.getElementById("btnRun").textContent=t('start');document.getElementById("btnRun").classList.remove('running');document.getElementById("btnRun").disabled=false;
+            document.getElementById("btnMock").textContent=t('mock');document.getElementById("btnMock").classList.remove('running');document.getElementById("btnMock").disabled=false;
           }else if(d.status==='error'){
-            pctEl.textContent='err';pctEl.style.color='var(--rd)';pstageEl.textContent=d.stage+' FAILED';
+            pctEl.textContent=t('err');pctEl.style.color='var(--rd)';pstageEl.innerHTML='<span class="stage-num">'+d.stage_num+'/9</span>'+d.stage+' FAILED';
             pfillEl.style.width=d.pct+'%';pfillEl.style.background='var(--rd)';
+            pelapsedEl.textContent='';window._pipelineRunning=false;window._stageStartTs=null;
+            // Reset buttons
+            document.getElementById("btnRun").textContent=t('start');document.getElementById("btnRun").classList.remove('running');document.getElementById("btnRun").disabled=false;
+            document.getElementById("btnMock").textContent=t('mock');document.getElementById("btnMock").classList.remove('running');document.getElementById("btnMock").disabled=false;
           }else{
-            pctEl.textContent=d.pct.toFixed(0)+'%';pctEl.style.color='var(--t1)';pstageEl.textContent=d.stage;
+            var sn=d.stage_num||'';
+            pctEl.textContent=d.pct.toFixed(0)+'%';pctEl.style.color='var(--t1)';
+            pstageEl.innerHTML=(sn?'<span class="stage-num">'+sn+'/9</span> ':'')+d.stage;
             pfillEl.style.width=d.pct+'%';pfillEl.style.background='var(--am)';
+            window._pipelineRunning=true;window._stageStartTs=window._stageStartTs||tsNow;
+            if(sn!==window._lastStageNum){window._stageStartTs=tsNow;window._lastStageNum=sn;}
+            var secs=Math.floor((tsNow-window._stageStartTs)/1000);
+            pelapsedEl.textContent=sn?secs+'s':'';pelapsedEl.style.color=secs>120?'var(--rd)':secs>60?'var(--am)':'var(--t3)';
             var logSection=document.getElementById('logBody').parentElement;
             if(!logSection.classList.contains('open'))logSection.classList.add('open');
+            document.getElementById('scrollLog').style.display='block';
           }
         }else if(d.type==='log'){
           var logBody=document.getElementById('logBody'),cls=d.level==='error'?'log-err':d.level==='warn'?'log-warn':'log-ok';
@@ -985,6 +1142,17 @@ refresh(); setInterval(refresh,5000);
     ws.onerror=function(){ws.close();};
   }
   connect();
+  // Stuck detection: if pipeline running but no progress for 90s, warn
+  setInterval(function(){
+    if(!window._pipelineRunning||!window._lastProgressTs)return;
+    var stuck=Date.now()-window._lastProgressTs;
+    var pelapsedEl=document.getElementById('pelapsed');
+    if(stuck>90000){
+      pelapsedEl.textContent='STUCK? '+Math.floor(stuck/1000)+'s';
+      pelapsedEl.style.color='var(--rd)';
+      pelapsedEl.style.fontWeight='600';
+    }
+  },5000);
 })();
 </script>
 

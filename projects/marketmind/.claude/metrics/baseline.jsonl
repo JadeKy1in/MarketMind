@@ -684,3 +684,27 @@
 {"timestamp": "2026-05-28T07:57:37.724519+00:00", "source_count": 37, "rss_article_count": 421, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 450, "post_dedup_total": 420, "issues": []}
 {"timestamp": "2026-05-28T07:57:57.395490+00:00", "source_count": 37, "rss_article_count": 421, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 450, "post_dedup_total": 420, "issues": []}
 {"timestamp": "2026-05-28T07:58:20.281929+00:00", "source_count": 37, "rss_article_count": 421, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 450, "post_dedup_total": 420, "issues": []}
+{"timestamp": "2026-05-30T12:04:15.967404+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 28, "rss_health_score": 0.946, "pre_dedup_total": 446, "post_dedup_total": 407, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-30T12:05:04.671208+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 28, "rss_health_score": 0.946, "pre_dedup_total": 446, "post_dedup_total": 408, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-30T12:06:12.014889+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 28, "rss_health_score": 0.946, "pre_dedup_total": 446, "post_dedup_total": 408, "issues": ["Reddit WSB: 3"]}
+{"timestamp": "2026-05-30T12:08:30.434410+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 28, "rss_health_score": 0.972, "pre_dedup_total": 446, "post_dedup_total": 408, "issues": []}
+{"timestamp": "2026-05-30T12:10:16.072438+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 28, "rss_health_score": 0.946, "pre_dedup_total": 446, "post_dedup_total": 408, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-30T12:10:16.130045+00:00", "type": "flash", "articles_in": 50, "signals_out": 0}
+{"timestamp": "2026-05-30T12:10:16.158873+00:00", "type": "l1", "event_grade": "E", "matrix_quadrant": "observe_skip", "sentiment": "neutral"}
+{"timestamp": "2026-05-30T12:11:36.501472+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 28, "rss_health_score": 0.972, "pre_dedup_total": 446, "post_dedup_total": 408, "issues": []}
+{"timestamp": "2026-05-30T12:16:58.256768+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 28, "rss_health_score": 0.972, "pre_dedup_total": 446, "post_dedup_total": 408, "issues": []}
+{"timestamp": "2026-05-30T12:23:44.473708+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 29, "rss_health_score": 0.972, "pre_dedup_total": 447, "post_dedup_total": 415, "issues": []}
+{"timestamp": "2026-05-30T12:24:17.353819+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 29, "rss_health_score": 0.972, "pre_dedup_total": 447, "post_dedup_total": 415, "issues": []}
+{"timestamp": "2026-05-30T12:25:03.959890+00:00", "source_count": 36, "rss_article_count": 418, "api_article_count": 29, "rss_health_score": 0.972, "pre_dedup_total": 447, "post_dedup_total": 415, "issues": []}
+{"timestamp": "2026-05-30T12:35:00.388384+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 28, "rss_health_score": 0.946, "pre_dedup_total": 446, "post_dedup_total": 50, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-30T12:35:00.419128+00:00", "type": "flash", "articles_in": 50, "signals_out": 0}
+{"timestamp": "2026-05-30T12:35:00.430629+00:00", "type": "l1", "event_grade": "E", "matrix_quadrant": "observe_skip", "sentiment": "neutral"}
+{"timestamp": "2026-05-30T12:39:52.134254+00:00", "source_count": 37, "rss_article_count": 418, "api_article_count": 28, "rss_health_score": 0.946, "pre_dedup_total": 446, "post_dedup_total": 16, "issues": ["Reddit WSB: 2"]}
+{"timestamp": "2026-05-30T12:40:15.819406+00:00", "type": "flash", "articles_in": 16, "signals_out": 16}
+{"timestamp": "2026-05-30T12:42:15.871526+00:00", "type": "l1", "event_grade": "E", "matrix_quadrant": "observe_skip", "sentiment": "neutral"}
+{"timestamp": "2026-05-30T12:57:57.838248+00:00", "source_count": 37, "rss_article_count": 408, "api_article_count": 28, "rss_health_score": 0.946, "pre_dedup_total": 436, "post_dedup_total": 21, "issues": ["Euronews Economy: 0 articles (URL may be broken)", "Reddit WSB: 2"]}
+{"timestamp": "2026-05-30T12:58:40.217650+00:00", "type": "flash", "articles_in": 21, "signals_out": 6}
+{"timestamp": "2026-05-30T13:00:40.241988+00:00", "type": "l1", "event_grade": "E", "matrix_quadrant": "observe_skip", "sentiment": "neutral"}
+{"timestamp": "2026-05-30T13:16:59.232262+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 420, "issues": []}
+{"timestamp": "2026-05-30T13:17:22.888426+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 420, "issues": []}
+{"timestamp": "2026-05-30T13:17:46.632985+00:00", "source_count": 37, "rss_article_count": 423, "api_article_count": 29, "rss_health_score": 0.973, "pre_dedup_total": 452, "post_dedup_total": 420, "issues": []}

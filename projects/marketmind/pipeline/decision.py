@@ -91,15 +91,16 @@ def _get_decision_prompt() -> str:
         f"must be based on CURRENT ({yr}) market conditions. "
         f"Do NOT reference {int(yr)-2}-{int(yr)-1} data as if it were recent.]"
     )
+    lang_note = f"\n\n[LANGUAGE: {_lang_instruction()}]"
     try:
         from marketmind.pipeline.methodology_rules import (
             assemble_dynamic_prompt, get_default_rules
         )
         if _rule_registry is None:
             _rule_registry = get_default_rules()
-        return assemble_dynamic_prompt(_rule_registry) + date_note
+        return assemble_dynamic_prompt(_rule_registry) + date_note + lang_note
     except Exception:
-        return DECISION_SYSTEM_PROMPT + date_note
+        return DECISION_SYSTEM_PROMPT + date_note + lang_note
 
 
 def get_rule_registry():
@@ -139,11 +140,204 @@ class NoTradeCard:
 
 
 @dataclass
+class PaperTrade:
+    ticker: str
+    direction: str  # "long" or "short"
+    confidence: float
+    thesis: str
+    source: str = ""  # e.g. "L2 fundamental", "L3 technical", "L1 narrative"
+
+
+@dataclass
 class DecisionOutput:
     decision_cards: list[DecisionCard] = field(default_factory=list)
     no_trade_card: NoTradeCard | None = None
+    paper_trade: PaperTrade | None = None  # virtual trade when no_trade
     summary: str = ""
     contrarian_challenges: list[dict] = field(default_factory=list)
+
+
+def _lang_instruction() -> str:
+    """Return language directive for LLM output based on MARKETMIND_LANG env var."""
+    import os as _os
+    lang = _os.environ.get("MARKETMIND_LANG", "zh")
+    lang_map = {
+        "zh": "所有输出必须使用中文。报告、分析、结论全部用中文撰写。",
+        "en": "All output must be in English.",
+        "ja": "すべての出力は日本語で記述すること。",
+        "ko": "모든 출력은 한국어로 작성해야 합니다.",
+        "es": "Toda la salida debe estar en español.",
+        "fr": "Toute sortie doit être en français.",
+        "ru": "Весь вывод должен быть на русском языке.",
+        "ar": "يجب أن يكون كل المخرجات باللغة العربية.",
+        "de": "Alle Ausgaben müssen auf Deutsch sein.",
+    }
+    return lang_map.get(lang, "所有输出必须使用中文。")
+
+
+def _t(key: str) -> str:
+    """Return i18n message for current language. Falls back to zh."""
+    import os as _os
+    lang = _os.environ.get("MARKETMIND_LANG", "zh")
+    msgs = _I18N.get(lang, _I18N["zh"])
+    return msgs.get(key, _I18N["zh"].get(key, key))
+
+
+_I18N = {
+    "zh": {
+        "no_signal_thesis": "无信号通过统计验证，且无标的通过技术审查。",
+        "no_signal_counterfactual": "需要 DSR > 0 且 PBO <= 0.10，同时至少有一个绿灯标的。",
+        "no_signal_adv_1": "统计纪律防止过拟合",
+        "no_signal_adv_2": "现金保留选择权",
+        "no_signal_summary": "今日无可行信号。持有现金是有效仓位。",
+        "api_error_thesis": "决策合成因 API 或系统错误失败。",
+        "api_error_counterfactual": "一次成功的 LLM 调用生成了决策合成。",
+        "api_error_adv_1": "合成不可用时的安全默认值",
+        "api_error_adv_2": "保护资本",
+        "api_error_summary": "决策合成失败 — 安全起见回退到不交易。",
+        "src_l1": "L1 宏观叙事",
+        "src_l2": "L2 基本面",
+        "src_l3": "L3 绿灯",
+        "l1_bullish": "看涨",
+        "l1_bearish": "看跌",
+    },
+    "en": {
+        "no_signal_thesis": "No signal passed statistical validation and no ticker cleared technical review.",
+        "no_signal_counterfactual": "A signal exceeding DSR > 0 and PBO <= 0.10 with at least 1 green-light ticker.",
+        "no_signal_adv_1": "Statistical discipline prevents overfitting",
+        "no_signal_adv_2": "Cash preserves optionality",
+        "no_signal_summary": "No actionable signal today. Cash is a valid position.",
+        "api_error_thesis": "Decision synthesis failed due to API or system error.",
+        "api_error_counterfactual": "A successful LLM call producing a decision synthesis.",
+        "api_error_adv_1": "Safe default when synthesis is unavailable",
+        "api_error_adv_2": "Preserves capital",
+        "api_error_summary": "Decision synthesis failed — falling back to no-trade for safety.",
+        "src_l1": "L1 Narrative",
+        "src_l2": "L2 Fundamental",
+        "src_l3": "L3 Green Light",
+        "l1_bullish": "bullish",
+        "l1_bearish": "bearish",
+    },
+    "ja": {
+        "no_signal_thesis": "統計的検証を通過したシグナルはなく、技術的レビューをクリアした銘柄もありません。",
+        "no_signal_counterfactual": "DSR > 0 かつ PBO <= 0.10 で、少なくとも1つのグリーンライト銘柄が必要です。",
+        "no_signal_adv_1": "統計的規律が過学習を防ぐ",
+        "no_signal_adv_2": "現金は選択肢を保持する",
+        "no_signal_summary": "本日は実行可能なシグナルなし。現金は有効なポジションです。",
+        "api_error_thesis": "APIまたはシステムエラーにより決定合成に失敗しました。",
+        "api_error_counterfactual": "決定合成を生成するLLM呼び出しの成功。",
+        "api_error_adv_1": "合成が利用できない場合の安全なデフォルト",
+        "api_error_adv_2": "資本を保護",
+        "api_error_summary": "決定合成に失敗 — 安全のため取引なしにフォールバック。",
+        "src_l1": "L1 マクロ分析",
+        "src_l2": "L2 ファンダメンタル",
+        "src_l3": "L3 グリーンライト",
+        "l1_bullish": "強気",
+        "l1_bearish": "弱気",
+    },
+    "ko": {
+        "no_signal_thesis": "통계적 검증을 통과한 신호가 없으며 기술적 검토를 통과한 종목도 없습니다.",
+        "no_signal_counterfactual": "DSR > 0, PBO <= 0.10, 최소 1개의 녹색 신호 종목이 필요합니다.",
+        "no_signal_adv_1": "통계적 규율이 과적합 방지",
+        "no_signal_adv_2": "현금은 선택권을 보존",
+        "no_signal_summary": "오늘 실행 가능한 신호 없음. 현금은 유효한 포지션입니다.",
+        "api_error_thesis": "API 또는 시스템 오류로 결정 합성 실패.",
+        "api_error_counterfactual": "결정 합성을 생성하는 성공적인 LLM 호출.",
+        "api_error_adv_1": "합성을 사용할 수 없을 때의 안전한 기본값",
+        "api_error_adv_2": "자본 보호",
+        "api_error_summary": "결정 합성 실패 — 안전을 위해 거래 없음으로 폴백.",
+        "src_l1": "L1 매크로 분석",
+        "src_l2": "L2 펀더멘털",
+        "src_l3": "L3 녹색 신호",
+        "l1_bullish": "강세",
+        "l1_bearish": "약세",
+    },
+    "es": {
+        "no_signal_thesis": "Ninguna señal pasó la validación estadística y ningún activo superó la revisión técnica.",
+        "no_signal_counterfactual": "Una señal que supere DSR > 0 y PBO <= 0.10 con al menos un activo en luz verde.",
+        "no_signal_adv_1": "La disciplina estadística previene el sobreajuste",
+        "no_signal_adv_2": "El efectivo preserva la opcionalidad",
+        "no_signal_summary": "Sin señales procesables hoy. El efectivo es una posición válida.",
+        "api_error_thesis": "La síntesis de decisión falló por error de API o sistema.",
+        "api_error_counterfactual": "Una llamada LLM exitosa que produzca una síntesis de decisión.",
+        "api_error_adv_1": "Valor predeterminado seguro cuando la síntesis no está disponible",
+        "api_error_adv_2": "Preserva el capital",
+        "api_error_summary": "Síntesis de decisión fallida — recurriendo a no operar por seguridad.",
+        "src_l1": "L1 Narrativa",
+        "src_l2": "L2 Fundamental",
+        "src_l3": "L3 Luz Verde",
+        "l1_bullish": "alcista",
+        "l1_bearish": "bajista",
+    },
+    "fr": {
+        "no_signal_thesis": "Aucun signal n'a passé la validation statistique et aucun actif n'a réussi l'examen technique.",
+        "no_signal_counterfactual": "Un signal dépassant DSR > 0 et PBO <= 0.10 avec au moins un actif en feu vert.",
+        "no_signal_adv_1": "La discipline statistique empêche le surapprentissage",
+        "no_signal_adv_2": "Les liquidités préservent l'optionalité",
+        "no_signal_summary": "Aucun signal exploitable aujourd'hui. Les liquidités sont une position valide.",
+        "api_error_thesis": "La synthèse de décision a échoué en raison d'une erreur API ou système.",
+        "api_error_counterfactual": "Un appel LLM réussi produisant une synthèse de décision.",
+        "api_error_adv_1": "Valeur par défaut sûre lorsque la synthèse n'est pas disponible",
+        "api_error_adv_2": "Préserve le capital",
+        "api_error_summary": "Échec de la synthèse de décision — repli vers l'absence de transaction par sécurité.",
+        "src_l1": "L1 Récit",
+        "src_l2": "L2 Fondamental",
+        "src_l3": "L3 Feu Vert",
+        "l1_bullish": "haussier",
+        "l1_bearish": "baissier",
+    },
+    "ru": {
+        "no_signal_thesis": "Ни один сигнал не прошёл статистическую проверку, и ни один актив не прошёл технический обзор.",
+        "no_signal_counterfactual": "Сигнал с DSR > 0 и PBO <= 0.10, имеющий хотя бы один актив с зелёным светом.",
+        "no_signal_adv_1": "Статистическая дисциплина предотвращает переобучение",
+        "no_signal_adv_2": "Наличные сохраняют опциональность",
+        "no_signal_summary": "Сегодня нет действенных сигналов. Наличные — допустимая позиция.",
+        "api_error_thesis": "Синтез решения не удался из-за ошибки API или системы.",
+        "api_error_counterfactual": "Успешный вызов LLM, создающий синтез решения.",
+        "api_error_adv_1": "Безопасное значение по умолчанию при недоступности синтеза",
+        "api_error_adv_2": "Сохраняет капитал",
+        "api_error_summary": "Синтез решения не удался — возврат к отсутствию сделок для безопасности.",
+        "src_l1": "L1 Макро",
+        "src_l2": "L2 Фундамент",
+        "src_l3": "L3 Зелёный",
+        "l1_bullish": "бычий",
+        "l1_bearish": "медвежий",
+    },
+    "ar": {
+        "no_signal_thesis": "لم تتجاوز أي إشارة التحقق الإحصائي ولم يجتز أي أصل المراجعة الفنية.",
+        "no_signal_counterfactual": "إشارة تتجاوز DSR > 0 و PBO <= 0.10 مع أصل واحد على الأقل في الضوء الأخضر.",
+        "no_signal_adv_1": "الانضباط الإحصائي يمنع الإفراط في التخصيص",
+        "no_signal_adv_2": "النقد يحافظ على الخيارات",
+        "no_signal_summary": "لا توجد إشارات قابلة للتنفيذ اليوم. النقد مركز صالح.",
+        "api_error_thesis": "فشل تركيب القرار بسبب خطأ في API أو النظام.",
+        "api_error_counterfactual": "استدعاء LLM ناجح ينتج تركيب قرار.",
+        "api_error_adv_1": "القيمة الافتراضية الآمنة عند عدم توفر التركيب",
+        "api_error_adv_2": "يحافظ على رأس المال",
+        "api_error_summary": "فشل تركيب القرار — التراجع إلى عدم التداول للسلامة.",
+        "src_l1": "L1 السرد",
+        "src_l2": "L2 أساسي",
+        "src_l3": "L3 ضوء أخضر",
+        "l1_bullish": "صاعد",
+        "l1_bearish": "هابط",
+    },
+    "de": {
+        "no_signal_thesis": "Kein Signal hat die statistische Validierung bestanden und kein Wert hat die technische Prüfung bestanden.",
+        "no_signal_counterfactual": "Ein Signal mit DSR > 0 und PBO <= 0.10 mit mindestens einem Wert mit grünem Licht.",
+        "no_signal_adv_1": "Statistische Disziplin verhindert Überanpassung",
+        "no_signal_adv_2": "Bargeld bewahrt Optionalität",
+        "no_signal_summary": "Heute keine handelbaren Signale. Bargeld ist eine gültige Position.",
+        "api_error_thesis": "Entscheidungssynthese aufgrund eines API- oder Systemfehlers fehlgeschlagen.",
+        "api_error_counterfactual": "Ein erfolgreicher LLM-Aufruf, der eine Entscheidungssynthese erzeugt.",
+        "api_error_adv_1": "Sicherer Standardwert, wenn Synthese nicht verfügbar ist",
+        "api_error_adv_2": "Bewahrt Kapital",
+        "api_error_summary": "Entscheidungssynthese fehlgeschlagen — Rückfall auf Nicht-Handel aus Sicherheitsgründen.",
+        "src_l1": "L1 Makro",
+        "src_l2": "L2 Fundamental",
+        "src_l3": "L3 Grünes Licht",
+        "l1_bullish": "bullisch",
+        "l1_bearish": "bärisch",
+    },
+}
 
 
 CONTRARIAN_PROMPT = """你是独立风控分析师。对以下投资决策方案提出2-3个具体的反对意见。
@@ -252,16 +446,18 @@ async def generate_decision(
 ) -> DecisionOutput:
     """Generate final decision cards and no-trade card."""
     if not resonance.passed and not l3.green_lights:
+        paper = _pick_paper_trade(l1, l2, l3, red_team, resonance)
         return DecisionOutput(
             no_trade_card=NoTradeCard(
-                thesis="No signal passed statistical validation and no ticker cleared technical review.",
+                thesis=_t("no_signal_thesis"),
                 supporting_evidence=[f"DSR={resonance.dsr}, PBO={resonance.pbo}"],
-                counterfactual="A signal exceeding DSR > 0 and PBO <= 0.10 with at least 1 green-light ticker.",
-                structural_advantages=["Statistical discipline prevents overfitting", "Cash preserves optionality"],
+                counterfactual=_t("no_signal_counterfactual"),
+                structural_advantages=[_t("no_signal_adv_1"), _t("no_signal_adv_2")],
                 pre_mortem="",
                 no_trade_score=100.0,
             ),
-            summary="No actionable signal today. Cash is a valid position."
+            paper_trade=paper,
+            summary=_t("no_signal_summary"),
         )
     user_prompt = _build_decision_prompt(l1, l2, l3, red_team, resonance)
     try:
@@ -278,16 +474,78 @@ async def generate_decision(
         return decision
     except Exception as e:
         logger.warning("Decision generation failed: %s", e)
+        paper = _pick_paper_trade(l1, l2, l3, red_team, resonance)
         return DecisionOutput(
             no_trade_card=NoTradeCard(
-                thesis="Decision synthesis failed due to API or system error.",
+                thesis=_t("api_error_thesis"),
                 supporting_evidence=[f"Error: {str(e)[:200]}"],
-                counterfactual="A successful LLM call producing a decision synthesis.",
-                structural_advantages=["Safe default when synthesis is unavailable", "Preserves capital"],
+                counterfactual=_t("api_error_counterfactual"),
+                structural_advantages=[_t("api_error_adv_1"), _t("api_error_adv_2")],
                 no_trade_score=100.0,
             ),
-            summary="Decision synthesis failed — falling back to no-trade for safety."
+            paper_trade=paper,
+            summary=_t("api_error_summary"),
         )
+
+
+def _pick_paper_trade(l1, l2, l3, red_team, resonance) -> PaperTrade | None:
+    """When no_trade, pick the best-conviction direction for virtual (paper) trading.
+
+    Scans L2 candidates + L3 lights to find the ticker with strongest directional signal.
+    Used for post-hoc review (复盘) without risking real capital.
+    """
+    candidates: list[dict] = []
+
+    # From L2 ticker candidates
+    for t in getattr(l2, 'ticker_candidates', []) or []:
+        candidates.append({
+            "ticker": str(t),
+            "direction": getattr(t, 'direction', 'neutral'),
+            "confidence": getattr(t, 'confidence', 0.0),
+            "thesis": getattr(t, 'thesis', ''),
+            "source": _t("src_l2"),
+        })
+
+    # From L3 green lights (strongest signal)
+    for r in getattr(l3, 'results', []) or []:
+        ticker = getattr(r, 'ticker', '')
+        if ticker in getattr(l3, 'green_lights', []):
+            candidates.append({
+                "ticker": str(ticker),
+                "direction": getattr(r, 'direction', 'long'),
+                "confidence": 0.65,
+                "thesis": getattr(r, 'summary', ''),
+                "source": _t("src_l3"),
+            })
+
+    # From L1 sentiment if available
+    l1_dir = getattr(l1, 'sentiment_direction', 'neutral')
+    if l1_dir in ('bullish', 'bearish') and not candidates:
+        direction = 'long' if l1_dir == 'bullish' else 'short'
+        l1_label = _t("l1_bullish") if l1_dir == 'bullish' else _t("l1_bearish")
+        for r in getattr(l3, 'results', []) or []:
+            candidates.append({
+                "ticker": str(getattr(r, 'ticker', 'SPY')),
+                "direction": direction,
+                "confidence": 0.45,
+                "thesis": f"{_t('src_l1')}: {l1_label}",
+                "source": _t("src_l1"),
+            })
+            break
+
+    if not candidates:
+        return None
+
+    # Sort by confidence descending
+    candidates.sort(key=lambda c: c["confidence"], reverse=True)
+    best = candidates[0]
+    return PaperTrade(
+        ticker=best["ticker"],
+        direction=best["direction"],
+        confidence=best["confidence"],
+        thesis=best["thesis"],
+        source=best["source"],
+    )
 
 
 def _build_decision_prompt(

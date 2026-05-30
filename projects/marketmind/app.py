@@ -35,9 +35,14 @@ def main():
                         help="Backtest end date (YYYY-MM-DD)")
     parser.add_argument("--output", type=str, default=None, metavar="PATH",
                         help="Backtest output path (JSON)")
+    parser.add_argument("--lang", type=str, default="zh",
+                        help="Output language: zh, en, ja, ko, es, fr, ru, ar, de")
     parser.add_argument("--playground", action="store_true",
                         help="Run Playground experimental agents after main pipeline")
     args = parser.parse_args()
+
+    import os as _os
+    _os.environ["MARKETMIND_LANG"] = args.lang
 
     config = MarketMindConfig.from_env()
     errors = config.validate()

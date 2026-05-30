@@ -4,3 +4,9 @@
 {"rule_id": "RRSK-BAD01", "action": "retired", "reason": "Negative impact confirmed: without_rule_mean=0.8500 > with_rule_mean=0.3500", "date": "2026-05-28"}
 {"rule_id": "RRSK-TUNE01", "action": "evolved", "reason": "Evolved: max_position 5.0->7.0", "date": "2026-05-28"}
 {"rule_id": "RRSK-REM01", "action": "removed", "reason": "Removed: Test removal", "date": "2026-05-28"}
+{"rule_id": "RRSK-BAD01", "action": "retired", "reason": "Negative impact confirmed: without_rule_mean=0.8500 > with_rule_mean=0.3500", "date": "2026-05-30"}
+{"rule_id": "RRSK-TUNE01", "action": "evolved", "reason": "Evolved: max_position 5.0->7.0", "date": "2026-05-30"}
+{"rule_id": "RRSK-REM01", "action": "removed", "reason": "Removed: Test removal", "date": "2026-05-30"}
+{"rule_id": "RRSK-BAD01", "action": "retired", "reason": "Negative impact confirmed: without_rule_mean=0.8500 > with_rule_mean=0.3500", "date": "2026-05-30"}
+{"rule_id": "RRSK-TUNE01", "action": "evolved", "reason": "Evolved: max_position 5.0->7.0", "date": "2026-05-30"}
+{"rule_id": "RRSK-REM01", "action": "removed", "reason": "Removed: Test removal", "date": "2026-05-30"}

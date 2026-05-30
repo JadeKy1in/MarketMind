@@ -1,0 +1,55 @@
+{
+  "date": "2026-05-30",
+  "has_no_trade": true,
+  "decision_summary": "No signal passed statistical validation and no ticker cleared technical review.",
+  "decision_cards": [],
+  "l1_analysis": "",
+  "l2_ticker_candidates": [
+    "TLT",
+    "GLD",
+    "XLU",
+    "XLV",
+    "XLP"
+  ],
+  "l3_green": [],
+  "l3_yellow": [],
+  "l3_red": [
+    "SPY",
+    "QQQ",
+    "IWM",
+    "DIA",
+    "TLT",
+    "GLD",
+    "SLV",
+    "USO",
+    "UNG",
+    "DBA"
+  ],
+  "red_team_challenges": [
+    {
+      "severity": "critical",
+      "challenge": "Portfolio construction ignores cross-asset correlations, leading to excessive concentration in a single macro regime. All selected assets (TLT, GLD, XLU, XLV, XLP) are likely to be highly correlated during risk-off events, but could simultaneously underperform if the macro environment shifts (e.g., "
+    },
+    {
+      "severity": "major",
+      "challenge": "Sector momentum assessments ('accelerating', 'stable') are unsubstantiated. No quantitative data, time periods, or calculation methodologies are provided, making the momentum analysis subjective and prone to recency bias."
+    },
+    {
+      "severity": "critical",
+      "challenge": "The analysis explicitly acknowledges high model risk due to reliance on macro forecasts and static assumptions, yet continues to output precise, high-conviction allocations. This is a fundamental decision-making error: acting on signals with acknowledged unreliability."
+    },
+    {
+      "severity": "major",
+      "challenge": "Factor scores are opaque and lack definition. It is unclear what the scores represent (e.g., expected return, risk-adjusted attractiveness, correlation to macro factors), rendering the subsequent weighting arbitrary."
+    }
+  ],
+  "resonance_verdict": "NO_SIGNAL",
+  "resonance_dsr": 0.5,
+  "paper_trade": {
+    "ticker": "TLT",
+    "direction": "neutral",
+    "confidence": 0.0,
+    "thesis": "",
+    "source": "L2 fundamental"
+  }
+}

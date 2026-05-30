@@ -14,7 +14,7 @@ from pathlib import Path
 from marketmind.gateway.async_client import init_gateway
 
 # ── StageTracker extracted to pipeline/stage_tracker.py ─────────────────
-from marketmind.pipeline.stage_tracker import StageTracker
+from marketmind.pipeline.stage_tracker import StageTracker, _report_stage_progress
 _StageTracker = StageTracker  # backward-compat alias for interactive_orchestration.py
 
 logger = logging.getLogger(__name__)
@@ -396,6 +396,7 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
     await _maybe_run_weekly_audit(shadow_db)
 
     print("\nMarketMind daily pipeline complete.")
+    _report_stage_progress(9, "Pipeline complete", "done")
     if _shadow_task and not _shadow_task.done():
         print("(Shadow ecosystem still running in background)")
     return 0
@@ -485,6 +486,18 @@ def _save_decision_brief(l1_result, l2_result, l3_result, red_team, resonance, d
                 has_no_trade = True
                 dec_summary = getattr(ntc, 'thesis', '') or dec_summary
 
+        # Paper trade (virtual investment when no_trade)
+        paper_trade = None
+        pt = getattr(decision, 'paper_trade', None)
+        if pt:
+            paper_trade = {
+                "ticker": pt.ticker,
+                "direction": pt.direction,
+                "confidence": pt.confidence,
+                "thesis": pt.thesis,
+                "source": pt.source,
+            }
+
         brief = {
             "date": today,
             "has_no_trade": has_no_trade,
@@ -498,6 +511,7 @@ def _save_decision_brief(l1_result, l2_result, l3_result, red_team, resonance, d
             "red_team_challenges": rt_challenges,
             "resonance_verdict": res_verdict,
             "resonance_dsr": res_dsr,
+            "paper_trade": paper_trade,
         }
         fpath = brief_dir / f"{today}.json"
         with open(fpath, "w", encoding="utf-8") as f:

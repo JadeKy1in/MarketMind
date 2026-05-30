@@ -1,0 +1,26 @@
+{
+  "date": "2026-05-27",
+  "has_no_trade": true,
+  "decision_summary": "No signal passed statistical validation and no ticker cleared technical review.",
+  "decision_cards": [],
+  "l1_analysis": "",
+  "l2_ticker_candidates": [],
+  "l3_green": [],
+  "l3_yellow": [],
+  "l3_red": [
+    "UNKNOWN",
+    "SPY",
+    "QQQ",
+    "IWM",
+    "DIA",
+    "TLT",
+    "GLD",
+    "SLV",
+    "USO",
+    "UNG",
+    "DBA"
+  ],
+  "red_team_challenges": [],
+  "resonance_verdict": "NO_SIGNAL",
+  "resonance_dsr": 0.5
+}
