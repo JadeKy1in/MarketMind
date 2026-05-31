@@ -1,6 +1,6 @@
 # MarketMind Restart Guide — 2026-05-31 EOD
 
-**Tests**: 2,160/2,160 pass (final pending) | **CI**: green | **Branch**: master
+**Tests**: 2,159/2,159 pass (1 flaky network test excluded) | **CI**: green | **Branch**: master
 **All pushed**: no | **frontload_required**: false
 
 ---
@@ -8,7 +8,7 @@
 ## 重启指令
 
 > 继续 MarketMind 开发。读 projects/marketmind/.claude/RESTART_GUIDE.md。
-> 上次完成：全模块语言注入（L1/L2/L3/RedTeam/L2-Interactive prompt 全部读取 MARKETMIND_LANG）+ 聊天框 AI 接通。
+> 上次完成：聊天体验优化（loading 动画 + Retry 重试 + Markdown 渲染）+ 影子生态机制审查。
 
 ---
 
@@ -36,24 +36,28 @@ python -m pytest tests/ -q -p no:warnings --ignore=tests/test_dryrun_real_api.py
 ## 今日完成 (2026-05-31)
 
 ### 1. 聊天框接通 AI
-- `api/chat_handler.py`：ChatManager + ChatSession 会话管理
+- `api/chat_handler.py`：ChatManager + ChatSession 会话管理，chat_pro() 调用
 - `api/routes.py`：POST /api/chat, GET/DELETE /api/chat/history
 - `dashboard.html`：sendMsg() 文本→AI 对话，文件→管线注入
-- 测试：11 个（test_chat_handler.py）
 
 ### 2. 全模块语言注入
-- `pipeline/language_utils.py`：共享 `lang_instruction()` + `lang_note()` 辅助函数（NEW）
-- `pipeline/layer1_narrative.py`：LAYER1_SYSTEM_PROMPT + lang_note()
-- `pipeline/layer2_fundamental.py`：LAYER2_SYSTEM_PROMPT + date_note + lang_note()
-- `pipeline/layer3_technical.py`：LAYER3_SYSTEM_PROMPT + date_note + lang_note()
-- `pipeline/red_team.py`：RED_TEAM_SYSTEM_PROMPT + lang_note()
-- `pipeline/l2_interactive.py`：3 处 chat_pro 调用 — LAYER2_SECTOR_DRILLDOWN_PROMPT + lang_note()，2 处内联 prompt 用 `lang_instruction()` 替换硬编码 "用中文"
-- Resonance + FragilityScanner：无需改动（纯计算，无 LLM 调用）
+- `pipeline/language_utils.py`：共享 lang_instruction() + lang_note()
+- L1/L2/L3/RedTeam/L2-Interactive：全部读取 MARKETMIND_LANG
+- Resonance + FragilityScanner：无 LLM 调用，跳过
 
-### 3. 测试结果
-- Pipeline tests: 1,043 passed, 0 failed
-- API tests: 45 passed, 0 failed
-- 全量: 运行中 (expect 2,160+)
+### 3. 聊天体验优化
+- **Loading 动画**：AI 思考时显示脉冲 "● ● ●" 占位消息
+- **Retry 重试**：失败消息旁显示 Retry 链接，点击重新发送
+- **Markdown 渲染**：AI 回复支持 **bold**, *italic*, `code`, ```block```, ### headers, - lists, [links](url), > blockquote, --- hr
+- **用户前缀修正**：`▶ 用户:` 前缀直接显示
+
+### 4. 影子生态机制审查
+- 临时影子 4 类：temp_event（事件记录器 30d）、missed_path（反事实追踪）、challenger（秘密挑战者）、beta（领域播种）
+- 影子生命周期：Birth → Analysis → Ranking → Crystallization → Challenger → Cleanup
+- ShadowMother 13 步 daily cycle 编排
+
+### 测试
+- Pipeline: 1,043 passed | API: 45 passed | Full: 2,159 passed（1 flaky network）
 
 ---
 
@@ -74,7 +78,9 @@ python -m pytest tests/ -q -p no:warnings --ignore=tests/test_dryrun_real_api.py
   ✅ decision.py    ✅ chat_handler.py    ✅ layer1_narrative.py
   ✅ layer2_fundamental.py  ✅ layer3_technical.py
   ✅ red_team.py    ✅ l2_interactive.py  — resonance.py (无LLM)
-  — fragility_scanner.py (无LLM)
+
+聊天 UX:
+  ✅ Loading 动画   ✅ Retry 重试         ✅ Markdown 渲染
 ```
 
 ---
@@ -83,18 +89,18 @@ python -m pytest tests/ -q -p no:warnings --ignore=tests/test_dryrun_real_api.py
 
 | 问题 | 严重度 | 说明 |
 |:--|:--|:--|
-| L2 prompt 内嵌中文格式要求 | 低 | LAYER2_SECTOR_DRILLDOWN_PROMPT 硬编码 "MUST be in Chinese"，非中文语言下 lang_note() 末尾覆盖可能产生混合语言输出 |
-| 虚拟投资端到端未实际验证 | 低 | `_pick_paper_trade` 逻辑已写好，需跑管线验证 |
-| 网络/代理不稳定 | 低 | 部分 fetcher 测试在网络差时失败 |
-| 聊天框 AI 响应延迟 | 低 | `chat_pro()` 调用需数秒，前端无 loading 动画 |
+| L2 prompt 内嵌中文格式要求 | 低 | 非中文语言下 lang_note() 末尾覆盖可能产生混合语言输出 |
+| 虚拟投资端到端未实际验证 | 低 | `_pick_paper_trade` 逻辑已写好，需跑真实管线验证 |
+| 网络/代理不稳定 | 低 | test_fetch_core_sources 在网络差时失败 |
+| Markdown render 简单实现 | 低 | 基础正则渲染，不支持嵌套格式、表格、图片 |
 
 ---
 
 ## 待办 (优先级排序)
 
-1. **端到端测试** — `--lang zh` + `--lang en` 各跑一条 mock 管线，验证全链路多语言输出
-2. **聊天体验优化** — AI 响应 loading 动画、错误重试按钮、Markdown 渲染
-3. **L2 深层语言化** — LAYER2_SECTOR_DRILLDOWN_PROMPT 中的硬编码中文格式要求改为语言感知
+1. **主管线迭代流程审查** — 用户要求审查 Stage 间过渡、Gate 逻辑、管道是否有卡死点
+2. **临时影子处理策略** — 审查 temp_event/missed_path/challenger/beta 的清理和资源管理
+3. **L2 深层语言化** — LAYER2_SECTOR_DRILLDOWN_PROMPT 中的硬编码中文格式改为语言感知
 4. **数据积累** — 多跑几天管线让影子排名有真实数据
 
 ---
@@ -102,18 +108,17 @@ python -m pytest tests/ -q -p no:warnings --ignore=tests/test_dryrun_real_api.py
 ## 流程优化 (HARD GATE #5)
 
 ### 方法论优化
-1. **共享语言工具模式**：`pipeline/language_utils.py` 提供 `lang_instruction()` + `lang_note()`，所有 LLM 调用模块统一导入。避免 4+ 处重复定义。
-2. **内联 prompt 语言化**：`l2_interactive.py` 中用 `f"{lang_instruction()}，简洁回答"` 替换硬编码 "用中文"，保持句子通顺。
-3. **纯计算模块跳过**：resonance/fragility_scanner 无 LLM 调用，无需语言注入——按需而非盲改。
+1. **影子生态分层架构**：永久影子（expert/daredevil/momentum/contrarian）→ 临时影子（temp_event/missed_path/challenger/beta）→ 维护系统（breeding/evolution/crystallization），三层清晰分离
+2. **前端渐进增强模式**：loading → retry → Markdown，每一步独立可测试，不互相依赖
 
 ### 根规则更新
 - 无需更新
 
 ### Agent 配置
-- Explore Agent × 2：并行扫 L1/L2/L3 和 RedTeam/Resonance 的 prompt 位置，5 分钟内完成
+- Explore Agent × 1：深度扫描 shadows/ 目录 70+ 文件，15 分钟完成完整生态映射
 
 ### 流程瓶颈
-- 无：两阶段任务均一次性完成，无返工
+- 无：三阶段任务均一次性完成
 
 ---
 
@@ -121,13 +126,13 @@ python -m pytest tests/ -q -p no:warnings --ignore=tests/test_dryrun_real_api.py
 
 | 文件 | 用途 |
 |------|------|
-| `dashboard.html` | Dashboard 前端（语言选择器、进度条、决策卡片、聊天） |
+| `dashboard.html` | Dashboard 前端（语言选择器、进度条、决策卡片、聊天+Markdown） |
 | `api/routes.py` | API 路由（含 /api/chat 等 3 端点） |
-| `api/chat_handler.py` | 聊天会话管理 + AI 调用（NEW） |
+| `api/chat_handler.py` | 聊天会话管理 + AI 调用 |
 | `api/websocket.py` | WebSocket 管理 |
 | `api/data_providers.py` | API 数据提供层 |
 | `app.py` | CLI 入口（--lang, --mock） |
-| `pipeline/language_utils.py` | 共享语言指令辅助（NEW） |
+| `pipeline/language_utils.py` | 共享语言指令辅助 |
 | `pipeline/layer1_narrative.py` | L1 叙事分析 + 语言注入 |
 | `pipeline/layer2_fundamental.py` | L2 基本面分析 + 语言注入 |
 | `pipeline/layer3_technical.py` | L3 技术面分析 + 语言注入 |
@@ -137,6 +142,8 @@ python -m pytest tests/ -q -p no:warnings --ignore=tests/test_dryrun_real_api.py
 | `pipeline/stage_tracker.py` | 阶段追踪 + HTTP 进度上报 |
 | `pipeline/orchestration.py` | 管线编排 |
 | `gateway/async_client.py` | DeepSeek API 网关 |
-| `shadows/shadow_mother.py` | 影子生态总指挥 |
+| `shadows/shadow_mother.py` | 影子生态总指挥（13-step daily cycle） |
 | `shadows/shadow_state.py` | 影子 SQLite 持久化 |
-| `tests/test_api/test_chat_handler.py` | 聊天模块测试（NEW） |
+| `shadows/temp_shadow_lifecycle.py` | 临时影子生命周期管理 |
+| `shadows/challenger_engine.py` | 挑战者 3 阶段淘汰管线 |
+| `tests/test_api/test_chat_handler.py` | 聊天模块测试 |

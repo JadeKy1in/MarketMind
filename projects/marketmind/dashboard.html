@@ -68,6 +68,23 @@
   .speaker-shadow { padding:1px 8px; }
   .msg-body.speaker-msg { border-left:3px solid var(--am); padding-left:12px; }
   .wait-indicator { display:inline-flex; align-items:center; gap:4px; color:var(--am); font:11px var(--mono); animation:pulse 1.5s infinite; }
+  .msg-retry { color:var(--am); font:11px var(--mono); cursor:pointer; margin-left:8px; text-decoration:underline; }
+  .msg-retry:hover { color:var(--t1); }
+  .msg-body h1,.msg-body h2,.msg-body h3,.msg-body h4 { font:14px var(--sans); font-weight:700; color:var(--am); margin:12px 0 4px; }
+  .msg-body h3 { font-size:13px; }
+  .msg-body ul,.msg-body ol { margin:4px 0; padding-left:20px; }
+  .msg-body li { margin:2px 0; }
+  .msg-body code { background:var(--bg); padding:1px 5px; border-radius:2px; font:12px var(--mono); color:var(--am); }
+  .msg-body pre { background:var(--bg); border:1px solid var(--bd); border-radius:3px; padding:10px 14px; overflow-x:auto; font:12px var(--mono); margin:8px 0; }
+  .msg-body pre code { background:none; padding:0; }
+  .msg-body a { color:var(--am); text-decoration:underline; }
+  .msg-body strong { font-weight:700; color:var(--t1); }
+  .msg-body em { font-style:italic; color:var(--t2); }
+  .msg-body blockquote { border-left:2px solid var(--am); padding-left:10px; margin:6px 0; color:var(--t2); }
+  .msg-body hr { border:none; border-top:1px solid var(--bd); margin:12px 0; }
+  .msg-body p { margin:4px 0; }
+  .msg-body p:first-child { margin-top:0; }
+  .msg-body p:last-child { margin-bottom:0; }
   .autocomplete-hint { color:var(--t3); font:11px var(--mono); padding:2px 0; display:none; }
   .btn-attach { width:32px; height:32px; min-width:32px; background:var(--card); border:1px solid var(--bd); color:var(--t2); border-radius:3px; cursor:pointer; font-size:18px; display:flex; align-items:center; justify-content:center; }
   .btn-attach:hover { border-color:var(--am); color:var(--am); }
@@ -571,26 +588,33 @@ async function startPipeline(mock=false){
 	}
 }
 
-async function sendMsg(){
-  const input=document.getElementById('chatInput'),text=input.value.trim();
+var _lastUserMsg = '';
+async function sendMsg(retryText){
+  const input=document.getElementById('chatInput'),text=retryText||input.value.trim();
   const fileInput=document.getElementById('fileInput'),files=fileInput.files;
   if(!text&&!files.length)return;
+  _lastUserMsg = text;
   const now=ts(),label=text||Array.from(files).map(f=>f.name).join(', ');
   const fileNames=Array.from(files).map(f=>f.name);
   // User message
-  msgs.push({time:now,text:'> '+label,status:'sending'});renderChat();
-  input.value='';fileInput.value='';updateFileChips();
-  var hasError=false;
+  msgs.push({time:now,text:'▶ 用户: '+label,status:'sending'});renderChat();
+  if(!retryText){input.value='';fileInput.value='';updateFileChips();}
   // Chat AI: send text to /api/chat
   if(text){
+    // Loading placeholder
+    var aiIdx = msgs.length;
+    msgs.push({time:'...',text:'...',status:'waiting'});renderChat();
     try{
       const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,session_id:_chatSessionId,lang:lang})});
       const d=await r.json();
-      msgs[msgs.length-1].status='sent';
+      msgs[msgs.length-2].status='sent';
       if(d.response){
-        msgs.push({time:ts(),text:'[主持人·主AI] '+d.response,status:'sent'});
-      }
-    }catch(e){msgs[msgs.length-1].status='failed';}
+        msgs[aiIdx]={time:ts(),text:'[主持人·主AI] '+d.response,status:'sent'};
+      } else { msgs.splice(aiIdx,1); }
+    }catch(e){
+      msgs[msgs.length-2].status='failed';
+      msgs[aiIdx]={time:ts(),text:'[主持人·主AI] 回复失败，请点击 Retry 重试。',status:'failed'};
+    }
   }
   // Files: inject into pipeline
   if(files.length){
@@ -598,7 +622,7 @@ async function sendMsg(){
       const r=await fetch('/api/info/inject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,files:fileNames})});
       const d=await r.json();
       if(!text)msgs[msgs.length-1].status='sent';
-    }catch(e){if(!text)msgs[msgs.length-1].status='failed';hasError=true;}
+    }catch(e){if(!text)msgs[msgs.length-1].status='failed';}
   }
   renderChat();
 }
@@ -619,17 +643,64 @@ function formatSpeaker(msg) {
     return '<span class="speaker-prefix speaker-'+label+'" style="color:'+c+'">[' + speaker + ']</span> ' + msg.slice(m[0].length);
   }
   if (msg.startsWith('> ')) return '<span class="speaker-prefix" style="color:var(--t2)">▶ 用户</span> ' + msg.slice(2);
+  if (msg.startsWith('▶ 用户')) return '<span class="speaker-prefix" style="color:var(--t2)">▶ 用户</span>' + msg.slice(4);
   return msg;
+}
+function renderMarkdown(text) {
+  // Safe: text is already HTML-escaped before calling this (except speaker prefix)
+  var t = text;
+  // Code blocks (``` ... ```)
+  t = t.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+  // Inline code (`...`) — but not inside <pre>
+  t = t.replace(/(^|[^`<])`([^`\n]+)`([^`>]|$)/g, '$1<code>$2</code>$3');
+  // Bold
+  t = t.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  // Italic
+  t = t.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+  // Headers
+  t = t.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  t = t.replace(/^## (.+)$/gm, '<h3>$1</h3>');
+  // Links [text](url)
+  t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+  // Unordered lists
+  t = t.replace(/^- (.+)$/gm, '<li>$1</li>');
+  t = t.replace(/((?:<li>[^<]*<\/li>\n?)+)/g, '<ul>$1</ul>');
+  // Blockquote
+  t = t.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+  // Horizontal rule
+  t = t.replace(/^---$/gm, '<hr>');
+  // Paragraphs: double newlines
+  t = t.replace(/\n\n+/g, '</p><p>');
+  t = '<p>'+t+'</p>';
+  // Clean empty paragraphs
+  t = t.replace(/<p><\/p>/g, '');
+  t = t.replace(/<p>(<[^p][^>]*><\/[^>]+>)<\/p>/g, '$1');
+  return t;
 }
 function renderChat(){
   const c=document.getElementById('chatMsgs');
   if(!msgs.length){ c.innerHTML='<div class="msg-empty">Pipeline idle. You can chat with the main AI here.<br><br>Paste external info or attach files to inject into analysis.<br>Shift+Enter to send.</div>'; return; }
-  c.innerHTML=msgs.map(m=>{
-    const sc=m.status==='sent'?'var(--gr)':m.status==='failed'?'var(--rd)':'var(--am)';
+  c.innerHTML=msgs.map(function(m,idx){
+    var sc=m.status==='sent'?'var(--gr)':m.status==='failed'?'var(--rd)':m.status==='waiting'?'var(--am)':'var(--am)';
     var body = m.text.replace(/</g,"&lt;").replace(/>/g,"&gt;");
     body = formatSpeaker(body);
-    var cls = body.includes('speaker-prefix') ? 'msg-body speaker-msg' : 'msg-body';
-    return `<div class="msg"><div class="msg-meta"><span>${m.time}</span><span style="font-size:10px;color:${sc}">${m.status==='sent'?m.chars+'c':m.status}</span></div><div class="${cls}">${body}</div></div>`;
+    var isSpeaker = body.includes('speaker-prefix');
+    var cls = isSpeaker ? 'msg-body speaker-msg' : 'msg-body';
+    // Markdown rendering for non-user messages
+    if (!body.includes('▶ 用户') && m.status !== 'waiting') {
+      body = renderMarkdown(body);
+    }
+    var metaRight = '';
+    if (m.status === 'waiting') {
+      metaRight = '<span class="wait-indicator">● ● ●</span>';
+    } else if (m.status === 'failed') {
+      metaRight = '<span style="font-size:10px;color:var(--rd)">failed</span> <span class="msg-retry" onclick="event.stopPropagation();sendMsg(_lastUserMsg)">Retry</span>';
+    } else if (m.status === 'sending') {
+      metaRight = '<span style="font-size:10px;color:var(--am)">sending</span>';
+    } else {
+      metaRight = m.chars ? '<span style="font-size:10px;color:var(--gr)">'+m.chars+'c</span>' : '';
+    }
+    return '<div class="msg"><div class="msg-meta"><span>'+m.time+'</span>'+metaRight+'</div><div class="'+cls+'">'+body+'</div></div>';
   }).join(''); c.scrollTop=c.scrollHeight;
 }
 

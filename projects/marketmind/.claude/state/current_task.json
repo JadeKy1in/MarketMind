@@ -1,1 +1,1 @@
-{"type": "test", "files": [], "risk": "low", "description": "End-to-end mock pipeline test with --lang zh and --lang en to verify full-chain multi-language output"}
+{"type": "enhance", "files": ["dashboard.html", "api/chat_handler.py"], "risk": "low", "description": "Chat UX: loading animation, retry button, Markdown rendering + Shadow ecosystem mechanism review"}
