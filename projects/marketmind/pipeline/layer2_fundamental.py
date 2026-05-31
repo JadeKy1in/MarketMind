@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 
 from marketmind.gateway.async_client import chat_pro
 from marketmind.gateway.response_parser import strip_markdown_fences
+from marketmind.pipeline.language_utils import lang_note
 from marketmind.pipeline.layer1_narrative import Layer1Result
 
 
@@ -146,7 +147,7 @@ async def analyze_layer2(l1: Layer1Result, market_context: dict | None = None,
     )
     try:
         result = await chat_pro(
-            system_prompt=LAYER2_SYSTEM_PROMPT + date_note,
+            system_prompt=LAYER2_SYSTEM_PROMPT + date_note + lang_note(),
             user_prompt=user_prompt,
             temperature=0.3,
             max_tokens=16384,

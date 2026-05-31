@@ -12,6 +12,7 @@ from typing import Any
 
 from marketmind.gateway.async_client import chat_pro
 from marketmind.gateway.response_parser import strip_markdown_fences
+from marketmind.pipeline.language_utils import lang_note
 
 
 @dataclass
@@ -115,7 +116,7 @@ async def analyze_layer3(tickers: list[str], market_data: dict | None = None) ->
     )
     try:
         result = await chat_pro(
-            system_prompt=LAYER3_SYSTEM_PROMPT + date_note,
+            system_prompt=LAYER3_SYSTEM_PROMPT + date_note + lang_note(),
             user_prompt=user_prompt,
             temperature=0.2,
             max_tokens=8192,

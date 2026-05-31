@@ -517,6 +517,7 @@ function ts(){ try{const d=new Date();return d.toLocaleString('en-US',{timeZone:
 
 // ── Chat ─────────────────────────────────────────────────────────
 const msgs=[];
+var _chatSessionId = 'chat_' + Date.now() + '_' + Math.random().toString(36).slice(2,8);
 document.querySelector('.btn-attach').addEventListener('click',()=>document.getElementById('fileInput').click());
 // Drag-and-drop overlay handlers
 let _dragC=0;
@@ -576,12 +577,29 @@ async function sendMsg(){
   if(!text&&!files.length)return;
   const now=ts(),label=text||Array.from(files).map(f=>f.name).join(', ');
   const fileNames=Array.from(files).map(f=>f.name);
-  msgs.push({time:now,text:label,status:'sending'});renderChat();
+  // User message
+  msgs.push({time:now,text:'> '+label,status:'sending'});renderChat();
   input.value='';fileInput.value='';updateFileChips();
-  try{
-    const r=await fetch('/api/info/inject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,files:fileNames})});
-    const d=await r.json();msgs[msgs.length-1].status='sent';msgs[msgs.length-1].chars=d.chars;
-  }catch(e){msgs[msgs.length-1].status='failed';}
+  var hasError=false;
+  // Chat AI: send text to /api/chat
+  if(text){
+    try{
+      const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,session_id:_chatSessionId,lang:lang})});
+      const d=await r.json();
+      msgs[msgs.length-1].status='sent';
+      if(d.response){
+        msgs.push({time:ts(),text:'[主持人·主AI] '+d.response,status:'sent'});
+      }
+    }catch(e){msgs[msgs.length-1].status='failed';}
+  }
+  // Files: inject into pipeline
+  if(files.length){
+    try{
+      const r=await fetch('/api/info/inject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,files:fileNames})});
+      const d=await r.json();
+      if(!text)msgs[msgs.length-1].status='sent';
+    }catch(e){if(!text)msgs[msgs.length-1].status='failed';hasError=true;}
+  }
   renderChat();
 }
 // Phase 4: Shadow speaker colors (persistent per shadow)

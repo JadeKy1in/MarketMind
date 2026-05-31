@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 
 from marketmind.gateway.async_client import chat_pro
 from marketmind.gateway.response_parser import strip_markdown_fences
+from marketmind.pipeline.language_utils import lang_note
 from marketmind.shadows.shadow_agent import defang_text
 
 
@@ -80,7 +81,7 @@ async def run_red_team(l1_raw: str, l2_raw: str, tickers: list[str]) -> RedTeamR
 Find every legitimate objection. At least 1 critical-level challenge is expected, but declare 'no valid objection' if analysis is genuinely solid."""
     try:
         result = await chat_pro(
-            system_prompt=RED_TEAM_SYSTEM_PROMPT,
+            system_prompt=RED_TEAM_SYSTEM_PROMPT + lang_note(),
             user_prompt=user_prompt,
             temperature=0.5,  # slightly higher for adversarial creativity
             max_tokens=16384,

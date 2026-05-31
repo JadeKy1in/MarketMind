@@ -13,6 +13,7 @@ logger = logging.getLogger("marketmind.pipeline.layer1")
 from marketmind.gateway.async_client import chat_pro
 from marketmind.gateway.response_parser import strip_markdown_fences
 from marketmind.pipeline.flash_preprocessor import FlashSignal
+from marketmind.pipeline.language_utils import lang_note
 from marketmind.pipeline.scout import NewsItem
 from marketmind.shadows.shadow_agent import defang_text
 
@@ -90,9 +91,9 @@ async def analyze_layer1(signals: list[FlashSignal], news_items: list[NewsItem],
         return Layer1Result.empty_default()
     signal_text = _format_signals(signals, news_items)
     user_prompt = f"Analyze these market signals for narrative structure:\n\n{signal_text}"
-    sys_prompt = LAYER1_SYSTEM_PROMPT
+    sys_prompt = LAYER1_SYSTEM_PROMPT + lang_note()
     if calibration_context:
-        sys_prompt = calibration_context + "\n\n" + LAYER1_SYSTEM_PROMPT
+        sys_prompt = calibration_context + "\n\n" + LAYER1_SYSTEM_PROMPT + lang_note()
     try:
         result = await chat_pro(
             system_prompt=sys_prompt,

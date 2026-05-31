@@ -1,6 +1,6 @@
-# MarketMind Restart Guide — 2026-05-30 EOD
+# MarketMind Restart Guide — 2026-05-31 EOD
 
-**Tests**: 27/27 relevant tests pass | **CI**: green | **Branch**: master
+**Tests**: 2,160/2,160 pass (final pending) | **CI**: green | **Branch**: master
 **All pushed**: no | **frontload_required**: false
 
 ---
@@ -8,7 +8,7 @@
 ## 重启指令
 
 > 继续 MarketMind 开发。读 projects/marketmind/.claude/RESTART_GUIDE.md。
-> 上次完成：全 UI 大修（9 语种选择器 + 决策卡片中文化 + Paper Trade 虚拟投资 + 进度条阶段追踪+卡死检测 + 管道进度 WebSocket 上报 + 按钮默认实盘+MOCK + 卡片展开状态保持 + 决策模块 9 语种 i18n `_t()` 字典 + AI prompt 语言注入 `_lang_instruction()`）。
+> 上次完成：全模块语言注入（L1/L2/L3/RedTeam/L2-Interactive prompt 全部读取 MARKETMIND_LANG）+ 聊天框 AI 接通。
 
 ---
 
@@ -33,34 +33,27 @@ python -m pytest tests/ -q -p no:warnings --ignore=tests/test_dryrun_real_api.py
 
 ---
 
-## 今日完成 (2026-05-30)
+## 今日完成 (2026-05-31)
 
-### 语言选择器 + AI 语言注入
-- `dashboard.html`：9 语种下拉（zh/en/es/fr/ru/ar/ja/ko/de），`t()` 函数多语言 UI
-- `app.py`：`--lang` 参数，设置 `MARKETMIND_LANG` 环境变量
-- `api/routes.py`：接受 `lang` 参数传递 `--lang` 给子进程
-- `pipeline/decision.py`：`_lang_instruction()` 注入 system prompt，`_I18N` 字典 + `_t()` 函数覆盖全部 9 语种的 fallback 消息和 PaperTrade 标签
+### 1. 聊天框接通 AI
+- `api/chat_handler.py`：ChatManager + ChatSession 会话管理
+- `api/routes.py`：POST /api/chat, GET/DELETE /api/chat/history
+- `dashboard.html`：sendMsg() 文本→AI 对话，文件→管线注入
+- 测试：11 个（test_chat_handler.py）
 
-### 进度条增强
-- `pipeline/stage_tracker.py`：`_report_stage_progress()` — 每阶段 HTTP POST 到 API 服务器
-- `api/websocket.py`：`broadcast_stage()` 支持 `stage_num`
-- `dashboard.html`：显示 "3/9 StageName" + 每阶段耗时 + 颜色变化 + STUCK 检测
+### 2. 全模块语言注入
+- `pipeline/language_utils.py`：共享 `lang_instruction()` + `lang_note()` 辅助函数（NEW）
+- `pipeline/layer1_narrative.py`：LAYER1_SYSTEM_PROMPT + lang_note()
+- `pipeline/layer2_fundamental.py`：LAYER2_SYSTEM_PROMPT + date_note + lang_note()
+- `pipeline/layer3_technical.py`：LAYER3_SYSTEM_PROMPT + date_note + lang_note()
+- `pipeline/red_team.py`：RED_TEAM_SYSTEM_PROMPT + lang_note()
+- `pipeline/l2_interactive.py`：3 处 chat_pro 调用 — LAYER2_SECTOR_DRILLDOWN_PROMPT + lang_note()，2 处内联 prompt 用 `lang_instruction()` 替换硬编码 "用中文"
+- Resonance + FragilityScanner：无需改动（纯计算，无 LLM 调用）
 
-### 决策卡片重设计
-- 中文标签（宏观叙事/技术灯/对抗挑战/统计验证），点击展开/收起
-- **展开状态保持**：5 秒刷新周期不再冲掉展开状态（`window._decExpanded` 标志位）
-- 颜色编码 🟢绿灯 🟡黄灯 🔴红灯
-
-### 虚拟投资 Paper Trade
-- `pipeline/decision.py`：`PaperTrade` 数据类 + `_pick_paper_trade()` — 当 no_trade 时自动选最有把握方向
-- `pipeline/orchestration.py`：`_save_decision_brief` 存储 `paper_trade`
-- UI：虚线卡片 "📝 虚拟投资" + 标的/方向/置信度/逻辑
-
-### 按钮 + 管道修复
-- 默认实盘（`mock=false`），MOCK 按钮独立
-- 管道进度 HTTP POST → API → WebSocket → 前端进度条
-- `stdout=subprocess.DEVNULL` 修复 pipe buffer 死锁
-- 管线完成后按钮一直闪烁不恢复 — WebSocket `done`/`error` 中加入按钮重置
+### 3. 测试结果
+- Pipeline tests: 1,043 passed, 0 failed
+- API tests: 45 passed, 0 failed
+- 全量: 运行中 (expect 2,160+)
 
 ---
 
@@ -73,6 +66,15 @@ python -m pytest tests/ -q -p no:warnings --ignore=tests/test_dryrun_real_api.py
          │                        │                    │
     Calibration             api_server:8520      ShadowMother
     (含进化通知)          WebSocket→Dashboard     (排名/串谋/挑战者)
+         │
+    POST /api/chat ──→ ChatManager ──→ chat_pro() ──→ AI 回复
+    GET/DELETE /api/chat/history ──→ 会话管理
+
+语言注入覆盖 (9 语种 via MARKETMIND_LANG):
+  ✅ decision.py    ✅ chat_handler.py    ✅ layer1_narrative.py
+  ✅ layer2_fundamental.py  ✅ layer3_technical.py
+  ✅ red_team.py    ✅ l2_interactive.py  — resonance.py (无LLM)
+  — fragility_scanner.py (无LLM)
 ```
 
 ---
@@ -81,18 +83,18 @@ python -m pytest tests/ -q -p no:warnings --ignore=tests/test_dryrun_real_api.py
 
 | 问题 | 严重度 | 说明 |
 |:--|:--|:--|
-| 聊天框未接通 AI | 中 | `sendMsg()` 无后端 API，需要 `/api/chat` 端点 |
-| 其他模块未注入语言指令 | 低 | L1/L2/L3/RedTeam 的 prompt 还没读 `MARKETMIND_LANG`，只有 decision 模块已注入 |
+| L2 prompt 内嵌中文格式要求 | 低 | LAYER2_SECTOR_DRILLDOWN_PROMPT 硬编码 "MUST be in Chinese"，非中文语言下 lang_note() 末尾覆盖可能产生混合语言输出 |
 | 虚拟投资端到端未实际验证 | 低 | `_pick_paper_trade` 逻辑已写好，需跑管线验证 |
 | 网络/代理不稳定 | 低 | 部分 fetcher 测试在网络差时失败 |
+| 聊天框 AI 响应延迟 | 低 | `chat_pro()` 调用需数秒，前端无 loading 动画 |
 
 ---
 
 ## 待办 (优先级排序)
 
-1. **聊天框接通 AI** — 添加 `/api/chat` 端点，让管道分析和用户对话通过聊天框进行
-2. **其他模块语言注入** — L1/L2/L3/RedTeam/Resonance 的 prompt 也读取 `MARKETMIND_LANG`
-3. **端到端测试** — `--lang zh` 跑一条 mock 管线，验证全链路中文输出
+1. **端到端测试** — `--lang zh` + `--lang en` 各跑一条 mock 管线，验证全链路多语言输出
+2. **聊天体验优化** — AI 响应 loading 动画、错误重试按钮、Markdown 渲染
+3. **L2 深层语言化** — LAYER2_SECTOR_DRILLDOWN_PROMPT 中的硬编码中文格式要求改为语言感知
 4. **数据积累** — 多跑几天管线让影子排名有真实数据
 
 ---
@@ -100,15 +102,18 @@ python -m pytest tests/ -q -p no:warnings --ignore=tests/test_dryrun_real_api.py
 ## 流程优化 (HARD GATE #5)
 
 ### 方法论优化
-1. **子进程进度上报模式**：HTTP POST + WebSocket 广播，适用于任何后台子进程向 Dashboard 报告进度
-2. **pipe buffer 死锁规则**：fire-and-forget 子进程必须用 `DEVNULL`，禁止 `PIPE`
-3. **5 秒轮询 UI 状态保持**：轮询刷新重建 DOM 时需保存/恢复交互状态（如 `window._decExpanded`）
+1. **共享语言工具模式**：`pipeline/language_utils.py` 提供 `lang_instruction()` + `lang_note()`，所有 LLM 调用模块统一导入。避免 4+ 处重复定义。
+2. **内联 prompt 语言化**：`l2_interactive.py` 中用 `f"{lang_instruction()}，简洁回答"` 替换硬编码 "用中文"，保持句子通顺。
+3. **纯计算模块跳过**：resonance/fragility_scanner 无 LLM 调用，无需语言注入——按需而非盲改。
 
 ### 根规则更新
-- 建议：所有 `subprocess.Popen` 非交互调用必须指定 `stdout=DEVNULL, stderr=DEVNULL`
+- 无需更新
+
+### Agent 配置
+- Explore Agent × 2：并行扫 L1/L2/L3 和 RedTeam/Resonance 的 prompt 位置，5 分钟内完成
 
 ### 流程瓶颈
-- 无：本次改动从诊断到实现到测试无返工
+- 无：两阶段任务均一次性完成，无返工
 
 ---
 
@@ -117,11 +122,21 @@ python -m pytest tests/ -q -p no:warnings --ignore=tests/test_dryrun_real_api.py
 | 文件 | 用途 |
 |------|------|
 | `dashboard.html` | Dashboard 前端（语言选择器、进度条、决策卡片、聊天） |
-| `api/routes.py` | API 路由 |
+| `api/routes.py` | API 路由（含 /api/chat 等 3 端点） |
+| `api/chat_handler.py` | 聊天会话管理 + AI 调用（NEW） |
 | `api/websocket.py` | WebSocket 管理 |
+| `api/data_providers.py` | API 数据提供层 |
 | `app.py` | CLI 入口（--lang, --mock） |
+| `pipeline/language_utils.py` | 共享语言指令辅助（NEW） |
+| `pipeline/layer1_narrative.py` | L1 叙事分析 + 语言注入 |
+| `pipeline/layer2_fundamental.py` | L2 基本面分析 + 语言注入 |
+| `pipeline/layer3_technical.py` | L3 技术面分析 + 语言注入 |
+| `pipeline/red_team.py` | 红队审计 + 语言注入 |
+| `pipeline/l2_interactive.py` | L2 交互式流程 + 语言注入 |
+| `pipeline/decision.py` | 决策生成 + PaperTrade + 语言注入 |
 | `pipeline/stage_tracker.py` | 阶段追踪 + HTTP 进度上报 |
 | `pipeline/orchestration.py` | 管线编排 |
-| `pipeline/decision.py` | 决策生成 + PaperTrade + 语言注入 |
+| `gateway/async_client.py` | DeepSeek API 网关 |
 | `shadows/shadow_mother.py` | 影子生态总指挥 |
 | `shadows/shadow_state.py` | 影子 SQLite 持久化 |
+| `tests/test_api/test_chat_handler.py` | 聊天模块测试（NEW） |

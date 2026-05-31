@@ -1,1 +1,1 @@
-{"type": "enhance", "files": ["dashboard.html", "api/data_providers.py"], "risk": "low", "description": "影子排名系统恢复+中英双语methodology显示"}
+{"type": "test", "files": [], "risk": "low", "description": "End-to-end mock pipeline test with --lang zh and --lang en to verify full-chain multi-language output"}

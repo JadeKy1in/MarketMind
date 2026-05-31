@@ -9,6 +9,7 @@ from pathlib import Path
 
 logger = logging.getLogger("marketmind.api.routes")
 
+from marketmind.api.chat_handler import chat_response, get_chat_manager
 from marketmind.api.data_providers import (
     add_log_entry,
     get_cost,
@@ -132,6 +133,44 @@ async def info_inject(request: dict):
         "items": len(result.items),
         "chars": result.total_chars,
     })
+
+
+@app.post("/api/chat")
+async def chat_endpoint(request: dict):
+    """Chat with the MarketMind AI analyst. Returns AI response with session tracking."""
+    try:
+        message = request.get("message", "").strip()
+        if not message:
+            return JSONResponse({"error": "message is required"}, status_code=400)
+        session_id = request.get("session_id", "default")
+        lang = request.get("lang", "")
+        result = await chat_response(session_id=session_id, message=message, lang=lang)
+        return JSONResponse(result)
+    except Exception:
+        logger.warning("chat endpoint failed", exc_info=True)
+        return JSONResponse({"error": "Chat service unavailable"}, status_code=500)
+
+
+@app.get("/api/chat/history")
+async def chat_history(session_id: str = "default"):
+    """Get chat history for a session."""
+    try:
+        manager = get_chat_manager()
+        history = manager.get_history(session_id)
+        return JSONResponse({"session_id": session_id, "messages": history})
+    except Exception:
+        return JSONResponse({"session_id": session_id, "messages": []})
+
+
+@app.delete("/api/chat/history")
+async def clear_chat_history(session_id: str = "default"):
+    """Clear chat history for a session."""
+    try:
+        manager = get_chat_manager()
+        manager.clear(session_id)
+        return JSONResponse({"status": "ok"})
+    except Exception:
+        return JSONResponse({"status": "error"}, status_code=500)
 
 
 @app.get("/api/alerts")

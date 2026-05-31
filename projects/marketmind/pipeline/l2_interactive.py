@@ -9,6 +9,7 @@ import re as _re
 from datetime import datetime, timezone
 
 from marketmind.gateway.async_client import chat_pro
+from marketmind.pipeline.language_utils import lang_note, lang_instruction
 from marketmind.pipeline.layer2_fundamental import analyze_layer2, Layer2Result
 from marketmind.pipeline.session_context import SessionContext
 from marketmind.shadows.shadow_agent import defang_text
@@ -194,7 +195,7 @@ async def _run_sector_drilldown(ctx: SessionContext, l2_result: Layer2Result, ch
 
     try:
         resp = await chat_pro(
-            system_prompt=LAYER2_SECTOR_DRILLDOWN_PROMPT,
+            system_prompt=LAYER2_SECTOR_DRILLDOWN_PROMPT + lang_note(),
             user_prompt=user_prompt,
             temperature=0.3, max_tokens=8192, reasoning_effort="minimal",
         )
@@ -394,7 +395,7 @@ async def _handle_l2_question(user_text: str, l2_result: Layer2Result) -> None:
         try:
             resp = await chat_pro(
                 system_prompt=(
-                    f"你是基本面分析师。今天是{today}。用中文，简洁回答。\n"
+                    f"你是基本面分析师。今天是{today}。{lang_instruction()}，简洁回答。\n"
                     f"L2结果: {defang_text(l2_result.raw_analysis)[:600]}"
                 ),
                 user_prompt=f"用户请求: {defang_text(user_text)}\n\n直接回答，不超过200字。",
@@ -413,7 +414,7 @@ async def _handle_l2_question(user_text: str, l2_result: Layer2Result) -> None:
     try:
         resp = await chat_pro(
             system_prompt=(
-                f"你是基本面分析师。今天是{today}。用中文，简明扼要。\n"
+                f"你是基本面分析师。今天是{today}。{lang_instruction()}，简明扼要。\n"
                 f"L2结果: {defang_text(l2_result.raw_analysis)[:600]}"
             ),
             user_prompt=f"用户问题: {defang_text(user_text)}\n\n直接回答。",
