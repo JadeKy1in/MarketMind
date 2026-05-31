@@ -128,6 +128,7 @@ def evaluate_resonance(
     dimensions: list[str],
     observed_sharpe: float,
     n_trials: int = 100,
+    data_mining_severity: float = 0.0,
 ) -> ResonanceResult:
     """Evaluate signal resonance through DSR and CSCV/PBO framework.
 
@@ -136,6 +137,8 @@ def evaluate_resonance(
         dimensions: which dimensions are contributing to this signal
         observed_sharpe: the Sharpe ratio of the combined signal
         n_trials: number of trials for multiplicity correction
+        data_mining_severity: 0.0-0.5 score from Red Team data mining challenges.
+            Higher severity = stricter PBO threshold (0.10 → 0.05 at max severity).
     """
     if not dimensions:
         return ResonanceResult(
@@ -163,9 +166,11 @@ def evaluate_resonance(
     os_sharpe = sharpe_ratio(os_rets) if len(os_rets) >= 2 else 0
     fwd_ratio = (os_sharpe / is_sharpe) if is_sharpe > 0 else 0
 
-    # Verdict
-    passed = dsr > 0 and pbo <= 0.10 and fwd_ratio >= 0.5
-    if passed and dsr > 0.5 and pbo < 0.05:
+    # Verdict — PBO threshold tightened by data_mining_severity from Red Team
+    pbo_threshold = 0.10 - (data_mining_severity * 0.10)  # range: 0.10 → 0.05
+    strong_threshold = 0.05 - (data_mining_severity * 0.05)  # range: 0.05 → 0.025
+    passed = dsr > 0 and pbo <= pbo_threshold and fwd_ratio >= 0.5
+    if passed and dsr > 0.5 and pbo < strong_threshold:
         verdict = "STRONG_SIGNAL"
     elif passed:
         verdict = "WEAK_SIGNAL"

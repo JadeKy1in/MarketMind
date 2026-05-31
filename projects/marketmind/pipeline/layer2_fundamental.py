@@ -131,11 +131,14 @@ Key rules:
 
 @monitor(source="l2_fundamental", impact=ImpactScope.MAIN_PIPELINE)
 async def analyze_layer2(l1: Layer1Result, market_context: dict | None = None,
-                         l1_context: str | None = None) -> Layer2Result:
+                         l1_context: str | None = None,
+                         calibration_context: str = "") -> Layer2Result:
     """Run Layer 2 fundamental analysis, incorporating Layer 1 narrative context."""
     context_str = _build_context(l1, market_context)
     if l1_context:
         context_str += f"\n\n## User's L1 Discussion Context (DEFANG filtered)\n{l1_context}"
+    if calibration_context:
+        context_str += f"\n\n{calibration_context}"
     user_prompt = f"Perform 5-tier fundamental analysis:\n\n{context_str}"
     from datetime import datetime, timezone
     today = datetime.now(timezone.utc).strftime("%Y年%m月%d日")

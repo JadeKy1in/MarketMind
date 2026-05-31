@@ -443,13 +443,27 @@ async def generate_decision(
     l3: Layer3BatchResult,
     red_team: RedTeamReport,
     resonance: ResonanceResult,
+    fragility=None,
 ) -> DecisionOutput:
-    """Generate final decision cards and no-trade card."""
+    """Generate final decision cards and no-trade card.
+
+    Args:
+        fragility: Optional FragilityReport from market fragility scan.
+                   If provided, fragility_score > 0.5 triggers position size reduction
+                   and fragility_crossed > 2 adds a risk warning to the no-trade card.
+    """
+    # Apply fragility adjustment: if market is fragile, tighten no-trade threshold
+    fragility_score = getattr(fragility, 'overall_fragility_score', 0.0) if fragility else 0.0
+    fragility_crossed = len(getattr(fragility, 'crossed', []) or []) if fragility else 0
+
     if not resonance.passed and not l3.green_lights:
         paper = _pick_paper_trade(l1, l2, l3, red_team, resonance)
+        fragility_note = ""
+        if fragility_crossed > 2:
+            fragility_note = f" [Fragility: {fragility_crossed} thresholds crossed, score={fragility_score:.2f}]"
         return DecisionOutput(
             no_trade_card=NoTradeCard(
-                thesis=_t("no_signal_thesis"),
+                thesis=_t("no_signal_thesis") + fragility_note,
                 supporting_evidence=[f"DSR={resonance.dsr}, PBO={resonance.pbo}"],
                 counterfactual=_t("no_signal_counterfactual"),
                 structural_advantages=[_t("no_signal_adv_1"), _t("no_signal_adv_2")],

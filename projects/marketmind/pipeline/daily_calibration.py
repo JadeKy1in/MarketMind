@@ -34,6 +34,12 @@ class DailyPrediction:
     flash_avg_impact: float = 0.0
     hvr_signals_found: int = 0
     hvr_articles_investigated: int = 0
+    # Per-stage outcome tracking (L2/L3/Decision calibration)
+    l2_sectors: list[str] = field(default_factory=list)
+    l2_sector_directions: dict[str, str] = field(default_factory=dict)
+    l3_green_tickers: list[str] = field(default_factory=list)
+    l3_red_tickers: list[str] = field(default_factory=list)
+    decision_no_trade: bool = False
 
 
 def _calibration_dir() -> Path:
@@ -76,6 +82,11 @@ def save_prediction(pred: DailyPrediction) -> None:
             "flash_avg_impact": pred.flash_avg_impact,
             "hvr_signals_found": pred.hvr_signals_found,
             "hvr_articles_investigated": pred.hvr_articles_investigated,
+            "l2_sectors": pred.l2_sectors,
+            "l2_sector_directions": pred.l2_sector_directions,
+            "l3_green_tickers": pred.l3_green_tickers,
+            "l3_red_tickers": pred.l3_red_tickers,
+            "decision_no_trade": pred.decision_no_trade,
         }
         with open(fpath, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -99,6 +110,11 @@ def load_prediction(date: str) -> DailyPrediction | None:
             flash_avg_impact=data.get("flash_avg_impact", 0.0),
             hvr_signals_found=data.get("hvr_signals_found", 0),
             hvr_articles_investigated=data.get("hvr_articles_investigated", 0),
+            l2_sectors=data.get("l2_sectors", []),
+            l2_sector_directions=data.get("l2_sector_directions", {}),
+            l3_green_tickers=data.get("l3_green_tickers", []),
+            l3_red_tickers=data.get("l3_red_tickers", []),
+            decision_no_trade=data.get("decision_no_trade", False),
         )
     except Exception:
         logger.debug("Failed to load calibration for %s", date, exc_info=True)
@@ -322,6 +338,109 @@ def _load_recent_evolutions(days: int = 7) -> list[dict]:
     except Exception:
         logger.debug("Failed to load evolution log", exc_info=True)
     return recent
+
+
+def get_stage_calibration(stage: str, shadow_db, days: int = 7) -> str:
+    """Build per-stage calibration context for L2/L3/Decision prompt injection.
+
+    Unlike the L1 calibration (which tracks direction accuracy), each stage
+    gets calibration tailored to its specific output metrics:
+      - L2: sector direction accuracy, ticker selection accuracy
+      - L3: green light accuracy (did green tickers actually go up?)
+      - Decision: no-trade rate, card direction accuracy
+    """
+    today = datetime.now(timezone.utc).date()
+    predictions: list[DailyPrediction] = []
+    for i in range(1, days + 1):
+        d = (today - timedelta(days=i)).isoformat()
+        pred = load_prediction(d)
+        if pred:
+            predictions.append(pred)
+
+    if not predictions:
+        return ""
+
+    lines = [f"\n## {stage.upper()} Calibration (past {days} days)"]
+
+    if stage == "l2":
+        total_sectors = 0
+        correct_sectors = 0
+        total_picks = 0
+        correct_picks = 0
+        for pred in predictions:
+            if pred.l2_sector_directions:
+                for sector, direction in pred.l2_sector_directions.items():
+                    total_sectors += 1
+                    actual_sign = _get_next_day_sign(shadow_db, sector, pred.date)
+                    expected = 1 if direction in ("bullish", "risk_on") else -1
+                    if actual_sign is not None and actual_sign != 0:
+                        if (expected > 0 and actual_sign > 0) or (expected < 0 and actual_sign < 0):
+                            correct_sectors += 1
+            for ticker in pred.ticker_candidates:
+                total_picks += 1
+                actual_sign = _get_next_day_sign(shadow_db, ticker, pred.date)
+                if actual_sign is not None and actual_sign > 0:
+                    correct_picks += 1
+        if total_sectors > 0:
+            lines.append(f"- Sector direction accuracy: {correct_sectors}/{total_sectors} "
+                         f"({correct_sectors/total_sectors:.0%})")
+        if total_picks > 0:
+            lines.append(f"- Ticker selection accuracy: {correct_picks}/{total_picks} "
+                         f"({correct_picks/total_picks:.0%})")
+        if total_sectors == 0 and total_picks == 0:
+            return ""
+
+    elif stage == "l3":
+        total_green = 0
+        green_correct = 0
+        total_red = 0
+        red_avoided = 0
+        for pred in predictions:
+            for ticker in pred.l3_green_tickers:
+                total_green += 1
+                actual_sign = _get_next_day_sign(shadow_db, ticker, pred.date)
+                if actual_sign is not None and actual_sign > 0:
+                    green_correct += 1
+            for ticker in pred.l3_red_tickers:
+                total_red += 1
+                actual_sign = _get_next_day_sign(shadow_db, ticker, pred.date)
+                if actual_sign is not None and actual_sign <= 0:
+                    red_avoided += 1
+        if total_green > 0:
+            lines.append(f"- Green light accuracy: {green_correct}/{total_green} "
+                         f"({green_correct/total_green:.0%})")
+        if total_red > 0:
+            lines.append(f"- Red light avoided: {red_avoided}/{total_red} "
+                         f"({red_avoided/total_red:.0%})")
+        if total_green == 0 and total_red == 0:
+            return ""
+
+    elif stage == "decision":
+        total_dec = 0
+        dec_correct = 0
+        no_trade_count = sum(1 for p in predictions if p.decision_no_trade)
+        for pred in predictions:
+            for dec in pred.decisions:
+                ticker = dec.get("ticker", "")
+                direction = dec.get("direction", "")
+                if not ticker or direction == "abstain":
+                    continue
+                total_dec += 1
+                actual_sign = _get_next_day_sign(shadow_db, ticker, pred.date)
+                expected = 1 if direction == "long" else -1
+                if actual_sign is not None and actual_sign != 0:
+                    if (expected > 0 and actual_sign > 0) or (expected < 0 and actual_sign < 0):
+                        dec_correct += 1
+        if total_dec > 0:
+            lines.append(f"- Decision accuracy: {dec_correct}/{total_dec} "
+                         f"({dec_correct/total_dec:.0%})")
+        if no_trade_count > 0:
+            lines.append(f"- No-trade days: {no_trade_count}/{len(predictions)}")
+        if total_dec == 0:
+            return ""
+
+    lines.append("Use this to calibrate today's outputs.")
+    return "\n".join(lines)
 
 
 def _get_next_day_sign(shadow_db, ticker: str, date: str) -> int | None:

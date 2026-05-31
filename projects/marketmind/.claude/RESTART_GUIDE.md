@@ -8,7 +8,7 @@
 ## 重启指令
 
 > 继续 MarketMind 开发。读 projects/marketmind/.claude/RESTART_GUIDE.md。
-> 上次完成：聊天体验优化（loading 动画 + Retry 重试 + Markdown 渲染）+ 影子生态机制审查。
+> 上次完成：管线 4 项优化（L1早停 + 逐Stage校准 + Fragility→Decision + Red Team→Resonance）+ 优化结构文档。
 
 ---
 

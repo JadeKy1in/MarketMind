@@ -100,11 +100,14 @@ IMPORTANT: All price data must be verifiable. Never fabricate levels."""
 
 
 @monitor(source="l3_technical", impact=ImpactScope.MAIN_PIPELINE)
-async def analyze_layer3(tickers: list[str], market_data: dict | None = None) -> Layer3BatchResult:
+async def analyze_layer3(tickers: list[str], market_data: dict | None = None,
+                         calibration_context: str = "") -> Layer3BatchResult:
     """Run Layer 3 technical review. Receives ONLY ticker list and raw market data — NOT L1/L2 results."""
     if not tickers:
         return Layer3BatchResult()
     data_str = _format_market_data(market_data)
+    if calibration_context:
+        data_str += f"\n\n{calibration_context}"
     user_prompt = f"Review these tickers independently. Do NOT consider any fundamental thesis.\n\nTickers: {', '.join(tickers)}\n\nMarket Data:\n{data_str}"
     from datetime import datetime, timezone
     today = datetime.now(timezone.utc).strftime("%Y年%m月%d日")

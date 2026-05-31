@@ -121,14 +121,17 @@ async def _do_l1_analysis(signals: list, news_items: list, tracker: StageTracker
     return result
 
 
-async def _do_l2_l3_parallel(l1_result, tracker: StageTracker):
+async def _do_l2_l3_parallel(l1_result, tracker: StageTracker, shadow_db=None):
     tracker.advance(4, "Layer 2+3: fundamental + technical analysis...")
     from marketmind.pipeline.layer2_fundamental import analyze_layer2
     from marketmind.pipeline.layer3_technical import analyze_layer3
     from marketmind.config.asset_universe import ASSET_UNIVERSE
+    # Per-stage calibration: L2 sees past L2 sector/ticker accuracy, L3 sees past green light accuracy
+    l2_calib = _get_stage_calibration("l2", shadow_db) if shadow_db else ""
+    l3_calib = _get_stage_calibration("l3", shadow_db) if shadow_db else ""
     tickers = [a.ticker for a in list(ASSET_UNIVERSE.values())[:10]]
-    l2_task = analyze_layer2(l1_result)
-    l3_task = analyze_layer3(tickers, {})
+    l2_task = analyze_layer2(l1_result, calibration_context=l2_calib) if l2_calib else analyze_layer2(l1_result)
+    l3_task = analyze_layer3(tickers, {}, calibration_context=l3_calib) if l3_calib else analyze_layer3(tickers, {})
     l2, l3 = await asyncio.gather(l2_task, l3_task)
     if l2 is None:
         from marketmind.pipeline.layer2_fundamental import Layer2Result
@@ -136,9 +139,42 @@ async def _do_l2_l3_parallel(l1_result, tracker: StageTracker):
     if l3 is None:
         from marketmind.pipeline.layer3_technical import Layer3Result
         l3 = Layer3Result()
-    tracker.result(f"L2: {len(l2.ticker_candidates)} candidates, "
-                   f"L3: {len(l3.results)} tickers ({len(l3.green_lights)} green)")
+    # L2→L3 fallback: if L2 found tickers but L3 all red, flag for re-selection next run
+    l2_tickers = set(l2.ticker_candidates or [])
+    l3_green = {r.ticker for r in (l3.results or []) if getattr(r, 'light', 'red') == 'green'}
+    if l2_tickers and not (l2_tickers & l3_green):
+        tracker.result(f"L2: {len(l2.ticker_candidates)} candidates, "
+                       f"L3: {len(l3.results)} tickers ({len(l3.green_lights)} green) "
+                       f"[WARN: L2-L3 mismatch — all L2 picks are L3 red]")
+    else:
+        tracker.result(f"L2: {len(l2.ticker_candidates)} candidates, "
+                       f"L3: {len(l3.results)} tickers ({len(l3.green_lights)} green)")
     return l2, l3
+
+
+def _get_stage_calibration(stage: str, shadow_db, days: int = 7) -> str:
+    """Load per-stage calibration context for L2/L3/Decision prompt injection."""
+    try:
+        from marketmind.pipeline.daily_calibration import get_stage_calibration
+        return get_stage_calibration(stage, shadow_db, days)
+    except Exception:
+        return ""
+
+
+async def _do_fragility_scan(tracker: StageTracker):
+    """Stage 7b: Market fragility scan — zero-LLM pure computation."""
+    tracker.advance(7, "Fragility: scanning market thresholds...")
+    from marketmind.pipeline.fragility_scanner import scan_fragility, FragilityReport
+    try:
+        report = await scan_fragility({})
+        crossed = len(report.crossed)
+        score = report.overall_fragility_score
+        tracker.result(f"fragility={score:.2f}, crossed={crossed}")
+        return report
+    except Exception:
+        tracker.result("Fragility scan skipped — no data")
+        return FragilityReport(alerts=[], crossed=[], warnings=[],
+                               overall_fragility_score=0.0, staleness_warnings=[], summary="")
 
 
 async def _do_red_team(l1_result, l2_result, selected_tickers: list, tracker: StageTracker):
@@ -152,7 +188,8 @@ async def _do_red_team(l1_result, l2_result, selected_tickers: list, tracker: St
     return report
 
 
-async def _do_resonance(l3_result, tracker: StageTracker):
+async def _do_resonance(l3_result, red_team, tracker: StageTracker):
+    """Resonance with Red Team feedback — data mining flags adjust PBO threshold."""
     tracker.advance(7, "Resonance: statistical validation...")
     from marketmind.pipeline.resonance import evaluate_resonance, ResonanceResult
     signal_returns_data = {}
@@ -163,18 +200,40 @@ async def _do_resonance(l3_result, tracker: StageTracker):
                 signal_returns_data[key] = [r.daily_return_pct] if r.daily_return_pct else []
     if not signal_returns_data:
         signal_returns_data = {"fallback": [0.001, -0.002, 0.003, -0.001, 0.002]}
+    # Extract Red Team data-mining severity for PBO adjustment
+    dm_severity = _extract_data_mining_severity(red_team)
     return evaluate_resonance(
         signal_returns=signal_returns_data,
         dimensions=["narrative", "fundamental", "technical", "sentiment"],
         observed_sharpe=_DEFAULT_OBSERVED_SHARPE,
+        data_mining_severity=dm_severity,
     )
 
 
-async def _do_decision(l1_result, l2_result, l3_result, red_team, resonance, tracker: StageTracker):
+def _extract_data_mining_severity(red_team) -> float:
+    """Extract data mining severity score from Red Team challenges for Resonance PBO adjustment."""
+    if not red_team or not hasattr(red_team, 'challenges'):
+        return 0.0
+    dm_keywords = ["data mining", "survivorship", "overfit", "multiple testing",
+                   "p-hacking", "look-ahead", "数据挖掘", "幸存偏误", "过度拟合"]
+    score = 0.0
+    for ch in red_team.challenges:
+        challenge_text = f"{getattr(ch, 'target', '')} {getattr(ch, 'challenge', '')}".lower()
+        for kw in dm_keywords:
+            if kw.lower() in challenge_text:
+                sev = getattr(ch, 'severity', 'minor')
+                score += 0.15 if sev == 'critical' else 0.08
+                break
+    return min(score, 0.5)  # cap at 0.5 to avoid over-penalizing
+
+
+async def _do_decision(l1_result, l2_result, l3_result, red_team, resonance,
+                       fragility, tracker: StageTracker):
     tracker.advance(8, "Decision: synthesis...")
     from marketmind.pipeline.decision import generate_decision
     decision = await generate_decision(l1=l1_result, l2=l2_result, l3=l3_result,
-                                        red_team=red_team, resonance=resonance)
+                                        red_team=red_team, resonance=resonance,
+                                        fragility=fragility)
     if decision is None:
         from marketmind.pipeline.decision import DecisionOutput
         decision = DecisionOutput()
@@ -304,8 +363,10 @@ async def run_daily_legacy(config, mock: bool = False, verbose: bool = False,
 
     # Steps 6-9: Shared pipeline core
     red_team = await _do_red_team(l1_result, l2_result, l2_result.ticker_candidates, tracker)
-    resonance = await _do_resonance(l3_result, tracker)
-    decision = await _do_decision(l1_result, l2_result, l3_result, red_team, resonance, tracker)
+    resonance = await _do_resonance(l3_result, red_team, tracker)
+    fragility = await _do_fragility_scan(tracker)
+    decision = await _do_decision(l1_result, l2_result, l3_result, red_team, resonance,
+                                   fragility, tracker)
     await _do_daily_archive(config, l1_result, l2_result, resonance, tracker)
 
     print("\nMarketMind daily pipeline complete.")
@@ -348,42 +409,76 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
     _shadow_result = None
     shadow_db, mother = _init_shadow_ecosystem(config, shadow_count, tracker)
 
-    # Steps 1-4: Shared pipeline core
+    # Steps 1-3: Scout → Flash → L1
     news_items = await _do_news_collection(config, tracker)
     signals = await _do_flash_preprocessing(news_items, tracker)
     l1_result = await _do_l1_analysis(signals, news_items, tracker, shadow_db=shadow_db)
-    l2_result, l3_result = await _do_l2_l3_parallel(l1_result, tracker)
 
-    # Step 5: Shadow ecosystem → NON-BLOCKING background launch (H1)
-    if config.shadow.shadows_enabled and mother is not None:
-        tracker.advance(5, "Shadows: launching background analysis...")
-        try:
-            from marketmind.gateway.async_client import get_budget
-            budget = await get_budget()
-            if budget:
-                br = budget.report()
-                tracker.result(f"Token budget: {br['tokens_pct_used']}% used, "
-                               f"{br['pro_calls_remaining']} Pro calls remaining")
-        except Exception:
-            pass
-        _shadow_progress_started()
-        _shadow_task = asyncio.create_task(mother.orchestrate_daily_cycle(news_items, {}))
-        _shadow_task.add_done_callback(_shadow_progress_done)
-        tracker.result("Shadows launched in background (non-blocking)")
-        if getattr(config.shadow, 'crystallization_enabled', False):
-            tracker.result("Memory update + crystallization will run in background")
+    # Gate: L1 early terminate — if nothing actionable, skip expensive downstream stages
+    skip_to_decision = (
+        l1_result.event_grade == 'E'
+        and l1_result.matrix_quadrant in ('observe_skip',)
+        and len(signals) == 0
+    )
+    if skip_to_decision:
+        tracker.advance(4, "No actionable signals (grade=E, observe_skip, 0 signals) — "
+                           "skipping L2+L3+Shadows+RedTeam+Resonance+Fragility...")
+        from marketmind.pipeline.layer2_fundamental import Layer2Result
+        from marketmind.pipeline.layer3_technical import Layer3BatchResult
+        from marketmind.pipeline.red_team import RedTeamReport
+        from marketmind.pipeline.resonance import ResonanceResult
+        from marketmind.pipeline.fragility_scanner import FragilityReport
+        l2_result = Layer2Result()
+        l3_result = Layer3BatchResult(results=[])
+        red_team = RedTeamReport()
+        resonance = ResonanceResult(passed=False, dsr=0.0, pbo=1.0,
+                                     forward_validation_ratio=0.0,
+                                     signal_count=0, dimensions_active=0,
+                                     verdict="NO_SIGNAL")
+        fragility = FragilityReport(alerts=[], crossed=[], warnings=[],
+                                     overall_fragility_score=0.0,
+                                     staleness_warnings=[], summary="")
+        tracker.result("L2+L3+Shadows+RedTeam+Resonance+Fragility skipped "
+                       "— ~4 Pro calls saved")
+    else:
+        # Steps 4: L2+L3 with per-stage calibration
+        l2_result, l3_result = await _do_l2_l3_parallel(l1_result, tracker, shadow_db=shadow_db)
 
-    # Steps 6-9: Shared pipeline core
-    red_team = await _do_red_team(l1_result, l2_result, l2_result.ticker_candidates, tracker)
-    resonance = await _do_resonance(l3_result, tracker)
-    decision = await _do_decision(l1_result, l2_result, l3_result, red_team, resonance, tracker)
+        # Step 5: Shadow ecosystem → NON-BLOCKING background launch (H1)
+        if config.shadow.shadows_enabled and mother is not None:
+            tracker.advance(5, "Shadows: launching background analysis...")
+            try:
+                from marketmind.gateway.async_client import get_budget
+                budget = await get_budget()
+                if budget:
+                    br = budget.report()
+                    tracker.result(f"Token budget: {br['tokens_pct_used']}% used, "
+                                   f"{br['pro_calls_remaining']} Pro calls remaining")
+            except Exception:
+                pass
+            _shadow_progress_started()
+            _shadow_task = asyncio.create_task(mother.orchestrate_daily_cycle(news_items, {}))
+            _shadow_task.add_done_callback(_shadow_progress_done)
+            tracker.result("Shadows launched in background (non-blocking)")
+            if getattr(config.shadow, 'crystallization_enabled', False):
+                tracker.result("Memory update + crystallization will run in background")
+
+        # Steps 6-7b: Red Team → Resonance (with data-mining feedback) → Fragility
+        red_team = await _do_red_team(l1_result, l2_result, l2_result.ticker_candidates, tracker)
+        resonance = await _do_resonance(l3_result, red_team, tracker)
+        fragility = await _do_fragility_scan(tracker)
+
+    # Step 8: Decision — always runs (with fragility + per-stage calibration)
+    decision = await _do_decision(l1_result, l2_result, l3_result, red_team, resonance,
+                                   fragility, tracker)
     await _do_daily_archive(config, l1_result, l2_result, resonance, tracker)
 
     # Save today's prediction for tomorrow's calibration feedback loop
-    _save_daily_prediction(l1_result, l2_result, decision)
+    _save_daily_prediction(l1_result, l2_result, l3_result, decision)
 
     # Save full reasoning brief for dashboard drill-down
-    _save_decision_brief(l1_result, l2_result, l3_result, red_team, resonance, decision)
+    _save_decision_brief(l1_result, l2_result, l3_result, red_team, resonance,
+                         decision, fragility=fragility)
 
     # Record pipeline metrics for weekly tactical audit
     _record_pipeline_metrics(
@@ -402,8 +497,8 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
     return 0
 
 
-def _save_daily_prediction(l1_result, l2_result, decision) -> None:
-    """Persist today's pipeline output for next-day calibration."""
+def _save_daily_prediction(l1_result, l2_result, l3_result, decision) -> None:
+    """Persist today's pipeline output for next-day calibration (all stages)."""
     try:
         from datetime import datetime as _dt, timezone as _tz
         from marketmind.pipeline.daily_calibration import DailyPrediction, save_prediction
@@ -417,13 +512,26 @@ def _save_daily_prediction(l1_result, l2_result, decision) -> None:
                 {"ticker": c.ticker, "direction": c.direction}
                 for c in getattr(decision, "decision_cards", [])
             ],
+            # Per-stage outcomes for calibration
+            l2_sectors=getattr(l2_result, "sector_shortlist", []) or [],
+            l2_sector_directions=getattr(l2_result, "sector_directions", {}) or {},
+            l3_green_tickers=[
+                r.ticker for r in (getattr(l3_result, "results", []) or [])
+                if getattr(r, "light", "red") == "green"
+            ],
+            l3_red_tickers=[
+                r.ticker for r in (getattr(l3_result, "results", []) or [])
+                if getattr(r, "light", "red") == "red"
+            ],
+            decision_no_trade=getattr(decision, "no_trade_card", None) is not None,
         )
         save_prediction(pred)
     except Exception:
         pass
 
 
-def _save_decision_brief(l1_result, l2_result, l3_result, red_team, resonance, decision) -> None:
+def _save_decision_brief(l1_result, l2_result, l3_result, red_team, resonance, decision,
+                          fragility=None) -> None:
     """Save full reasoning chain for dashboard drill-down."""
     import json
     from datetime import datetime as _dt, timezone as _tz
@@ -498,6 +606,13 @@ def _save_decision_brief(l1_result, l2_result, l3_result, red_team, resonance, d
                 "source": pt.source,
             }
 
+        # Fragility
+        fragility_score = 0.0
+        fragility_crossed = 0
+        if fragility:
+            fragility_score = getattr(fragility, 'overall_fragility_score', 0.0) or 0.0
+            fragility_crossed = len(getattr(fragility, 'crossed', []) or [])
+
         brief = {
             "date": today,
             "has_no_trade": has_no_trade,
@@ -511,6 +626,8 @@ def _save_decision_brief(l1_result, l2_result, l3_result, red_team, resonance, d
             "red_team_challenges": rt_challenges,
             "resonance_verdict": res_verdict,
             "resonance_dsr": res_dsr,
+            "fragility_score": fragility_score,
+            "fragility_crossed": fragility_crossed,
             "paper_trade": paper_trade,
         }
         fpath = brief_dir / f"{today}.json"
