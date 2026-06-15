@@ -277,7 +277,7 @@ td:nth-child(3){background:rgba(61,184,176,0.04)}
   <div class="principle-card">
     <div class="num">04</div>
     <div class="title">吃波段，不追毫秒</div>
-    <p>这是给Vertu手机用户做波段决策的工具。不是F1赛车争0.01秒，而是在高速公路上做方向判断——下一个出口下不下？看清了再决定。不做量化，不做高频，不做实时交易。<strong>目标不是最大化收益，而是在事件驱动的波段中做出有质量的方向判断。</strong>这个定位从根本上改变了架构选择。</p>
+    <p>这是给高净值个人投资者做波段决策的工具。不是F1赛车争0.01秒，而是在高速公路上做方向判断——下一个出口下不下？看清了再决定。不做量化，不做高频，不做实时交易。<strong>目标不是最大化收益，而是在事件驱动的波段中做出有质量的方向判断。</strong>这个定位从根本上改变了架构选择。</p>
   </div>
   <div class="principle-card">
     <div class="num">05</div>
@@ -383,6 +383,11 @@ td:nth-child(3){background:rgba(61,184,176,0.04)}
 
 <div class="insight-box">MarketMind 的架构不是在优化"更多 Agent"或"更激烈的辩论"。它在回答：<strong>如何制造出真正的认知多样性？</strong>——不是视觉上的，不是角色设定上的，而是<strong>信息通道层面的正交性</strong>。</div>
 
+<div class="highlight-box" style="margin-top:16px; border-left-color: var(--am)">
+  <div class="label" style="color: var(--am)">坦诚说明</div>
+  <p>MarketMind 核心分析引擎的 37 个信源中，大部分仍属于公开金融信息生态（31 个 RSS 新闻源 + 3 个金融 API + SEC + 社交）。如果你只是把这些源接到 TradingAgents 里，<strong>不会解决回音壁问题。</strong>反回音壁的增量不在这 37 个源的选择上——在两条线：<strong>Playground 的独立数据通道（EE Times / EDN / 半导体工程等非金融信源）解决"看什么"；影子生态的分析隔离（上下文窗口级防火墙 + 盲点扫描）解决"怎么看"。</strong>前者扩展信息生态的边界，后者防止信息生态内的群体思维——两条线缺一不可。</p>
+</div>
+
 <!-- ============================================================ -->
 <div class="section-break"></div>
 <h2 id="s5"><span class="num">05</span>坦诚的自我评估</h2>
@@ -420,12 +425,12 @@ td:nth-child(3){background:rgba(61,184,176,0.04)}
 
 <h3>在什么条件下应该判定"这个系统失败了"</h3>
 
-<p>一个不断自我怀疑的系统如果不设定<strong>外部失败判定标准</strong>，就变成了逻辑上的莫顿堡垒——任何批评都被"我们已经在怀疑自己了"吸收。所以：</p>
+<p>一个不断自我怀疑的系统如果不设定<strong>外部失败判定标准</strong>，就变成了一个自我免疫的逻辑闭环——任何批评都被"我们已经在怀疑自己了"吸收，系统变得不可证伪。所以：</p>
 
 <div class="warning-box">
-  <p><strong>项目 Kill Switch（满足任一即触发停止投入）：</strong></p>
+  <p><strong>项目 Kill Switch（系统开始产生交易建议后启用，满足任一即触发停止投入）：</strong></p>
   <ul style="margin-top:8px">
-    <li>连续 60 个交易日实盘 Sharpe &lt; 0（跑不赢现金）</li>
+    <li>连续 60 个交易日实盘 Sharpe &lt; 0（跑不赢现金）—— 注意：此条在系统当前"0交易"状态下不适用。过渡期用"连续 90 天未产生任何非 Mock 交易建议"作为替代判定</li>
     <li>影子生态 ELITE 层级连续 30 天成员数为 0（没有影子能证明自己）</li>
     <li>Playground Agent 在 120 天观察期内没有产生一个通过 6 门控的候选者</li>
   </ul>
@@ -440,7 +445,7 @@ td:nth-child(3){background:rgba(61,184,176,0.04)}
 <ul>
   <li>如果 AI 投资工具和全世界所有其他 AI 投资工具在同一个信息生态里竞争——我们在"赌"什么？赌我们的模型比别人的模型推理能力更强？</li>
   <li>arXiv:2603.12564 已经证明 LLM "看到异常但不说"——那么"让 LLM 检查 LLM 的结论"这个模式，在对抗性场景下到底有多少有效性？</li>
-  <li>在 Vertu 手机上使用 AI 投资工具——一旦崩盘，代价不只是亏钱，而是品牌信任的不可逆破裂。为这个场景设计的 AI，和为 GitHub 仓库设计的 AI，需要有什么不同？</li>
+  <li>在高净值用户端使用 AI 投资工具——一旦崩盘，代价不只是亏钱，而是品牌信任的不可逆破裂。为这个场景设计的 AI，和为 GitHub 仓库设计的 AI，需要有什么不同？</li>
 </ul>
 
 <div class="highlight-box">
@@ -550,7 +555,7 @@ td:nth-child(3){background:rgba(61,184,176,0.04)}
 <tr>
   <td><strong>市场定位</strong></td>
   <td>开源研究框架，学术验证</td>
-  <td>个人投资分析工作站，Vertu 手机集成<br><span style="font-size:11px;color:var(--t3)">不做交易执行，人始终是最终决策者</span></td>
+  <td>个人投资分析工作站，高净值用户端集成<br><span style="font-size:11px;color:var(--t3)">不做交易执行，人始终是最终决策者</span></td>
 </tr>
 </table>
 </div>

@@ -18,8 +18,8 @@ from typing import Any
 
 from marketmind.playground.agent_manifest import AgentManifest, discover_agents
 from marketmind.playground.playground_tracker import (
-    AgentPerformance, compute_agent_performance, load_performance_history,
-    record_performance,
+    AgentPerformance, _load_decisions, compute_agent_performance,
+    load_performance_history, record_performance,
 )
 
 logger = logging.getLogger("marketmind.playground.auditor")

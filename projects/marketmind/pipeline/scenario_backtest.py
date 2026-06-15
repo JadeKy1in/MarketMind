@@ -7,6 +7,7 @@ Decision heuristic mirrors decision.py:generate_decision() — no LLM calls need
 """
 from __future__ import annotations
 
+import json
 import logging
 import math
 import random

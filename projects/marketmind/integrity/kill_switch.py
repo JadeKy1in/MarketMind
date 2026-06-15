@@ -161,8 +161,7 @@ class KillSwitchMonitor:
             t2_reasons.append(f"ELITE-empty={self.consecutive_elite_empty_days}d")
         if t2_reasons:
             logger.warning("T2 WARNING: %s", "; ".join(t2_reasons))
-            if self.state == KillSwitchState.ACTIVE:
-                return KillSwitchState.WARNING
+            return KillSwitchState.WARNING
 
         # Auto-recover WARNING→ACTIVE when all T2 conditions clear
         if self.state == KillSwitchState.WARNING:
