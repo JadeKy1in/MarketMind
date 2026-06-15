@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MarketMind · 另一种 AI 投资思考 — CEO 简报 2026-06-16</title>
+<style>
+:root {
+  --bg:#0a0c0f; --card:#111418; --card2:#161920; --bd:#252830;
+  --t1:#e8eaed; --t2:#9aa0b0; --t3:#7e8696;
+  --gr:#5cb878; --rd:#e0556a; --am:#c8a050; --bl:#5a8fd0; --cy:#3db8b0;
+  --mono:'Cascadia Code','SF Mono','Consolas',monospace;
+  --sans:'PingFang SC','SF Pro SC','Microsoft YaHei',sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--t1);font:16px/1.8 var(--sans);max-width:1020px;margin:0 auto;padding:40px 28px 80px}
+h1{font:30px var(--mono);color:var(--t1);margin-bottom:6px;letter-spacing:-0.5px}
+h1 .accent{color:var(--cy)}
+.subtitle{font:13px var(--mono);color:var(--t3);margin-bottom:48px;letter-spacing:0.5px}
+
+.toc-bar{position:sticky;top:0;z-index:10;display:flex;gap:0;background:rgba(10,12,15,0.94);backdrop-filter:blur(10px);border-bottom:1px solid var(--bd);padding:10px 0;margin:-40px -28px 36px;padding-left:28px;overflow-x:auto;font:11px var(--mono)}
+.toc-item{color:var(--t3);text-decoration:none;padding:4px 14px;border-right:1px solid rgba(37,40,48,0.5);white-space:nowrap;transition:color 0.2s}
+.toc-item:hover,.toc-item.here{color:var(--cy)}
+
+.section-break{height:2px;background:linear-gradient(90deg,var(--cy),var(--bd) 40%,transparent);margin:56px 0 48px}
+
+h2{font:19px var(--mono);color:var(--t1);margin:44px 0 18px;padding-bottom:8px;border-bottom:1px solid var(--bd)}
+h2 .num{color:var(--cy);margin-right:10px}
+.section-duration{font:11px var(--mono);color:var(--t3);margin:-14px 0 18px}
+
+h3{font:14px var(--mono);color:var(--am);margin:32px 0 12px;padding-left:10px;border-left:2px solid var(--am);letter-spacing:0.5px}
+
+p{margin-bottom:14px;color:var(--t2)}
+p strong{color:var(--t1);font-weight:600}
+p em{color:var(--am);font-style:normal}
+
+.highlight-box{background:var(--card2);border-left:3px solid var(--cy);padding:16px 22px;margin:22px 0;border-radius:0 6px 6px 0}
+.highlight-box p{margin-bottom:6px;color:var(--t1)}
+.highlight-box .label{font:10px var(--mono);color:var(--cy);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}
+
+.warning-box{background:rgba(224,85,106,0.08);border-left:3px solid var(--rd);padding:16px 22px;margin:22px 0;border-radius:0 6px 6px 0}
+.warning-box p{margin-bottom:6px;color:var(--t1)}
+.warning-box .label{font:10px var(--mono);color:#f07882;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}
+.warning-box .label::before{content:"⚠ "}
+
+.insight-box{background:rgba(61,184,176,0.06);border:1px solid rgba(61,184,176,0.2);border-radius:4px;padding:12px 16px;margin:24px 0 0;font:13px var(--sans);color:var(--cy)}
+.insight-box::before{content:"本节要点  ";font:10px var(--mono);color:var(--t3);text-transform:uppercase;letter-spacing:1px;display:block;margin-bottom:4px}
+
+.compare-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:20px 0}
+@media(max-width:700px){.compare-grid{grid-template-columns:1fr}}
+.compare-card{background:var(--card);border:1px solid var(--bd);border-radius:6px;padding:18px}
+.compare-card.good{border-color:rgba(92,184,120,0.3)}
+.compare-card.warn{border-color:rgba(200,160,80,0.3)}
+.compare-card .card-title{font:12px var(--mono);color:var(--t1);margin-bottom:10px}
+.compare-card .card-title .icon{margin-right:6px}
+.compare-card p,.compare-card li{font-size:14px;color:var(--t2);margin-bottom:4px}
+.compare-card ul{padding-left:18px;margin-bottom:10px}
+.compare-card li{margin-bottom:4px}
+
+.five-principles{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px;margin:20px 0}
+.principle-card{background:var(--card);border:1px solid rgba(61,184,176,0.15);border-radius:6px;padding:22px;transition:border-color 0.3s}
+.principle-card:nth-child(even){border-color:rgba(90,143,208,0.2)}
+.principle-card .num{font:32px var(--mono);color:var(--cy);margin-bottom:8px;opacity:0.8}
+.principle-card .title{font:14px var(--mono);color:var(--t1);margin-bottom:10px}
+.principle-card p{font-size:13px;color:var(--t2)}
+
+.table-wrap{overflow-x:auto;margin:20px 0}
+table{width:100%;border-collapse:collapse;font:13px/1.6 var(--sans)}
+th{color:var(--t3);font:11px var(--mono);letter-spacing:0.5px;padding:10px 12px;text-align:left;border-bottom:1px solid var(--bd)}
+td{padding:10px 12px;border-bottom:1px solid rgba(37,40,48,0.5);color:var(--t2)}
+td:first-child{color:var(--t1)}
+tr:hover td{background:rgba(255,255,255,0.02)}
+
+.pipeline-flow{display:flex;align-items:center;gap:6px;margin:24px 0;overflow-x:auto;font:11px var(--mono);padding:14px 0}
+.pipeline-step{background:var(--card);border:1px solid var(--bd);border-radius:4px;padding:10px 14px;text-align:center;white-space:nowrap;flex-shrink:0}
+.pipeline-step .name{color:var(--t1);font-size:12px}
+.pipeline-step .desc{color:var(--t3);font-size:10px;margin-top:2px}
+.pipeline-step.gate{border-color:var(--am);background:rgba(200,160,80,0.12);box-shadow:0 0 12px rgba(200,160,80,0.08)}
+.pipeline-step.gate .name{color:var(--am)}
+.pipeline-arrow{color:var(--cy);font-size:14px;opacity:0.7;flex-shrink:0}
+
+.arch-diagram{background:var(--card);border:1px solid var(--bd);border-radius:6px;padding:22px;margin:20px 0;font:13px 'Cascadia Code','SF Mono','Consolas','Microsoft YaHei',monospace;line-height:2.1;overflow-x:auto}
+.arch-diagram .layer{margin-bottom:4px}
+.arch-diagram .lname{color:var(--cy)}
+.arch-diagram .ldetail{color:var(--t3)}
+.arch-diagram .sep{margin:8px 0;border-top:1px dashed var(--bd)}
+
+.quote-block{font:16px/1.9 var(--sans);color:var(--t1);font-style:italic;padding:16px 24px;margin:20px 0;border-left:3px solid var(--am);background:rgba(200,160,80,0.05);border-radius:0 6px 6px 0}
+.quote-block .attribution{font-style:normal;font-size:12px;color:var(--t3);margin-top:8px}
+
+footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--bd)}
+footer p{font:11px var(--mono);color:var(--t3)}
+
+.chip{display:inline-block;padding:2px 8px;border-radius:3px;font:10px var(--mono);margin-right:4px}
+.chip.green{background:rgba(92,184,120,0.15);color:var(--gr)}
+.chip.amber{background:rgba(200,160,80,0.15);color:var(--am)}
+.chip.red{background:rgba(224,85,106,0.15);color:var(--rd)}
+.chip.blue{background:rgba(90,143,208,0.15);color:var(--bl)}
+
+.stats-row{display:flex;gap:16px;margin:20px 0;flex-wrap:wrap}
+.stat-card{background:var(--card);border:1px solid var(--bd);border-radius:6px;padding:14px 20px;min-width:120px}
+.stat-card .val{font:26px var(--mono);color:var(--cy)}
+.stat-card .lbl{font:10px var(--mono);color:var(--t3);text-transform:uppercase;margin-top:2px}
+
+.decision-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin:20px 0}
+.decision-card{background:var(--card);border:2px solid var(--bd);border-radius:6px;padding:20px}
+.decision-card.primary{border-color:var(--cy);box-shadow:0 0 20px rgba(61,184,176,0.08)}
+
+ul{list-style:none;padding-left:20px;margin-bottom:16px}
+ul li{color:var(--t2);margin-bottom:6px;position:relative;padding-left:16px}
+ul li::before{content:"";position:absolute;left:0;top:10px;width:5px;height:5px;border-radius:50%;background:var(--cy);opacity:0.6}
+td:nth-child(2){background:rgba(90,143,208,0.04)}
+td:nth-child(3){background:rgba(61,184,176,0.04)}
+
+@media(min-width:1500px){body{max-width:1140px;font-size:17px}h1{font-size:34px}h2{font-size:21px}.five-principles{grid-template-columns:repeat(auto-fill,minmax(330px,1fr))}}
+@media print{body{background:#fff;color:#000;max-width:100%}.highlight-box,.warning-box,.compare-card,.principle-card,.stat-card,.arch-diagram,.decision-card{background:#f5f5f5;border-color:#ccc}.section-break{background:#000}.pipeline-step{border-color:#000}}
+</style>
+</head>
+<body>
+
+<nav class="toc-bar">
+  <a href="#s1" class="toc-item">01 全景</a>
+  <a href="#s2" class="toc-item">02 回音壁</a>
+  <a href="#s3" class="toc-item">03 设计哲学</a>
+  <a href="#s4" class="toc-item">04 架构</a>
+  <a href="#s5" class="toc-item">05 自评</a>
+  <a href="#s6" class="toc-item">06 下一步</a>
+  <a href="#s7" class="toc-item">07 对比</a>
+</nav>
+
+<h1><span class="accent">MarketMind</span> · 另一种 AI 投资思考</h1>
+<p class="subtitle">CEO 技术简报 · 2026-06-16 · 讲解 ~20 分钟 · 讨论 ~10 分钟</p>
+
+<div class="highlight-box">
+  <div class="label">阅读指引</div>
+  <p>这份材料不是产品推销。它是一次<strong>方法论的平行对话</strong>——在公司的 TradingAgents 体系之外，提供一套不同但互补的 AI 投资架构思路。核心问题只有一个：</p>
+  <p style="margin-top:10px"><strong>当 AI 投资工具的竞争集中在"谁的 Agent 更多、辩论更激烈、回测更漂亮"时，是不是有人在思考"如果所有人都错了怎么办"？</strong></p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="s1"><span class="num">01</span>当前 AI 投资工具全景</h2>
+<p class="section-duration">约 3 分钟</p>
+
+<p>2025-2026 年，AI 投资工具进入爆发期。以下是目前最具影响力的几个项目：</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>项目</th><th>Stars</th><th>Agent 架构</th><th>数据源</th><th>核心创新</th></tr>
+<tr>
+  <td><strong>TradingAgents</strong><br><span style="font-size:11px;color:var(--t3)">Tauric Research</span></td>
+  <td>71.4K</td>
+  <td>基本面 / 情绪 / 新闻 / 技术 4 分析师并行 → Bull vs Bear 辩论 → 3 风控 → 基金经理 5 档评级</td>
+  <td><strong>6 源异构分配</strong>：Yahoo Finance / Alpha Vantage / FRED / StockTwits 散户情绪 / Reddit RSS / Polymarket 预测市场</td>
+  <td>每个分析师获取<strong>不同的数据子集</strong>（非共享同一数据池）; Reddit/StockTwits 数据预提取到 prompt 中防止 LLM 伪造</td>
+</tr>
+<tr>
+  <td><strong>AI Hedge Fund</strong><br><span style="font-size:11px;color:var(--t3)">Virat Singh</span></td>
+  <td>53K</td>
+  <td>14 位投资大师人格（巴菲特/芒格/塔勒布/木头姐等）+ 5 专业分析师 → 风控 → 组合经理</td>
+  <td><strong>1 个商业 API</strong>：Financial Datasets API（提供价格/财务指标/内部人交易/新闻情感等全部数据）</td>
+  <td>投资大师人格化——让 Damodaran 做 DCF、让塔勒布看尾部风险；所有 19 个 Agent 并行分析同一标的</td>
+</tr>
+<tr>
+  <td><strong>AlphaAgents</strong><br><span style="font-size:11px;color:var(--t3)">BlackRock</span></td>
+  <td>论文</td>
+  <td>3 Agent（Fundamental/Sentiment/Valuation）→ AutoGen Round-Robin 辩论 → 共识/分歧标记</td>
+  <td>Bloomberg News / SEC 10-K 10-Q / Yahoo Finance</td>
+  <td>机构级 Round-Robin 辩论协议；风险偏好参数化（同一数据可产出不同风险态度的决策）</td>
+</tr>
+<tr>
+  <td><strong>FinGPT</strong><br><span style="font-size:11px;color:var(--t3)">AI4Finance</span></td>
+  <td>~20K</td>
+  <td>5 层全栈框架（数据→工程→LLM→任务→应用），LoRA 金融微调</td>
+  <td>互联网金融文本流（新闻/推文/报告）</td>
+  <td>开源金融 LLM 基础设施；单次 LoRA 微调成本 &lt;$300；支持 RLHF 个性化风险偏好</td>
+</tr>
+</table>
+</div>
+
+<h3>它们的三个共同闪光点</h3>
+
+<div class="compare-grid">
+  <div class="compare-card good">
+    <div class="card-title"><span class="icon">&#9670;</span>结构化多视角</div>
+    <p>不再是单一模型输出 buy/sell。多个 Agent 从不同维度分析同一标的——TradingAgents 的异构数据分配、AI Hedge Fund 的投资人格多样化——结构上比单体 LLM 更接近真实投研团队。</p>
+  </div>
+  <div class="compare-card good">
+    <div class="card-title"><span class="icon">&#9670;</span>有说服力的验证数据</div>
+    <p>TradingAgents 论文提供了完整的 ablation study；AI Hedge Fund 支持完整历史回放；QuantAgents 在 NASDAQ-100 上三年累计回报 ~300%（EMNLP 2025 发表）。</p>
+  </div>
+  <div class="compare-card good">
+    <div class="card-title"><span class="icon">&#9670;</span>工程化成熟</div>
+    <p>LangGraph 编排、多 LLM 供应商、SQLite/MongoDB 持久化、Web Dashboard、SSE 流式推送——这些项目已具备生产级工程质量。TradingAgents 在源码层面甚至做了 Reddit JSON API 被封禁后自动降级到 RSS 的容错设计。</p>
+  </div>
+</div>
+
+<h3>以及它们共享的一个结构特征</h3>
+
+<p>这四个项目在数据源数量上差异巨大——从 AI Hedge Fund 的 1 个 API 到 TradingAgents 的 6 个异构源——但<strong>它们都运行在同一个信息生态系统里</strong>：公开可获取的金融市场价格、新闻头条、社交媒体情绪、监管文件、宏观经济指标。这个生态系统的特征是：</p>
+
+<ul>
+  <li><strong>它捕捉的是"市场共识"</strong>——股价、头条、推文、Reddit 热帖，本质上都在反映市场参与者已经知道或正在讨论的事情。</li>
+  <li><strong>它不捕捉"隐藏信息"</strong>——供应链瓶颈的早期信号、抵押贷款造假率、区域性银行的资产负债表异常、行业中未被定价的结构性变化。</li>
+  <li><strong>当黑天鹅的种子埋在这个生态系统之外时，再多数据源也无济于事</strong>——因为它们都在同一个信息域内交叉引用彼此。</li>
+</ul>
+
+<div class="insight-box">不是数据源太少，是数据生态太窄。6 个 API 和 1 个 API 面对同一种黑天鹅时的盲区，可能没有本质区别。</div>
+
+<!-- ============================================================ -->
+<div class="section-break"></div>
+<h2 id="s2"><span class="num">02</span>回音壁问题：当所有人都往同一个方向看</h2>
+<p class="section-duration">约 4 分钟</p>
+
+<h3>先讲一个故事</h3>
+
+<div class="quote-block">
+  <p>2006年，所有主流指标——GDP增速、失业率、房价指数——看起来都很好。市场共识是"房价永远不会全国性下跌"。但同时，抵押贷款申请造假率在飙升，CDO底层资产违约率在悄悄爬升，加州和佛罗里达的二手房挂牌量开始反常激增。</p>
+  <p>这些信号<strong>不在主流金融信息生态里</strong>。它们存在于区域性银行的贷款记录、县级房产登记处、以及少数做空研究员手动整理的Excel表格里。等到这些信号终于出现在Bloomberg终端上的时候，雷曼兄弟已经破产了。</p>
+  <div class="attribution">— 次贷危机：当所有主流信息都指向同一个方向</div>
+</div>
+
+<p>这个故事的核心不是"有人看到了别人没看到的东西"。核心是：<strong>当所有主流信息来源都在说同一件事的时候，正是风险最高的时候。</strong></p>
+
+<h3>AI系统放大了这个问题</h3>
+
+<p>这不仅仅是人类的弱点。AI投资系统有三个特性，让回音壁风险变得更大：</p>
+
+<div class="compare-grid">
+  <div class="compare-card warn">
+    <div class="card-title"><span class="icon">&#9654;</span>速度 × 不自知</div>
+    <p>人类分析师需要几周形成的共识偏差，AI在一次运行中就能完成。而且AI输出的文本质量极高，逻辑严密、引用完整——这种"看起来太对了"的文本，让人更难发现里面的漏洞。</p>
+  </div>
+  <div class="compare-card warn">
+    <div class="card-title"><span class="icon">&#9654;</span>规模 × 假独立</div>
+    <p>AI Hedge Fund有19个Agent，TradingAgents有6个数据源——看起来很独立。但当所有Agent都从同一个信息池取水，19个声音说同一句话，你只会更确信它是真的。</p>
+  </div>
+  <div class="compare-card warn">
+    <div class="card-title"><span class="icon">&#9654;</span>看到问题但不说</div>
+    <p>学术研究已证实：AI在被数据操纵的场景中，<strong>即使准确识别了异常，仍然会推荐被操纵的标的</strong>。它倾向于"执行指令"而不是"质疑数据"。给AI一个交叉验证的数据源，不等于它会把验证结果说出来。</p>
+  </div>
+</div>
+
+<h3>当下的具体风险</h3>
+
+<p>当前AI产业处于一个特殊的信息环境中：AI巨头需要维持市场信心，政策制定者无法承受泡沫破灭的代价，媒体和社交网络上单边信息泛滥。<strong>这是一个所有公开信息都在朝同一个方向推的市场——恰恰是回音壁效应最容易产生系统性盲区的环境。</strong></p>
+
+<div class="warning-box">
+  <div class="label">对我们公司意味着什么</div>
+  <p><strong>如果我们的AI投资系统只从公开信息生态中汲取数据——无论用了1个API还是6个——它面对的不只是"某个数据源可能出错"，而是"整个信息生态系统可能同时产生结构性盲区"。回测越漂亮，信心越强，盲区暴露那一天的损失也越彻底。</strong></p>
+</div>
+
+<div class="insight-box">回音壁的解法不是"更多数据源"，而是<strong>"不在同一个信息生态里的数据源"</strong>——以及一套<strong>不依赖"自我检查"的独立验证机制</strong>。</div>
+
+<!-- ============================================================ -->
+<div class="section-break"></div>
+<h2 id="s3"><span class="num">03</span>MarketMind 的设计哲学：五个不同的选择</h2>
+<p class="section-duration">约 3 分钟</p>
+
+<p>我不是要做"更好的 TradingAgents"。我是在回答一个不同的问题：<strong>如果要设计一个能自我迭代、有自己的独立判断、能从信息生态之外找验证信号的投资分析系统，它应该长什么样？</strong></p>
+
+<div class="five-principles">
+  <div class="principle-card">
+    <div class="num">01</div>
+    <div class="title">系统要能自我迭代成长</div>
+    <p>想象两个分析师：一个每天从零开始读新闻，另一个记住了过去十年每一次判断是对是错、为什么。第二个只会越来越准。<strong>三层记忆系统</strong>让每个影子Agent像第二个分析师——工作记忆记住今天的事，情景记忆锁住关键时刻，语义记忆提炼可复用的方法论。系统越跑越聪明。</p>
+  </div>
+  <div class="principle-card">
+    <div class="num">02</div>
+    <div class="title">要有自己的独立判断</div>
+    <p>CEO做重大决定前，会分别找24个人单独聊，还是开一个大会？当然是先单独聊——防止前面的人说完，后面的人跟着点头。<strong>24个影子Agent</strong>各自独立分析同一批新闻，互相看不到对方的结论。当24个独立判断开始高度趋同——盲点扫描器拉警报：这是真正的共识，还是大家想到一块去了？</p>
+  </div>
+  <div class="principle-card">
+    <div class="num">03</div>
+    <div class="title">用信息生态之外的信号交叉验证</div>
+    <p>判断一家芯片公司值不值得投资，光看财报和股价不够。去看它的供应商——设备交期有没有变长？原料订单有没有下降？这些信息不在Bloomberg上，但在EE Times和EDN上。<strong>Playground实验沙箱</strong>的Agent拥有这些独立数据通道，须运行60天以上、通过6个门控检验后，才能将其判断接入主系统。</p>
+  </div>
+  <div class="principle-card">
+    <div class="num">04</div>
+    <div class="title">吃波段，不追毫秒</div>
+    <p>这是给Vertu手机用户做波段决策的工具。不是F1赛车争0.01秒，而是在高速公路上做方向判断——下一个出口下不下？看清了再决定。不做量化，不做高频，不做实时交易。<strong>目标不是最大化收益，而是在事件驱动的波段中做出有质量的方向判断。</strong>这个定位从根本上改变了架构选择。</p>
+  </div>
+  <div class="principle-card">
+    <div class="num">05</div>
+    <div class="title">AI是参谋，人做决定</div>
+    <p>参谋提供分析，将军做出决定。三层关卡确保你永远同时看到三份互相矛盾的文件——<strong>买入论证、不买论证、红队攻击意见</strong>。没有"AI推荐买入"，只有"数据显示A，风险是B，反方观点是C——你的判断是什么？"选择权在你，不在模型。</p>
+  </div>
+</div>
+
+<div class="insight-box">这五个选择叠加在一起，不是在优化"预测更准"——而是在优化<strong>"不被系统性愚弄的概率"</strong>。</div>
+
+<!-- ============================================================ -->
+<div class="section-break"></div>
+<h2 id="s4"><span class="num">04</span>架构如何落地这些理念</h2>
+<p class="section-duration">约 6 分钟</p>
+
+<div class="stats-row">
+  <div class="stat-card"><div class="val">37</div><div class="lbl">信息源 · 4 级权威分级</div></div>
+  <div class="stat-card"><div class="val">24</div><div class="lbl">独立影子 Agent</div></div>
+  <div class="stat-card"><div class="val">10+3</div><div class="lbl">Pipeline 阶段 + Gate</div></div>
+  <div class="stat-card"><div class="val">6</div><div class="lbl">Playground 升级门控</div></div>
+  <div class="stat-card"><div class="val">3</div><div class="lbl">人类决策关卡</div></div>
+  <div class="stat-card"><div class="val">1,998+</div><div class="lbl">测试 · 全部通过</div></div>
+</div>
+
+<h3>核心架构：两条并行分析轨道</h3>
+
+<div class="arch-diagram">
+  <div class="layer"><span class="lname">轨道 A — 主 Pipeline（深度 + 对抗验证）</span></div>
+  <div class="layer" style="margin-left:16px;"><span class="ldetail">Scout 37源采集 → Flash 初筛 → L1 叙事分析（2×2矩阵 + 级联效应）</span></div>
+  <div class="layer" style="margin-left:16px;"><span class="ldetail">→ &#9670; Gate 1（人：方向确认）→ L2 基本面 + L3 技术面（并行）</span></div>
+  <div class="layer" style="margin-left:16px;"><span class="ldetail">→ Red Team 红队攻击 → Resonance 统计验证（DSR/PBO/CSCV）→ Fragility 脆弱性扫描</span></div>
+  <div class="layer" style="margin-left:16px;"><span class="ldetail">→ &#9670; Gate 2（人：信号确认 + ELITE 影子发言）→ Decision 决策合成（含现金重框）→ &#9670; Gate 3（人：审批）</span></div>
+  <div class="sep"></div>
+  <div class="layer"><span class="lname">轨道 B — 影子生态（独立 + 并行 + 防火墙）</span></div>
+  <div class="layer" style="margin-left:16px;"><span class="ldetail">与轨道 A 的 L2+L3 同时执行。24 个影子独立分析<strong>相同的原始新闻</strong></span></div>
+  <div class="layer" style="margin-left:16px;"><span class="ldetail">&#10060; 看不到 L1/L2/L3 结论  &#10060; 看不到其他影子的分析  &#10003; 只看到原始新闻 + 自己的历史记忆</span></div>
+  <div class="sep"></div>
+  <div class="layer"><span class="lname">轨道 C — Playground（独立数据 + 独立验证 + 升级通道）</span></div>
+  <div class="layer" style="margin-left:16px;"><span class="ldetail">&#10060; 不经过主管道 Scout  &#10003; EE Times / EDN / Semiconductor Engineering 等独立数据源</span></div>
+</div>
+
+<h3>影子生态：24 个独立思维的基金经理</h3>
+
+<p>这是 MarketMind 与 TradingAgents 和 AI Hedge Fund 最根本的架构差异。不是"分工"（每人看不同维度），而是"独立"（每人看全局，方法论不同，<strong>互相隔离</strong>）。</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>影子类型</th><th>数量</th><th>设计逻辑</th></tr>
+<tr><td><strong>Expert 领域专家</strong></td><td>16</td><td>每个影子聚焦一个资产领域（黄金/能源/债券/科技/医疗/新兴市场/外汇/做空等），拥有该领域的深度知识体系和三层记忆</td></tr>
+<tr><td><strong>Daredevil 逆向策略</strong></td><td>8</td><td>采用非主流、高确信度的逆向策略——区间交易/反转/动量——人群中一定要有"唱反调的人"</td></tr>
+<tr><td><strong>特殊影子（按需创建）</strong></td><td>动态</td><td>Temp 事件驱动影子（重大事件时创建，事件结束销毁）; MissedPath 反事实追踪（追踪在 Gate 处被否决的方向"如果当时选了会怎样"）</td></tr>
+</table>
+</div>
+
+<h3>信息防火墙：工程实现</h3>
+
+<p>防火墙不是 prompt 层面的"请勿查看其他分析"——arXiv:2603.12564 恰恰证明了 prompt 隔离不可靠。MarketMind 的实现是<strong>上下文窗口级别的物理隔离</strong>：每个影子 Agent 的 LLM 调用使用独立的上下文窗口，只包含原始新闻数据和该影子自己的历史记忆。<strong>任何其他影子的输出、任何主 Pipeline 的分析结论——永远不会出现在该影子的上下文中。</strong></p>
+
+<h3>自我进化：五级分层 + 淘汰机制</h3>
+
+<div class="table-wrap">
+<table>
+<tr><th>层级</th><th>条件</th><th>核心权益</th></tr>
+<tr><td><span class="chip green">ELITE</span></td><td>Top 15% · Deflated Sharpe ≥ 0.8 · 30+ 连续日</td><td><strong>Gate 2 发言权</strong>——在人类做信号确认时，ELITE 影子的独立意见与主 Pipeline 结论并列展示</td></tr>
+<tr><td><span class="chip blue">EXCELLENT</span></td><td>Top 30% · Deflated Sharpe ≥ 0.6 · 10+ 连续日</td><td>可申请毕业进入主 Pipeline 辅助决策</td></tr>
+<tr><td>NORMAL</td><td>默认层级</td><td>完整分析权 · 参与排名</td></tr>
+<tr><td><span class="chip amber">ENDANGERED</span></td><td>Bottom 20% · 14+ 连续日</td><td>进入挑战者淘汰流程——三阶段诊断、挑战、裁决</td></tr>
+<tr><td style="color:var(--t3)">&#10005; 淘汰</td><td>挑战失败</td><td>历史数据保留用于学习，方法论归档为反面教材</td></tr>
+</table>
+</div>
+
+<h3>保持怀疑的系统性机制</h3>
+
+<div class="compare-grid">
+  <div class="compare-card good">
+    <div class="card-title"><span class="icon">&#9654;</span>Red Team 红队攻击</div>
+    <p>对主 Pipeline 的 L1+L2+L3 结论进行系统性攻击——逻辑漏洞、反事实挑战、替代解释、最坏情况损失。每个挑战附带严重度评级。不是"辩论"，是"找茬"。</p>
+  </div>
+  <div class="compare-card good">
+    <div class="card-title"><span class="icon">&#9654;</span>统计反过拟合</div>
+    <p>采用 López de Prado 的学术框架：DSR（Deflated Sharpe Ratio）检测多重策略测试后的真实技能；PBO（Probability of Backtest Overfitting）检测回测过拟合概率。PBO > 0.5 时自动降权 + 标记"需人工复核"。</p>
+  </div>
+  <div class="compare-card good">
+    <div class="card-title"><span class="icon">&#9654;</span>盲点扫描器</div>
+    <p>每日扫描 24 个影子的全部投票：方向集中度是否过高？是否有资产类别被集体遗漏？不同影子的方法论是否在无意中趋同？——识别"大家想到一块了"是否代表真正的市场共识，还是方法论的隐性收敛。</p>
+  </div>
+  <div class="compare-card good">
+    <div class="card-title"><span class="icon">&#9654;</span>No-Trade Card</div>
+    <p>不交易本身是一种决策。"如果我现在持有的是现金，我会买入吗？"——强制消除禀赋效应。Decision Card + No-Trade Card + Red Team 攻击意见三者同时展示，让人类看到的是分歧而非共识。</p>
+  </div>
+</div>
+
+<h3>Playground：策略孵化器，不是一次性模型</h3>
+
+<p>最关键的不是 6 个门控本身——而是<strong>第 6 个门控的设计逻辑</strong>：</p>
+
+<div class="highlight-box">
+  <p><strong>升级门控 #6：与主 Pipeline 的决策相关性 ≤ 0.7</strong> <span style="font-size:10px;color:var(--t3);font-family:var(--mono)">架构就绪，待校准数据桥接激活</span></p>
+  <p style="margin-top:8px">如果 Playground Agent 的产出和主 Pipeline 高度一致——说明它<strong>没有提供增量信息</strong>。即使它的准确率很高，也不会被升级。相关性计算采用 Spearman 秩相关（金融信号的标准选择）辅以 VIF 多重共线性检测。我们不是在找"正确"的 Agent，我们在找<strong>"主 Pipeline 没看到的东西"</strong>。</p>
+</div>
+
+<p>其余 5 个门控（≥60 天观察期、≥20 次结算、方向准确率 ≥55% 且 p&lt;0.05、Sharpe ≥0.5、最大回撤 ≤25%）确保的是"这个 Agent 本身值得被认真对待"。第 6 个门控确保的是"它值得被<strong>加进来</strong>"——因为它是不同的声音，不是回声。</p>
+
+<div class="insight-box">MarketMind 的架构不是在优化"更多 Agent"或"更激烈的辩论"。它在回答：<strong>如何制造出真正的认知多样性？</strong>——不是视觉上的，不是角色设定上的，而是<strong>信息通道层面的正交性</strong>。</div>
+
+<!-- ============================================================ -->
+<div class="section-break"></div>
+<h2 id="s5"><span class="num">05</span>坦诚的自我评估</h2>
+<p class="section-duration">约 3 分钟</p>
+
+<h3>这个系统不擅长什么</h3>
+
+<div class="table-wrap">
+<table>
+<tr><th>场景</th><th>为什么</th></tr>
+<tr><td>短期量化优化</td><td>不做高频数据采集，Pipeline 周期是"每日一次"，不是"每秒一次"</td></tr>
+<tr><td>全自动化执行</td><td>三层 Gate 全部需要人类介入。这不是"缺陷"，是设计意图——但在全自动化场景下不适用</td></tr>
+<tr><td>跨市场套利</td><td>资产池限制在 Robinhood 可交易标的（25 个 ETF/个股/加密资产），不覆盖期货、期权、外汇保证金</td></tr>
+<tr><td>毫秒级新闻反应</td><td>Scout 每日定时采集，不是流式实时推送</td></tr>
+</table>
+</div>
+
+<h3>当前状态：跑通了架构，还没通过市场检验</h3>
+
+<p>以下数据来自系统运行日志（<code>pipeline_metrics.jsonl</code>）：</p>
+
+<div class="stats-row">
+  <div class="stat-card"><div class="val">14</div><div class="lbl">累计 Pipeline 运行</div></div>
+  <div class="stat-card"><div class="val">0</div><div class="lbl">生成的交易建议</div></div>
+  <div class="stat-card"><div class="val">100%</div><div class="lbl">No-Trade 率</div></div>
+  <div class="stat-card"><div class="val">0%</div><div class="lbl">L3 技术面绿灯率</div></div>
+</div>
+
+<p>14 次运行，0 次建议交易。周审计的结论是"上游过滤器过于严格，导致决策瘫痪"。L2/L3 绿灯率为 0%。Resonance 统计验证从未通过。</p>
+
+<div class="quote-block">
+  <p><strong>14次运行，14次拒绝。</strong>我不知道是"标准太高"还是"根本不会分析"——因为没有足够的非Mock运行数据来区分这两种可能。坦诚说：在拿到实盘数据之前，这个问题没有答案。</p>
+  <div class="attribution">— 2026-06-15</div>
+</div>
+
+<h3>在什么条件下应该判定"这个系统失败了"</h3>
+
+<p>一个不断自我怀疑的系统如果不设定<strong>外部失败判定标准</strong>，就变成了逻辑上的莫顿堡垒——任何批评都被"我们已经在怀疑自己了"吸收。所以：</p>
+
+<div class="warning-box">
+  <p><strong>项目 Kill Switch（满足任一即触发停止投入）：</strong></p>
+  <ul style="margin-top:8px">
+    <li>连续 60 个交易日实盘 Sharpe &lt; 0（跑不赢现金）</li>
+    <li>影子生态 ELITE 层级连续 30 天成员数为 0（没有影子能证明自己）</li>
+    <li>Playground Agent 在 120 天观察期内没有产生一个通过 6 门控的候选者</li>
+  </ul>
+</div>
+
+<h3>尽管不确定，为什么这个思路仍然值得被认真对待</h3>
+
+<p>当前的 AI 投资工具赛道，几乎所有人的优化方向都是同一件事：<strong>更多的 Agent、更激烈的辩论、更漂亮的回测、更高的预测准确率。</strong>这些是"量"的优化——在同一个信息生态里越跑越快。</p>
+
+<p>MarketMind 尝试的是"质"的方向——<strong>让思考路径本身更不容易被系统性盲区捕获。</strong>这条路不一定对，但它提出了一些值得讨论的问题：</p>
+
+<ul>
+  <li>如果 AI 投资工具和全世界所有其他 AI 投资工具在同一个信息生态里竞争——我们在"赌"什么？赌我们的模型比别人的模型推理能力更强？</li>
+  <li>arXiv:2603.12564 已经证明 LLM "看到异常但不说"——那么"让 LLM 检查 LLM 的结论"这个模式，在对抗性场景下到底有多少有效性？</li>
+  <li>在 Vertu 手机上使用 AI 投资工具——一旦崩盘，代价不只是亏钱，而是品牌信任的不可逆破裂。为这个场景设计的 AI，和为 GitHub 仓库设计的 AI，需要有什么不同？</li>
+</ul>
+
+<div class="highlight-box">
+  <p><strong>我们不是在做一个更准的预测模型。我们是在做一个让人的判断始终在场、让不同声音有通道表达的思考框架。它不一定比 TradingAgents 赚得多——但它可能在你最确信的时候，递给你一张写着"万一错了呢"的卡片。</strong></p>
+</div>
+
+<!-- ============================================================ -->
+<div class="section-break"></div>
+<h2 id="s6"><span class="num">06</span>下一步：我需要你做三个决定</h2>
+<p class="section-duration">约 3 分钟 + 讨论</p>
+
+<div class="decision-cards">
+  <div class="decision-card primary">
+    <div class="card-title" style="font:14px var(--mono);color:var(--t1);margin-bottom:12px">决定 1 · 方向判断</div>
+    <p style="font-size:14px;margin-bottom:10px"><strong>"反回音壁"——在公开金融信息生态之外寻找独立验证信号——是否值得公司投入？</strong></p>
+    <div style="font-size:13px;color:var(--t2);margin-bottom:8px">
+      <p style="margin-bottom:6px"><strong>选项A：</strong>继续投入。进入决定2。</p>
+      <p style="margin-bottom:6px"><strong>选项B：</strong>到此为止。这份材料作为一次方法论分享，目的已达到。</p>
+    </div>
+    <div style="font-size:11px;color:var(--t3);margin-top:8px;border-top:1px solid var(--bd);padding-top:8px">
+      <strong>成功标准：</strong>做出选择即完成。<br>
+      <strong>时间：</strong>本次讨论内。<br>
+      <strong>资源：</strong>0。
+    </div>
+  </div>
+  <div class="decision-card">
+    <div class="card-title" style="font:14px var(--mono);color:var(--t1);margin-bottom:12px">决定 2 · 验证资源</div>
+    <p style="font-size:14px;margin-bottom:10px"><strong>是否投入资源进行3-6个月的真实市场并行观察？</strong></p>
+    <div style="font-size:13px;color:var(--t2);margin-bottom:8px">
+      <p style="margin-bottom:6px"><strong>选项A：</strong>启动并行观察。MarketMind与现有TradingAgents流程并行运行，对比两套系统的建议分歧率和方向准确率。不影响现有流程——只旁观，不替换。</p>
+      <p style="margin-bottom:6px"><strong>选项B：</strong>暂缓。等待更多架构验证数据后再决定。</p>
+    </div>
+    <div style="font-size:11px;color:var(--t3);margin-top:8px;border-top:1px solid var(--bd);padding-top:8px">
+      <strong>成功标准：</strong>6个月后，能清晰回答"MarketMind是否提供了现有系统没有捕捉到的信号"。<br>
+      <strong>时间：</strong>决定后2周内启动，持续3-6个月。<br>
+      <strong>资源：</strong>轻量方案——1台服务器（已有）+ 每周1小时对接人时间。无需额外采购。
+    </div>
+  </div>
+  <div class="decision-card">
+    <div class="card-title" style="font:14px var(--mono);color:var(--t1);margin-bottom:12px">决定 3 · 组织对接</div>
+    <p style="font-size:14px;margin-bottom:10px"><strong>是否指定一个内部对接人持续跟踪？</strong></p>
+    <div style="font-size:13px;color:var(--t2);margin-bottom:8px">
+      <p style="margin-bottom:6px"><strong>选项A：</strong>指定一人。不需要懂代码。职责：每周看一次两套系统的对比简报，判断MarketMind的"不同声音"是否提供了增量价值。</p>
+      <p style="margin-bottom:6px"><strong>选项B：</strong>暂不指定。由我通过邮件简报单向汇报，直到有明确信号后再讨论对接。</p>
+    </div>
+    <div style="font-size:11px;color:var(--t3);margin-top:8px;border-top:1px solid var(--bd);padding-top:8px">
+      <strong>成功标准：</strong>对接人能在每月的"继续/暂停"评估中做出判断。<br>
+      <strong>时间：</strong>决定后1周内确认人选。<br>
+      <strong>资源：</strong>每周1小时。无需技术背景。
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<div class="section-break"></div>
+<h2 id="s7"><span class="num">07</span>附录：方法论维度对比</h2>
+<p class="section-duration">约 2 分钟（可选讲解或会后阅读）</p>
+
+<div class="table-wrap">
+<table>
+<tr><th>维度</th><th>TradingAgents（71.4K &#9733;）</th><th>MarketMind</th></tr>
+<tr>
+  <td><strong>Agent 架构</strong></td>
+  <td>4 分析师分工 + 辩论 + 风控 + 基金经理<br><span style="font-size:11px;color:var(--t3)">分工模式：每人看不同维度</span></td>
+  <td>24 影子独立分析 + 信息防火墙<br><span style="font-size:11px;color:var(--t3)">独立模式：每人看全局，方法论不同，互相隔离</span></td>
+</tr>
+<tr>
+  <td><strong>数据源与信息生态</strong></td>
+  <td>6 源（Yahoo Finance / Alpha Vantage / FRED / StockTwits / Reddit / Polymarket）<br><span style="font-size:11px;color:var(--t3)">均属于公开金融信息生态</span></td>
+  <td>37 源（31 RSS + 3 API + SEC + 社交）<br>+ Playground 独立数据通道（EE Times / EDN / 半导体工程等）<br><span style="font-size:11px;color:var(--t3)">公开生态 + 非金融信息生态</span></td>
+</tr>
+<tr>
+  <td><strong>信息隔离</strong></td>
+  <td>异构数据分配——每个分析师获取不同数据子集<br><span style="font-size:11px;color:var(--t3)">辩论阶段共享信息，Bull/Bear 看到对方论点</span></td>
+  <td>上下文窗口级物理隔离——影子互不可见，<br>不可见主分析结论，不可见其他影子分析</td>
+</tr>
+<tr>
+  <td><strong>对抗验证</strong></td>
+  <td>Bull vs Bear 结构化辩论<br><span style="font-size:11px;color:var(--t3)">辩论的是共享数据的不同解读</span></td>
+  <td>Red Team 系统攻击 + 盲点扫描<br>+ 独立数据源交叉验证<br><span style="font-size:11px;color:var(--t3)">找的是"数据里没有的东西"</span></td>
+</tr>
+<tr>
+  <td><strong>过拟合防护</strong></td>
+  <td>历史回测（论文提供 ablation study）</td>
+  <td>DSR / PBO / CSCV 三重统计验证<br>+ PBO > 0.5 自动降权</td>
+</tr>
+<tr>
+  <td><strong>人类角色</strong></td>
+  <td>端到端自动化，Agent 输出 Buy/Sell</td>
+  <td>3 层 Gate 强制人类介入<br>+ No-Trade Card 同时展示不交易论证</td>
+</tr>
+<tr>
+  <td><strong>自我进化</strong></td>
+  <td>trading_memory.md 记录历史决策与反思</td>
+  <td>三层记忆 + 知识结晶化<br>+ 五级分层 + 挑战者淘汰</td>
+</tr>
+<tr>
+  <td><strong>策略孵化</strong></td>
+  <td>无</td>
+  <td>Playground 实验沙箱<br>+ 6 门控（含相关性 ≤0.7 反回音壁门控）</td>
+</tr>
+<tr>
+  <td><strong>行为金融学</strong></td>
+  <td>无系统性嵌入</td>
+  <td>现金重框（禀赋效应对抗）· 锚定防范<br>· 确认偏误对抗（Red Team）· 过度自信防范（PBO）</td>
+</tr>
+<tr>
+  <td><strong>市场定位</strong></td>
+  <td>开源研究框架，学术验证</td>
+  <td>个人投资分析工作站，Vertu 手机集成<br><span style="font-size:11px;color:var(--t3)">不做交易执行，人始终是最终决策者</span></td>
+</tr>
+</table>
+</div>
+
+<p style="font-size:11px;color:var(--t3);margin-top:8px">注：TradingAgents 信息基于其 GitHub 仓库源码审查（default_config.py、dataflows/、agents/）和论文 arXiv:2412.20138。AI Hedge Fund 基于其 GitHub 仓库源码审查（src/tools/api.py、src/agents/）。数据截至 2026-06。</p>
+
+<footer>
+  <p>MarketMind · AI 投资分析工作站 &nbsp;|&nbsp; projects/marketmind/ &nbsp;|&nbsp; 1,998+ 测试 &nbsp;|&nbsp; 10 阶段 Pipeline &nbsp;|&nbsp; 24 影子生态 &nbsp;|&nbsp; 6 门控 Playground</p>
+</footer>
+
+</body>
+</html>

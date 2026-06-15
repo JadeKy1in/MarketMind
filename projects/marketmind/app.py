@@ -12,9 +12,13 @@ from marketmind.pipeline.interactive_orchestration import run_interactive
 
 def main():
     parser = argparse.ArgumentParser(description="MarketMind — AI Investment Analysis Workstation")
-    parser.add_argument("--mode", choices=["daily", "interactive", "gui", "shadows"], default="gui",
+    parser.add_argument("--mode", choices=["daily", "interactive", "gui", "shadows", "scenario"], default="gui",
                         help="Run mode: daily (full pipeline), interactive (L1 Socratic dialogue), "
-                             "shadows (background shadow ecosystem only), or gui (default: gui)")
+                             "shadows (background shadow ecosystem only), scenario (historical scenario backtest), "
+                             "or gui (default: gui)")
+    parser.add_argument("--scenario", type=str, default=None, metavar="NAME",
+                        help="Scenario name for --mode scenario (e.g., covid2020_crash). "
+                             "Use 'all' to run all 6 standard scenarios.")
     parser.add_argument("--mock", action="store_true",
                         help="Use mock LLM responses (no API calls)")
     parser.add_argument("--verbose", "-v", action="store_true",
@@ -70,6 +74,9 @@ def main():
                                           shadow_count=0 if args.no_shadows else args.shadows))
         asyncio.run(_run_playground_if_requested(args, config))
         return ret
+    elif args.mode == "scenario":
+        from marketmind.pipeline.scenario_backtest import run_scenario_backtest
+        return run_scenario_backtest(args)
     elif args.mode == "gui":
         from marketmind.pipeline.orchestration import run_gui
         return run_gui(config)

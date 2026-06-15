@@ -82,18 +82,348 @@ def _check_statistical_significance(perf: AgentPerformance) -> bool:
     return z > 1.645
 
 
-def _compute_main_pipeline_correlation(
-    agent_id: str, playground_dir: Path | None = None
-) -> float | None:
-    """Compute correlation between agent's directional calls and main pipeline decisions.
+# ── Spearman rank correlation (manual — no scipy dependency needed) ──
 
-    Returns None if insufficient data to compute. Requires both playground
-    decisions and main pipeline calibration data to exist for the same dates.
+def _spearman_rank(x: list[float], y: list[float]) -> float | None:
+    """Compute Spearman rank correlation between two equal-length series.
+
+    Spearman is preferred over Pearson for financial signals because it
+    captures monotonic relationships, not just linear ones. A directional
+    call that is "more bullish when the main pipeline is more bullish" is
+    a monotonic relationship worth detecting even if the magnitudes differ.
+
+    Returns None if series have zero variance (all values identical).
     """
-    # Placeholder — requires main pipeline calibration data for same period.
-    # Will be implemented when the bridge between playground and calibration
-    # data is established.
-    return None
+    import math
+    n = len(x)
+    if n < 3:
+        return None
+
+    def _rank(series: list[float]) -> list[float]:
+        """Assign ranks to values, averaging ties."""
+        indexed = sorted(enumerate(series), key=lambda kv: kv[1])
+        ranks = [0.0] * n
+        i = 0
+        while i < n:
+            j = i
+            while j + 1 < n and indexed[j + 1][1] == indexed[i][1]:
+                j += 1
+            avg_rank = (i + j) / 2.0 + 1.0  # 1-based ranks
+            for k in range(i, j + 1):
+                ranks[indexed[k][0]] = avg_rank
+            i = j + 1
+        return ranks
+
+    rank_x = _rank(x)
+    rank_y = _rank(y)
+
+    # Check for zero variance
+    if all(r == rank_x[0] for r in rank_x) or all(r == rank_y[0] for r in rank_y):
+        return None
+
+    mean_rx = sum(rank_x) / n
+    mean_ry = sum(rank_y) / n
+    cov = sum((rx - mean_rx) * (ry - mean_ry) for rx, ry in zip(rank_x, rank_y))
+    std_rx = math.sqrt(sum((rx - mean_rx) ** 2 for rx in rank_x))
+    std_ry = math.sqrt(sum((ry - mean_ry) ** 2 for ry in rank_y))
+
+    if std_rx == 0.0 or std_ry == 0.0:
+        return None
+    r = cov / (std_rx * std_ry)
+    return max(-1.0, min(1.0, r))
+
+
+def _pearson_corr(x: list[float], y: list[float]) -> float | None:
+    """Compute Pearson correlation between two equal-length series.
+
+    Returns None if insufficient data or zero variance.
+    """
+    import math
+    n = len(x)
+    if n < 2:
+        return None
+    mean_x = sum(x) / n
+    mean_y = sum(y) / n
+    cov = sum((xi - mean_x) * (yi - mean_y) for xi, yi in zip(x, y))
+    std_x = math.sqrt(sum((xi - mean_x) ** 2 for xi in x))
+    std_y = math.sqrt(sum((yi - mean_y) ** 2 for yi in y))
+    if std_x == 0.0 or std_y == 0.0:
+        return None
+    r = cov / (std_x * std_y)
+    return max(-1.0, min(1.0, r))
+
+
+# ── Data loading helpers ──
+
+def _load_agent_direction_scores(
+    agent_id: str, playground_dir: Path
+) -> dict[str, float]:
+    """Load agent's directional calls and aggregate into per-date direction scores.
+
+    Each date gets a net direction score: mean of +1 (bullish) / -1 (bearish)
+    across all ticker-level calls that day. Dates with no directional calls
+    are excluded.
+
+    Returns:
+        Dict mapping date string "YYYY-MM-DD" -> float in [-1.0, 1.0].
+    """
+    from collections import defaultdict
+    decisions = _load_decisions(playground_dir, agent_id=agent_id)
+    date_scores: dict[str, list[float]] = defaultdict(list)
+    for dec in decisions:
+        date = dec.get("timestamp", "")[:10]
+        if not date:
+            continue
+        for call in dec.get("directional_calls", []):
+            direction = call.get("direction", "neutral")
+            if direction == "neutral":
+                continue
+            ticker = call.get("ticker", "")
+            if not ticker:
+                continue
+            date_scores[date].append(1.0 if direction == "bullish" else -1.0)
+    return {
+        date: sum(scores) / len(scores)
+        for date, scores in date_scores.items()
+        if scores
+    }
+
+
+def _load_main_pipeline_direction_scores(
+    cal_dir: Path,
+) -> dict[str, float]:
+    """Load main pipeline calibration data and produce per-date direction scores.
+
+    Reads all JSON files in the calibration directory. Each file's
+    l1_direction is mapped to a numeric score: bullish=+1.0, bearish=-1.0,
+    neutral=0.0. Also incorporates L3 ticker signals as supplementary data
+    points (per-ticker entries keyed as "TICKER::YYYY-MM-DD").
+
+    Returns:
+        Dict mapping date string "YYYY-MM-DD" -> float in [-1.0, 1.0].
+        Also includes per-ticker keys "TICKER::YYYY-MM-DD" for granular
+        overlap matching when per-date aggregation is too sparse.
+    """
+    scores: dict[str, float] = {}
+    if not cal_dir.exists():
+        return scores
+
+    for cal_file in sorted(cal_dir.glob("*.json")):
+        try:
+            with open(cal_file, "r", encoding="utf-8") as f:
+                data = json.loads(f.read())
+        except Exception:
+            continue
+        date = data.get("date", "")
+        if not date:
+            continue
+
+        # L1 direction (market-level signal)
+        l1_dir = data.get("l1_direction", "neutral")
+        if l1_dir == "bullish":
+            scores[date] = 1.0
+        elif l1_dir == "bearish":
+            scores[date] = -1.0
+        else:
+            scores[date] = 0.0
+
+        # L3 per-ticker signals for granular overlap
+        for ticker in data.get("l3_green_tickers", []):
+            scores[f"{ticker}::{date}"] = 1.0
+        for ticker in data.get("l3_red_tickers", []):
+            scores[f"{ticker}::{date}"] = -1.0
+
+    return scores
+
+
+def _compute_main_pipeline_correlation(
+    agent_id: str,
+    playground_dir: Path | None = None,
+    shadow_db=None,
+) -> float | None:
+    """Compute Spearman rank correlation between agent's directional calls
+    and main pipeline decisions.
+
+    Uses two strategies for matching, choosing the one with more data points:
+    1. Per-date aggregation: agent's net direction score vs main pipeline's
+       L1 direction for the same date.
+    2. Per-ticker matching: each agent (ticker, date, direction) matched
+       against main pipeline's L3 green/red ticker lists.
+
+    Also computes VIF (Variance Inflation Factor) from Pearson correlation
+    as a secondary redundancy check.
+
+    Returns:
+        Spearman correlation coefficient (float) if >= 20 overlapping data
+        points exist, or a value exceeding MAX_MAIN_PIPELINE_CORRELATION if
+        VIF >= 5. Returns None if insufficient data (gate passes by default).
+    """
+    import math
+
+    pg_dir = playground_dir or Path(__file__).resolve().parent
+    project_root = pg_dir.parent  # up from playground/ to marketmind/
+    cal_dir = project_root / ".claude" / "calibration"
+
+    # Strategy 1: per-date aggregation
+    agent_date_scores = _load_agent_direction_scores(agent_id, pg_dir)
+    main_date_scores = _load_main_pipeline_direction_scores(cal_dir)
+
+    # Separate per-date keys from per-ticker keys
+    main_pure_date = {
+        k: v for k, v in main_date_scores.items() if "::" not in k
+    }
+    main_ticker_date = {
+        k: v for k, v in main_date_scores.items() if "::" in k
+    }
+
+    # Strategy 1: overlapping pure dates
+    common_dates = sorted(set(agent_date_scores.keys()) & set(main_pure_date.keys()))
+    series_agent: list[float] = []
+    series_main: list[float] = []
+
+    # Strategy 2: per-ticker matching — build (ticker, date) pairs from agent calls
+    decisions = _load_decisions(pg_dir, agent_id=agent_id)
+    agent_ticker_calls: dict[str, float] = {}
+    for dec in decisions:
+        date = dec.get("timestamp", "")[:10]
+        if not date:
+            continue
+        for call in dec.get("directional_calls", []):
+            direction = call.get("direction", "neutral")
+            ticker = call.get("ticker", "")
+            if direction == "neutral" or not ticker:
+                continue
+            key = f"{ticker}::{date}"
+            agent_ticker_calls[key] = 1.0 if direction == "bullish" else -1.0
+
+    common_tickers = sorted(
+        set(agent_ticker_calls.keys()) & set(main_ticker_date.keys())
+    )
+    ticker_agent_series = [agent_ticker_calls[k] for k in common_tickers]
+    ticker_main_series = [main_ticker_date[k] for k in common_tickers]
+
+    # Choose the strategy with more data points
+    if len(common_dates) >= len(common_tickers) and len(common_dates) >= 20:
+        series_agent = [agent_date_scores[d] for d in common_dates]
+        series_main = [main_pure_date[d] for d in common_dates]
+    elif len(common_tickers) >= 20:
+        series_agent = ticker_agent_series
+        series_main = ticker_main_series
+    elif len(common_dates) > 0:
+        series_agent = [agent_date_scores[d] for d in common_dates]
+        series_main = [main_pure_date[d] for d in common_dates]
+    else:
+        # Insufficient data — gate passes by default (conservative)
+        return None
+
+    n = len(series_agent)
+    if n < 20:
+        return None
+
+    # Primary: Spearman rank correlation
+    spearman_r = _spearman_rank(series_agent, series_main)
+
+    # Secondary: VIF from Pearson correlation
+    pearson_r = _pearson_corr(series_agent, series_main)
+    if pearson_r is not None and abs(pearson_r) < 1.0:
+        vif = 1.0 / (1.0 - pearson_r ** 2)
+        if vif >= 5.0:
+            # VIF high — agent signal is linearly reconstructable from main
+            # pipeline. Return a value that fails the gate.
+            return max(
+                abs(spearman_r) if spearman_r is not None else 0.0,
+                MAX_MAIN_PIPELINE_CORRELATION + 0.01,
+            )
+
+    return abs(spearman_r) if spearman_r is not None else None
+
+
+def compute_signal_diversity(
+    agent_calls: list[dict],
+    main_decisions: list[dict],
+) -> dict[str, float | None]:
+    """Compute Q-statistic and Double Fault Measure between two signal sources.
+
+    Based on Kuncheva & Whitaker (2003) pairwise classifier diversity measures.
+    Adapted for directional trading signals:
+
+    - Q-statistic: measures association between two binary classifiers.
+      Q = (N11*N00 - N01*N10) / (N11*N00 + N01*N10)
+      Q in [-1, 1]: 1 = perfect agreement, -1 = perfect disagreement,
+      0 = independent. For signal diversity, Q near 0 is ideal.
+
+    - Double Fault Measure: proportion of overlapping (ticker, date) pairs
+      where both sources agree on direction. High DF means the agent adds
+      no new perspective (redundant). DF in [0, 1].
+
+    Args:
+        agent_calls: List of dicts, each with 'ticker', 'direction', 'date'.
+        main_decisions: List of dicts, each with 'ticker', 'direction', 'date'.
+
+    Returns:
+        Dict with keys 'q_statistic', 'double_fault', 'n_overlapping'.
+        Values are None if insufficient overlapping data (< 5 pairs).
+    """
+    # Index both by (ticker, date)
+    agent_index: dict[tuple[str, str], int] = {}
+    for call in agent_calls:
+        ticker = call.get("ticker", "")
+        date = call.get("date", "") or call.get("timestamp", "")[:10]
+        direction = call.get("direction", "neutral")
+        if not ticker or not date or direction == "neutral":
+            continue
+        agent_index[(ticker, date)] = 1 if direction == "bullish" else -1
+
+    main_index: dict[tuple[str, str], int] = {}
+    for dec in main_decisions:
+        ticker = dec.get("ticker", "")
+        date = dec.get("date", "") or dec.get("timestamp", "")[:10]
+        direction = dec.get("direction", "neutral")
+        if not ticker or not date or direction == "neutral":
+            continue
+        main_index[(ticker, date)] = 1 if direction == "bullish" else -1
+
+    # Find overlapping (ticker, date) pairs
+    overlap_keys = set(agent_index.keys()) & set(main_index.keys())
+    n = len(overlap_keys)
+    if n < 5:
+        return {"q_statistic": None, "double_fault": None, "n_overlapping": n}
+
+    # Contingency table
+    n11 = 0  # both bullish
+    n00 = 0  # both bearish
+    n10 = 0  # agent bullish, main bearish
+    n01 = 0  # agent bearish, main bullish
+
+    for key in overlap_keys:
+        a_dir = agent_index[key]
+        m_dir = main_index[key]
+        if a_dir == 1 and m_dir == 1:
+            n11 += 1
+        elif a_dir == -1 and m_dir == -1:
+            n00 += 1
+        elif a_dir == 1 and m_dir == -1:
+            n10 += 1
+        elif a_dir == -1 and m_dir == 1:
+            n01 += 1
+
+    # Q-statistic
+    numerator = n11 * n00 - n01 * n10
+    denominator = n11 * n00 + n01 * n10
+    if denominator == 0:
+        q_stat = None  # undefined (would require division by zero)
+    else:
+        q_stat = numerator / denominator
+
+    # Double Fault Measure: proportion where both agree (both bullish or both bearish)
+    # High agreement = low diversity = redundant agent
+    df = (n11 + n00) / n
+
+    return {
+        "q_statistic": q_stat,
+        "double_fault": df,
+        "n_overlapping": n,
+    }
 
 
 def audit_agent(
@@ -167,7 +497,9 @@ def audit_agent(
         )
 
     # Gate 6: Correlation with main pipeline
-    correlation = _compute_main_pipeline_correlation(manifest.agent_id, pg_dir)
+    correlation = _compute_main_pipeline_correlation(
+        manifest.agent_id, pg_dir, shadow_db
+    )
     correlation_ok = (
         correlation is None
         or correlation <= MAX_MAIN_PIPELINE_CORRELATION
