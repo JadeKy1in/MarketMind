@@ -1,18 +1,22 @@
-"""Layer 3: Technical review — 3-light review + entry/exit calculation (INDEPENDENT from L1-L2)."""
+"""Layer 3: technical review — 3-light gate + entry/exit levels (INDEPENDENT from L1-L2).
+
+SPEC_v3 §5 step 3: every number here is computed by code from real price
+history (pipeline/l3_indicators.py). No LLM call. A ticker whose history cannot
+be fetched is reported red with data_available=False — never estimated.
+"""
 from __future__ import annotations
+
 import logging
 from dataclasses import dataclass, field
 
-from marketmind.notification.monitor_decorator import monitor
+from marketmind.gateway.price_history import get_price_histories
 from marketmind.notification.alert_schema import ImpactScope
+from marketmind.notification.monitor_decorator import monitor
+from marketmind.pipeline.l3_indicators import (
+    DEFAULT_MAX_HOLD_DAYS, TechnicalSnapshot, compute_snapshot, describe,
+)
 
 logger = logging.getLogger("marketmind.pipeline.layer3")
-import json
-from typing import Any
-
-from marketmind.gateway.async_client import chat_pro
-from marketmind.gateway.response_parser import strip_markdown_fences
-from marketmind.pipeline.language_utils import lang_note
 
 
 @dataclass
@@ -34,8 +38,11 @@ class Layer3Result:
     max_hold_days: int
     reward_risk_ratio: float
     recommendation: str            # enter | wait | avoid
-    daily_return_pct: float | None = None  # daily return % from market data
+    daily_return_pct: float | None = None
     raw_analysis: str = ""
+    data_available: bool = True
+    close: float | None = None
+    as_of: str = ""
 
 
 @dataclass
@@ -50,143 +57,67 @@ class Layer3BatchResult:
     def red_lights(self) -> list[Layer3Result]:
         return [r for r in self.results if r.light == "red"]
 
-
-LAYER3_SYSTEM_PROMPT = """You are a technical analyst. Your ONLY job is to determine whether to buy, wait, or avoid — you do NOT generate trade ideas.
-
-IMPORTANT: You receive ONLY raw market data and a list of tickers. You do NOT see Layer 1 or Layer 2 analysis. This is intentional — you must provide an independent technical opinion.
-
-For each ticker, perform the 3-light review:
-1. Price > 200 WMA? (Weekly Moving Average)
-2. Daily structure intact? (higher highs/lows in uptrend, lower highs/lows in downtrend)
-3. Not within 3% of key resistance?
-
-Lights:
-- GREEN: All 3 conditions pass → proceed to entry calculation
-- YELLOW: 1-2 conditions fail → WAIT, do not add
-- RED: All 3 fail → DO NOT BUY regardless of fundamental thesis
-
-For GREEN lights only, calculate:
-- Support zone (who is buying: ETF flows, institutional, volume nodes)
-- Resistance zone (option open interest clusters, historical sellers, round numbers)
-- Entry zone (2-3% wide, not exact price points)
-- Stop-loss (below support structure)
-- Target price (next major resistance)
-- Max hold days
-
-Output JSON array:
-[{
-  "ticker": "TICKER",
-  "light": "green|yellow|red",
-  "above_200wma": true|false,
-  "daily_structure_intact": true|false,
-  "near_key_resistance": true|false,
-  "resistance_distance_pct": 0.0,
-  "support_zone_low": 0.0,
-  "support_zone_high": 0.0,
-  "resistance_zone_low": 0.0,
-  "resistance_zone_high": 0.0,
-  "entry_zone_low": 0.0,
-  "entry_zone_high": 0.0,
-  "stop_loss": 0.0,
-  "target_price": 0.0,
-  "max_hold_days": 30,
-  "reward_risk_ratio": 0.0,
-  "recommendation": "enter|wait|avoid"
-}]
-
-Druckenmiller principle: if fundamentals bullish but technicals bearish → lean toward no buy. Price is the final arbiter.
-
-IMPORTANT: All price data must be verifiable. Never fabricate levels."""
+    def get(self, ticker: str) -> Layer3Result | None:
+        for r in self.results:
+            if r.ticker == ticker:
+                return r
+        return None
 
 
 @monitor(source="l3_technical", impact=ImpactScope.MAIN_PIPELINE)
 async def analyze_layer3(tickers: list[str], market_data: dict | None = None,
                          calibration_context: str = "") -> Layer3BatchResult:
-    """Run Layer 3 technical review. Receives ONLY ticker list and raw market data — NOT L1/L2 results."""
+    """Code-computed 3-light review for `tickers`.
+
+    `market_data` and `calibration_context` are accepted for call-site
+    compatibility and ignored: L3 pulls its own price history and has no prompt.
+    """
+    tickers = list(dict.fromkeys(t for t in tickers if t))  # dedupe, keep order
     if not tickers:
         return Layer3BatchResult()
-    data_str = _format_market_data(market_data)
-    if calibration_context:
-        data_str += f"\n\n{calibration_context}"
-    user_prompt = f"Review these tickers independently. Do NOT consider any fundamental thesis.\n\nTickers: {', '.join(tickers)}\n\nMarket Data:\n{data_str}"
-    from datetime import datetime, timezone
-    today = datetime.now(timezone.utc).strftime("%Y年%m月%d日")
-    yr = today[:4]
-    date_note = (
-        f"\n\n[TODAY: {today}. All support/resistance/entry levels must be current ({yr}) levels. "
-        f"Do NOT use {int(yr)-2}-{int(yr)-1} price levels as current. "
-        f"If you lack current price data, flag it and estimate from provided market context.]"
-    )
-    try:
-        result = await chat_pro(
-            system_prompt=LAYER3_SYSTEM_PROMPT + date_note + lang_note(),
-            user_prompt=user_prompt,
-            temperature=0.2,
-            max_tokens=8192,
-        )
-        raw = result["content"]
-        parsed = _parse_layer3_response(raw)
-        # Fill missing tickers with avoid results
-        seen = {r.ticker for r in parsed}
-        for t in tickers:
-            if t not in seen:
-                parsed.append(Layer3Result(
-                    ticker=t, light="red",
-                    above_200wma=False, daily_structure_intact=False,
-                    near_key_resistance=True, resistance_distance_pct=0,
-                    support_zone_low=0, support_zone_high=0,
-                    resistance_zone_low=0, resistance_zone_high=0,
-                    entry_zone_low=0, entry_zone_high=0,
-                    stop_loss=0, target_price=0,
-                    max_hold_days=0, reward_risk_ratio=0,
-                    recommendation="avoid"
-                ))
-        return Layer3BatchResult(results=parsed)
-    except Exception as e:
-        logger.warning("Layer 3 analysis failed: %s", e)
-        return Layer3BatchResult()
-
-
-def _format_market_data(data: dict | None) -> str:
-    if not data:
-        return "No market data available."
-    return "\n".join(f"- {k}: {v}" for k, v in data.items())
-
-
-def _parse_layer3_response(content: str) -> list[Layer3Result]:
-    content = strip_markdown_fences(content)
-    try:
-        data = json.loads(content)
-        if isinstance(data, dict):
-            data = [data]
-    except json.JSONDecodeError:
-        start = content.find("[")
-        end = content.rfind("]")
-        if start != -1 and end != -1:
-            data = json.loads(content[start:end + 1])
-        else:
-            return []
+    histories = await get_price_histories(tickers)
     results = []
-    for d in data:
-        results.append(Layer3Result(
-            ticker=d.get("ticker", "UNKNOWN"),
-            light=d.get("light", "red"),
-            above_200wma=d.get("above_200wma", False),
-            daily_structure_intact=d.get("daily_structure_intact", False),
-            near_key_resistance=d.get("near_key_resistance", True),
-            resistance_distance_pct=float(d.get("resistance_distance_pct") or 0),
-            support_zone_low=float(d.get("support_zone_low") or 0),
-            support_zone_high=float(d.get("support_zone_high") or 0),
-            resistance_zone_low=float(d.get("resistance_zone_low") or 0),
-            resistance_zone_high=float(d.get("resistance_zone_high") or 0),
-            entry_zone_low=float(d.get("entry_zone_low") or 0),
-            entry_zone_high=float(d.get("entry_zone_high") or 0),
-            stop_loss=float(d.get("stop_loss") or 0),
-            target_price=float(d.get("target_price") or 0),
-            max_hold_days=int(d.get("max_hold_days") or 0),
-            reward_risk_ratio=float(d.get("reward_risk_ratio") or 0),
-            recommendation=d.get("recommendation", "avoid"),
-            daily_return_pct=float(d.get("daily_return_pct")) if d.get("daily_return_pct") is not None else None,
-            raw_analysis=content,
-        ))
-    return results
+    for t in tickers:
+        hist = histories.get(t)
+        snap = compute_snapshot(hist) if hist is not None else None
+        if snap is None:
+            results.append(unavailable_result(t))
+        else:
+            results.append(from_snapshot(snap))
+    green = sum(r.light == "green" for r in results)
+    missing = sum(not r.data_available for r in results)
+    logger.info("L3: %d tickers, %d green, %d without data", len(results), green, missing)
+    return Layer3BatchResult(results=results)
+
+
+def from_snapshot(s: TechnicalSnapshot) -> Layer3Result:
+    res = s.key_resistance or 0.0
+    return Layer3Result(
+        ticker=s.ticker, light=s.light,
+        above_200wma=s.above_200wma, daily_structure_intact=s.structure_intact,
+        near_key_resistance=s.near_key_resistance,
+        resistance_distance_pct=s.resistance_distance_pct or 0.0,
+        support_zone_low=s.support_low, support_zone_high=s.support_high,
+        resistance_zone_low=res, resistance_zone_high=res,
+        entry_zone_low=s.entry_low, entry_zone_high=s.entry_high,
+        stop_loss=s.stop_loss, target_price=s.target_price,
+        max_hold_days=DEFAULT_MAX_HOLD_DAYS, reward_risk_ratio=s.reward_risk_ratio,
+        recommendation=s.recommendation, daily_return_pct=s.daily_return_pct,
+        raw_analysis=describe(s), data_available=True, close=s.close, as_of=s.as_of,
+    )
+
+
+def unavailable_result(ticker: str) -> Layer3Result:
+    return Layer3Result(
+        ticker=ticker, light="red",
+        above_200wma=False, daily_structure_intact=False,
+        near_key_resistance=False, resistance_distance_pct=0.0,
+        support_zone_low=0.0, support_zone_high=0.0,
+        resistance_zone_low=0.0, resistance_zone_high=0.0,
+        entry_zone_low=0.0, entry_zone_high=0.0,
+        stop_loss=0.0, target_price=0.0,
+        max_hold_days=0, reward_risk_ratio=0.0,
+        recommendation="avoid",
+        raw_analysis=f"{ticker}: price history unavailable — no technical view (not estimated)",
+        data_available=False,
+    )

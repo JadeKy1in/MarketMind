@@ -1,5 +1,6 @@
 """Unified async DeepSeek gateway. All LLM calls route through here."""
 from __future__ import annotations
+import os
 import re
 import time
 import asyncio
@@ -24,10 +25,28 @@ DEEPSEEK_BASE = "https://api.deepseek.com/v1"
 DEFAULT_TIMEOUT = httpx.Timeout(120.0)
 MAX_CONNECTIONS = 20
 
+# Model ids. /models on 2026-09-27 listed "deepseek-flash" and "deepseek-v4-pro"
+# (the old "deepseek-v4-flash" id is no longer listed). Override via env.
+FLASH_MODEL = os.environ.get("MARKETMIND_FLASH_MODEL", "deepseek-flash")
+PRO_MODEL = os.environ.get("MARKETMIND_PRO_MODEL", "deepseek-v4-pro")
+
+
+# deepseek-flash reasons before answering. With max_tokens=4096 the reasoning used
+# the whole budget and `content` came back empty for 3 of 4 news batches
+# (2026-09-27 live run). Floor the output cap; unused tokens are refunded by settle().
+FLASH_MIN_MAX_TOKENS = int(os.environ.get("MARKETMIND_FLASH_MIN_MAX_TOKENS", "16384"))
+
+
+def pro_routed_to_flash() -> bool:
+    """Owner decision 2026-09-27: Pro is too expensive and underperforms Flash,
+    so Pro-tier calls run on Flash unless MARKETMIND_PRO_AS_FLASH=0."""
+    return os.environ.get("MARKETMIND_PRO_AS_FLASH", "1").strip().lower() not in ("0", "false", "no")
+
+
 # Model name mapping for fallback providers that do not support DeepSeek model names
 _FALLBACK_MODEL_MAP: dict[str, str] = {
-    "deepseek-v4-flash": "gpt-4o-mini",
-    "deepseek-v4-pro": "gpt-4o",
+    FLASH_MODEL: "gpt-4o-mini",
+    PRO_MODEL: "gpt-4o",
 }
 
 
@@ -203,8 +222,10 @@ class DeepSeekGateway:
                     "检查Pro响应格式，当前已自动恢复", degraded_output=False,
                 )
             else:
-                logger.warning("DeepSeek: content empty, reasoning_content=%d chars — no JSON found",
-                            len(reasoning_content))
+                logger.warning("DeepSeek: content empty, reasoning_content=%d chars — no JSON found "
+                               "(model=%s, max_tokens=%d, finish_reason=%s)",
+                               len(reasoning_content), model, max_tokens,
+                               (data.get("choices") or [{}])[0].get("finish_reason"))
                 emit_alert(
                     Severity.ERROR, "gateway", ImpactScope.MAIN_PIPELINE,
                     "Pro response content empty — no JSON recovered",
@@ -318,6 +339,7 @@ async def chat_flash(
         return dict(_MOCK_FLASH_RESPONSE)
     gw = await get_gateway()
     budget = await get_budget()
+    max_tokens = max(max_tokens, FLASH_MIN_MAX_TOKENS)
     estimated = max_tokens + 1024
     if not budget.reserve_flash(estimated):
         logger.warning("Budget exhausted for flash model call")
@@ -328,13 +350,15 @@ async def chat_flash(
             "增加预算或减少调用频率", degraded_output=True,
         )
         return {"content": "", "error": "budget_exhausted", "usage": {}}
+    result = None
     try:
-        return await _call_with_retry(
-            gw, "deepseek-v4-flash", system_prompt, user_prompt,
-            temperature, max_tokens, reasoning_effort
+        result = await _call_with_retry(
+            gw, FLASH_MODEL, system_prompt, user_prompt,
+            temperature, max_tokens, ""  # Flash does not take reasoning_effort
         )
+        return result
     finally:
-        budget.release_flash(estimated)
+        budget.settle_flash(estimated, _used_tokens(result, estimated))
 
 
 async def chat_pro(
@@ -360,13 +384,37 @@ async def chat_pro(
             "增加预算，今日分析可能需重新运行", degraded_output=True,
         )
         return {"content": "", "error": "budget_exhausted", "usage": {}}
+    result = None
     try:
-        return await _call_with_retry(
-            gw, "deepseek-v4-pro", system_prompt, user_prompt,
-            temperature, max_tokens, reasoning_effort
+        if pro_routed_to_flash():
+            model, effort = FLASH_MODEL, ""
+            max_tokens = max(max_tokens, FLASH_MIN_MAX_TOKENS)
+        else:
+            model, effort = PRO_MODEL, reasoning_effort
+        result = await _call_with_retry(
+            gw, model, system_prompt, user_prompt,
+            temperature, max_tokens, effort
         )
+        return result
     finally:
-        budget.release_pro(estimated)
+        budget.settle_pro(estimated, _used_tokens(result, estimated))
+
+
+def _used_tokens(result: dict[str, Any] | None, reserved: int) -> int | None:
+    """Tokens billed for a call; None if it did not complete (full refund).
+
+    A call that returned content but no usage block is charged the full
+    reservation (conservative), not refunded.
+    """
+    if not isinstance(result, dict) or result.get("error"):
+        return None
+    usage = result.get("usage") or {}
+    total = usage.get("total_tokens")
+    if total is None:
+        total = (usage.get("prompt_tokens") or 0) + (usage.get("completion_tokens") or 0)
+    if total:
+        return int(total)
+    return reserved if result.get("content") else None
 
 
 async def _fallback_call(
@@ -396,11 +444,20 @@ async def _fallback_call(
         "max_tokens": max_tokens,
         "stream": False,
     }
-    # For DeepSeek-compatible providers, reasoning_effort goes in body
-    # For OpenAI-compatible fallback, also keep header for backward compat
-    if reasoning_effort:
+    same_provider = "deepseek" in gw.fallback_url.lower()
+    # reasoning_effort is a DeepSeek parameter; other providers may reject the call.
+    if reasoning_effort and same_provider:
         payload["reasoning_effort"] = reasoning_effort
-    fallback_key = gw.fallback_api_key or gw.key_rotator.current()
+    # Never send the DeepSeek key to a different provider.
+    if gw.fallback_api_key:
+        fallback_key = gw.fallback_api_key
+    elif same_provider:
+        fallback_key = gw.key_rotator.current()
+    else:
+        raise CircuitOpenError(
+            "Circuit breaker is OPEN and the fallback provider has no fallback_api_key "
+            "(refusing to send the primary key to another provider)"
+        )
     headers = {"Authorization": f"Bearer {fallback_key}"}
 
     t0 = time.perf_counter()

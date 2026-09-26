@@ -151,8 +151,9 @@ class MarketMindConfig:
     deepseek_base_url: str = field(default_factory=lambda: os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"))
     newsapi_key: str | None = field(default_factory=lambda: os.getenv("NEWSAPI_KEY"))
     gnews_key: str | None = field(default_factory=lambda: os.getenv("GNEWS_API_KEY"))
-    fred_key: str = field(default_factory=lambda: os.getenv("FRED_KEY", ""), repr=False)
-    eia_key: str = field(default_factory=lambda: os.getenv("EIA_KEY", ""), repr=False)
+    # Accept both the short names used in code and the providers' conventional names.
+    fred_key: str = field(default_factory=lambda: os.getenv("FRED_KEY") or os.getenv("FRED_API_KEY", ""), repr=False)
+    eia_key: str = field(default_factory=lambda: os.getenv("EIA_KEY") or os.getenv("EIA_API_KEY", ""), repr=False)
     data_dir: Path = field(default_factory=lambda: Path(os.getenv("MARKETMIND_DATA_DIR", "data")))
     event_confidence_discount_enabled: bool = True
     max_position_count: int = 6

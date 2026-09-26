@@ -309,9 +309,10 @@ def assemble_dynamic_prompt(registry: RuleRegistry,
             "You receive:\n"
             "- Layer 1 narrative analysis\n"
             "- Layer 2 fundamental analysis with ticker candidates\n"
-            "- Layer 3 technical review (green/yellow/red lights)\n"
-            "- Red Team challenges\n"
-            "- Signal resonance verdict\n\n"
+            "- Layer 3 technical review (green/yellow/red lights) with code-computed levels\n"
+            "- Red Team challenges\n\n"
+            "Price levels are computed by code and overwrite your output; copy them "
+            "from the Layer 3 section. Position size is capped by code.\n\n"
             "Output JSON with decision_cards, no_trade_card, and summary fields.\n\n"
             "CRITICAL RULES (dynamically assembled by SHARP):\n"
         )

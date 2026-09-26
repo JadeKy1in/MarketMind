@@ -1,7 +1,11 @@
 """System fragility threshold library. Versioned, with staleness tracking."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
+
+# Threshold values come from the 2026-05-18 methodology research
+# (docs/archive/project-docs/dev/research/pipeline-methodology-gap.md).
+THRESHOLDS_RESEARCHED_ON = "2026-05-18T00:00:00+00:00"
 
 
 @dataclass
@@ -16,7 +20,9 @@ class FragilityThreshold:
     data_source: str         # "FRED:WRBWFRBL"
     source_document: str     # "Fed H.4.1", "BIS Quarterly Review", etc.
     current_value: float | None = None
-    last_validated: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    # Date the threshold value was last researched. It used to default to "now",
+    # which meant the 90-day staleness check could never fire.
+    last_validated: str = THRESHOLDS_RESEARCHED_ON
     is_active: bool = True
 
 

@@ -15,6 +15,7 @@ from marketmind.gateway.response_parser import strip_markdown_fences
 from marketmind.pipeline.layer1_narrative import Layer1Result
 from marketmind.pipeline.layer2_fundamental import Layer2Result
 from marketmind.pipeline.layer3_technical import Layer3BatchResult
+from marketmind.pipeline.decision_guard import enforce
 from marketmind.pipeline.red_team import RedTeamReport
 from marketmind.pipeline.resonance import ResonanceResult
 from marketmind.shadows.shadow_agent import defang_text
@@ -155,6 +156,7 @@ class DecisionOutput:
     paper_trade: PaperTrade | None = None  # virtual trade when no_trade
     summary: str = ""
     contrarian_challenges: list[dict] = field(default_factory=list)
+    raw_response: str = ""  # LLM output as received, for white-box traceability
 
 
 def _lang_instruction() -> str:
@@ -185,9 +187,9 @@ def _t(key: str) -> str:
 
 _I18N = {
     "zh": {
-        "no_signal_thesis": "无信号通过统计验证，且无标的通过技术审查。",
-        "no_signal_counterfactual": "需要 DSR > 0 且 PBO <= 0.10，同时至少有一个绿灯标的。",
-        "no_signal_adv_1": "统计纪律防止过拟合",
+        "no_signal_thesis": "今日没有标的通过技术面三灯审查（L3）。",
+        "no_signal_counterfactual": "至少一个标的亮绿灯：高于 200 周均线、日线结构完好、距关键阻力超过 3%。",
+        "no_signal_adv_1": "技术面纪律避免在弱势或阻力位追高",
         "no_signal_adv_2": "现金保留选择权",
         "no_signal_summary": "今日无可行信号。持有现金是有效仓位。",
         "api_error_thesis": "决策合成因 API 或系统错误失败。",
@@ -202,9 +204,9 @@ _I18N = {
         "l1_bearish": "看跌",
     },
     "en": {
-        "no_signal_thesis": "No signal passed statistical validation and no ticker cleared technical review.",
-        "no_signal_counterfactual": "A signal exceeding DSR > 0 and PBO <= 0.10 with at least 1 green-light ticker.",
-        "no_signal_adv_1": "Statistical discipline prevents overfitting",
+        "no_signal_thesis": "No ticker cleared the Layer 3 three-light technical review today.",
+        "no_signal_counterfactual": "At least one green-light ticker: above its 200-week MA, daily structure intact, more than 3% below key resistance.",
+        "no_signal_adv_1": "Technical discipline avoids buying weakness or into resistance",
         "no_signal_adv_2": "Cash preserves optionality",
         "no_signal_summary": "No actionable signal today. Cash is a valid position.",
         "api_error_thesis": "Decision synthesis failed due to API or system error.",
@@ -219,9 +221,9 @@ _I18N = {
         "l1_bearish": "bearish",
     },
     "ja": {
-        "no_signal_thesis": "統計的検証を通過したシグナルはなく、技術的レビューをクリアした銘柄もありません。",
-        "no_signal_counterfactual": "DSR > 0 かつ PBO <= 0.10 で、少なくとも1つのグリーンライト銘柄が必要です。",
-        "no_signal_adv_1": "統計的規律が過学習を防ぐ",
+        "no_signal_thesis": "本日、レイヤー3の3灯テクニカル審査を通過した銘柄はありません。",
+        "no_signal_counterfactual": "少なくとも1銘柄がグリーン：200週移動平均の上、日足構造が健全、主要レジスタンスまで3%超。",
+        "no_signal_adv_1": "テクニカル規律により弱い銘柄やレジスタンスでの買いを回避",
         "no_signal_adv_2": "現金は選択肢を保持する",
         "no_signal_summary": "本日は実行可能なシグナルなし。現金は有効なポジションです。",
         "api_error_thesis": "APIまたはシステムエラーにより決定合成に失敗しました。",
@@ -236,9 +238,9 @@ _I18N = {
         "l1_bearish": "弱気",
     },
     "ko": {
-        "no_signal_thesis": "통계적 검증을 통과한 신호가 없으며 기술적 검토를 통과한 종목도 없습니다.",
-        "no_signal_counterfactual": "DSR > 0, PBO <= 0.10, 최소 1개의 녹색 신호 종목이 필요합니다.",
-        "no_signal_adv_1": "통계적 규율이 과적합 방지",
+        "no_signal_thesis": "오늘 레이어 3 기술적 3등 심사를 통과한 종목이 없습니다.",
+        "no_signal_counterfactual": "최소 1개 종목이 녹색: 200주 이동평균 위, 일봉 구조 유지, 주요 저항까지 3% 초과.",
+        "no_signal_adv_1": "기술적 규율로 약세 종목이나 저항선 매수를 회피",
         "no_signal_adv_2": "현금은 선택권을 보존",
         "no_signal_summary": "오늘 실행 가능한 신호 없음. 현금은 유효한 포지션입니다.",
         "api_error_thesis": "API 또는 시스템 오류로 결정 합성 실패.",
@@ -253,9 +255,9 @@ _I18N = {
         "l1_bearish": "약세",
     },
     "es": {
-        "no_signal_thesis": "Ninguna señal pasó la validación estadística y ningún activo superó la revisión técnica.",
-        "no_signal_counterfactual": "Una señal que supere DSR > 0 y PBO <= 0.10 con al menos un activo en luz verde.",
-        "no_signal_adv_1": "La disciplina estadística previene el sobreajuste",
+        "no_signal_thesis": "Ningún activo superó hoy la revisión técnica de tres luces (Capa 3).",
+        "no_signal_counterfactual": "Al menos un activo en luz verde: por encima de su media de 200 semanas, estructura diaria intacta y a más de un 3% de la resistencia clave.",
+        "no_signal_adv_1": "La disciplina técnica evita comprar debilidad o contra resistencias",
         "no_signal_adv_2": "El efectivo preserva la opcionalidad",
         "no_signal_summary": "Sin señales procesables hoy. El efectivo es una posición válida.",
         "api_error_thesis": "La síntesis de decisión falló por error de API o sistema.",
@@ -270,9 +272,9 @@ _I18N = {
         "l1_bearish": "bajista",
     },
     "fr": {
-        "no_signal_thesis": "Aucun signal n'a passé la validation statistique et aucun actif n'a réussi l'examen technique.",
-        "no_signal_counterfactual": "Un signal dépassant DSR > 0 et PBO <= 0.10 avec au moins un actif en feu vert.",
-        "no_signal_adv_1": "La discipline statistique empêche le surapprentissage",
+        "no_signal_thesis": "Aucun actif n'a passé aujourd'hui l'examen technique à trois feux (couche 3).",
+        "no_signal_counterfactual": "Au moins un actif au feu vert : au-dessus de sa moyenne 200 semaines, structure journalière intacte, à plus de 3 % de la résistance clé.",
+        "no_signal_adv_1": "La discipline technique évite d'acheter la faiblesse ou sous une résistance",
         "no_signal_adv_2": "Les liquidités préservent l'optionalité",
         "no_signal_summary": "Aucun signal exploitable aujourd'hui. Les liquidités sont une position valide.",
         "api_error_thesis": "La synthèse de décision a échoué en raison d'une erreur API ou système.",
@@ -287,9 +289,9 @@ _I18N = {
         "l1_bearish": "baissier",
     },
     "ru": {
-        "no_signal_thesis": "Ни один сигнал не прошёл статистическую проверку, и ни один актив не прошёл технический обзор.",
-        "no_signal_counterfactual": "Сигнал с DSR > 0 и PBO <= 0.10, имеющий хотя бы один актив с зелёным светом.",
-        "no_signal_adv_1": "Статистическая дисциплина предотвращает переобучение",
+        "no_signal_thesis": "Сегодня ни один актив не прошёл технический обзор «трёх огней» (слой 3).",
+        "no_signal_counterfactual": "Хотя бы один актив с зелёным светом: выше 200-недельной средней, дневная структура цела, более 3% до ключевого сопротивления.",
+        "no_signal_adv_1": "Техническая дисциплина исключает покупки на слабости или у сопротивления",
         "no_signal_adv_2": "Наличные сохраняют опциональность",
         "no_signal_summary": "Сегодня нет действенных сигналов. Наличные — допустимая позиция.",
         "api_error_thesis": "Синтез решения не удался из-за ошибки API или системы.",
@@ -304,9 +306,9 @@ _I18N = {
         "l1_bearish": "медвежий",
     },
     "ar": {
-        "no_signal_thesis": "لم تتجاوز أي إشارة التحقق الإحصائي ولم يجتز أي أصل المراجعة الفنية.",
-        "no_signal_counterfactual": "إشارة تتجاوز DSR > 0 و PBO <= 0.10 مع أصل واحد على الأقل في الضوء الأخضر.",
-        "no_signal_adv_1": "الانضباط الإحصائي يمنع الإفراط في التخصيص",
+        "no_signal_thesis": "لم يجتز أي أصل اليوم المراجعة الفنية ذات الأضواء الثلاثة (الطبقة 3).",
+        "no_signal_counterfactual": "أصل واحد على الأقل بضوء أخضر: فوق متوسط 200 أسبوع، وهيكل يومي سليم، وعلى بعد أكثر من 3% من المقاومة الرئيسية.",
+        "no_signal_adv_1": "الانضباط الفني يمنع الشراء عند الضعف أو قرب المقاومة",
         "no_signal_adv_2": "النقد يحافظ على الخيارات",
         "no_signal_summary": "لا توجد إشارات قابلة للتنفيذ اليوم. النقد مركز صالح.",
         "api_error_thesis": "فشل تركيب القرار بسبب خطأ في API أو النظام.",
@@ -321,9 +323,9 @@ _I18N = {
         "l1_bearish": "هابط",
     },
     "de": {
-        "no_signal_thesis": "Kein Signal hat die statistische Validierung bestanden und kein Wert hat die technische Prüfung bestanden.",
-        "no_signal_counterfactual": "Ein Signal mit DSR > 0 und PBO <= 0.10 mit mindestens einem Wert mit grünem Licht.",
-        "no_signal_adv_1": "Statistische Disziplin verhindert Überanpassung",
+        "no_signal_thesis": "Heute hat kein Wert die technische Drei-Lichter-Prüfung (Ebene 3) bestanden.",
+        "no_signal_counterfactual": "Mindestens ein Wert mit grünem Licht: über dem 200-Wochen-Durchschnitt, intakte Tagesstruktur, mehr als 3 % unter dem Schlüsselwiderstand.",
+        "no_signal_adv_1": "Technische Disziplin verhindert Käufe in Schwäche oder in Widerstände",
         "no_signal_adv_2": "Bargeld bewahrt Optionalität",
         "no_signal_summary": "Heute keine handelbaren Signale. Bargeld ist eine gültige Position.",
         "api_error_thesis": "Entscheidungssynthese aufgrund eines API- oder Systemfehlers fehlgeschlagen.",
@@ -351,9 +353,12 @@ DECISION_SYSTEM_PROMPT = """You are a decision synthesis engine. Your job is to 
 You receive:
 - Layer 1 narrative analysis
 - Layer 2 fundamental analysis with ticker candidates
-- Layer 3 technical review (green/yellow/red lights)
+- Layer 3 technical review (green/yellow/red lights) with code-computed levels
 - Red Team challenges
-- Signal resonance verdict
+
+Price levels (entry, stop, target, reward/risk, hold days) are computed by code
+and will overwrite whatever you output; copy them from the Layer 3 section.
+Position size is capped by code (25% per position, 25% total heat).
 
 Output JSON:
 {
@@ -442,21 +447,22 @@ async def generate_decision(
     l2: Layer2Result,
     l3: Layer3BatchResult,
     red_team: RedTeamReport,
-    resonance: ResonanceResult,
+    resonance: ResonanceResult | None = None,
     fragility=None,
 ) -> DecisionOutput:
     """Generate final decision cards and no-trade card.
 
     Args:
+        resonance: Ignored since SPEC_v3 — statistical validation (DSR/PBO)
+                   belongs to shadow promotion review, not the daily gate.
+                   Kept for call-site compatibility.
         fragility: Optional FragilityReport from market fragility scan.
-                   If provided, fragility_score > 0.5 triggers position size reduction
-                   and fragility_crossed > 2 adds a risk warning to the no-trade card.
+                   fragility_crossed > 2 adds a risk warning to the no-trade card.
     """
-    # Apply fragility adjustment: if market is fragile, tighten no-trade threshold
     fragility_score = getattr(fragility, 'overall_fragility_score', 0.0) if fragility else 0.0
     fragility_crossed = len(getattr(fragility, 'crossed', []) or []) if fragility else 0
 
-    if not resonance.passed and not l3.green_lights:
+    if not l3.green_lights:
         paper = _pick_paper_trade(l1, l2, l3, red_team, resonance)
         fragility_note = ""
         if fragility_crossed > 2:
@@ -464,7 +470,7 @@ async def generate_decision(
         return DecisionOutput(
             no_trade_card=NoTradeCard(
                 thesis=_t("no_signal_thesis") + fragility_note,
-                supporting_evidence=[f"DSR={resonance.dsr}, PBO={resonance.pbo}"],
+                supporting_evidence=[_l3_evidence(l3)],
                 counterfactual=_t("no_signal_counterfactual"),
                 structural_advantages=[_t("no_signal_adv_1"), _t("no_signal_adv_2")],
                 pre_mortem="",
@@ -484,6 +490,27 @@ async def generate_decision(
             max_tokens=16384,
         )
         decision = _parse_decision_response(result["content"])
+        decision.raw_response = (result.get("content") or "")[:20000]
+        guard = enforce(decision.decision_cards, l3)
+        decision.decision_cards = guard.kept
+        if guard.notes:
+            logger.info("Decision guard: %s", guard.summary)
+            decision.summary = (decision.summary + f"\n[guard] {guard.summary}").strip()
+        if not decision.decision_cards:
+            # "No trade" must always be an explicit output (SPEC_v3 L7), even when
+            # the LLM returned nothing usable or the guard dropped every card.
+            if decision.no_trade_card is None:
+                reason = guard.summary or "LLM returned no valid decision card"
+                decision.no_trade_card = NoTradeCard(
+                    thesis=_t("no_signal_thesis") if not l3.green_lights else
+                    f"No decision card survived validation: {reason}",
+                    supporting_evidence=[_l3_evidence(l3) if not l3.green_lights else reason],
+                    counterfactual=_t("no_signal_counterfactual"),
+                    structural_advantages=[_t("no_signal_adv_1"), _t("no_signal_adv_2")],
+                    no_trade_score=100.0,
+                )
+            if decision.paper_trade is None:
+                decision.paper_trade = _pick_paper_trade(l1, l2, l3, red_team, resonance)
         decision.contrarian_challenges = await generate_contrarian_challenges(decision)
         return decision
     except Exception as e:
@@ -520,17 +547,16 @@ def _pick_paper_trade(l1, l2, l3, red_team, resonance) -> PaperTrade | None:
             "source": _t("src_l2"),
         })
 
-    # From L3 green lights (strongest signal)
-    for r in getattr(l3, 'results', []) or []:
-        ticker = getattr(r, 'ticker', '')
-        if ticker in getattr(l3, 'green_lights', []):
-            candidates.append({
-                "ticker": str(ticker),
-                "direction": getattr(r, 'direction', 'long'),
-                "confidence": 0.65,
-                "thesis": getattr(r, 'summary', ''),
-                "source": _t("src_l3"),
-            })
+    # From L3 green lights (strongest signal). green_lights holds Layer3Result
+    # objects — compare by ticker, not by object membership.
+    for r in getattr(l3, 'green_lights', []) or []:
+        candidates.append({
+            "ticker": str(r.ticker),
+            "direction": "long",  # L3 only validates long setups
+            "confidence": 0.65,
+            "thesis": getattr(r, 'raw_analysis', ''),
+            "source": _t("src_l3"),
+        })
 
     # From L1 sentiment if available
     l1_dir = getattr(l1, 'sentiment_direction', 'neutral')
@@ -562,28 +588,38 @@ def _pick_paper_trade(l1, l2, l3, red_team, resonance) -> PaperTrade | None:
     )
 
 
+def _l3_evidence(l3: Layer3BatchResult) -> str:
+    results = getattr(l3, "results", []) or []
+    missing = sum(not getattr(r, "data_available", True) for r in results)
+    yellow = sum(r.light == "yellow" for r in results)
+    return (f"L3: {len(results)} tickers reviewed, 0 green, {yellow} yellow, "
+            f"{missing} without price data")
+
+
 def _build_decision_prompt(
     l1: Layer1Result, l2: Layer2Result, l3: Layer3BatchResult,
-    red_team: RedTeamReport, resonance: ResonanceResult,
+    red_team: RedTeamReport, resonance: ResonanceResult | None = None,
 ) -> str:
-    green = [r.ticker for r in l3.green_lights]
+    green_lines = "\n".join(
+        f"- {defang_text(r.ticker)}: entry {r.entry_zone_low:.2f}-{r.entry_zone_high:.2f}, "
+        f"stop {r.stop_loss:.2f}, target {r.target_price:.2f}, R/R {r.reward_risk_ratio:.2f}, "
+        f"hold <= {r.max_hold_days}d ({r.recommendation})"
+        for r in l3.green_lights
+    )
     challenges_str = "\n".join(
         f"- [{c.severity}] {defang_text(c.challenge)}" for c in red_team.challenges[:5]
     )
 
     defanged_tickers = [defang_text(t) for t in l2.ticker_candidates[:10]]
 
-    return f"""## Signal Resonance
-Verdict: {resonance.verdict} | DSR: {resonance.dsr} | PBO: {resonance.pbo}
-
-## Layer 1 Narrative
+    return f"""## Layer 1 Narrative
 Quadrant: {defang_text(l1.matrix_quadrant)} | Sentiment: {defang_text(l1.sentiment_direction)} | Price-in: {l1.price_in_score}
 
 ## Layer 2 Fundamentals
 Tickers: {', '.join(defanged_tickers)}
 
-## Layer 3 Technical (GREEN lights only)
-{', '.join(green) if green else 'None — no ticker passed L3'}
+## Layer 3 Technical (GREEN lights only, levels computed by code)
+{green_lines if green_lines else 'None — no ticker passed L3'}
 
 ## Red Team Challenges
 {challenges_str if challenges_str else 'No challenges raised'}

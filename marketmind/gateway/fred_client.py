@@ -85,6 +85,12 @@ _FRED_SERIES: dict[str, tuple[str, str, str, str]] = {
     "DTWEXBGS":("DTWEXBGS","Trade-Weighted USD Index (broad)",  "daily",  "index"),
     # ── EMBI Spread (Frontier Scout) ──
     "BAMLEMHBHYCRPIOAS": ("BAMLEMHBHYCRPIOAS", "ICE BofA EM HY Corporate OAS", "daily", "bp"),
+    # ── Liquidity / funding stress (fragility scanner) ──
+    "RRPONTSYD":   ("RRPONTSYD",   "Overnight Reverse Repo (ON RRP)",   "daily",  "B USD"),
+    "WTREGEN":     ("WTREGEN",     "Treasury General Account (TGA)",    "weekly", "M USD"),
+    "WRESBAL":     ("WRESBAL",     "Reserve Balances with Fed Banks",   "weekly", "B USD"),
+    "IORB":        ("IORB",        "Interest on Reserve Balances",      "daily",  "%"),
+    "BAMLH0A3HYC": ("BAMLH0A3HYC", "ICE BofA CCC & Lower US HY OAS",    "daily",  "%"),
     # ── Legacy (backward compat with macro_data.py) ──
     "BDI":     ("PCU483111483111", "PPI: Deep Sea Freight (BDI proxy)", "monthly", "index"),
 }

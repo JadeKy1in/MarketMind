@@ -27,6 +27,8 @@ class FragilityReport:
     staleness_warnings: list[str]
     summary: str
     generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    # metric -> reason it could not be evaluated (no source / fetch failed)
+    unavailable: dict[str, str] = field(default_factory=dict)
 
 
 def _compute_distance(current: float, threshold: float, direction: str) -> float:
@@ -71,17 +73,21 @@ def _compute_fragility_score(alerts: list[FragilityAlert]) -> float:
 
 async def scan_fragility(
     market_data: dict[str, float],
+    unavailable: dict[str, str] | None = None,
 ) -> FragilityReport:
     """Scan all active thresholds against current market data.
 
     Args:
         market_data: Dict mapping metric names to current values.
                      e.g. {"bank_reserves": 2.9, "us10y_yield": 4.35, ...}
+        unavailable: Optional metric -> reason for inputs that could not be fetched.
 
     Returns:
         FragilityReport with alerts, crossed list, score, and summary.
+        Metrics with no value are listed in `unavailable`, never treated as safe.
     """
     staleness_warnings = ft_config.validate_thresholds()
+    missing: dict[str, str] = dict(unavailable or {})
 
     alerts: list[FragilityAlert] = []
     for t in ft_config.THRESHOLD_LIBRARY:
@@ -90,6 +96,7 @@ async def scan_fragility(
 
         current_value = market_data.get(t.metric)
         if current_value is None:
+            missing.setdefault(t.metric, "no data supplied")
             continue
 
         distance_pct = _compute_distance(current_value, t.threshold_value, t.direction)
@@ -119,6 +126,8 @@ async def scan_fragility(
         summary = f"Fragility score {score:.2f}: {warning_count} WARNING, {monitor_count} MONITOR out of {total_count} thresholds"
     else:
         summary = f"Fragility score {score:.2f}: {crossed_count} CRITICAL, {warning_count} WARNING, {monitor_count} MONITOR out of {total_count} thresholds"
+    if missing:
+        summary += f" ({len(missing)} thresholds not evaluated: {', '.join(sorted(missing))})"
 
     return FragilityReport(
         alerts=alerts,
@@ -127,6 +136,7 @@ async def scan_fragility(
         overall_fragility_score=score,
         staleness_warnings=staleness_warnings,
         summary=summary,
+        unavailable=missing,
     )
 
 

@@ -65,12 +65,38 @@ class TokenBudget:
         return True
 
     def release_pro(self, actual_tokens: int) -> None:
+        """Full refund of a reservation (call never ran). Use settle_pro after a call."""
         self.tokens_remaining += actual_tokens
         self.pro_calls_remaining += 1
 
     def release_flash(self, actual_tokens: int) -> None:
+        """Full refund of a reservation (call never ran). Use settle_flash after a call."""
         self.tokens_remaining += actual_tokens
         self.flash_calls_remaining += 1
+
+    def settle_pro(self, reserved_tokens: int, used_tokens: int | None) -> None:
+        self._settle(reserved_tokens, used_tokens, "pro")
+
+    def settle_flash(self, reserved_tokens: int, used_tokens: int | None) -> None:
+        self._settle(reserved_tokens, used_tokens, "flash")
+
+    def _settle(self, reserved: int, used: int | None, kind: str) -> None:
+        """Close a reservation after the call.
+
+        used is None -> the call failed and consumed nothing: refund all.
+        Otherwise the call counts, and only the unused part of the token
+        reservation is returned. (Previously every call was refunded in full,
+        so the daily limits could never trigger.)
+        """
+        if used is None:
+            self.tokens_remaining += reserved
+            if kind == "pro":
+                self.pro_calls_remaining += 1
+            else:
+                self.flash_calls_remaining += 1
+            return
+        # refund the unused part, or charge the overrun if the call used more
+        self.tokens_remaining += reserved - max(0, used)
 
     def handle_429(self, retry_after: int) -> float:
         self._backoff_until = time.time() + retry_after + 1.0

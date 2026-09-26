@@ -39,6 +39,8 @@ DEFAULT_PRIORITY_SCORE = 0.0
 
 # ── Dedup threshold ─────────────────────────────────────────────────────────
 TITLE_SIMILARITY_THRESHOLD = 0.80
+# Articles already seen in the last 72h rank lower but stay in the feed.
+SEEN_BEFORE_PRIORITY_FACTOR = 0.5
 
 
 @dataclass
@@ -59,6 +61,9 @@ class NewsItem:
     priority_score: float = DEFAULT_PRIORITY_SCORE
     # Social media routing: content_type distinguishes news from social for Flash bypass
     content_type: str = "news_article"  # "news_article" | "social_mention" | "sec_filing"
+    # Seen in a previous run within the 72h window. Kept (down-weighted), not dropped:
+    # dropping starved same-day re-runs (391 -> 49 -> 4 articles on 2026-09-27).
+    seen_before: bool = False
 
     @classmethod
     def from_entry(cls, entry: dict, source: Source) -> "NewsItem":
@@ -404,6 +409,8 @@ async def fetch_all_sources(config: MarketMindConfig, use_cross_run_cache: bool 
     for item in deduped:
         try:
             item.priority_score = compute_priority(item, now_utc)
+            if item.seen_before:
+                item.priority_score *= SEEN_BEFORE_PRIORITY_FACTOR
         except Exception:
             logger.warning("priority_score computation failed for item", exc_info=True)
         # Update cache with surviving item (only if cross-run cache is active)
@@ -448,7 +455,7 @@ def deduplicate(items: list[NewsItem], content_hash_cache: dict | None = None) -
             if _title_similarity(item.title, existing.title) > TITLE_SIMILARITY_THRESHOLD:
                 is_dup = True
                 break
-        # Z1: Cross-run dedup via content_hash cache
+        # Z1: Cross-run novelty via content_hash cache — mark, don't drop
         if not is_dup and content_hash_cache is not None:
             try:
                 ch = item.content_hash
@@ -456,9 +463,9 @@ def deduplicate(items: list[NewsItem], content_hash_cache: dict | None = None) -
                     ch = compute_content_hash(item.title, item.summary)
                     item.content_hash = ch
                 if ch and ch in content_hash_cache:
-                    is_dup = True
+                    item.seen_before = True
             except Exception:
-                logger.warning("content_hash dedup check failed", exc_info=True)  # Hash failure → don't dedup (conservative)
+                logger.warning("content_hash novelty check failed", exc_info=True)
         if not is_dup:
             seen_urls.add(item.url)
             result.append(item)

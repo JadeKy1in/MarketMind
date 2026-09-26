@@ -116,6 +116,7 @@ class TestFallbackRouting:
                 "test-key",
                 fallback_url="https://fallback.api.example.com/v1",
                 fallback_model="fallback-model-v1",
+                fallback_api_key="fallback-key",  # a non-DeepSeek fallback needs its own key
                 circuit_breaker_threshold=1,
             )
 
@@ -303,6 +304,7 @@ class TestFallbackOutputFormat:
             init_gateway(
                 "test-key",
                 fallback_url="https://fallback.example.com/v1",
+                fallback_api_key="fallback-key",  # a non-DeepSeek fallback needs its own key
                 circuit_breaker_threshold=1,
             )
             from marketmind.gateway.async_client import _gateway, chat_flash
