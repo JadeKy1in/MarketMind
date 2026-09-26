@@ -88,6 +88,12 @@ async def test_empty_llm_output_still_yields_explicit_no_trade_and_paper_trade()
     assert out.paper_trade is not None and out.paper_trade.ticker == "NVDA"
 
 
+def test_parse_decision_coerces_non_string_summary():
+    from marketmind.pipeline.decision import _parse_decision_response
+    out = _parse_decision_response('{"decision_cards": [], "summary": {"view": "neutral", "risk": "high"}}')
+    assert isinstance(out.summary, str) and "neutral" in out.summary
+
+
 def test_paper_trade_picks_l3_green_by_ticker():
     class L1: sentiment_direction = "neutral"
     class L2: ticker_candidates = []

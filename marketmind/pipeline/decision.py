@@ -666,8 +666,13 @@ def _parse_decision_response(content: str) -> DecisionOutput:
             pre_mortem=ntc_data.get("pre_mortem", ""),
             no_trade_score=float(ntc_data.get("no_trade_score", 0)),
         )
+    summary = data.get("summary", "")
+    if not isinstance(summary, str):
+        # Flash sometimes returns summary as an object; 2026-09-27 live run crashed on
+        # `dict + str` when the guard appended its notes.
+        summary = json.dumps(summary, ensure_ascii=False)
     return DecisionOutput(
         decision_cards=cards,
         no_trade_card=no_trade,
-        summary=data.get("summary", ""),
+        summary=summary,
     )
