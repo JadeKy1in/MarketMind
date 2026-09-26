@@ -1,1 +1,0 @@
-"""MarketMind test suite."""
