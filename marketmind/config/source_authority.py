@@ -203,14 +203,12 @@ SOURCES: list[Source] = [
            "https://trends.google.com/trending/rss?geo=US", "rss", 0.20, 1.0),
 
     # ── Insider / Smart Money (Phase G Layer 4) ─────────────────────
-    # Congress trades revived 2026-05-25 via @anguslin/mcp-capitol-trades
-    # (real-time HTML scraping of capitoltrades.com via Node.js MCP subprocess).
-    # DEGRADED 2026-09-27 (was hard-coded WORKING): MCP path hit HTTP 429 and SPEC C12 records it
-    # as unavailable; the site answers 200 to a browser UA, so it stays fetched (once per run)
-    # with failures tolerated rather than being assumed healthy.
+    # Congress trades: House Clerk PTR filings (pipeline/house_ptr.py), 2026-09-27.
+    # capitoltrades.com is behind a Vercel bot checkpoint (429 for any UA) and the
+    # Senate eFD site is Akamai-blocked from the current network, so House only.
     Source("Congress Trades", SourceTier.BEST_EFFORT,
-           "https://www.capitoltrades.com/trades",
-           "congress_api", 0.20, 1.0, status=SourceStatus.DEGRADED),
+           "https://disclosures-clerk.house.gov/FinancialDisclosure",
+           "congress_api", 0.20, 1.0, status=SourceStatus.WORKING),
     Source("SEC Form 4", SourceTier.BEST_EFFORT,
            "", "sec_form4", 0.20, 1.0),
     Source("SEC 13F", SourceTier.BEST_EFFORT,

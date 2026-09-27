@@ -1,9 +1,8 @@
 """Phase G Layer 4: Insider / Smart Money data sources.
 
-Congress trades: revived via @anguslin/mcp-capitol-trades MCP server
-(replaces dead House Stock Watcher/Senate Stock Watcher/CapitolTrades BFF
-endpoints with real-time HTML scraping through Node.js MCP). SEC Form 4
-and 13F via EDGAR Atom feeds remain active. Insider cluster detection
+Congress trades: House Clerk Periodic Transaction Reports (pipeline/house_ptr.py);
+the capitoltrades.com MCP scraper is blocked by a Vercel bot checkpoint since
+2026-09. SEC Form 4 and 13F via EDGAR Atom feeds remain active. Insider cluster detection
 for priority boosting.
 
 All sources are free, use no API keys, and return NewsItem objects
@@ -24,24 +23,12 @@ logger = logging.getLogger("marketmind.pipeline.insider_sources")
 
 
 async def fetch_congress_trades() -> list[Any]:
-    """Fetch Congressional stock trades via MCP Capitol Trades server.
-
-    Uses the @anguslin/mcp-capitol-trades MCP server (Node.js subprocess)
-    to scrape capitoltrades.com/trades in real-time. No API key needed.
-    """
-    from marketmind.pipeline.congress_mcp_client import (
-        fetch_congress_trades_via_mcp,
-        congress_trades_to_newsitems,
-    )
+    """Recent House PTR stock trades (official House Clerk disclosures, no key)."""
+    from marketmind.pipeline.house_ptr import fetch_house_ptr_items
     try:
-        trades = await fetch_congress_trades_via_mcp(days=90)
-        if trades:
-            items = congress_trades_to_newsitems(trades)
-            logger.info("Congress Trades: %d trades → %d NewsItems", len(trades), len(items))
-            return items
-        return []
+        return await fetch_house_ptr_items()
     except Exception as e:
-        logger.warning("Congress Trades MCP fetch failed: %s", e)
+        logger.warning("Congress Trades (House PTR) fetch failed: %s", e)
         return []
 
 

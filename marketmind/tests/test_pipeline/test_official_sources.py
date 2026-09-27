@@ -78,9 +78,9 @@ def test_sec_8k_registry_entry_matches_handler():
 
 def test_status_corrections():
     by = _by_name()
-    # Congress: no longer hard-coded WORKING, still fetched (DEGRADED is available).
-    assert by["Congress Trades"].status == SourceStatus.DEGRADED
-    assert by["Congress Trades"].is_available
+    # Congress: capitoltrades scraper replaced by House Clerk PTR filings (verified 2026-09-27).
+    assert by["Congress Trades"].status == SourceStatus.WORKING
+    assert "disclosures-clerk.house.gov" in by["Congress Trades"].url
     assert by["Euronews Economy"].status == SourceStatus.DEGRADED
     assert by["Euronews Economy"].is_available
     # Xinhua feed frozen since 2018: documented but not fetched.
