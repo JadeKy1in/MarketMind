@@ -406,6 +406,10 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
     _shadow_result = None
     from marketmind.gateway import usage_tracker
     usage_tracker.reset()
+    # Load the tradable universe off the event loop: its first download is a blocking
+    # HTTP call that guard / ledger would otherwise make from inside async code.
+    from marketmind.universe import get_equity_universe
+    await asyncio.to_thread(get_equity_universe)
     shadow_db, mother = _init_shadow_ecosystem(config, shadow_count, tracker)
 
     # Settle whatever in the ledger has come due before making new calls (SPEC_v3 §7)

@@ -7,6 +7,8 @@ Rules (all code, no judgement; see docs/S2_DESIGN.md §4):
                      the zone; long fills at min(open, entry_high), short at
                      max(open, entry_low). Never filled inside the window -> void.
   Exit    checked bar by bar from the fill bar, in this order:
+          gap     an open already beyond the target exits there as target (the order
+                  fills at that open), checked before the stop.
           stop    long: low <= stop (gap through -> the open); short mirrored.
           target  long: high >= target (gap through -> the open). On a zone fill bar
                   that did not fill at the open, the target is not credited (the
@@ -19,6 +21,12 @@ Rules (all code, no judgement; see docs/S2_DESIGN.md §4):
           Excess = net - benchmark for both directions ("did this beat simply
           holding the benchmark").
   Brier   (confidence - outcome)^2, outcome = 1 if net > 0 else 0.
+  Adjusted prices  sources return split/dividend-adjusted series, so a later corporate
+          action rescales past bars. Price levels (zone, stop, target, falsifier) are
+          multiplied by close(snapshot date in the current series) / snapshot price
+          before simulating; returns are then in the current series (total return).
+  Benchmark backfill  a settled record whose benchmark data was missing is retried
+          on later runs; only the benchmark fields change.
   Missing data leaves the record unsettled with a note; nothing is estimated.
   Only complete bars are used: bars dated on or after today (UTC) are dropped,
   because a data source returns the running session as a partial bar.
@@ -26,7 +34,7 @@ Rules (all code, no judgement; see docs/S2_DESIGN.md §4):
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -141,6 +149,11 @@ def simulate(e: LedgerEntry, bars: list[Bar]) -> Outcome:
     for j in range(fill.index, min(last, len(after) - 1) + 1):
         b = after[j]
         ref_open = fill.price if j == fill.index else b.open
+        open_known = j > fill.index or fill.at_open
+        if (open_known and e.target_price is not None
+                and (b.open >= e.target_price if long else b.open <= e.target_price)):
+            return Outcome("settled", fill=fill, exit_index=j, exit_price=b.open,
+                           exit_reason="target")
         if e.stop_loss is not None and (b.low <= e.stop_loss if long else b.high >= e.stop_loss):
             px = min(ref_open, e.stop_loss) if long else max(ref_open, e.stop_loss)
             return Outcome("settled", fill=fill, exit_index=j, exit_price=px, exit_reason="stop")
@@ -199,6 +212,16 @@ def apply_outcome(e: LedgerEntry, out: Outcome, bars: list[Bar],
     e.cost_return = round(2 * cost_bps(e.asset_type) / 10_000, 6)
     e.net_return = round(e.gross_return - e.cost_return, 6)
     e.pnl_usd = round(e.position_usd * e.net_return, 2)
+    apply_benchmarks(e, market_bars, domain_bars)
+    outcome = 1.0 if e.net_return > 0 else 0.0
+    e.brier = round((e.confidence - outcome) ** 2, 6)
+    e.falsifier_triggered = e.exit_reason in ("stop", "falsifier")
+    e.settled_at = _now()
+
+
+def apply_benchmarks(e: LedgerEntry, market_bars: list[Bar] | None,
+                     domain_bars: list[Bar] | None) -> None:
+    """Fill benchmark returns of a settled record; note whichever is still missing."""
     e.market_benchmark = market_benchmark(e)
     mret = benchmark_return(market_bars, e.entry_date, e.exit_date)
     e.market_return = None if mret is None else round(mret, 6)
@@ -212,10 +235,48 @@ def apply_outcome(e: LedgerEntry, out: Outcome, bars: list[Bar],
         missing.append(e.domain_benchmark)
     if missing:
         e.settle_note = "benchmark data unavailable: " + ", ".join(missing)
-    outcome = 1.0 if e.net_return > 0 else 0.0
-    e.brier = round((e.confidence - outcome) ** 2, 6)
-    e.falsifier_triggered = e.exit_reason in ("stop", "falsifier")
-    e.settled_at = _now()
+    elif e.settle_note.startswith("benchmark data unavailable"):
+        e.settle_note = ""
+
+
+def needs_benchmark(e: LedgerEntry) -> bool:
+    return e.status == "settled" and (
+        e.market_return is None or (bool(e.domain_benchmark) and e.domain_return is None))
+
+
+def adjustment_factor(e: LedgerEntry, bars: list[Bar], snapshot: dict[str, dict]) -> float:
+    """close(snapshot date) in the current series / snapshot price; 1.0 if not comparable."""
+    snap = snapshot.get(e.ticker) or {}
+    price, day = snap.get("price"), snap.get("price_date")
+    if not price or price <= 0 or not day:
+        return 1.0
+    bar = next((b for b in bars if b.date == day), None)
+    if bar is None or bar.close <= 0:
+        return 1.0
+    factor = bar.close / price
+    if abs(factor - 1.0) < 1e-4:
+        return 1.0
+    if not 0.01 <= factor <= 100:
+        logger.warning("Ledger: implausible adjustment factor %.4f for %s, ignored",
+                       factor, e.ticker)
+        return 1.0
+    return factor
+
+
+def rescaled(e: LedgerEntry, factor: float) -> LedgerEntry:
+    """Copy of `e` with every price level multiplied by `factor` (simulation only)."""
+    if factor == 1.0:
+        return e
+
+    def scale(v: float | None) -> float | None:
+        return None if v is None else v * factor
+
+    rule = dict(e.falsifier_rule) if e.falsifier_rule else None
+    if rule and rule.get("price") is not None:
+        rule["price"] = float(rule["price"]) * factor
+    return replace(e, entry_low=scale(e.entry_low), entry_high=scale(e.entry_high),
+                   stop_loss=scale(e.stop_loss), target_price=scale(e.target_price),
+                   falsifier_rule=rule)
 
 
 def _now() -> str:
@@ -229,12 +290,15 @@ class SettleReport:
     voided: int = 0
     still_open: int = 0
     pending: int = 0
+    benchmarks_backfilled: int = 0
     unavailable: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
         text = (f"ledger: checked {self.checked}, settled {self.settled}, void {self.voided}, "
                 f"open {self.still_open}, pending {self.pending}")
+        if self.benchmarks_backfilled:
+            text += f", benchmarks backfilled {self.benchmarks_backfilled}"
         if self.unavailable:
             text += f", no price data: {', '.join(sorted(set(self.unavailable)))}"
         if self.errors:
@@ -267,13 +331,18 @@ async def settle_all(store: LedgerStore, source: PriceSource,
                 report.unavailable.append(e.ticker)
                 store.update(e)
                 continue
-            out = simulate(e, bars)
+            snapshot = store.snapshot(e.snapshot_id) if e.snapshot_id else {}
+            factor = adjustment_factor(e, bars, snapshot)
+            out = simulate(rescaled(e, factor), bars)
             market_bars = domain_bars = None
             if out.status == "settled":
                 market_bars = await bars_for(market_benchmark(e))
                 if e.domain_benchmark:
                     domain_bars = await bars_for(e.domain_benchmark)
             apply_outcome(e, out, bars, market_bars, domain_bars)
+            if factor != 1.0:
+                note = f"price levels rescaled x{factor:.4f} (adjusted series changed)"
+                e.settle_note = f"{e.settle_note}; {note}" if e.settle_note else note
             e.price_source = source_of(source, e.ticker)
             store.update(e)
         except Exception as exc:
@@ -293,5 +362,20 @@ async def settle_all(store: LedgerStore, source: PriceSource,
             report.still_open += 1
         else:
             report.pending += 1
+
+    # Settled records whose benchmark data was missing: retry the benchmark only.
+    for e in store.list(status="settled"):
+        if not needs_benchmark(e):
+            continue
+        try:
+            before = (e.market_return, e.domain_return)
+            market_bars = await bars_for(market_benchmark(e))
+            domain_bars = await bars_for(e.domain_benchmark) if e.domain_benchmark else None
+            apply_benchmarks(e, market_bars, domain_bars)
+            if (e.market_return, e.domain_return) != before:
+                store.update(e)
+                report.benchmarks_backfilled += 1
+        except Exception:
+            logger.error("Ledger: benchmark backfill for %s failed", e.entry_id, exc_info=True)
     logger.info(report.summary())
     return report

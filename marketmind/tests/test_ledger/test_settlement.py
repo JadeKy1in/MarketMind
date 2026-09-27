@@ -245,3 +245,47 @@ async def test_price_source_is_recorded_per_ticker(tmp_path):
     src = StaticPriceSource({})
     src.served_by = {"ETH-USD": "binance"}
     assert source_of(src, "ETH-USD") == "binance" and source_of(src, "SPY") == "static"
+
+
+def test_gap_open_beyond_target_exits_at_open_even_if_stop_touched_later():
+    # opens above the target, then trades down through the stop the same day
+    bars = flat(DAYS[:3]) + [bar("2026-09-04", 113, 114, 94, 95)]
+    out = simulate(entry(stop_loss=95.0, target_price=110.0), bars)
+    assert (out.exit_reason, out.exit_price) == ("target", 113)
+    short = flat(DAYS[:3]) + [bar("2026-09-04", 88, 106, 87, 105)]
+    out = simulate(entry(direction="short", stop_loss=105.0, target_price=90.0), short)
+    assert (out.exit_reason, out.exit_price) == ("target", 88)
+
+
+@pytest.mark.asyncio
+async def test_levels_rescaled_when_adjusted_series_changes(tmp_path):
+    # Recorded when the series showed 100 on 09-01 (stop 95); a later 2:1 split
+    # re-adjusts history to 50, so the stop must be read as 47.5, not 95.
+    store = LedgerStore(tmp_path / "l.db")
+    sid = store.save_snapshot({"AAA": (100.0, "2026-09-01", "static")})
+    eid = store.add(entry(stop_loss=95.0, target_price=130.0, snapshot_id=sid),
+                    created_at=CREATED)
+    adjusted = flat(DAYS[:8], 50.0)
+    spy = flat(DAYS[:8])
+    await settle_all(store, StaticPriceSource({"AAA": adjusted, "SPY": spy}), today="2026-09-30")
+    e = store.get(eid)
+    assert e.exit_reason == "expiry" and e.entry_price == 50.0
+    assert "rescaled x0.5000" in e.settle_note
+
+
+@pytest.mark.asyncio
+async def test_missing_benchmark_is_backfilled_later(tmp_path):
+    store = LedgerStore(tmp_path / "l.db")
+    eid = store.add(entry(), created_at=CREATED)
+    stock = flat(DAYS[:8])
+    report = await settle_all(store, StaticPriceSource({"AAA": stock}), today="2026-09-30")
+    e = store.get(eid)
+    assert e.status == "settled" and e.market_return is None
+    assert "benchmark data unavailable: SPY" in e.settle_note
+    net = e.net_return
+    report = await settle_all(store, StaticPriceSource({"AAA": stock, "SPY": flat(DAYS[:8])}),
+                              today="2026-09-30")
+    e = store.get(eid)
+    assert report.benchmarks_backfilled == 1 and "backfilled 1" in report.summary()
+    assert e.market_return == 0.0 and e.excess_market == net and e.settle_note == ""
+    assert e.net_return == net  # outcome itself untouched
