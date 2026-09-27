@@ -7,16 +7,19 @@ show what the guard did.
 """
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass, field
+
+logger = logging.getLogger("marketmind.pipeline.decision_guard")
 
 MAX_SINGLE_POSITION_PCT = 25.0   # gate23-architecture.md: single-position hard cap
 MAX_TOTAL_HEAT_PCT = 25.0        # design spec §6.3: all stops hit together <= 25% equity
 MAX_POSITIONS = 6                # design spec §6.3: attention constraint
 
-# Interim tradability rule until the Robinhood universe lands (SPEC_v3 S2):
-# a ticker with a foreign-exchange suffix (600900.SS, 0700.HK, 7203.T ...) cannot be
-# bought on Robinhood US. "-USD" crypto pairs are allowed.
+# Fallback when the tradable universe (marketmind.universe) cannot be loaded:
+# a foreign-exchange suffix (600900.SS, 0700.HK, 7203.T ...) is never tradable on
+# Robinhood US; everything else is given the benefit of the doubt.
 _FOREIGN_SUFFIXES = (".SS", ".SZ", ".HK", ".T", ".L", ".PA", ".DE", ".TO", ".AX",
                      ".KS", ".KQ", ".TW", ".NS", ".BO", ".SW", ".AS", ".MI", ".SA")
 
@@ -32,6 +35,11 @@ def is_robinhood_tradable(ticker: str) -> bool:
     t = (ticker or "").strip().upper()
     if not t:
         return False
+    from marketmind.universe import is_tradable
+    verdict = is_tradable(t)
+    if verdict is not None:
+        return verdict
+    logger.warning("Tradable universe unavailable; %s judged by suffix rule", t)
     if t.endswith("-USD"):
         return True
     return not t.endswith(_FOREIGN_SUFFIXES)

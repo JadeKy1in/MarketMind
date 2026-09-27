@@ -406,6 +406,10 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
     _shadow_result = None
     shadow_db, mother = _init_shadow_ecosystem(config, shadow_count, tracker)
 
+    # Settle whatever in the ledger has come due before making new calls (SPEC_v3 §7)
+    if not mock:
+        await settle_ledger(config)
+
     # Steps 1-3: Scout → Flash → L1
     news_items = await _do_news_collection(config, tracker, mock=mock)
     signals = await _do_flash_preprocessing(news_items, tracker)
@@ -469,6 +473,10 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
     _save_decision_brief(l1_result, l2_result, l3_result, red_team, resonance,
                          decision, fragility=fragility)
 
+    # Every card / forced paper trade goes into the unified ledger (mock runs never do)
+    if not mock:
+        await _record_to_ledger(config, decision, l3_result)
+
     # Record pipeline metrics for weekly tactical audit
     _record_pipeline_metrics(
         flash_results=signals, l1_result=l1_result, l2_result=l2_result,
@@ -484,6 +492,35 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
     if _shadow_task and not _shadow_task.done():
         print("(Shadow ecosystem still running in background)")
     return 0
+
+
+def _ledger_store(config):
+    from marketmind.ledger.store import LedgerStore
+    return LedgerStore(Path(config.data_dir) / "ledger.db")
+
+
+async def settle_ledger(config) -> str:
+    """Settle due ledger records; never blocks the pipeline, but failures are logged."""
+    try:
+        from marketmind.ledger.prices import HistoryPriceSource
+        from marketmind.ledger.settlement import settle_all
+        report = await settle_all(_ledger_store(config), HistoryPriceSource())
+        print(f"  [ledger] {report.summary()}")
+        return report.summary()
+    except Exception:
+        logger.error("Ledger settlement failed (records stay unsettled)", exc_info=True)
+        return "ledger settlement failed"
+
+
+async def _record_to_ledger(config, decision, l3_result) -> None:
+    try:
+        from marketmind.ledger.prices import HistoryPriceSource
+        from marketmind.ledger.recorder import record_main_decision
+        ids = await record_main_decision(decision, l3_result, _ledger_store(config),
+                                         HistoryPriceSource())
+        print(f"  [ledger] recorded {len(ids)} entr{'y' if len(ids) == 1 else 'ies'}")
+    except Exception:
+        logger.error("Ledger recording failed — today's calls are NOT in the ledger", exc_info=True)
 
 
 def _save_daily_prediction(l1_result, l2_result, l3_result, decision) -> None:

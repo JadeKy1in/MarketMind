@@ -169,3 +169,13 @@ def vcr_news_offline():
             _os.makedirs(_os.path.dirname(_z1_cache_path), exist_ok=True)
             with open(_z1_cache_path, "w", encoding="utf-8") as _f:
                 _f.write(_cache_backup)
+
+
+@pytest.fixture(autouse=True)
+def _offline_equity_universe():
+    """Tests never download the NASDAQ symbol files: the equity universe is
+    'unavailable' unless a test installs its own via set_equity_universe()."""
+    from marketmind.universe import reset_equity_universe, set_equity_universe
+    set_equity_universe(None)
+    yield
+    reset_equity_universe()

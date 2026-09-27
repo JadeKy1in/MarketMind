@@ -132,6 +132,7 @@ class DecisionCard:
     red_team_note: str            # most important objection
     cash_reframing: str           # "if I had cash today, would I buy this?"
     invalidation: str = ""        # falsifiable condition: "I am wrong if ..." (SPEC_v3 L5)
+    confidence: float | None = None  # P(trade ends profitable), 0-1; settled with Brier (SPEC_v3 §7)
 
 
 @dataclass
@@ -349,11 +350,14 @@ _I18N = {
 DECISION_OUTPUT_SCHEMA = """
 
 OUTPUT FORMAT — use EXACTLY these keys, no others:
-{"decision_cards": [{"ticker": "TICKER", "direction": "long", "position_size_pct": 0.0,
-   "max_hold_days": 30, "thesis": "1-2 sentence thesis", "risk_statement": "main risk",
+{"decision_cards": [{"ticker": "TICKER", "direction": "long", "position_size_pct": 5.0,
+   "max_hold_days": 30, "confidence": 0.55,
+   "thesis": "1-2 sentence thesis", "risk_statement": "main risk",
    "red_team_note": "answer to the key red-team objection",
    "invalidation": "I am wrong if ... (observable, dated condition)",
    "cash_reframing": "if I had cash today, would I buy this?"}],
+ (position_size_pct is a PERCENT of the portfolio: 5.0 means 5%;
+  confidence = your probability, 0-1, that the trade ends profitable; it is scored later)
  "no_trade_card": {"thesis": "why not trading is best", "supporting_evidence": ["..."],
    "counterfactual": "what would make us trade", "structural_advantages": ["..."],
    "pre_mortem": "...", "no_trade_score": 0},
@@ -386,12 +390,13 @@ Output JSON:
     {
       "ticker": "TICKER",
       "direction": "long|short",
-      "position_size_pct": 0.0,
+      "position_size_pct": 5.0,
       "entry_low": 0.0,
       "entry_high": 0.0,
       "stop_loss": 0.0,
       "target_price": 0.0,
       "max_hold_days": 30,
+      "confidence": 0.55,
       "reward_risk_ratio": 0.0,
       "thesis": "1-sentence thesis",
       "risk_statement": "1-sentence risk",
@@ -668,6 +673,24 @@ def _num(v: Any, default: float) -> float:
         return default
 
 
+def _probability(v: Any) -> float | None:
+    """0-1 probability from an LLM value; accepts percentages (65 -> 0.65)."""
+    f = _num(v, -1.0)
+    if f > 1.0:
+        f /= 100.0
+    return round(f, 4) if 0.0 <= f <= 1.0 else None
+
+
+def _normalise_size_units(cards: list[DecisionCard]) -> None:
+    """Sizes are percents. Flash has answered in fractions (0.06 meaning 6%, live run 5,
+    2026-09-27); when every size is <= 1 treat the batch as fractions."""
+    sizes = [c.position_size_pct for c in cards if c.position_size_pct > 0]
+    if sizes and all(s <= 1.0 for s in sizes):
+        logger.info("Decision sizes look like fractions %s; converting to percent", sizes)
+        for c in cards:
+            c.position_size_pct = round(c.position_size_pct * 100, 4)
+
+
 def _parse_decision_response(content: str) -> DecisionOutput:
     content = strip_markdown_fences(content)
     try:
@@ -700,6 +723,7 @@ def _parse_decision_response(content: str) -> DecisionOutput:
             red_team_note=_text(_pick(d, "red_team_note", "red_team_response_cn", "red_team")),
             cash_reframing=_text(_pick(d, "cash_reframing", "cash_reframing_cn")),
             invalidation=_text(_pick(d, "invalidation", "invalidation_cn", "falsifiable_condition")),
+            confidence=_probability(_pick(d, "confidence", "probability", "win_probability", default=None)),
         ))
     ntc_data = data.get("no_trade_card", {})
     no_trade = None
@@ -712,6 +736,7 @@ def _parse_decision_response(content: str) -> DecisionOutput:
             pre_mortem=ntc_data.get("pre_mortem", ""),
             no_trade_score=_num(_pick(ntc_data, "no_trade_score", "no_trade_strength"), 0.0),
         )
+    _normalise_size_units(cards)
     summary = data.get("summary", "")
     if not isinstance(summary, str):
         # Flash sometimes returns summary as an object; 2026-09-27 live run crashed on

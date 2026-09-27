@@ -130,3 +130,37 @@ def test_paper_trade_picks_l3_green_by_ticker():
     l3 = Layer3BatchResult(results=[green("NVDA")])
     paper = _pick_paper_trade(L1(), L2(), l3, None, None)
     assert paper is not None and paper.ticker == "NVDA" and paper.direction == "long"
+
+
+def test_parse_reads_confidence_and_converts_fraction_sizes():
+    import json
+    from marketmind.pipeline.decision import _parse_decision_response
+    raw = json.dumps({"decision_cards": [
+        {"ticker": "COIN", "position_size_pct": 0.06, "confidence": 0.55, "thesis": "t"},
+        {"ticker": "SLV", "position_size_pct": 0.1, "confidence": 60, "thesis": "t"},
+        {"ticker": "GLD", "position_size_pct": 0.05, "confidence": "high", "thesis": "t"},
+    ]})
+    cards = _parse_decision_response(raw).decision_cards
+    assert [c.position_size_pct for c in cards] == [6.0, 10.0, 5.0]   # live run 5: fractions
+    assert [c.confidence for c in cards] == [0.55, 0.6, None]
+
+
+def test_parse_keeps_percent_sizes():
+    import json
+    from marketmind.pipeline.decision import _parse_decision_response
+    raw = json.dumps({"decision_cards": [{"ticker": "A", "position_size_pct": 12},
+                                         {"ticker": "B", "position_size_pct": 0.5}]})
+    assert [c.position_size_pct for c in _parse_decision_response(raw).decision_cards] == [12, 0.5]
+
+
+def test_guard_uses_tradable_universe_when_loaded():
+    from datetime import datetime, timezone
+    from marketmind.universe import set_equity_universe
+    from marketmind.universe.equities import EquityRecord, EquityUniverse
+    set_equity_universe(EquityUniverse(
+        symbols={"NVDA": EquityRecord("NVDA", "NVIDIA", "Q", False)},
+        fetched_at=datetime(2026, 9, 25, tzinfo=timezone.utc), from_cache=True, stale=False))
+    l3 = Layer3BatchResult(results=[green("NVDA"), green("ZZZZ"), green("FAKECOIN-USD")])
+    rep = enforce([card("NVDA"), card("ZZZZ"), card("FAKECOIN-USD")], l3)
+    assert [c.ticker for c in rep.kept] == ["NVDA"]
+    assert sum("not tradable" in n for n in rep.notes) == 2
