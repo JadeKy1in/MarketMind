@@ -21,6 +21,13 @@ _FOREIGN_SUFFIXES = (".SS", ".SZ", ".HK", ".T", ".L", ".PA", ".DE", ".TO", ".AX"
                      ".KS", ".KQ", ".TW", ".NS", ".BO", ".SW", ".AS", ".MI", ".SA")
 
 
+# Owner decision 2026-09-27: ultra-short T-bill ETFs are cash, not trades. Holding
+# them is the no-trade state, so they never take a decision-card slot.
+CASH_EQUIVALENT_ETFS = frozenset({
+    "SHV", "BIL", "SGOV", "USFR", "TFLO", "BILS", "GBIL", "TBIL", "XBIL", "CLTL",
+})
+
+
 def is_robinhood_tradable(ticker: str) -> bool:
     t = (ticker or "").strip().upper()
     if not t:
@@ -61,6 +68,9 @@ def enforce(cards: list, l3, max_single_pct: float = MAX_SINGLE_POSITION_PCT,
             continue
         if not is_robinhood_tradable(card.ticker):
             report.notes.append(f"dropped {card.ticker}: not tradable on Robinhood US")
+            continue
+        if t in CASH_EQUIVALENT_ETFS:
+            report.notes.append(f"dropped {card.ticker}: cash-equivalent T-bill ETF counts as no-trade")
             continue
         card.entry_low, card.entry_high = lvl.entry_zone_low, lvl.entry_zone_high
         card.stop_loss, card.target_price = lvl.stop_loss, lvl.target_price

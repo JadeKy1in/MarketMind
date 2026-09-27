@@ -88,6 +88,11 @@ async def test_empty_llm_output_still_yields_explicit_no_trade_and_paper_trade()
     assert out.paper_trade is not None and out.paper_trade.ticker == "NVDA"
 
 
+def test_cash_equivalent_etf_is_not_a_trade():
+    rep = enforce([card("SHV"), card("bil")], Layer3BatchResult(results=[green("SHV"), green("BIL")]))
+    assert rep.kept == [] and sum("cash-equivalent" in n for n in rep.notes) == 2  # case-insensitive
+
+
 def test_green_but_wait_is_dropped():
     g = green("NVDA")
     g.recommendation, g.reward_risk_ratio = "wait", 0.47
