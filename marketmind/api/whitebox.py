@@ -216,3 +216,18 @@ def get_evidence(date: str | None = None) -> dict:
     return {"available": True, "date": day, "status": report.get("status"),
             "divergences": report.get("divergences", 0), "items": items,
             "dropped": report.get("dropped", []), "news_considered": report.get("news_considered")}
+
+
+# ── owner holdings (S6) ─────────────────────────────────────────────────────
+
+def get_holdings() -> dict:
+    day, report = _latest_json(data_dir() / "holdings_reports")
+    if report is None:
+        from marketmind.holdings.store import load
+        n = len(load())
+        reason = ("未录入持仓：python -m marketmind.holdings add <代码> <数量> <成本>" if not n
+                  else f"已录入 {n} 个持仓，尚未巡检：python -m marketmind.holdings inspect")
+        return {"available": False, "reason": reason}
+    items = report.get("items", [])
+    return {"available": True, "date": day, "items": items,
+            "note": "结论由代码规则给出（docs/S6_DESIGN.md），系统不下单；持仓只存在本机 data/holdings.json"}

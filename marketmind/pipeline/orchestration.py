@@ -793,6 +793,22 @@ async def run_evidence(config, news_items: list):
     return report
 
 
+async def inspect_holdings_step(config) -> None:
+    """S6: inspect the owner's real holdings last, so today's shadow picks can be alternatives."""
+    from marketmind.holdings.inspect import run_inspection
+    try:
+        reports, path = await run_inspection(_ledger_store(config))
+    except Exception:
+        logger.warning("holdings inspection failed", exc_info=True)
+        print("  [holdings] inspection failed (see log)")
+        return
+    if not reports:
+        print("  [holdings] no holdings recorded")
+        return
+    flagged = [f"{r.ticker} {r.verdict_cn}" for r in reports if r.verdict in ("exit", "switch")]
+    print(f"  [holdings] {len(reports)} inspected" + (f"; action: {', '.join(flagged)}" if flagged else ""))
+
+
 async def run_evidence_only(config) -> int:
     """`--mode evidence`: collect news, run the evidence layer only."""
     init_gateway(config.deepseek_api_key, config.deepseek_base_url)
@@ -964,6 +980,7 @@ async def _run_daily_with_shadows(config, args) -> int:
         except asyncio.CancelledError:
             pass
     if not args.mock:
+        await inspect_holdings_step(config)
         from marketmind.gateway import usage_tracker
         usage_tracker.append_log("daily")
 

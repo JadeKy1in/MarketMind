@@ -117,6 +117,12 @@ async def wb_evidence(date: str = ""):
     return _wb(whitebox.get_evidence, date or None)
 
 
+@app.get("/api/wb/holdings")
+async def wb_holdings():
+    from marketmind.api import whitebox
+    return _wb(whitebox.get_holdings)
+
+
 @app.post("/api/reporter")
 async def reporter_endpoint(request: dict):
     from marketmind.api import reporter
