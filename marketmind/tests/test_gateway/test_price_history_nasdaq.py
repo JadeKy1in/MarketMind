@@ -137,7 +137,10 @@ def test_crypto_and_indices_not_sent_to_nasdaq(_isolate, monkeypatch):
 
     async def _no_binance(ticker):
         return None
+    async def _no_bybit(ticker, years):
+        return None
     monkeypatch.setattr(ph, "_from_binance", _no_binance)
+    monkeypatch.setattr(ph, "_from_bybit", _no_bybit)
     for t in ("BTC-USD", "^GSPC", "600519.SS"):
         assert asyncio.run(ph.get_price_history(t, years=1)) is None
     assert calls == []

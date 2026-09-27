@@ -5,7 +5,8 @@ Returns ~5 years of daily bars plus derived weekly bars, which is what the
 market_data.py is too short for that.
 
 Sources: yfinance for stocks, ETFs, indices and crypto (e.g. "BTC-USD");
-Binance public klines as a crypto fallback; the Nasdaq public historical API
+Binance public klines, then Bybit public spot klines, as crypto fallbacks; the
+Nasdaq public historical API
 (api.nasdaq.com) as a fallback for US stocks/ETFs. No API keys. Returns None
 when every source fails — callers must report "data unavailable", never guess.
 
@@ -15,6 +16,11 @@ NOT dividend-adjusted (AAPL 2021-09-27 close $145.37 = raw close), so they
 differ slightly from yfinance auto_adjust closes, more so for high-yield
 tickers. Indices (^...), futures/FX (=), non-US suffix tickers (.SS, .HK, ...)
 and crypto are not sent to Nasdaq. Class shares map "-" -> "." (BRK-B -> BRK.B).
+
+Bybit caveats: "BTC-USD" maps to the spot pair "BTCUSDT", i.e. prices are
+quoted in USDT, treated as ~USD (same assumption as the Binance path). Bars are
+UTC-day candles. Like the Binance path, the current (still-forming) UTC day's
+bar is kept as the last bar. Only "-USD" tickers are sent to Bybit.
 """
 from __future__ import annotations
 
@@ -32,6 +38,9 @@ except ImportError:  # pragma: no cover - yfinance is a hard dependency
 logger = logging.getLogger("marketmind.gateway.price_history")
 
 _BINANCE_KLINES = "https://api.binance.com/api/v3/klines"
+_BYBIT_KLINES = "https://api.bybit.com/v5/market/kline"
+_BYBIT_TIMEOUT = 15.0
+_BYBIT_PAGE = 1000
 _NASDAQ_HISTORICAL = "https://api.nasdaq.com/api/quote/{symbol}/historical"
 _NASDAQ_HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -69,6 +78,8 @@ async def get_price_history(ticker: str, years: int = 5) -> PriceHistory | None:
     hist = await _from_yfinance(ticker, years)
     if hist is None and ticker.upper().endswith("-USD"):
         hist = await _from_binance(ticker)
+        if hist is None:
+            hist = await _from_bybit(ticker, years)
     elif hist is None:
         hist = await _from_nasdaq(ticker, years)
     if hist is None:
@@ -135,6 +146,82 @@ async def _from_binance(ticker: str) -> PriceHistory | None:
     if not daily:
         return None
     return PriceHistory(ticker=ticker, source="binance", daily=daily, weekly=to_weekly(daily))
+
+
+# ── Bybit (second crypto fallback) ─────────────────────────────────────────
+
+def _bybit_symbol(ticker: str) -> str | None:
+    """"BTC-USD" -> "BTCUSDT" (USDT quote, treated as ~USD); None for non-crypto."""
+    t = ticker.strip().upper()
+    if not t.endswith("-USD") or len(t) <= 4:
+        return None
+    return t[:-4] + "USDT"
+
+
+def _bybit_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=_BYBIT_TIMEOUT)
+
+
+def _parse_bybit(rows) -> list[Bar]:
+    """Bybit kline rows (newest-first strings) -> ascending bars, deduped on date."""
+    from datetime import datetime, timezone
+    by_date: dict[str, Bar] = {}
+    for r in rows or []:
+        try:
+            d = datetime.fromtimestamp(int(r[0]) / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+            by_date[d] = Bar(date=d, open=float(r[1]), high=float(r[2]), low=float(r[3]),
+                             close=float(r[4]), volume=float(r[5]))
+        except (IndexError, TypeError, ValueError, OverflowError, OSError):
+            continue
+    return [by_date[d] for d in sorted(by_date)]
+
+
+async def _from_bybit(ticker: str, years: int) -> PriceHistory | None:
+    symbol = _bybit_symbol(ticker)
+    if symbol is None:
+        return None
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    start_dt = now - timedelta(days=int(365.25 * years))
+    start_ms = int(start_dt.timestamp() * 1000)
+    cutoff = start_dt.strftime("%Y-%m-%d")
+    max_pages = int(365.25 * years) // _BYBIT_PAGE + 2
+    raw: list = []
+    # Always send `end`: with only `start`, Bybit returns the oldest `limit`
+    # bars going forward from `start` instead of the newest ones.
+    end_ms = int(now.timestamp() * 1000)
+    try:
+        async with _bybit_client() as client:
+            for _ in range(max_pages):
+                params = {"category": "spot", "symbol": symbol, "interval": "D",
+                          "limit": _BYBIT_PAGE, "start": start_ms, "end": end_ms}
+                resp = await client.get(_BYBIT_KLINES, params=params)
+                if resp.status_code != 200:
+                    logger.warning("Bybit klines HTTP %s for %s", resp.status_code, ticker)
+                    return None
+                payload = resp.json()
+                if not isinstance(payload, dict) or payload.get("retCode") != 0:
+                    logger.warning("Bybit klines error for %s: retCode=%s %s", ticker,
+                                   (payload or {}).get("retCode") if isinstance(payload, dict) else None,
+                                   (payload or {}).get("retMsg") if isinstance(payload, dict) else payload)
+                    return None
+                rows = ((payload.get("result") or {}).get("list")) or []
+                if not isinstance(rows, list):
+                    logger.warning("Bybit klines malformed list for %s", ticker)
+                    return None
+                raw.extend(rows)
+                starts = [int(r[0]) for r in rows]
+                if len(rows) < _BYBIT_PAGE or not starts or min(starts) <= start_ms:
+                    break
+                end_ms = min(starts) - 1
+    except Exception as exc:
+        logger.warning("Bybit klines failed for %s: %s", ticker, exc)
+        return None
+    daily = [b for b in _parse_bybit(raw) if b.date >= cutoff]
+    if not daily:
+        logger.warning("Bybit klines empty for %s", ticker)
+        return None
+    return PriceHistory(ticker=ticker, source="bybit", daily=daily, weekly=to_weekly(daily))
 
 
 # ── Nasdaq (US stock/ETF fallback) ─────────────────────────────────────────
