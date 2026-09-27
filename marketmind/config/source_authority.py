@@ -70,6 +70,45 @@ SOURCES: list[Source] = [
            "fiscaldata_auctions", 0.95, 1.0),
     Source("NY Fed Reference Rates", SourceTier.PRIMARY,
            "https://markets.newyorkfed.org/api/rates/all/latest.json", "nyfed_rates", 0.95, 1.0),
+    # SEC full-text red-flag phrases / Fed + BLS calendars → pipeline/sources_regulatory.py
+    Source("SEC EDGAR Full-Text Flags", SourceTier.PRIMARY,
+           "https://efts.sec.gov/LATEST/search-index", "sec_fulltext", 0.90, 1.0),
+    Source("Federal Reserve Calendar", SourceTier.PRIMARY,
+           "https://www.federalreserve.gov/json/calendar.json", "fed_calendar", 0.97, 1.0),
+    Source("BLS Release Calendar", SourceTier.PRIMARY,
+           "https://www.bls.gov/schedule/news_release/bls.ics", "bls_calendar", 0.97, 1.0),
+    # Positioning / inventory / volatility → pipeline/sources_positioning.py
+    # Cboe data: 15-min delayed, personal non-commercial use only.
+    Source("CFTC Commitments of Traders", SourceTier.PRIMARY, "https://publicreporting.cftc.gov/resource/6dca-aqww.json", "cftc_cot", 0.95, 1.0),
+    Source("EIA Weekly Petroleum Status", SourceTier.PRIMARY, "https://ir.eia.gov/wpsr/table1.csv", "eia_petroleum", 0.97, 1.0),
+    Source("EIA Natural Gas Storage", SourceTier.PRIMARY, "https://ir.eia.gov/ngs/wngsr.json", "eia_natgas", 0.97, 1.0),
+    Source("Cboe VIX History", SourceTier.PRIMARY, "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv", "cboe_vix", 0.95, 1.0),
+    Source("Cboe SPX Options (delayed)", SourceTier.RELIABLE, "https://cdn.cboe.com/api/global/delayed_quotes/options/_SPX.json", "cboe_spx_options", 0.90, 0.5),
+    Source("Deribit DVOL", SourceTier.RELIABLE, "https://www.deribit.com/api/v2/public/get_volatility_index_data", "deribit_dvol", 0.85, 1.0),
+    Source("Bybit Perp Funding/OI", SourceTier.RELIABLE, "https://api.bybit.com/v5/market/tickers", "bybit_derivs", 0.80, 1.0),
+    Source("Hyperliquid Perp Funding/OI", SourceTier.FRAGILE, "https://api.hyperliquid.xyz/info", "hyperliquid_derivs", 0.75, 1.0),
+    # Attention / alternative data → pipeline/sources_alternative.py (anomalies only)
+    Source("Wikipedia Attention Spikes", SourceTier.BEST_EFFORT,
+           "https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/en.wikipedia/all-access/user/",
+           "wiki_pageviews", 0.60, 1.0),
+    Source("GDELT Events (15-min)", SourceTier.BEST_EFFORT,
+           "http://data.gdeltproject.org/gdeltv2/lastupdate.txt", "gdelt_events", 0.50, 1.0),
+    Source("IMF PortWatch Chokepoints", SourceTier.PRIMARY,
+           "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query",
+           "portwatch_chokepoints", 0.85, 1.0),
+    # FDA approvals, recalls, enforcement: first-hand biotech/pharma catalysts.
+    Source("FDA Press", SourceTier.PRIMARY,
+           "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-releases/rss.xml",
+           "rss", 0.93, 1.0),
+
+    # ── Global central banks (added 2026-09-27, verified live) ─────
+    # BIS aggregates speeches from ~60 central banks (incl. PBOC, RBI, BCB) in one feed.
+    Source("BIS Central Bank Speeches", SourceTier.PRIMARY, "https://www.bis.org/doclist/cbspeeches.rss", "rss", 0.93, 1.0),
+    Source("Bank of Japan", SourceTier.PRIMARY, "https://www.boj.or.jp/en/rss/whatsnew.xml", "rss", 0.95, 1.0),
+    Source("Bank of England", SourceTier.PRIMARY, "https://www.bankofengland.co.uk/rss/news", "rss", 0.95, 1.0),
+    Source("Swiss National Bank", SourceTier.PRIMARY, "https://www.snb.ch/public/en/rss/pressrel", "rss", 0.95, 1.0),
+    Source("Reserve Bank of Australia", SourceTier.PRIMARY, "https://www.rba.gov.au/rss/rss-cb-media-releases.xml", "rss", 0.95, 1.0),
+    Source("Bank of Canada", SourceTier.PRIMARY, "https://www.bankofcanada.ca/content_type/press-releases/feed/", "rss", 0.95, 1.0),
 
     # ── China / Greater China ──────────────────────────────────────
     Source("SCMP Business", SourceTier.RELIABLE, "https://www.scmp.com/rss/4/feed/", "rss", 0.80, 2.0),
@@ -82,6 +121,14 @@ SOURCES: list[Source] = [
     # Chinese-language financial news; FRAGILE because the mirror is volunteer-run with no SLA.
     Source("Caixin Latest (via RSSHub)", SourceTier.FRAGILE, "https://rsshub.rssforever.com/caixin/latest", "rss", 0.70, 1.0),
     Source("Yicai Brief (via RSSHub)", SourceTier.FRAGILE, "https://rsshub.rssforever.com/yicai/brief", "rss", 0.65, 1.0),
+    # Primary company disclosures (unofficial JSON backends of the public sites; one request
+    # per run, no retries) → pipeline/sources_cn_hk.py. HKEXnews: English; CNINFO: Chinese.
+    Source("HKEXnews Announcements", SourceTier.RELIABLE,
+           "https://www1.hkexnews.hk/ncms/json/eds/lcisehk7relsde_1.json", "hkex_announcements", 0.92, 1.0),
+    Source("CNINFO A-share Risk Announcements", SourceTier.RELIABLE,
+           "https://www.cninfo.com.cn/new/hisAnnouncement/query", "cninfo_risk", 0.92, 1.0),
+    Source("CNINFO A-share Restructuring", SourceTier.RELIABLE,
+           "https://www.cninfo.com.cn/new/hisAnnouncement/query", "cninfo_restructuring", 0.90, 1.0),
 
     # ── Japan / Asia Pacific ───────────────────────────────────────
     Source("Nikkei Asia", SourceTier.RELIABLE, "https://asia.nikkei.com/rss/feed/nar", "rss", 0.80, 2.0),
@@ -151,6 +198,9 @@ SOURCES: list[Source] = [
            "https://bsky.social/xrpc/com.atproto.repo.searchPosts?q={QUERY}", "api", 0.20, 1.0),
     Source("Truth Social (Trump)", SourceTier.BEST_EFFORT,
            "https://trumpstruth.org/feed", "rss", 0.15, 1.0),
+    # Google daily trending searches (US, 10 items): mass-attention signal, not a news source.
+    Source("Google Trends US", SourceTier.BEST_EFFORT,
+           "https://trends.google.com/trending/rss?geo=US", "rss", 0.20, 1.0),
 
     # ── Insider / Smart Money (Phase G Layer 4) ─────────────────────
     # Congress trades revived 2026-05-25 via @anguslin/mcp-capitol-trades

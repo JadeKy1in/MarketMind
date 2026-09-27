@@ -159,6 +159,33 @@ from marketmind.pipeline.official_data_sources import (
     fetch_treasury_auctions,
     fetch_nyfed_reference_rates,
 )
+# ── Key-free data sources added 2026-09-27 (each module documents its rules)
+from marketmind.pipeline.sources_regulatory import (
+    fetch_sec_fulltext_flags, fetch_fed_calendar, fetch_bls_calendar,
+)
+from marketmind.pipeline.sources_positioning import POSITIONING_FETCHERS
+from marketmind.pipeline.sources_alternative import (
+    fetch_wikipedia_attention, fetch_gdelt_events, fetch_portwatch_chokepoints,
+)
+from marketmind.pipeline.sources_cn_hk import (
+    fetch_hkex_announcements, fetch_cninfo_risk_announcements, fetch_cninfo_restructuring,
+)
+
+# feed_type -> fetcher(source, config) -> list[NewsItem]; fetchers raise on HTTP errors.
+DATA_FETCHERS = {
+    "fiscaldata_auctions": fetch_treasury_auctions,
+    "nyfed_rates": fetch_nyfed_reference_rates,
+    "sec_fulltext": fetch_sec_fulltext_flags,
+    "fed_calendar": fetch_fed_calendar,
+    "bls_calendar": fetch_bls_calendar,
+    **POSITIONING_FETCHERS,
+    "wiki_pageviews": fetch_wikipedia_attention,
+    "gdelt_events": fetch_gdelt_events,
+    "portwatch_chokepoints": fetch_portwatch_chokepoints,
+    "hkex_announcements": fetch_hkex_announcements,
+    "cninfo_risk": fetch_cninfo_risk_announcements,
+    "cninfo_restructuring": fetch_cninfo_restructuring,
+}
 
 async def _fetch_api_source(source: Source, config: MarketMindConfig) -> list[NewsItem]:
     """Fetch from a JSON API source (NewsAPI, GNews, etc.). Injects API key into URL."""
@@ -236,9 +263,8 @@ async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsIte
                 source.status = SourceStatus.WORKING
                 source.consecutive_failures = 0
             return items
-        if source.feed_type in ("fiscaldata_auctions", "nyfed_rates"):
-            fetcher = fetch_treasury_auctions if source.feed_type == "fiscaldata_auctions" else fetch_nyfed_reference_rates
-            items = await fetcher(source, config)
+        if source.feed_type in DATA_FETCHERS:
+            items = await DATA_FETCHERS[source.feed_type](source, config)
             source.status = SourceStatus.WORKING
             source.consecutive_failures = 0
             source.last_checked = datetime.now(timezone.utc).isoformat()
