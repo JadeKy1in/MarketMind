@@ -5,8 +5,16 @@ Returns ~5 years of daily bars plus derived weekly bars, which is what the
 market_data.py is too short for that.
 
 Sources: yfinance for stocks, ETFs, indices and crypto (e.g. "BTC-USD");
-Binance public klines as a crypto fallback. No API keys. Returns None when
-every source fails — callers must report "data unavailable", never guess.
+Binance public klines as a crypto fallback; the Nasdaq public historical API
+(api.nasdaq.com) as a fallback for US stocks/ETFs. No API keys. Returns None
+when every source fails — callers must report "data unavailable", never guess.
+
+Nasdaq caveats (verified live 2026-09-27): prices ARE split-adjusted (NVDA
+10:1 split on 2024-06-10 is continuous: 06-07 $120.888 -> 06-10 $121.79) but
+NOT dividend-adjusted (AAPL 2021-09-27 close $145.37 = raw close), so they
+differ slightly from yfinance auto_adjust closes, more so for high-yield
+tickers. Indices (^...), futures/FX (=), non-US suffix tickers (.SS, .HK, ...)
+and crypto are not sent to Nasdaq. Class shares map "-" -> "." (BRK-B -> BRK.B).
 """
 from __future__ import annotations
 
@@ -24,6 +32,13 @@ except ImportError:  # pragma: no cover - yfinance is a hard dependency
 logger = logging.getLogger("marketmind.gateway.price_history")
 
 _BINANCE_KLINES = "https://api.binance.com/api/v3/klines"
+_NASDAQ_HISTORICAL = "https://api.nasdaq.com/api/quote/{symbol}/historical"
+_NASDAQ_HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/128.0 Safari/537.36"),
+    "Accept": "application/json",
+}
+_NASDAQ_TIMEOUT = 15.0
 _YF_CONCURRENCY = asyncio.Semaphore(5)
 _cache: dict[str, "PriceHistory | None"] = {}
 
@@ -54,6 +69,8 @@ async def get_price_history(ticker: str, years: int = 5) -> PriceHistory | None:
     hist = await _from_yfinance(ticker, years)
     if hist is None and ticker.upper().endswith("-USD"):
         hist = await _from_binance(ticker)
+    elif hist is None:
+        hist = await _from_nasdaq(ticker, years)
     if hist is None:
         logger.warning("No price history for %s — all sources failed", ticker)
     _cache[key] = hist
@@ -118,6 +135,77 @@ async def _from_binance(ticker: str) -> PriceHistory | None:
     if not daily:
         return None
     return PriceHistory(ticker=ticker, source="binance", daily=daily, weekly=to_weekly(daily))
+
+
+# ── Nasdaq (US stock/ETF fallback) ─────────────────────────────────────────
+
+def _nasdaq_symbol(ticker: str) -> str | None:
+    """yfinance-style ticker -> Nasdaq symbol; None when Nasdaq can't serve it."""
+    t = ticker.strip().upper()
+    if not t or t.startswith("^") or "=" in t or "." in t or t.endswith("-USD"):
+        return None
+    return t.replace("-", ".")
+
+
+def _nasdaq_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=_NASDAQ_TIMEOUT, headers=_NASDAQ_HEADERS)
+
+
+def _num(text) -> float:
+    return float(str(text).replace("$", "").replace(",", "").strip())
+
+
+def _parse_nasdaq(payload: dict) -> list[Bar]:
+    """Nasdaq JSON -> ascending daily bars. Unparseable rows are skipped."""
+    from datetime import datetime
+    rows = (((payload or {}).get("data") or {}).get("tradesTable") or {}).get("rows") or []
+    bars: list[Bar] = []
+    for r in rows:
+        try:
+            d = datetime.strptime(r["date"], "%m/%d/%Y").strftime("%Y-%m-%d")
+            try:
+                vol = _num(r.get("volume"))
+            except (TypeError, ValueError):
+                vol = 0.0
+            bars.append(Bar(date=d, open=_num(r["open"]), high=_num(r["high"]),
+                            low=_num(r["low"]), close=_num(r["close"]), volume=vol))
+        except (KeyError, TypeError, ValueError):
+            continue
+    bars.sort(key=lambda b: b.date)
+    return bars
+
+
+async def _from_nasdaq(ticker: str, years: int) -> PriceHistory | None:
+    symbol = _nasdaq_symbol(ticker)
+    if symbol is None:
+        return None
+    from datetime import date, timedelta
+    today = date.today()
+    start = today - timedelta(days=int(365.25 * years))
+    params = {"fromdate": start.isoformat(), "todate": today.isoformat(), "limit": 9999}
+    try:
+        async with _nasdaq_client() as client:
+            for assetclass in ("stocks", "etf"):
+                resp = await client.get(_NASDAQ_HISTORICAL.format(symbol=symbol),
+                                        params={**params, "assetclass": assetclass})
+                if resp.status_code != 200:
+                    logger.warning("Nasdaq history HTTP %s for %s (%s)",
+                                   resp.status_code, ticker, assetclass)
+                    continue
+                try:
+                    payload = resp.json()
+                except ValueError:
+                    logger.warning("Nasdaq history non-JSON for %s (%s)", ticker, assetclass)
+                    continue
+                daily = [b for b in _parse_nasdaq(payload) if b.date >= start.isoformat()]
+                if daily:
+                    return PriceHistory(ticker=ticker, source="nasdaq",
+                                        daily=daily, weekly=to_weekly(daily))
+    except Exception as exc:
+        logger.warning("Nasdaq history failed for %s: %s", ticker, exc)
+        return None
+    logger.warning("Nasdaq history empty for %s", ticker)
+    return None
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
