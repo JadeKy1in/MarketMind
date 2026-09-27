@@ -189,6 +189,18 @@ def compute_snapshot(hist: PriceHistory) -> TechnicalSnapshot | None:
     )
 
 
+def recommendation_reason(s: TechnicalSnapshot) -> str:
+    """Why the ticker is wait/avoid, stated explicitly so the decision LLM does not guess
+    (live run 8: it said 'price not yet in the entry zone' when close was inside it)."""
+    if s.recommendation == "enter":
+        return ""
+    zone = ("close inside entry zone" if s.entry_low <= s.close <= s.entry_high
+            else "close outside entry zone")
+    if s.recommendation == "wait" and s.light == "green":
+        return f"reason: R/R {s.reward_risk_ratio:.2f} < 2.00 ({zone})"
+    return f"reason: {s.light} light ({zone})"
+
+
 def describe(s: TechnicalSnapshot) -> str:
     """Human-readable, fully traceable explanation of the light."""
     wma = f"{s.wma200:.2f}" if s.wma200 is not None else "n/a"
@@ -202,5 +214,8 @@ def describe(s: TechnicalSnapshot) -> str:
         f"entry {s.entry_low:.2f}-{s.entry_high:.2f}, stop {s.stop_loss:.2f}, "
         f"target {s.target_price:.2f}, R/R {s.reward_risk_ratio:.2f}, ATR14 {s.atr14:.2f}",
     ]
+    reason = recommendation_reason(s)
+    if reason:
+        parts.append(reason)
     parts.extend(s.notes)
     return " | ".join(parts)

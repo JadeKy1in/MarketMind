@@ -132,3 +132,16 @@ def test_stop_always_below_entry_zone(closes):
 def test_describe_is_traceable():
     text = describe(compute_snapshot(make_history(uptrend())))
     assert "GREEN" in text and "200WMA" in text and "stop" in text
+
+
+def test_describe_states_why_green_is_wait():
+    from dataclasses import replace
+    from marketmind.pipeline.l3_indicators import recommendation_reason
+    snap = compute_snapshot(make_history(uptrend()))
+    s = replace(snap, light="green", recommendation="wait", reward_risk_ratio=1.38,
+                entry_low=snap.close - 1, entry_high=snap.close + 1)
+    assert recommendation_reason(s) == "reason: R/R 1.38 < 2.00 (close inside entry zone)"
+    assert "reason: R/R 1.38 < 2.00" in describe(s)
+    y = replace(s, light="yellow", entry_low=snap.close + 1, entry_high=snap.close + 2)
+    assert recommendation_reason(y) == "reason: yellow light (close outside entry zone)"
+    assert recommendation_reason(replace(s, recommendation="enter")) == ""

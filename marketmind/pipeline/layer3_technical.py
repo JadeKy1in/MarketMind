@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
-from marketmind.gateway.price_history import get_price_histories
+from marketmind.gateway.price_history import completed_history, get_price_histories
 from marketmind.notification.alert_schema import ImpactScope
 from marketmind.notification.monitor_decorator import monitor
 from marketmind.pipeline.l3_indicators import (
@@ -79,7 +79,8 @@ async def analyze_layer3(tickers: list[str], market_data: dict | None = None,
     results = []
     for t in tickers:
         hist = histories.get(t)
-        snap = compute_snapshot(hist) if hist is not None else None
+        # a running session's partial bar would move close, ATR and levels intraday
+        snap = compute_snapshot(completed_history(hist)) if hist is not None else None
         if snap is None:
             results.append(unavailable_result(t))
         else:

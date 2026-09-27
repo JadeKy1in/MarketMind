@@ -390,3 +390,34 @@ def to_weekly(daily: list[Bar]) -> list[Bar]:
             wk.close = b.close
             wk.volume += b.volume
     return weeks
+
+
+def is_crypto_ticker(ticker: str) -> bool:
+    return ticker.upper().endswith("-USD")
+
+
+def complete_bars(ticker: str, daily: list[Bar], now=None) -> list[Bar]:
+    """Drop the running session's partial bar.
+
+    Crypto bars are UTC days: only dates before today (UTC) are complete. US bars
+    are New York sessions: today's bar is complete only after the 16:00 ET close.
+    """
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+    now = now or datetime.now(timezone.utc)
+    if is_crypto_ticker(ticker):
+        cutoff = now.astimezone(timezone.utc).date().isoformat()
+        return [b for b in daily if b.date < cutoff]
+    ny = now.astimezone(ZoneInfo("America/New_York"))
+    today = ny.date().isoformat()
+    closed = (ny.hour, ny.minute) >= (16, 0)
+    return [b for b in daily if b.date < today or (b.date == today and closed)]
+
+
+def completed_history(hist: PriceHistory, now=None) -> PriceHistory:
+    """`hist` without a partial last bar (weekly bars rebuilt if anything was dropped)."""
+    daily = complete_bars(hist.ticker, hist.daily, now)
+    if len(daily) == len(hist.daily):
+        return hist
+    return PriceHistory(ticker=hist.ticker, source=hist.source, daily=daily,
+                        weekly=to_weekly(daily))

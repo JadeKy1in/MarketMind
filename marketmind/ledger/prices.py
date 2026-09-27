@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Protocol
 
-from marketmind.gateway.price_history import Bar, get_price_history
+from marketmind.gateway.price_history import Bar, complete_bars, get_price_history
 
 logger = logging.getLogger("marketmind.ledger.prices")
 
@@ -63,7 +63,9 @@ async def latest_quotes(source: PriceSource, tickers: list[str]
     """ticker -> (last close, bar date, source name) for a point-in-time snapshot."""
     out: dict[str, tuple[float | None, str | None, str | None]] = {}
     for t in dict.fromkeys(tickers):
-        bars = await source.daily_bars(t)
+        # partial bars are excluded: settlement compares this close with the
+        # completed bar of the same date to detect price re-adjustments
+        bars = complete_bars(t, await source.daily_bars(t) or [])
         if bars:
             out[t] = (bars[-1].close, bars[-1].date, source_of(source, t))
         else:
