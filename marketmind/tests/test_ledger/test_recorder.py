@@ -59,3 +59,30 @@ async def test_forced_paper_trade_recorded_when_no_cards(tmp_path):
 async def test_nothing_to_record(tmp_path):
     store = LedgerStore(tmp_path / "l.db")
     assert await record_main_decision(DecisionOutput(), None, store, SRC) == []
+
+
+@pytest.mark.asyncio
+async def test_forced_trade_without_direction_is_not_recorded(tmp_path):
+    store = LedgerStore(tmp_path / "l.db")
+    out = DecisionOutput(paper_trade=PaperTrade("NVDA", "neutral", 0.0, "", "L2"))
+    assert await record_main_decision(out, None, store, SRC) == []
+
+
+@pytest.mark.asyncio
+async def test_forced_trade_zero_or_percent_confidence(tmp_path):
+    store = LedgerStore(tmp_path / "l.db")
+    ids = await record_main_decision(DecisionOutput(paper_trade=PaperTrade("NVDA", "long", 0.0, "", "")),
+                                     None, store, SRC)
+    e = store.get(ids[0])
+    assert e.confidence == 0.5 and e.confidence_is_default
+    ids = await record_main_decision(DecisionOutput(paper_trade=PaperTrade("NVDA", "long", 65, "", "")),
+                                     None, store, SRC)
+    assert store.get(ids[0]).confidence == 0.65
+
+
+@pytest.mark.asyncio
+async def test_card_without_stop_or_invalidation_still_recorded(tmp_path):
+    store = LedgerStore(tmp_path / "l.db")
+    ids = await record_main_decision(
+        DecisionOutput(decision_cards=[card(stop_loss=0.0, invalidation="")]), None, store, SRC)
+    assert "loses money" in store.get(ids[0]).falsifier

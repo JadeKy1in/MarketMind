@@ -26,13 +26,16 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from marketmind.gateway.price_history import Bar
-from marketmind.ledger.prices import PriceSource
+from marketmind.ledger.prices import PriceSource, source_of
 from marketmind.ledger.store import LedgerEntry, LedgerStore
 
 logger = logging.getLogger("marketmind.ledger.settlement")
+
+NEW_YORK = ZoneInfo("America/New_York")
 
 # One-way cost in basis points. Crypto reflects Robinhood's quoted spread; the
 # 50 bp figure is an estimate, not a verified number (to confirm in S6).
@@ -45,7 +48,7 @@ def cost_bps(asset_type: str) -> float:
 
 
 def market_benchmark(entry: LedgerEntry) -> str:
-    return "BTC-USD" if entry.asset_type == "crypto" or entry.ticker.upper().endswith("-USD") else "SPY"
+    return "BTC-USD" if is_crypto(entry) else "SPY"
 
 
 @dataclass
@@ -79,9 +82,41 @@ def _find_fill(e: LedgerEntry, bars: list[Bar]) -> Fill | None | str:
     return "void" if len(bars) >= e.hold_bars else None
 
 
+def bars_after_creation(e: LedgerEntry, bars: list[Bar]) -> list[Bar]:
+    """Bars the record could first trade on.
+
+    Crypto bars are UTC days, so the first usable bar is the next UTC date. US
+    stock/ETF bars are New York sessions: a record created before 09:30 ET can
+    still fill at that day's open (e.g. a run at 09:00 Beijing time).
+    """
+    ts = _parse_ts(e.created_at)
+    if ts is None:
+        return list(bars)
+    if is_crypto(e):
+        first = (ts.date() + timedelta(days=1)).isoformat()
+    else:
+        ny = ts.astimezone(NEW_YORK)
+        before_open = (ny.hour, ny.minute) < (9, 30)
+        first = (ny.date() if before_open else ny.date() + timedelta(days=1)).isoformat()
+    return [b for b in bars if b.date >= first]
+
+
+def _parse_ts(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        ts = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+
+
+def is_crypto(e: LedgerEntry) -> bool:
+    return e.asset_type == "crypto" or e.ticker.upper().endswith("-USD")
+
+
 def simulate(e: LedgerEntry, bars: list[Bar]) -> Outcome:
-    created = (e.created_at or "")[:10]
-    after = [b for b in bars if b.date > created]
+    after = bars_after_creation(e, bars)
     fill = _find_fill(e, after)
     if fill is None:
         return Outcome("pending", "waiting for the first bar after creation"
@@ -105,6 +140,7 @@ def simulate(e: LedgerEntry, bars: list[Bar]) -> Outcome:
             return Outcome("settled", fill=fill, exit_index=j, exit_price=px, exit_reason="target")
         rule = e.falsifier_rule or {}
         level = rule.get("price")
+        level = float(level) if level is not None else None
         if level is not None and (
             (rule.get("type") == "close_below" and b.close < level)
             or (rule.get("type") == "close_above" and b.close > level)
@@ -121,15 +157,15 @@ def benchmark_return(bars: list[Bar] | None, start: str, end: str) -> float | No
     if not bars:
         return None
     window = [b for b in bars if start <= b.date <= end]
-    if not window or window[0].open <= 0:
+    # A stale or gappy series must not pass off a partial window as the real return.
+    if not window or window[0].date != start or window[-1].date != end or window[0].open <= 0:
         return None
     return window[-1].close / window[0].open - 1
 
 
 def apply_outcome(e: LedgerEntry, out: Outcome, bars: list[Bar],
                   market_bars: list[Bar] | None, domain_bars: list[Bar] | None) -> None:
-    created = (e.created_at or "")[:10]
-    after = [b for b in bars if b.date > created]
+    after = bars_after_creation(e, bars)
     e.status = out.status
     e.settle_note = out.note
     if out.fill is not None:
@@ -144,6 +180,9 @@ def apply_outcome(e: LedgerEntry, out: Outcome, bars: list[Bar],
     e.exit_date = after[out.exit_index].date
     e.exit_price = round(out.exit_price, 6)
     e.exit_reason = out.exit_reason
+    if not e.entry_price or e.entry_price <= 0:
+        e.status, e.settle_note = "open", "invalid entry price in source data (not settled)"
+        return
     sign = 1.0 if e.direction == "long" else -1.0
     e.gross_return = round(sign * (e.exit_price / e.entry_price - 1), 6)
     e.cost_return = round(2 * cost_bps(e.asset_type) / 10_000, 6)
@@ -180,12 +219,15 @@ class SettleReport:
     still_open: int = 0
     pending: int = 0
     unavailable: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
         text = (f"ledger: checked {self.checked}, settled {self.settled}, void {self.voided}, "
                 f"open {self.still_open}, pending {self.pending}")
         if self.unavailable:
             text += f", no price data: {', '.join(sorted(set(self.unavailable)))}"
+        if self.errors:
+            text += f", errors: {len(self.errors)} (see settle_note)"
         return text
 
 
@@ -207,21 +249,31 @@ async def settle_all(store: LedgerStore, source: PriceSource,
 
     for e in store.unsettled():
         report.checked += 1
-        bars = await bars_for(e.ticker)
-        if not bars:
-            e.settle_note = "price data unavailable (not estimated)"
-            report.unavailable.append(e.ticker)
+        try:
+            bars = await bars_for(e.ticker)
+            if not bars:
+                e.settle_note = "price data unavailable (not estimated)"
+                report.unavailable.append(e.ticker)
+                store.update(e)
+                continue
+            out = simulate(e, bars)
+            market_bars = domain_bars = None
+            if out.status == "settled":
+                market_bars = await bars_for(market_benchmark(e))
+                if e.domain_benchmark:
+                    domain_bars = await bars_for(e.domain_benchmark)
+            apply_outcome(e, out, bars, market_bars, domain_bars)
+            e.price_source = source_of(source, e.ticker)
             store.update(e)
+        except Exception as exc:
+            # One malformed record must not block settlement of all the others.
+            logger.error("Ledger: settling %s (%s) failed", e.entry_id, e.ticker, exc_info=True)
+            report.errors.append(e.entry_id)
+            fresh = store.get(e.entry_id)
+            if fresh is not None:
+                fresh.settle_note = f"settlement error: {type(exc).__name__}: {exc}"[:500]
+                store.update(fresh)
             continue
-        out = simulate(e, bars)
-        market_bars = domain_bars = None
-        if out.status == "settled":
-            market_bars = await bars_for(market_benchmark(e))
-            if e.domain_benchmark:
-                domain_bars = await bars_for(e.domain_benchmark)
-        apply_outcome(e, out, bars, market_bars, domain_bars)
-        e.price_source = source.name
-        store.update(e)
         if e.status == "settled":
             report.settled += 1
         elif e.status == "void":

@@ -164,3 +164,71 @@ async def test_partial_bar_for_today_is_not_used(tmp_path):
     assert e.status == "open" and e.exit_price is None
     await settle_all(store, StaticPriceSource({"AAA": bars}), today="2026-09-07")
     assert store.get(eid).exit_price == 125
+
+
+def test_us_record_created_before_the_open_fills_that_day():
+    # 2026-09-02T01:00Z = 2026-09-01 21:00 ET (after close) -> fill on 09-02
+    # 2026-09-02T12:00Z = 08:00 ET on 09-02 (before open)   -> fill on 09-02 too
+    bars = [bar("2026-09-01", 90, 91, 89, 90), bar("2026-09-02", 100, 101, 99, 100),
+            bar("2026-09-03", 110, 111, 109, 110)]
+    for created in ("2026-09-02T01:00:00Z", "2026-09-02T12:00:00Z"):
+        assert simulate(entry(created_at=created), bars).fill.price == 100
+    assert simulate(entry(created_at="2026-09-02T15:00:00Z"), bars).fill.price == 110
+    crypto = entry(ticker="ETH-USD", asset_type="crypto", created_at="2026-09-02T01:00:00Z")
+    assert simulate(crypto, bars).fill.price == 110
+
+
+def test_benchmark_window_must_cover_entry_and_exit_dates():
+    from marketmind.ledger.settlement import benchmark_return
+    spy = [bar("2026-09-02", 100, 101, 99, 100), bar("2026-09-03", 100, 106, 99, 105)]
+    assert benchmark_return(spy, "2026-09-02", "2026-09-03") == pytest.approx(0.05)
+    assert benchmark_return(spy, "2026-09-02", "2026-09-20") is None   # stale series
+    assert benchmark_return(spy, "2026-09-01", "2026-09-03") is None   # missing start
+
+
+@pytest.mark.asyncio
+async def test_one_bad_record_does_not_block_the_rest(tmp_path, monkeypatch):
+    from marketmind.ledger import settlement
+    store = LedgerStore(tmp_path / "l.db")
+    bad = store.add(entry(ticker="BAD"), created_at=CREATED)
+    good = store.add(entry(), created_at=CREATED)
+    real = settlement.simulate
+
+    def flaky(e, bars):
+        if e.ticker == "BAD":
+            raise RuntimeError("corrupt record")
+        return real(e, bars)
+
+    monkeypatch.setattr(settlement, "simulate", flaky)
+    src = StaticPriceSource({"BAD": flat(DAYS[:8]), "AAA": flat(DAYS[:8]), "SPY": flat(DAYS[:8])})
+    report = await settle_all(store, src, today="2026-09-30")
+    assert store.get(good).status == "settled"
+    assert report.errors == [bad] and "corrupt record" in store.get(bad).settle_note
+
+
+@pytest.mark.asyncio
+async def test_zero_entry_price_is_not_settled(tmp_path):
+    store = LedgerStore(tmp_path / "l.db")
+    eid = store.add(entry(), created_at=CREATED)
+    zero = flat(DAYS[:1]) + [bar(d, 0, 1, 0, 0.5) for d in DAYS[1:8]]
+    await settle_all(store, StaticPriceSource({"AAA": zero}), today="2026-09-30")
+    e = store.get(eid)
+    assert e.status == "open" and e.net_return is None and "invalid entry price" in e.settle_note
+
+
+def test_falsifier_rule_is_validated(tmp_path):
+    store = LedgerStore(tmp_path / "l.db")
+    with pytest.raises(ValueError):
+        store.add(entry(falsifier_rule={"type": "close_below", "price": "n/a"}))
+    with pytest.raises(ValueError):
+        store.add(entry(falsifier_rule={"type": "vibes", "price": 1}))
+    eid = store.add(entry(falsifier_rule={"type": "close_below", "price": "98.5"}))
+    assert store.get(eid).falsifier_rule["price"] == 98.5
+
+
+@pytest.mark.asyncio
+async def test_price_source_is_recorded_per_ticker(tmp_path):
+    from marketmind.ledger.prices import source_of
+    src = StaticPriceSource({})
+    src.served_by = {"ETH-USD": "binance"}
+    assert source_of(src, "ETH-USD") == "binance" and source_of(src, "SPY") == "static"

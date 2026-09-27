@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 
 from marketmind.ledger.prices import PriceSource, latest_quotes
+from marketmind.pipeline.decision import _probability
 from marketmind.ledger.store import LedgerEntry, LedgerStore
 
 logger = logging.getLogger("marketmind.ledger.recorder")
@@ -43,7 +44,8 @@ def _card_entry(card, snapshot_id: str | None) -> LedgerEntry:
     layer, asset_type = classify_ticker(card.ticker)
     conf = getattr(card, "confidence", None)
     falsifier = (card.invalidation or "").strip() or (
-        f"{card.ticker} closes below the stop {card.stop_loss:.2f}")
+        f"{card.ticker} closes below the stop {card.stop_loss:.2f}" if card.stop_loss
+        else f"{card.ticker} {card.direction} loses money over {card.max_hold_days} trading days")
     return LedgerEntry(
         source_type="main", source_id="main_pipeline",
         ticker=card.ticker.upper(), direction=card.direction,
@@ -64,7 +66,7 @@ def _card_entry(card, snapshot_id: str | None) -> LedgerEntry:
 
 def _forced_entry(pt, l3, snapshot_id: str | None) -> LedgerEntry:
     layer, asset_type = classify_ticker(pt.ticker)
-    direction = pt.direction if pt.direction in ("long", "short") else "long"
+    direction = pt.direction
     lvl = l3.get(pt.ticker) if l3 is not None and hasattr(l3, "get") else None
     # L3 levels describe long setups only; use them only for a long paper trade.
     stop = target = None
@@ -73,11 +75,14 @@ def _forced_entry(pt, l3, snapshot_id: str | None) -> LedgerEntry:
         target = lvl.target_price or None
     falsifier = (f"{pt.ticker} closes below the L3 stop {stop:.2f}" if stop else
                  f"{pt.ticker} {direction} loses money over {FORCED_HOLD_BARS} trading days")
-    conf = min(max(float(pt.confidence or 0.0), 0.0), 1.0)
+    conf = _probability(pt.confidence)
+    conf_default = not conf  # missing or 0 means "no stated belief", not certainty of loss
+    conf = DEFAULT_CONFIDENCE if conf_default else conf
     return LedgerEntry(
         source_type="main_forced", source_id="main_pipeline",
         ticker=pt.ticker.upper(), direction=direction, hold_bars=FORCED_HOLD_BARS,
-        confidence=conf, position_usd=max(FORCED_MIN_USD, round(FORCED_BASE_USD * conf, 2)),
+        confidence=conf, confidence_is_default=conf_default,
+        position_usd=max(FORCED_MIN_USD, round(FORCED_BASE_USD * conf, 2)),
         falsifier=falsifier, thesis=(pt.thesis or "")[:2000],
         layer=layer, asset_type=asset_type, entry_rule="next_open",
         stop_loss=stop, target_price=target, snapshot_id=snapshot_id,
@@ -95,8 +100,15 @@ async def record_main_decision(decision, l3, store: LedgerStore, source: PriceSo
         return []
     tickers = [c.ticker.upper() for c in cards] or [paper.ticker.upper()]
     snapshot_id = store.save_snapshot(await latest_quotes(source, tickers), taken_at=created_at)
-    entries = ([_card_entry(c, snapshot_id) for c in cards] if cards
-               else [_forced_entry(paper, l3, snapshot_id)])
+    if cards:
+        entries = [_card_entry(c, snapshot_id) for c in cards]
+    elif paper.direction in ("long", "short"):
+        entries = [_forced_entry(paper, l3, snapshot_id)]
+    else:
+        # A direction must never be invented (SPEC_v3 L3); log the gap instead.
+        logger.warning("Ledger: forced paper trade %s has direction %r; not recorded",
+                       paper.ticker, paper.direction)
+        return []
     ids = []
     for e in entries:
         try:

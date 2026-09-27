@@ -585,6 +585,10 @@ def _pick_paper_trade(l1, l2, l3, red_team, resonance) -> PaperTrade | None:
             "source": _t("src_l3"),
         })
 
+    # L2 candidates are often bare ticker strings with no direction; a forced
+    # trade needs a real direction, so directionless candidates cannot be picked.
+    candidates = [c for c in candidates if c["direction"] in ("long", "short")]
+
     # From L1 sentiment if available
     l1_dir = getattr(l1, 'sentiment_direction', 'neutral')
     if l1_dir in ('bullish', 'bearish') and not candidates:
@@ -685,9 +689,10 @@ def _probability(v: Any) -> float | None:
 
 def _normalise_size_units(cards: list[DecisionCard]) -> None:
     """Sizes are percents. Flash has answered in fractions (0.06 meaning 6%, live run 5,
-    2026-09-27); when every size is <= 1 treat the batch as fractions."""
+    2026-09-27). The prompt asks for 1-25, so when every size is below 1 the batch is
+    read as fractions; a 1.0 is a legitimate 1%."""
     sizes = [c.position_size_pct for c in cards if c.position_size_pct > 0]
-    if sizes and all(s <= 1.0 for s in sizes):
+    if sizes and all(s < 1.0 for s in sizes):
         logger.info("Decision sizes look like fractions %s; converting to percent", sizes)
         for c in cards:
             c.position_size_pct = round(c.position_size_pct * 100, 4)

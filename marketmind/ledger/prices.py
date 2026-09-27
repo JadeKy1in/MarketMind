@@ -24,16 +24,25 @@ class PriceSource(Protocol):
         ...
 
 
+def source_of(source: PriceSource, ticker: str) -> str:
+    """Provider that actually served `ticker` (a source may fall back per ticker)."""
+    per_ticker = getattr(source, "served_by", None)
+    return (per_ticker or {}).get(ticker, source.name)
+
+
 class HistoryPriceSource:
     """yfinance (+ Binance for crypto) via gateway.price_history, cached per process."""
 
     name = "yfinance"
 
+    def __init__(self):
+        self.served_by: dict[str, str] = {}
+
     async def daily_bars(self, ticker: str) -> list[Bar] | None:
         hist = await get_price_history(ticker)  # same cache key as L3
         if hist is None or not hist.daily:
             return None
-        self.name = hist.source
+        self.served_by[ticker] = hist.source
         return hist.daily
 
 
@@ -56,7 +65,7 @@ async def latest_quotes(source: PriceSource, tickers: list[str]
     for t in dict.fromkeys(tickers):
         bars = await source.daily_bars(t)
         if bars:
-            out[t] = (bars[-1].close, bars[-1].date, source.name)
+            out[t] = (bars[-1].close, bars[-1].date, source_of(source, t))
         else:
             logger.warning("Snapshot: no price for %s (recorded as unavailable)", t)
             out[t] = (None, None, None)

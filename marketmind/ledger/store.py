@@ -87,6 +87,13 @@ class LedgerEntry:
             raise ValueError("ticker is required")
         if not self.falsifier.strip():
             raise ValueError("falsifier is required (SPEC_v3 L5)")
+        if self.falsifier_rule is not None:
+            if self.falsifier_rule.get("type") not in ("close_below", "close_above"):
+                raise ValueError(f"unknown falsifier_rule type {self.falsifier_rule.get('type')!r}")
+            try:
+                self.falsifier_rule["price"] = float(self.falsifier_rule["price"])
+            except (KeyError, TypeError, ValueError):
+                raise ValueError("falsifier_rule needs a numeric price") from None
 
 
 _JSON_FIELDS = {"falsifier_rule", "meta"}

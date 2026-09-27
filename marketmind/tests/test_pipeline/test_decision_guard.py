@@ -151,6 +151,15 @@ def test_parse_keeps_percent_sizes():
     raw = json.dumps({"decision_cards": [{"ticker": "A", "position_size_pct": 12},
                                          {"ticker": "B", "position_size_pct": 0.5}]})
     assert [c.position_size_pct for c in _parse_decision_response(raw).decision_cards] == [12, 0.5]
+    one = json.dumps({"decision_cards": [{"ticker": "A", "position_size_pct": 1.0}]})
+    assert _parse_decision_response(one).decision_cards[0].position_size_pct == 1.0
+
+
+def test_paper_trade_never_picks_a_directionless_candidate():
+    class L1: sentiment_direction = "bullish"
+    class L2: ticker_candidates = ["NVDA", "AMD"]   # bare strings: no direction
+    l3 = Layer3BatchResult(results=[])
+    assert _pick_paper_trade(L1(), L2(), l3, None, None) is None
 
 
 def test_guard_uses_tradable_universe_when_loaded():
