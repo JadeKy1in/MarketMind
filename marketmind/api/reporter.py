@@ -89,6 +89,13 @@ def build_context(question: str) -> dict[str, Any]:
             "paper_trade": b.get("paper_trade"),
             "fragility_summary": b.get("fragility_summary"),
         }
+    ev = whitebox.get_evidence()
+    if ev.get("available"):
+        ctx["evidence_layer"] = {
+            "date": ev["date"], "divergences": ev["divergences"],
+            "items": [{k: i.get(k) for k in ("claim", "type", "ticker", "verdict_cn", "evidence",
+                                              "independent_sources", "entry_id")}
+                      for i in ev["items"][:20]]}
     ctx["promotion"] = "所有影子处于见习期；晋升评审（S7）尚未实现"
     return ctx
 

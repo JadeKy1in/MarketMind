@@ -111,6 +111,12 @@ async def wb_health():
     return _wb(whitebox.get_health)
 
 
+@app.get("/api/wb/evidence")
+async def wb_evidence(date: str = ""):
+    from marketmind.api import whitebox
+    return _wb(whitebox.get_evidence, date or None)
+
+
 @app.post("/api/reporter")
 async def reporter_endpoint(request: dict):
     from marketmind.api import reporter

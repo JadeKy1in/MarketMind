@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 # ══════════════════════════════════════════════════════════════════════════════
 
 _shadow_task: "asyncio.Task | None" = None
+_evidence_task: "asyncio.Task | None" = None
 _shadow_result = None  # stores ShadowOrchestrationResult when background task completes
 
 # Only interactive_orchestration still evaluates resonance (legacy path, to be
@@ -426,6 +427,11 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
             and not mock):
         _shadow_task = asyncio.create_task(run_v3_shadows(config, news_items, shadow_count))
         print("  [shadows] daily decisions launched in background")
+    # S5 evidence layer: news claims checked against primary data, in the background.
+    if not mock:
+        global _evidence_task
+        _evidence_task = asyncio.create_task(run_evidence(config, news_items))
+        print("  [evidence] claim checks launched in background")
 
     signals = await _do_flash_preprocessing(news_items, tracker)
     l1_result = await _do_l1_analysis(signals, news_items, tracker, shadow_db=shadow_db)
@@ -774,6 +780,33 @@ async def run_v3_shadows(config, news_items: list, limit: int | None = None):
     return report
 
 
+async def run_evidence(config, news_items: list):
+    """S5 evidence layer -> data/evidence/<date>.json + divergences into the ledger."""
+    from marketmind.evidence.runner import run_evidence_day
+    try:
+        report = await run_evidence_day(_ledger_store(config), news_items)
+    except Exception:
+        logger.warning("evidence run failed", exc_info=True)
+        print("  [evidence] failed (see log)")
+        return None
+    print(f"  [evidence] {report.summary()}")
+    return report
+
+
+async def run_evidence_only(config) -> int:
+    """`--mode evidence`: collect news, run the evidence layer only."""
+    init_gateway(config.deepseek_api_key, config.deepseek_base_url)
+    from marketmind.gateway import usage_tracker
+    from marketmind.pipeline.scout import fetch_all_sources
+    usage_tracker.reset()
+    news_items = await fetch_all_sources(config) or []
+    print(f"Evidence: {len(news_items)} articles collected")
+    report = await run_evidence(config, news_items)
+    print(f"  [tokens] {usage_tracker.summary_line()}")
+    usage_tracker.append_log("evidence")
+    return 0 if report is not None and report.status in ("ok", "skipped") else 1
+
+
 async def run_shadows_only(config, verbose: bool = False) -> int:
     """Run ONLY the shadows: S3 daily decisions (legacy ecosystem if enabled in settings)."""
     if not getattr(config.shadow, "legacy_ecosystem_enabled", False):
@@ -922,6 +955,14 @@ async def _run_daily_with_shadows(config, args) -> int:
             pass
         from marketmind.gateway import usage_tracker
         print(f"  [tokens incl. shadows] {usage_tracker.summary_line()}")
+    global _evidence_task
+    if _evidence_task and not _evidence_task.done():
+        try:
+            await asyncio.wait_for(_evidence_task, timeout=EVIDENCE_WAIT_S)
+        except asyncio.TimeoutError:
+            print(f"(Evidence layer timed out after {EVIDENCE_WAIT_S // 60} minutes)")
+        except asyncio.CancelledError:
+            pass
     if not args.mock:
         from marketmind.gateway import usage_tracker
         usage_tracker.append_log("daily")
@@ -931,3 +972,5 @@ async def _run_daily_with_shadows(config, args) -> int:
 
 # 23 shadows, 5 at a time, one Flash call each (+1 retry): allow 15 minutes.
 SHADOW_WAIT_S = 900
+# one Flash call plus up to ~15 primary-data checks (SEC requests are spaced)
+EVIDENCE_WAIT_S = 600

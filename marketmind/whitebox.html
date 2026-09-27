@@ -186,8 +186,9 @@ async function loadEvidence(){
   const d=await j("/api/wb/evidence");
   if(!d.available){$("#s-evidence").innerHTML=`<div class="card empty">证据层：${esc(d.reason||"无数据")}</div>`;return}
   $("#s-evidence").innerHTML=`<div class="card"><h2>叙事与数据背离清单 ${esc(d.date||"")}</h2>
-  <div class="tw"><table><tr><th>说法</th><th>来源</th><th>判定</th><th>一手数据</th><th>账本</th></tr>
-  ${(d.items||[]).map(i=>`<tr><td>${esc(i.claim)}</td><td>${(i.sources||[]).map(s=>`<div class="mut">${esc(s)}</div>`).join("")}<div class="mut">独立来源 ${i.independent_sources??"?"}</div></td><td><span class="chip ${i.verdict==="contradict"?"red":i.verdict==="support"?"green":""}">${esc(i.verdict_cn||i.verdict)}</span></td><td>${esc(i.evidence||"")}</td><td>${i.entry_id?idl(i.entry_id):"—"}</td></tr>`).join("")||'<tr><td colspan="5" class="empty">当天没有背离</td></tr>'}
+  <div class="mut" style="margin-bottom:8px">考察新闻 ${d.news_considered??"?"} 条，抽出可核对说法 ${(d.items||[]).length} 条，背离 ${d.divergences} 条${d.status!=="ok"?`（状态：${esc(d.status)}）`:""}；背离按"数据是对的"方向记入账本，持有 10 个交易日后结算打分。</div>
+  <div class="tw"><table><tr><th>说法</th><th>类型 / 标的</th><th>来源</th><th>判定</th><th>一手数据</th><th>账本</th></tr>
+  ${(d.items||[]).map(i=>`<tr><td>${esc(i.claim)}<div class="mut">叙事方向：${i.asserted==="up"?"上":"下"}；数据：${esc(i.observed||"无")}</div></td><td>${esc(i.type)}<div>${esc(i.ticker||"")}</div></td><td>${(i.sources||[]).map(s=>`<div class="mut">${esc(s)}</div>`).join("")}<div class="mut">独立来源 ${i.independent_sources??"?"}</div></td><td><span class="chip ${i.verdict==="contradict"?"red":i.verdict==="support"?"green":""}">${esc(i.verdict_cn||i.verdict)}</span></td><td>${esc(i.evidence||"")}</td><td>${i.entry_id?idl(i.entry_id):`<span class="mut">${esc(i.ledger_note||"—")}</span>`}</td></tr>`).join("")||'<tr><td colspan="6" class="empty">当天没有可核对的说法</td></tr>'}
   </table></div></div>`;
 }
 

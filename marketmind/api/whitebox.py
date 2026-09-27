@@ -194,3 +194,25 @@ def get_health() -> dict:
         "shadow_run": {"date": run_day, "submitted": submitted, "total": len(run_results)},
         "token_usage": read_token_usage(),
     }
+
+
+# ── evidence layer (S5) ─────────────────────────────────────────────────────
+
+def get_evidence(date: str | None = None) -> dict:
+    folder = data_dir() / "evidence"
+    if date:
+        p = folder / f"{date}.json"
+        if not p.exists():
+            return {"available": False, "reason": f"no evidence report for {date}"}
+        day, report = date, json.loads(p.read_text(encoding="utf-8"))
+    else:
+        day, report = _latest_json(folder)
+    if report is None:
+        return {"available": False, "reason": "证据层尚未运行（每日运行或 --mode evidence 后生成）"}
+    items = report.get("items", [])
+    # divergences first, then support, then unverifiable
+    order = {"contradict": 0, "support": 1, "unverifiable": 2}
+    items = sorted(items, key=lambda i: order.get(i.get("verdict"), 3))
+    return {"available": True, "date": day, "status": report.get("status"),
+            "divergences": report.get("divergences", 0), "items": items,
+            "dropped": report.get("dropped", []), "news_considered": report.get("news_considered")}
