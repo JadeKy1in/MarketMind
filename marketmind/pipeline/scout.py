@@ -1,6 +1,7 @@
 """Multi-source news collection with 3-tier degradation strategy."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import re
@@ -371,6 +372,9 @@ def _load_manual_data(items: list) -> None:
             logger.warning("Failed to load Bluesky manual file: %s", e)
 
 
+SCOUT_CONCURRENCY = 12
+
+
 @monitor(source="scout", impact=ImpactScope.INFRASTRUCTURE)
 async def fetch_all_sources(config: MarketMindConfig, use_cross_run_cache: bool = True) -> list[NewsItem]:
     """Fetch from all working sources, deduplicate, return sorted by priority_score descending.
@@ -392,9 +396,20 @@ async def fetch_all_sources(config: MarketMindConfig, use_cross_run_cache: bool 
     source_counts: dict[str, int] = {}
     source_issues: list[str] = []
 
-    for source in sources:
+    # Sources are fetched concurrently (was sequential: 2m40s for 73 sources in live
+    # run 8, close to the 180 s scout timeout); results are merged in registry order.
+    sem = asyncio.Semaphore(SCOUT_CONCURRENCY)
+
+    async def _fetch(source: Source) -> list[NewsItem]:
+        async with sem:
+            return await fetch_source(source, config)
+
+    results = await asyncio.gather(*(_fetch(s) for s in sources), return_exceptions=True)
+    for source, items in zip(sources, results):
+        if isinstance(items, BaseException):
+            logger.warning("Scout source fetch crashed for '%s': %s", source.name, items)
+            items = []
         before = len(all_items)
-        items = await fetch_source(source, config)
         all_items.extend(items)
         source_counts[source.name] = len(all_items) - before
         if source.status in (SourceStatus.DEGRADED, SourceStatus.DEAD):
