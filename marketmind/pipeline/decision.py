@@ -350,14 +350,16 @@ _I18N = {
 DECISION_OUTPUT_SCHEMA = """
 
 OUTPUT FORMAT — use EXACTLY these keys, no others:
-{"decision_cards": [{"ticker": "TICKER", "direction": "long", "position_size_pct": 5.0,
-   "max_hold_days": 30, "confidence": 0.55,
+{"decision_cards": [{"ticker": "TICKER", "direction": "long", "position_size_pct": <number>,
+   "max_hold_days": 30, "confidence": <number>,
    "thesis": "1-2 sentence thesis", "risk_statement": "main risk",
    "red_team_note": "answer to the key red-team objection",
    "invalidation": "I am wrong if ... (observable, dated condition)",
    "cash_reframing": "if I had cash today, would I buy this?"}],
- (position_size_pct is a PERCENT of the portfolio: 5.0 means 5%;
-  confidence = your probability, 0-1, that the trade ends profitable; it is scored later)
+ (<number> = your own value, never a copied example.
+  position_size_pct: PERCENT of the portfolio, 1-25 (e.g. 8 means 8%).
+  confidence: your probability, 0-1, that this trade ends profitable; it is scored later
+  with a Brier score, so state what you actually believe.)
  "no_trade_card": {"thesis": "why not trading is best", "supporting_evidence": ["..."],
    "counterfactual": "what would make us trade", "structural_advantages": ["..."],
    "pre_mortem": "...", "no_trade_score": 0},
@@ -390,13 +392,13 @@ Output JSON:
     {
       "ticker": "TICKER",
       "direction": "long|short",
-      "position_size_pct": 5.0,
+      "position_size_pct": <number>,
       "entry_low": 0.0,
       "entry_high": 0.0,
       "stop_loss": 0.0,
       "target_price": 0.0,
       "max_hold_days": 30,
-      "confidence": 0.55,
+      "confidence": <number>,
       "reward_risk_ratio": 0.0,
       "thesis": "1-sentence thesis",
       "risk_statement": "1-sentence risk",

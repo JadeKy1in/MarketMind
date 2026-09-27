@@ -105,7 +105,7 @@ async def test_settle_all_scores_returns_costs_benchmarks_brier(tmp_path):
     crypto_id = store.add(entry(ticker="ETH-USD", asset_type="crypto", hold_bars=3), created_at=CREATED)
     missing_id = store.add(entry(ticker="NODATA"), created_at=CREATED)
 
-    report = await settle_all(store, src)
+    report = await settle_all(store, src, today="2026-09-30")
     assert (report.settled, report.unavailable) == (3, ["NODATA"])
 
     e = store.get(long_id)
@@ -126,7 +126,7 @@ async def test_settle_all_scores_returns_costs_benchmarks_brier(tmp_path):
     m = store.get(missing_id)
     assert m.status == "pending" and "unavailable" in m.settle_note
 
-    again = await settle_all(store, src)          # idempotent: settled records are left alone
+    again = await settle_all(store, src, today="2026-09-30")          # idempotent: settled records are left alone
     assert again.checked == 1
 
 
@@ -152,3 +152,15 @@ def test_store_roundtrip_json_bool_and_snapshot(tmp_path):
     assert e.confidence_is_default is False and e.falsifier_triggered is None
     snap = store.snapshot(sid)
     assert snap["AAA"]["price"] == 100.0 and snap["BBB"]["price"] is None
+
+
+@pytest.mark.asyncio
+async def test_partial_bar_for_today_is_not_used(tmp_path):
+    store = LedgerStore(tmp_path / "l.db")
+    bars = flat(DAYS[:5]) + [bar("2026-09-06", 100, 130, 99, 125)]   # running session
+    eid = store.add(entry(hold_bars=5), created_at=CREATED)
+    await settle_all(store, StaticPriceSource({"AAA": bars}), today="2026-09-06")
+    e = store.get(eid)
+    assert e.status == "open" and e.exit_price is None
+    await settle_all(store, StaticPriceSource({"AAA": bars}), today="2026-09-07")
+    assert store.get(eid).exit_price == 125

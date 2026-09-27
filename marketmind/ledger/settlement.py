@@ -19,6 +19,8 @@ Rules (all code, no judgement; see docs/S2_DESIGN.md §4):
           holding the benchmark").
   Brier   (confidence - outcome)^2, outcome = 1 if net > 0 else 0.
   Missing data leaves the record unsettled with a note; nothing is estimated.
+  Only complete bars are used: bars dated on or after today (UTC) are dropped,
+  because a data source returns the running session as a partial bar.
 """
 from __future__ import annotations
 
@@ -187,14 +189,20 @@ class SettleReport:
         return text
 
 
-async def settle_all(store: LedgerStore, source: PriceSource) -> SettleReport:
-    """Recompute every unsettled record; idempotent, safe to run on every pipeline start."""
+async def settle_all(store: LedgerStore, source: PriceSource,
+                     today: str | None = None) -> SettleReport:
+    """Recompute every unsettled record; idempotent, safe to run on every pipeline start.
+
+    `today` (YYYY-MM-DD, default: current UTC date) bounds the bars used.
+    """
     report = SettleReport()
     cache: dict[str, list[Bar] | None] = {}
+    today = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     async def bars_for(ticker: str) -> list[Bar] | None:
         if ticker not in cache:
-            cache[ticker] = await source.daily_bars(ticker)
+            bars = await source.daily_bars(ticker)
+            cache[ticker] = [b for b in bars if b.date < today] if bars else bars
         return cache[ticker]
 
     for e in store.unsettled():
