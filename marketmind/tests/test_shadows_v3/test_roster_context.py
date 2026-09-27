@@ -70,7 +70,7 @@ def test_context_renders_real_fields_and_no_data_rows():
                         fred={"DFII10": {"label": "10y TIPS", "value": 2.1, "unit": "%",
                                          "date": "2026-09-25"}}, today="2026-09-28")
     text = ctx.render()
-    assert "GLD |" in text and "200WMA" in text and "ATR14" in text and "20d range" in text
+    assert "GLD [US] |" in text and "200WMA" in text and "ATR14" in text and "20d range" in text
     assert "SLV: no data today" in text
     assert "Gold hits record" in text and "Chip stocks" not in text
     assert "10y TIPS (DFII10): 2.1 %" in text

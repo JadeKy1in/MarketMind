@@ -199,3 +199,15 @@ def _no_alpaca_credentials(monkeypatch):
     that exercise the Alpaca path set fake credentials themselves."""
     monkeypatch.delenv("ALPACA_API_KEY_ID", raising=False)
     monkeypatch.delenv("ALPACA_API_SECRET_KEY", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _offline_global_quotes(monkeypatch):
+    """Eastmoney / Tencent fallbacks never hit the network in tests; tests of
+    those parsers call them with their own mock payloads."""
+    from marketmind.gateway import global_quotes
+
+    async def _none(ticker, years=5):
+        return None
+    monkeypatch.setattr(global_quotes, "from_eastmoney", _none)
+    monkeypatch.setattr(global_quotes, "from_tencent", _none)

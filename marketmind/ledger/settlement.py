@@ -28,8 +28,9 @@ Rules (all code, no judgement; see docs/S2_DESIGN.md §4):
   Benchmark backfill  a settled record whose benchmark data was missing is retried
           on later runs; only the benchmark fields change.
   Missing data leaves the record unsettled with a note; nothing is estimated.
-  Only complete bars are used: bars dated on or after today (UTC) are dropped,
-  because a data source returns the running session as a partial bar.
+  Only complete bars are used (price_history.complete_bars: each market's own
+  session close; UTC days for crypto/FX), because a data source returns the
+  running session as a partial bar.
 """
 from __future__ import annotations
 
@@ -38,13 +39,13 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from marketmind.gateway.price_history import Bar
+from marketmind.gateway.price_history import Bar, complete_bars
+from marketmind.markets import CASH, market_for
 from marketmind.ledger.prices import PriceSource, source_of
 from marketmind.ledger.store import LedgerEntry, LedgerStore
 
 logger = logging.getLogger("marketmind.ledger.settlement")
 
-NEW_YORK = ZoneInfo("America/New_York")
 
 # One-way cost in basis points. Crypto reflects Robinhood's quoted spread; the
 # 50 bp figure is an estimate, not a verified number (to confirm in S6).
@@ -61,12 +62,18 @@ def entry_window(e: LedgerEntry) -> int:
     return min(e.hold_bars, ENTRY_WINDOW_BARS)
 
 
-def cost_bps(asset_type: str) -> float:
-    return COST_BPS.get(asset_type, DEFAULT_COST_BPS)
+def cost_bps(asset_type: str, ticker: str = "") -> float:
+    """One-way cost: per asset type where configured (crypto), else by market."""
+    if asset_type in COST_BPS:
+        return COST_BPS[asset_type]
+    return market_for(ticker).cost_bps if ticker else DEFAULT_COST_BPS
 
 
 def market_benchmark(entry: LedgerEntry) -> str:
-    return "BTC-USD" if is_crypto(entry) else "SPY"
+    """SPY for US, BTC-USD for crypto, the local index/ETF abroad, CASH for FX/rates."""
+    if is_crypto(entry):
+        return "BTC-USD"
+    return market_for(entry.ticker).benchmark
 
 
 @dataclass
@@ -104,19 +111,21 @@ def _find_fill(e: LedgerEntry, bars: list[Bar]) -> Fill | None | str:
 def bars_after_creation(e: LedgerEntry, bars: list[Bar]) -> list[Bar]:
     """Bars the record could first trade on.
 
-    Crypto bars are UTC days, so the first usable bar is the next UTC date. US
-    stock/ETF bars are New York sessions: a record created before 09:30 ET can
-    still fill at that day's open (e.g. a run at 09:00 Beijing time).
+    Crypto and FX bars are UTC days, so the first usable bar is the next UTC date.
+    Exchange bars are local sessions (marketmind.markets): a record created before
+    the local open can still fill at that day's open (e.g. a US record written at
+    09:00 Beijing time, or a Tokyo record written the previous evening UTC).
     """
     ts = _parse_ts(e.created_at)
     if ts is None:
         return list(bars)
-    if is_crypto(e):
-        first = (ts.date() + timedelta(days=1)).isoformat()
+    m = market_for(e.ticker)
+    if is_crypto(e) or m.utc_days:
+        first = (ts.astimezone(timezone.utc).date() + timedelta(days=1)).isoformat()
     else:
-        ny = ts.astimezone(NEW_YORK)
-        before_open = (ny.hour, ny.minute) < (9, 30)
-        first = (ny.date() if before_open else ny.date() + timedelta(days=1)).isoformat()
+        local = ts.astimezone(ZoneInfo(m.tz))
+        before_open = local.time() < m.open
+        first = (local.date() if before_open else local.date() + timedelta(days=1)).isoformat()
     return [b for b in bars if b.date >= first]
 
 
@@ -209,7 +218,7 @@ def apply_outcome(e: LedgerEntry, out: Outcome, bars: list[Bar],
         return
     sign = 1.0 if e.direction == "long" else -1.0
     e.gross_return = round(sign * (e.exit_price / e.entry_price - 1), 6)
-    e.cost_return = round(2 * cost_bps(e.asset_type) / 10_000, 6)
+    e.cost_return = round(2 * cost_bps(e.asset_type, e.ticker) / 10_000, 6)
     e.net_return = round(e.gross_return - e.cost_return, 6)
     e.pnl_usd = round(e.position_usd * e.net_return, 2)
     apply_benchmarks(e, market_bars, domain_bars)
@@ -223,7 +232,8 @@ def apply_benchmarks(e: LedgerEntry, market_bars: list[Bar] | None,
                      domain_bars: list[Bar] | None) -> None:
     """Fill benchmark returns of a settled record; note whichever is still missing."""
     e.market_benchmark = market_benchmark(e)
-    mret = benchmark_return(market_bars, e.entry_date, e.exit_date)
+    mret = (0.0 if e.market_benchmark == CASH
+            else benchmark_return(market_bars, e.entry_date, e.exit_date))
     e.market_return = None if mret is None else round(mret, 6)
     e.excess_market = None if mret is None else round(e.net_return - mret, 6)
     if e.domain_benchmark:
@@ -314,12 +324,16 @@ async def settle_all(store: LedgerStore, source: PriceSource,
     """
     report = SettleReport()
     cache: dict[str, list[Bar] | None] = {}
-    today = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    fixed_today = today
 
     async def bars_for(ticker: str) -> list[Bar] | None:
         if ticker not in cache:
             bars = await source.daily_bars(ticker)
-            cache[ticker] = [b for b in bars if b.date < today] if bars else bars
+            if bars and fixed_today:        # replay / tests: a fixed cut-off date
+                bars = [b for b in bars if b.date < fixed_today]
+            elif bars:                      # live: each market's own session close
+                bars = complete_bars(ticker, bars)
+            cache[ticker] = bars
         return cache[ticker]
 
     for e in store.unsettled():
@@ -336,7 +350,8 @@ async def settle_all(store: LedgerStore, source: PriceSource,
             out = simulate(rescaled(e, factor), bars)
             market_bars = domain_bars = None
             if out.status == "settled":
-                market_bars = await bars_for(market_benchmark(e))
+                mb = market_benchmark(e)
+                market_bars = None if mb == CASH else await bars_for(mb)
                 if e.domain_benchmark:
                     domain_bars = await bars_for(e.domain_benchmark)
             apply_outcome(e, out, bars, market_bars, domain_bars)
@@ -369,7 +384,8 @@ async def settle_all(store: LedgerStore, source: PriceSource,
             continue
         try:
             before = (e.market_return, e.domain_return)
-            market_bars = await bars_for(market_benchmark(e))
+            mb = market_benchmark(e)
+            market_bars = None if mb == CASH else await bars_for(mb)
             domain_bars = await bars_for(e.domain_benchmark) if e.domain_benchmark else None
             apply_benchmarks(e, market_bars, domain_bars)
             if (e.market_return, e.domain_return) != before:

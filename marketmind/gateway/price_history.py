@@ -87,15 +87,23 @@ async def get_price_history(ticker: str, years: int = 5) -> PriceHistory | None:
     key = f"{ticker.upper()}:{years}"
     if key in _cache:
         return _cache[key]
-    hist = await _from_alpaca(ticker, years)
+    from marketmind.markets import US, market_for
+    market = market_for(ticker)
+    hist = await _from_alpaca(ticker, years) if market is US else None
     if hist is None:
         hist = await _from_yfinance(ticker, years)
     if hist is None and ticker.upper().endswith("-USD"):
         hist = await _from_binance(ticker)
         if hist is None:
             hist = await _from_bybit(ticker, years)
-    elif hist is None:
+    elif hist is None and market is US:
         hist = await _from_nasdaq(ticker, years)
+    elif hist is None:
+        # non-US markets, futures, FX, indices (docs/S3_DESIGN.md §7)
+        from marketmind.gateway.global_quotes import from_eastmoney, from_tencent
+        hist = await from_eastmoney(ticker, years)
+        if hist is None:
+            hist = await from_tencent(ticker, years)
     if hist is None:
         logger.warning("No price history for %s — all sources failed", ticker)
     _cache[key] = hist
@@ -399,18 +407,21 @@ def is_crypto_ticker(ticker: str) -> bool:
 def complete_bars(ticker: str, daily: list[Bar], now=None) -> list[Bar]:
     """Drop the running session's partial bar.
 
-    Crypto bars are UTC days: only dates before today (UTC) are complete. US bars
-    are New York sessions: today's bar is complete only after the 16:00 ET close.
+    Crypto and FX bars are UTC days: only dates before today (UTC) are complete.
+    Exchange-traded bars are local sessions: today's bar is complete only after
+    that exchange's close in its own timezone (marketmind.markets).
     """
     from datetime import datetime, timezone
     from zoneinfo import ZoneInfo
+    from marketmind.markets import market_for
     now = now or datetime.now(timezone.utc)
-    if is_crypto_ticker(ticker):
+    m = market_for(ticker)
+    if m.utc_days:
         cutoff = now.astimezone(timezone.utc).date().isoformat()
         return [b for b in daily if b.date < cutoff]
-    ny = now.astimezone(ZoneInfo("America/New_York"))
-    today = ny.date().isoformat()
-    closed = (ny.hour, ny.minute) >= (16, 0)
+    local = now.astimezone(ZoneInfo(m.tz))
+    today = local.date().isoformat()
+    closed = local.time() >= m.close
     return [b for b in daily if b.date < today or (b.date == today and closed)]
 
 

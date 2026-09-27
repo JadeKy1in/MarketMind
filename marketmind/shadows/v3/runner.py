@@ -25,6 +25,7 @@ from marketmind.shadows.v3.context import (
     BEAR_TRACKER_ID, FADE_MASTER_ID, NEWS_HOUND_ID, OPTIONS_READER_ID, SQUEEZE_WATCH_ID,
     ShadowContext, build_context, news_tickers, red_flag_tickers, ticker_view,
 )
+from marketmind.markets import market_for
 from marketmind.shadows.v3.decision import OUTPUT_INSTRUCTIONS, ParseResult, parse_decisions
 
 logger = logging.getLogger("marketmind.shadows.v3.runner")
@@ -62,8 +63,42 @@ class RunReport:
 
 
 def _tradable(ticker: str) -> bool:
-    from marketmind.universe import classify, is_tradable
-    return bool(is_tradable(ticker)) and bool(getattr(classify(ticker), "settleable", False))
+    """Shadows trade any real market instrument (docs/S3_DESIGN.md §7), not only Robinhood's."""
+    from marketmind.markets import is_shadow_tradable
+    return is_shadow_tradable(ticker)
+
+
+MAX_OFF_CONTEXT = 3
+
+
+async def _price_off_context(text: str, known: dict[str, float]) -> dict[str, float]:
+    """Last close for tickers the reply names that the context did not price."""
+    from marketmind.shadows.v3.decision import extract_json
+    try:
+        data = extract_json(text)
+    except ValueError:
+        return {}
+    raw = data.get("decisions") if isinstance(data, dict) else data
+    if not isinstance(raw, list):
+        return {}
+    known_upper = {k.upper() for k in known}
+    wanted = []
+    for d in raw:
+        if isinstance(d, dict):
+            t = str(d.get("ticker", "")).strip().upper().lstrip("$")
+            if t and t not in known_upper and _tradable(t) and t not in wanted:
+                wanted.append(t)
+    if not wanted:
+        return {}
+    histories = await get_price_histories(wanted[:MAX_OFF_CONTEXT])
+    out = {}
+    for t in wanted[:MAX_OFF_CONTEXT]:
+        view = ticker_view(t, histories.get(t))
+        if view.snap is not None:
+            out[t] = view.snap.close
+        else:
+            logger.info("Off-context ticker %s has no price data; decision will be dropped", t)
+    return out
 
 
 def _asset_type(ticker: str) -> str:
@@ -111,6 +146,8 @@ async def decide(ctx: ShadowContext, call=_call_llm) -> tuple[ParseResult, list[
     stage = f"shadow:{ctx.entry.name}"
     raws: list[str] = []
     result = ParseResult()
+    off_context: dict[str, float] = {}
+    ctx.off_context = off_context
     for attempt in (1, 2):
         try:
             text = await call(system, user, stage)
@@ -119,7 +156,10 @@ async def decide(ctx: ShadowContext, call=_call_llm) -> tuple[ParseResult, list[
             raws.append("")
             continue
         raws.append(text)
-        result = parse_decisions(text, ctx.closes, fixed_hold=fixed)
+        extra = await _price_off_context(text, ctx.closes)
+        off_context.update(extra)
+        result = parse_decisions(text, {**ctx.closes, **extra}, fixed_hold=fixed,
+                                 no_levels=set(extra))
         if result.ok:
             return result, raws, attempt
         user = (ctx.render() + "\n\n## Your previous reply was rejected\n"
@@ -237,6 +277,9 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
         if ctx.entry.shadow_id == SCALPER_ID:
             meta["intraday_approx"] = True
         for d in parsed.decisions:
+            d_meta = {**meta, "market": market_for(d.ticker).code}
+            if d.ticker in ctx.off_context:
+                d_meta["off_context"] = True
             res.entry_ids.append(store.add(LedgerEntry(
                 source_type="shadow", source_id=ctx.entry.shadow_id, ticker=d.ticker,
                 direction=d.direction, hold_bars=d.hold_days, confidence=d.confidence,
@@ -244,7 +287,7 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
                 asset_type=_asset_type(d.ticker), entry_rule="next_open",
                 stop_loss=d.stop, target_price=d.target, falsifier_rule=d.falsifier_rule,
                 domain_benchmark=ctx.entry.domain_benchmark, snapshot_id=snapshot_id,
-                meta=meta,
+                meta=d_meta,
             )))
         bench = _benchmark_entry(ctx, [d.hold_days for d in parsed.decisions], today, snapshot_id)
         if bench is not None:

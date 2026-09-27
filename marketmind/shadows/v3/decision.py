@@ -80,12 +80,14 @@ def _num(v) -> float | None:
         return None
 
 
-def parse_decisions(text: str, closes: dict[str, float], fixed_hold: int | None = None
-                    ) -> ParseResult:
+def parse_decisions(text: str, closes: dict[str, float], fixed_hold: int | None = None,
+                    no_levels: set[str] | frozenset = frozenset()) -> ParseResult:
     """Validate the LLM's decisions against today's context.
 
-    `closes`: ticker -> last close for every ticker in the shadow's context
-    (only these may be traded). `fixed_hold` forces hold_days (scalper = 1).
+    `closes`: ticker -> last close for every tradable ticker with data (the
+    context plus any off-context ticker the runner priced). `no_levels`: tickers
+    the shadow never saw prices for - their stop/target/rule are dropped, since
+    those numbers could only be invented. `fixed_hold` forces hold_days (scalper = 1).
     """
     res = ParseResult()
     try:
@@ -146,6 +148,12 @@ def parse_decisions(text: str, closes: dict[str, float], fixed_hold: int | None 
         close = closes[ticker]
         long = direction == "long"
         stop, target = _num(d.get("stop")), _num(d.get("target"))
+        if ticker in no_levels and (stop is not None or target is not None
+                                    or d.get("falsifier_rule")):
+            res.warnings.append(f"{tag}: {ticker} was not in your context, so its price "
+                                f"levels are dropped (text falsifier kept)")
+            stop = target = None
+            d = {**d, "falsifier_rule": None}
         if stop is not None and not (stop < close if long else stop > close):
             res.warnings.append(f"{tag}: stop {stop} on the wrong side of close {close}, dropped")
             stop = None
@@ -197,7 +205,11 @@ Reply with ONE JSON object and nothing else:
     "target": <number or null>}}
 ]}}
 Rules: {MIN_DECISIONS}-{MAX_DECISIONS} decisions, at least one every day - abstaining is not
-allowed. Only tickers listed in today's context. Entry is the next session's open.
+allowed. Any instrument in your domain that trades on a real market worldwide is allowed
+(Yahoo-style symbols: AAPL, 0700.HK, 600519.SS, 7203.T, SAP.DE, CL=F, EURUSD=X, BTC-USD;
+not bare indices like ^N225 - use an ETF or future). Prefer tickers in today's context:
+for any other ticker you have no prices, so give no stop/target/falsifier_rule for it.
+Entry is the next session's open.
 falsifier_rule: close_below (for a long) or close_above (for a short) a price level.
 For a long, stop < last close < target; mirrored for a short. Use prices from the
 context only; never invent data. The placeholders above are not suggestions.

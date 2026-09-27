@@ -67,8 +67,8 @@ async def test_submitted_decisions_and_benchmark_are_recorded(tmp_path, prices):
 
     bench = store.list(source_type="benchmark")
     assert len(bench) == 1 and bench[0].source_id == "random:expert:gold:bullion_broker"
-    assert bench[0].hold_bars == 6 and bench[0].ticker in {"GLD", "GDX", "GDXJ", "SIL", "NEM",
-                                                           "AEM", "WPM", "PPLT"}
+    gold = roster.by_id()["expert:gold:bullion_broker"].watchlist
+    assert bench[0].hold_bars == 6 and bench[0].ticker in set(gold) - {"SLV"}
     assert (tmp_path / "runs" / f"{TODAY}.json").exists()
     assert "1 submitted (2 decisions)" in report.summary()
 
@@ -80,13 +80,13 @@ async def test_retry_with_errors_then_missed(tmp_path, prices):
 
     async def call(system, user, stage):
         prompts.append(user)
-        return reply(good("AAPL")) if len(prompts) == 1 else reply(good("GLD"))
+        return reply(good("^N225")) if len(prompts) == 1 else reply(good("GLD"))
 
     report = await runner.run_shadow_day(store, [], today=TODAY,
                                          entries=entries("expert:gold:bullion_broker"),
                                          call=call, fred_fetch=no_fred)
     assert report.results[0].status == "submitted" and report.results[0].attempts == 2
-    assert "previous reply was rejected" in prompts[1] and "AAPL" in prompts[1]
+    assert "previous reply was rejected" in prompts[1] and "^N225" in prompts[1]
 
     async def abstain(system, user, stage):
         return "I prefer to stay in cash today."
@@ -205,4 +205,44 @@ async def test_squeeze_options_and_bear_tracker_get_their_extra_data(tmp_path, p
     op = seen["shadow:options_reader"]
     assert "NVDA options ok" in op and "AMD: option chain unavailable" in op
     assert "Short interest" not in op and "Option chains" not in sq
-    assert "- ACME |" in seen["shadow:bear_tracker"]   # red-flag ticker added with prices
+    assert "- ACME [US] |" in seen["shadow:bear_tracker"]   # red-flag ticker added with prices
+
+
+@pytest.mark.asyncio
+async def test_off_context_global_ticker_is_priced_and_loses_its_levels(tmp_path, prices):
+    store = LedgerStore(tmp_path / "l.db")
+
+    async def call(system, user, stage):
+        assert "0700.HK" in system and "Yahoo-style" in system   # global rule is stated
+        return reply(good("0700.hk", stop=1, target=10_000,
+                          falsifier_rule={"type": "close_below", "price": 1}),
+                     good("GLD", stop=40, target=500))
+
+    report = await runner.run_shadow_day(store, [], today=TODAY,
+                                         entries=entries("expert:gold:bullion_broker"),
+                                         call=call, fred_fetch=no_fred)
+    r = report.results[0]
+    assert r.status == "submitted" and len(r.entry_ids) == 2
+    assert any("0700.HK was not in your context" in w for w in r.warnings)
+    hk = next(e for e in store.list(source_type="shadow") if e.ticker == "0700.HK")
+    assert hk.stop_loss is None and hk.target_price is None and hk.falsifier_rule is None
+    assert hk.meta["off_context"] is True and hk.meta["market"] == "HK"
+    gld = next(e for e in store.list(source_type="shadow") if e.ticker == "GLD")
+    assert gld.stop_loss == 40 and "off_context" not in gld.meta and gld.meta["market"] == "US"
+
+
+@pytest.mark.asyncio
+async def test_off_context_ticker_without_data_is_dropped(tmp_path, monkeypatch):
+    async def fake(tickers, years=5):
+        return {t: (history(t) if t == "GLD" else None) for t in tickers}
+    monkeypatch.setattr(runner, "get_price_histories", fake)
+
+    async def call(system, user, stage):
+        return reply(good("NODATA.T"), good("GLD"))
+
+    report = await runner.run_shadow_day(LedgerStore(tmp_path / "l.db"), [], today=TODAY,
+                                         entries=entries("expert:gold:bullion_broker"),
+                                         call=call, fred_fetch=no_fred)
+    r = report.results[0]
+    assert r.status == "submitted" and len(r.entry_ids) == 1
+    assert any("NODATA.T" in e for e in r.errors)

@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from marketmind.gateway.price_history import PriceHistory, completed_history
+from marketmind.markets import market_for
 from marketmind.pipeline.l3_indicators import TechnicalSnapshot, compute_snapshot
 from marketmind.shadows.v3.roster import RosterEntry
 
@@ -51,11 +52,11 @@ class TickerView:
             if s.wma200 is not None else "n/a (history too short)"
         res = f"{s.key_resistance:.2f}" if s.key_resistance is not None else "none overhead"
         return (
-            f"- {self.ticker} | {s.as_of} close {s.close:.4g} | "
+            f"- {self.ticker} [{market_for(self.ticker).code}] | {s.as_of} close {s.close:.6g} | "
             f"1d {_pct(s.daily_return_pct)} 5d {_pct(self.ret_5d)} 20d {_pct(self.ret_20d)} | "
-            f"200WMA {wma} | ATR14 {s.atr14:.4g} | "
-            f"20d range {self.low_20d:.4g}-{self.high_20d:.4g} | "
-            f"support {s.support_low:.4g}-{s.support_high:.4g} | resistance {res} | "
+            f"200WMA {wma} | ATR14 {s.atr14:.6g} | "
+            f"20d range {self.low_20d:.6g}-{self.high_20d:.6g} | "
+            f"support {s.support_low:.6g}-{s.support_high:.6g} | resistance {res} | "
             f"light {s.light.upper()}, structure {'intact' if s.structure_intact else 'broken'}, "
             f"long-setup R/R {s.reward_risk_ratio:.2f}"
         )
@@ -174,6 +175,7 @@ class ShadowContext:
     short_interest: list[str] = field(default_factory=list)
     options: list[str] = field(default_factory=list)
     today: str = ""
+    off_context: dict[str, float] = field(default_factory=dict)  # priced after the reply
 
     @property
     def closes(self) -> dict[str, float]:
