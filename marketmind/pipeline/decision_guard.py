@@ -52,6 +52,10 @@ def enforce(cards: list, l3, max_single_pct: float = MAX_SINGLE_POSITION_PCT,
         if lvl is None:
             report.notes.append(f"dropped {card.ticker}: not an L3 green light")
             continue
+        if getattr(lvl, "recommendation", "enter") != "enter":
+            report.notes.append(f"dropped {card.ticker}: L3 says '{lvl.recommendation}' "
+                                f"(R/R {lvl.reward_risk_ratio:.2f} < 2)")
+            continue
         if card.direction != "long":
             report.notes.append(f"dropped {card.ticker}: L3 only validates long setups (got {card.direction})")
             continue

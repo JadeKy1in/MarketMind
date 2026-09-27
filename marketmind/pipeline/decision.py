@@ -99,7 +99,10 @@ def _get_decision_prompt() -> str:
         )
         if _rule_registry is None:
             _rule_registry = get_default_rules()
-        return assemble_dynamic_prompt(_rule_registry) + date_note + lang_note
+        # The dynamic prompt never stated the card schema, so the model invented its
+        # own keys (why_cn, action_en ...) and theses were lost. State it explicitly.
+        return (assemble_dynamic_prompt(_rule_registry) + DECISION_OUTPUT_SCHEMA
+                + date_note + lang_note)
     except Exception:
         return DECISION_SYSTEM_PROMPT + date_note + lang_note
 
@@ -128,6 +131,7 @@ class DecisionCard:
     risk_statement: str           # 1-sentence risk declaration
     red_team_note: str            # most important objection
     cash_reframing: str           # "if I had cash today, would I buy this?"
+    invalidation: str = ""        # falsifiable condition: "I am wrong if ..." (SPEC_v3 L5)
 
 
 @dataclass
@@ -340,6 +344,22 @@ _I18N = {
         "l1_bearish": "bärisch",
     },
 }
+
+
+DECISION_OUTPUT_SCHEMA = """
+
+OUTPUT FORMAT — use EXACTLY these keys, no others:
+{"decision_cards": [{"ticker": "TICKER", "direction": "long", "position_size_pct": 0.0,
+   "max_hold_days": 30, "thesis": "1-2 sentence thesis", "risk_statement": "main risk",
+   "red_team_note": "answer to the key red-team objection",
+   "invalidation": "I am wrong if ... (observable, dated condition)",
+   "cash_reframing": "if I had cash today, would I buy this?"}],
+ "no_trade_card": {"thesis": "why not trading is best", "supporting_evidence": ["..."],
+   "counterfactual": "what would make us trade", "structural_advantages": ["..."],
+   "pre_mortem": "...", "no_trade_score": 0},
+ "summary": "one paragraph, plain text"}
+Only include a decision card for a ticker you would actually enter today; tickers you
+would wait on belong in the no-trade card, not in decision_cards."""
 
 
 CONTRARIAN_PROMPT = """你是独立风控分析师。对以下投资决策方案提出2-3个具体的反对意见。
@@ -627,6 +647,27 @@ Tickers: {', '.join(defanged_tickers)}
 Produce decision cards for GREEN-light tickers only. Generate a parallel no-trade card with equal rigor."""
 
 
+def _pick(d: dict, *keys: str, default: Any = None) -> Any:
+    for k in keys:
+        if k in d and d[k] not in (None, ""):
+            return d[k]
+    return default
+
+
+def _text(v: Any) -> str:
+    if v is None:
+        return ""
+    return v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+
+
+def _num(v: Any, default: float) -> float:
+    try:
+        f = float(v)
+        return f if f == f else default  # NaN -> default
+    except (TypeError, ValueError):
+        return default
+
+
 def _parse_decision_response(content: str) -> DecisionOutput:
     content = strip_markdown_fences(content)
     try:
@@ -639,32 +680,37 @@ def _parse_decision_response(content: str) -> DecisionOutput:
         else:
             return DecisionOutput(summary="Failed to parse decision output")
     cards = []
-    for d in data.get("decision_cards", []):
+    for d in data.get("decision_cards", []) or []:
+        if not isinstance(d, dict):
+            continue
+        # Flash often ignores the schema and invents keys (why_cn, action_en, ...);
+        # read the common aliases, and honour its own "don't enter" verdicts.
+        action = str(_pick(d, "action_en", "action", default="")).upper()
+        if action and not any(w in action for w in ("ENTER", "BUY", "LONG", "执行", "买入")):
+            continue
         cards.append(DecisionCard(
-            ticker=d.get("ticker", ""),
-            direction=d.get("direction", "long"),
-            position_size_pct=float(d.get("position_size_pct", 0)),
-            entry_low=float(d.get("entry_low", 0)),
-            entry_high=float(d.get("entry_high", 0)),
-            stop_loss=float(d.get("stop_loss", 0)),
-            target_price=float(d.get("target_price", 0)),
-            max_hold_days=int(d.get("max_hold_days", 30)),
-            reward_risk_ratio=float(d.get("reward_risk_ratio", 0)),
-            thesis=d.get("thesis", ""),
-            risk_statement=d.get("risk_statement", ""),
-            red_team_note=d.get("red_team_note", ""),
-            cash_reframing=d.get("cash_reframing", ""),
+            ticker=str(d.get("ticker", "")),
+            direction=str(d.get("direction", "long")),
+            position_size_pct=_num(d.get("position_size_pct"), 0.0),
+            entry_low=0.0, entry_high=0.0, stop_loss=0.0, target_price=0.0,  # set by guard from L3
+            max_hold_days=int(_num(_pick(d, "max_hold_days", "hold_days_max"), 30)),
+            reward_risk_ratio=0.0,
+            thesis=_text(_pick(d, "thesis", "why_cn", "why", "rationale", "thesis_cn")),
+            risk_statement=_text(_pick(d, "risk_statement", "risk_cn", "target_caveat_cn", "risk")),
+            red_team_note=_text(_pick(d, "red_team_note", "red_team_response_cn", "red_team")),
+            cash_reframing=_text(_pick(d, "cash_reframing", "cash_reframing_cn")),
+            invalidation=_text(_pick(d, "invalidation", "invalidation_cn", "falsifiable_condition")),
         ))
     ntc_data = data.get("no_trade_card", {})
     no_trade = None
-    if ntc_data:
+    if isinstance(ntc_data, dict) and ntc_data:
         no_trade = NoTradeCard(
-            thesis=ntc_data.get("thesis", ""),
+            thesis=_text(_pick(ntc_data, "thesis", "core_argument_cn", "why_cn", "thesis_cn")),
             supporting_evidence=ntc_data.get("supporting_evidence", []),
             counterfactual=ntc_data.get("counterfactual", ""),
             structural_advantages=ntc_data.get("structural_advantages", []),
             pre_mortem=ntc_data.get("pre_mortem", ""),
-            no_trade_score=float(ntc_data.get("no_trade_score", 0)),
+            no_trade_score=_num(_pick(ntc_data, "no_trade_score", "no_trade_strength"), 0.0),
         )
     summary = data.get("summary", "")
     if not isinstance(summary, str):

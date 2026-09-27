@@ -88,6 +88,31 @@ async def test_empty_llm_output_still_yields_explicit_no_trade_and_paper_trade()
     assert out.paper_trade is not None and out.paper_trade.ticker == "NVDA"
 
 
+def test_green_but_wait_is_dropped():
+    g = green("NVDA")
+    g.recommendation, g.reward_risk_ratio = "wait", 0.47
+    rep = enforce([card("NVDA")], Layer3BatchResult(results=[g]))
+    assert rep.kept == [] and any("wait" in n for n in rep.notes)
+
+
+def test_parse_accepts_flash_aliases_and_respects_its_action():
+    import json
+    from marketmind.pipeline.decision import _parse_decision_response
+    raw = json.dumps({
+        "decision_cards": [
+            {"ticker": "SLV", "action_en": "ENTER", "position_size_pct": 12, "why_cn": "白银对冲",
+             "invalidation_cn": "若跌破 54 则错", "red_team_response_cn": "回应"},
+            {"ticker": "NVDA", "action_en": "WAIT", "position_size_pct": 8, "why_cn": "等待"},
+        ],
+        "no_trade_card": {"core_argument_cn": "持币理由", "no_trade_strength": 74},
+        "summary": "s"})
+    out = _parse_decision_response(raw)
+    assert [c.ticker for c in out.decision_cards] == ["SLV"]
+    c = out.decision_cards[0]
+    assert c.thesis == "白银对冲" and c.invalidation == "若跌破 54 则错" and c.red_team_note == "回应"
+    assert out.no_trade_card.thesis == "持币理由" and out.no_trade_card.no_trade_score == 74
+
+
 def test_parse_decision_coerces_non_string_summary():
     from marketmind.pipeline.decision import _parse_decision_response
     out = _parse_decision_response('{"decision_cards": [], "summary": {"view": "neutral", "risk": "high"}}')
