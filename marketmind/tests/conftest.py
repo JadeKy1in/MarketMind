@@ -17,8 +17,20 @@ def pytest_configure(config):
     )
     config.addinivalue_line(
         "markers",
-        "slow: mark test as slow (real API calls, skipped in CI by default)",
+        "slow: real network / paid API calls; skipped unless MARKETMIND_LIVE_TESTS=1",
     )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Real-API tests are opt-in. They used to run whenever DEEPSEEK_API_KEY was set,
+    which made every local run spend tokens and take ~14 min instead of ~3."""
+    import os
+    if os.environ.get("MARKETMIND_LIVE_TESTS") == "1":
+        return
+    skip = pytest.mark.skip(reason="real API test; set MARKETMIND_LIVE_TESTS=1 to run")
+    for item in items:
+        if "slow" in item.keywords:
+            item.add_marker(skip)
 
 
 @pytest.fixture

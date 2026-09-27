@@ -203,6 +203,7 @@ async def test_fetch_rss_source():
         assert "url" in item
 
 
+@pytest.mark.slow  # live RSS fetch; fails offline
 @pytest.mark.asyncio
 async def test_fetch_core_sources():
     """Integration: fetch CORE sources for serenity_reply."""
