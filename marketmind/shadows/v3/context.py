@@ -23,6 +23,11 @@ MAX_HEADLINES = 20
 MAX_NEWS_TICKERS = 10
 FADE_MASTER_ID = "contrarian:consensus:fade_master"
 NEWS_HOUND_ID = "momentum:event:news_hound"
+BEAR_TRACKER_ID = "expert:short:bear_tracker"
+SQUEEZE_WATCH_ID = "short:squeeze:squeeze_watch"
+OPTIONS_READER_ID = "derivatives:options:options_reader"
+SEC_FLAGS_SOURCE = "SEC EDGAR Full-Text Flags"
+_PAREN_TICKER = re.compile(r"\(([A-Z]{1,5}(?:[.-][A-Z])?)\)")
 
 _NEWS_TICKER = re.compile(
     r"\$([A-Z]{1,5}(?:[.-][A-Z])?)\b"
@@ -83,7 +88,9 @@ def filter_news(news_items: list, keywords: tuple[str, ...], limit: int = MAX_HE
     """Headlines matching any keyword (word-start, case-insensitive); all news if none given."""
     if not keywords:
         return list(news_items[:limit])
-    pattern = re.compile(r"\b(" + "|".join(re.escape(k) for k in keywords) + r")", re.I)
+    # word-start match for Latin keywords; CJK text has no spaces, so match anywhere
+    parts = [(r"\b" if k[:1].isascii() else "") + re.escape(k) for k in keywords]
+    pattern = re.compile("(" + "|".join(parts) + ")", re.I)
     out = []
     for item in news_items:
         text = f"{_attr(item, 'title')} {_attr(item, 'summary')[:300]}"
@@ -120,6 +127,17 @@ def news_tickers(news_items: list, tradable, limit: int = MAX_NEWS_TICKERS) -> l
     return [t for t, _ in counts.most_common() if tradable(t)][:limit]
 
 
+def red_flag_tickers(news_items: list, tradable, limit: int = MAX_NEWS_TICKERS) -> list[str]:
+    """Tickers of companies in SEC full-text red-flag filings ('Acme Corp (ACME) 8-K: ...')."""
+    counts: Counter[str] = Counter()
+    for item in news_items:
+        if _attr(item, "source_name") != SEC_FLAGS_SOURCE:
+            continue
+        for m in _PAREN_TICKER.finditer(_attr(item, "title")):
+            counts[m.group(1).replace(".", "-")] += 1
+    return [t for t, _ in counts.most_common() if tradable(t)][:limit]
+
+
 def fred_lines(series: dict[str, dict]) -> list[str]:
     lines = []
     for key, r in series.items():
@@ -153,6 +171,8 @@ class ShadowContext:
     headlines: list[str]
     fred: list[str] = field(default_factory=list)
     consensus: list[str] = field(default_factory=list)
+    short_interest: list[str] = field(default_factory=list)
+    options: list[str] = field(default_factory=list)
     today: str = ""
 
     @property
@@ -173,6 +193,15 @@ class ShadowContext:
         if self.consensus:
             parts += ["", "## Yesterday's shadow consensus (direction share only)",
                       *self.consensus]
+        if self.short_interest:
+            parts += ["", "## Short interest (Nasdaq, exchange settlement, twice a month)",
+                      *self.short_interest]
+        if self.options:
+            parts += ["", "## Option chains (Nasdaq, delayed; computed by code)",
+                      "Implied move = at-the-money straddle mid / spot to the near expiry. "
+                      "OTM put/call price ratio compares ~5% OTM put and call mids "
+                      "(higher = more downside protection demand). Walls = largest open "
+                      "interest strikes.", *self.options]
         parts += ["", "## Today's headlines", *(self.headlines or ["- (no relevant headlines today)"])]
         return "\n".join(parts)
 
@@ -180,7 +209,8 @@ class ShadowContext:
 def build_context(entry: RosterEntry, histories: dict[str, PriceHistory | None],
                   news_items: list, fred: dict[str, dict] | None = None,
                   consensus_rows: list | None = None, extra_tickers: list[str] | None = None,
-                  today: str | None = None) -> ShadowContext:
+                  today: str | None = None, short_interest: list[str] | None = None,
+                  options: list[str] | None = None) -> ShadowContext:
     tickers = list(dict.fromkeys([*entry.watchlist, *(extra_tickers or [])]))
     views = [ticker_view(t, histories.get(t)) for t in tickers]
     headlines = news_lines(filter_news(news_items, entry.news_keywords))
@@ -188,5 +218,6 @@ def build_context(entry: RosterEntry, histories: dict[str, PriceHistory | None],
         entry=entry, views=views, headlines=headlines,
         fred=fred_lines(fred or {}),
         consensus=consensus_lines(consensus_rows or []) if entry.shadow_id == FADE_MASTER_ID else [],
+        short_interest=list(short_interest or []), options=list(options or []),
         today=today or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
     )

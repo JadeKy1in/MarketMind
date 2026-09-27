@@ -120,3 +120,14 @@
 - 缺失的 9 个影子（defi_scout、harvest_seer、squeeze_watch、options_reader、odds_analyst、dragon_watch、carry_watch、euro_watch、bear_tracker 补全）的方法论。
 - scalper（日内）用日线近似：持有 1 天，下一根开盘入场、当天收盘离场，账本 meta 注明 `intraday_approx`（已定）。以后有分钟线再换。
 - 虚拟资金规模、仓位上限，以后是否按账本成绩调整（S7）。
+
+## 6. 第二批（2026-09-28）
+
+- 在册 32 个，**31 个上线**。新增 8 个：defi_scout、harvest_seer、bear_tracker、dragon_watch、carry_watch、euro_watch、squeeze_watch、options_reader。
+- 新数据：`gateway/nasdaq_derivs.py`，数据来自 Nasdaq 公开接口，取不到时标为"不可用"，不估算。
+  - squeeze_watch：空头持仓（交易所结算数据，每月两次，只覆盖 Nasdaq 上市股票，所以观察清单全部选 Nasdaq 股票）。
+  - options_reader：期权链摘要，包括看跌/看涨成交量比和未平仓量比、近月平值跨式的隐含波动幅度、虚值看跌/看涨价格比、期权墙。
+- bear_tracker 的上下文加入 SEC 全文检索红旗文件中公司的代码（最多 10 个）。
+- defi_scout 可以看到 BTC-USD、ETH-USD，作为市场状态参考。prompt 按所有人要求加了防护：不追涨、只在 BTC 牛市结构下做多、确信度上限更低、止损更宽、炒作类新闻不作为入场理由。
+- 中文新闻关键词不要求词首边界（dragon_watch 读中文源）。
+- **odds_analyst 暂缓，未放弃**：Kalshi、Polymarket 在所有人当前所在地被屏蔽，所有人不绕过当地法规。恢复条件和步骤见 `SPEC_v3.md` §13.1 与仓库根目录 `AGENTS.md`。

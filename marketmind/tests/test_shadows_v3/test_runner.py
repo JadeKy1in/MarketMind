@@ -167,3 +167,42 @@ async def test_benchmark_is_reproducible(tmp_path, prices):
         b = store.list(source_type="benchmark")[0]
         picks.append((b.ticker, b.direction))
     assert picks[0] == picks[1]
+
+
+class FakeDerivs:
+    @staticmethod
+    async def get_short_interest(ticker):
+        if ticker == "BYND":
+            return None
+        from marketmind.gateway.nasdaq_derivs import ShortInterest
+        return ShortInterest(ticker, "2026-09-15", 1e6, 6.0, 5.0, "2026-08-31")
+
+    @staticmethod
+    async def get_option_summary(ticker, spot, day):
+        return None if ticker == "AMD" else type("S", (), {"line": lambda self: f"- {ticker} options ok"})()
+
+
+@pytest.mark.asyncio
+async def test_squeeze_options_and_bear_tracker_get_their_extra_data(tmp_path, prices, monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(runner, "_tradable", lambda t: True)
+    seen = {}
+
+    async def call(system, user, stage):
+        seen[stage] = user
+        return reply(good("IWM"), good("SPY"))
+
+    flags = [SimpleNamespace(title='Acme Corp (ACME) 10-K: "going concern"', summary="",
+                             source_name="SEC EDGAR Full-Text Flags", published_at="")]
+    await runner.run_shadow_day(
+        LedgerStore(tmp_path / "l.db"), flags, today=TODAY, call=call, fred_fetch=no_fred,
+        derivs_fetch=FakeDerivs,
+        entries=entries("short:squeeze:squeeze_watch", "derivatives:options:options_reader",
+                        "expert:short:bear_tracker"))
+    sq = seen["shadow:squeeze_watch"]
+    assert "UPST: short interest" in sq and "BYND: short interest unavailable" in sq
+    assert "IWM: short interest" not in sq            # the benchmark ETF is not queried
+    op = seen["shadow:options_reader"]
+    assert "NVDA options ok" in op and "AMD: option chain unavailable" in op
+    assert "Short interest" not in op and "Option chains" not in sq
+    assert "- ACME |" in seen["shadow:bear_tracker"]   # red-flag ticker added with prices

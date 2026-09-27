@@ -6,7 +6,7 @@ from marketmind.gateway.fred_client import SHADOW_FRED_SERIES
 from marketmind.gateway.price_history import Bar, PriceHistory, to_weekly
 from marketmind.shadows.v3 import roster
 from marketmind.shadows.v3.context import (
-    build_context, consensus_lines, filter_news, fred_lines, news_tickers,
+    build_context, consensus_lines, filter_news, fred_lines, news_tickers, red_flag_tickers,
 )
 
 REQUIRED_SECTIONS = ["## Identity and edge", "## Universe", "## Signals", "## Entry rules",
@@ -39,12 +39,13 @@ def test_roster_matches_spec_and_launch_decision():
         groups[r.group] = groups.get(r.group, 0) + 1
     assert groups == {"fundamental": 17, "momentum": 4, "contrarian": 4, "short": 2,
                       "derivatives": 2, "cross_market": 3}
-    # owner decision 2026-09-28: 15 experts + 8 momentum/contrarian go live first
+    # 2026-09-28: 31 live; odds_analyst is blocked (no reachable prediction-market data),
+    # deferred not dropped — see SPEC_v3 §13.1 and AGENTS.md
     active = roster.active()
-    assert len(active) == 23
-    assert {r.name for r in roster.ROSTER if r.status == roster.PENDING_PROMPT} == {
-        "defi_scout", "harvest_seer", "bear_tracker", "squeeze_watch", "options_reader",
-        "odds_analyst", "dragon_watch", "carry_watch", "euro_watch"}
+    assert len(active) == 31
+    pending = [r for r in roster.ROSTER if r.status == roster.PENDING_PROMPT]
+    assert [r.name for r in pending] == ["odds_analyst"]
+    assert "BLOCKED" in pending[0].notes
 
 
 def test_every_active_prompt_is_complete():
@@ -98,3 +99,21 @@ def test_news_filter_word_start_and_news_tickers():
 
 def test_fred_lines_mark_unavailable():
     assert fred_lines({"X": {"error": "source_unavailable"}}) == ["- X: unavailable"]
+
+
+def test_red_flag_tickers_only_from_sec_flags_and_cjk_keywords():
+    items = [news('Acme Corp (ACME) 10-K: "going concern"', source="SEC EDGAR Full-Text Flags"),
+             news('Beta Inc (BETA) 8-K: "material weakness"', source="SEC EDGAR Full-Text Flags"),
+             news("Gamma (GAMA) wins award", source="Reuters")]
+    assert red_flag_tickers(items, lambda t: t != "BETA") == ["ACME"]
+    cn = [news("中国央行降准，港股大涨"), news("Oil falls")]
+    assert [i.title for i in filter_news(cn, ("央行",))] == ["中国央行降准，港股大涨"]
+
+
+def test_derivative_sections_render():
+    by = roster.by_id()
+    ctx = build_context(by["short:squeeze:squeeze_watch"], {}, [],
+                        short_interest=["- UPST: short interest 1 shares"])
+    assert "## Short interest (Nasdaq" in ctx.render() and "UPST: short interest" in ctx.render()
+    ctx = build_context(by["derivatives:options:options_reader"], {}, [], options=["- SPY options"])
+    assert "## Option chains" in ctx.render() and "Implied move" in ctx.render()

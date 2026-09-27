@@ -22,7 +22,8 @@ from marketmind.gateway.price_history import get_price_histories
 from marketmind.ledger.store import LedgerEntry, LedgerStore
 from marketmind.shadows.v3 import roster as roster_mod
 from marketmind.shadows.v3.context import (
-    FADE_MASTER_ID, NEWS_HOUND_ID, ShadowContext, build_context, news_tickers,
+    BEAR_TRACKER_ID, FADE_MASTER_ID, NEWS_HOUND_ID, OPTIONS_READER_ID, SQUEEZE_WATCH_ID,
+    ShadowContext, build_context, news_tickers, red_flag_tickers, ticker_view,
 )
 from marketmind.shadows.v3.decision import OUTPUT_INSTRUCTIONS, ParseResult, parse_decisions
 
@@ -127,6 +128,31 @@ async def decide(ctx: ShadowContext, call=_call_llm) -> tuple[ParseResult, list[
     return result, raws, 2
 
 
+async def _derivatives_lines(todo: list, histories: dict, today: str, fetch=None) -> dict:
+    """Short interest for squeeze_watch, option-chain summaries for options_reader."""
+    from datetime import date as _date
+    if fetch is None:
+        from marketmind.gateway import nasdaq_derivs as fetch
+    out: dict[str, dict] = {}
+    for e in todo:
+        if e.shadow_id == SQUEEZE_WATCH_ID:
+            stocks = [t for t in e.watchlist if t != e.domain_benchmark]
+            got = await asyncio.gather(*(fetch.get_short_interest(t) for t in stocks))
+            out[e.shadow_id] = {"short_interest": [
+                g.line() if g else f"- {t}: short interest unavailable"
+                for t, g in zip(stocks, got)]}
+        elif e.shadow_id == OPTIONS_READER_ID:
+            day = _date.fromisoformat(today)
+            spots = {t: ticker_view(t, histories.get(t)).snap for t in e.watchlist}
+            tickers = [t for t, snap in spots.items() if snap is not None]
+            got = await asyncio.gather(*(fetch.get_option_summary(t, spots[t].close, day)
+                                         for t in tickers))
+            out[e.shadow_id] = {"options": [
+                g.line() if g else f"- {t}: option chain unavailable"
+                for t, g in zip(tickers, got)]}
+    return out
+
+
 def _benchmark_entry(ctx: ShadowContext, holds: list[int], today: str,
                      snapshot_id: str) -> LedgerEntry | None:
     """Random same-domain pick: seeded by date + shadow id so it is reproducible."""
@@ -150,7 +176,7 @@ def _benchmark_entry(ctx: ShadowContext, holds: list[int], today: str,
 
 async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | None = None,
                          entries: list | None = None, call=_call_llm, fred_fetch=None,
-                         report_dir: Path | None = None) -> RunReport:
+                         derivs_fetch=None, report_dir: Path | None = None) -> RunReport:
     today = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     entries = entries if entries is not None else roster_mod.active()
     report = RunReport(today)
@@ -164,12 +190,15 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
     if not todo:
         return report
 
-    extra = {NEWS_HOUND_ID: news_tickers(news_items, _tradable)}
+    extra = {NEWS_HOUND_ID: news_tickers(news_items, _tradable),
+             BEAR_TRACKER_ID: red_flag_tickers(news_items, _tradable)}
     tickers = sorted({t for e in todo for t in (*e.watchlist, *extra.get(e.shadow_id, []))})
     histories = await get_price_histories(tickers)
     if fred_fetch is None:
         from marketmind.gateway.fred_client import get_fred_for_shadow as fred_fetch
     consensus = _previous_consensus(store, today)
+
+    derivs = await _derivatives_lines(todo, histories, today, derivs_fetch)
 
     contexts = []
     for e in todo:
@@ -180,7 +209,8 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
             fred = {}
         contexts.append(build_context(e, histories, news_items, fred=fred,
                                       consensus_rows=consensus if e.shadow_id == FADE_MASTER_ID else None,
-                                      extra_tickers=extra.get(e.shadow_id), today=today))
+                                      extra_tickers=extra.get(e.shadow_id), today=today,
+                                      **derivs.get(e.shadow_id, {})))
 
     quotes = {}
     for ctx in contexts:

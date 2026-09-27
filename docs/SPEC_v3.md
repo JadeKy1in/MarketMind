@@ -204,7 +204,16 @@
 
 ## 13.1 开放问题
 
-- 补齐 17 个影子方法论 prompt 的内容，需要逐个设计。
+- 补齐影子方法论 prompt：截至 2026-09-28 已有 31 个（见 `docs/S3_DESIGN.md`），剩 odds_analyst。
+- **odds_analyst（预测市场赔率影子）暂缓，未放弃，必须补上。**
+  - 卡点：需要真钱预测市场的公开赔率（Kalshi `api.elections.kalshi.com/trade-api/v2`、Polymarket `gamma-api.polymarket.com`，读取无需密钥）。所有人所在地（利雅得）网络会重置这两个站的 TLS 连接，疑为当地博彩类屏蔽；所有人决定不绕过当地法规（不用代理、不用云端代抓）。
+  - 恢复条件：在所有人本机能直接访问上述 API 时（例如回国后）继续。
+  - 恢复步骤：
+    1. 写取数模块（参照 `gateway/nasdaq_derivs.py`），带离线测试；
+    2. 把与观察清单相关的市场（美联储利率决议、CPI、衰退、大选、BTC 价格区间等）的隐含概率和近日变化加进 `shadows/v3/context.py` 的上下文；
+    3. 按 `shadows/v3/prompts/` 的 8 段模板写 `odds_analyst.md`；
+    4. `roster.py` 里把状态改为 active，跑测试和一次 live；
+    5. 删掉本条和 `AGENTS.md` 里的对应待办。
 - 行情数据源选型：Alpaca 免费档需要注册账户，需实测。
 - 期货、事件合约的历史数据来源与结算规则细节。
 - LLM 成本上限：32 个影子每天强制决策，按实测结果确定每日预算。

@@ -58,8 +58,9 @@ ROSTER: tuple[RosterEntry, ...] = (
        ["BTC-USD", "ETH-USD", "SOL-USD", "IBIT", "ETHA", "COIN", "MSTR"], "BTC-USD",
        keywords=["bitcoin", "crypto", "ethereum", "stablecoin", "etf flow", "blockchain"]),
     _e("expert:crypto:defi_scout", "DeFi Scout", "fundamental", "altcoins and DeFi",
-       ["SOL-USD", "AVAX-USD", "LINK-USD", "UNI-USD", "AAVE-USD", "DOGE-USD"], "ETH-USD",
-       status=PENDING_PROMPT, keywords=["defi", "altcoin", "token", "solana", "crypto"]),
+       ["SOL-USD", "AVAX-USD", "LINK-USD", "UNI-USD", "AAVE-USD", "DOGE-USD", "BTC-USD", "ETH-USD"],
+       "ETH-USD",
+       keywords=["defi", "altcoin", "token", "solana", "crypto"]),
     _e("expert:energy:oil_geologist", "Oil Geologist", "fundamental", "energy",
        ["USO", "XLE", "XOP", "XOM", "CVX", "COP", "OXY", "SLB", "UNG"], "XLE",
        keywords=["oil", "crude", "opec", "energy", "natural gas", "petroleum", "refin", "brent"]),
@@ -95,8 +96,7 @@ ROSTER: tuple[RosterEntry, ...] = (
        keywords=["steel", "copper", "iron ore", "aluminum", "lme", "mining", "metal"]),
     _e("expert:agriculture:harvest_seer", "Harvest Seer", "fundamental", "agriculture",
        ["DBA", "CORN", "WEAT", "SOYB", "ADM", "BG", "MOS", "NTR", "DE"], "DBA",
-       status=PENDING_PROMPT,
-       keywords=["crop", "grain", "wheat", "corn", "soybean", "usda", "fertilizer", "drought"]),
+              keywords=["crop", "grain", "wheat", "corn", "soybean", "usda", "fertilizer", "drought"]),
     _e("expert:realestate:reit_analyst", "REIT Analyst", "fundamental", "real estate",
        ["VNQ", "XLRE", "PLD", "AMT", "EQIX", "O", "SPG", "ITB", "XHB"], "VNQ",
        keywords=["reit", "real estate", "housing", "mortgage", "home", "property", "rent"]),
@@ -129,23 +129,43 @@ ROSTER: tuple[RosterEntry, ...] = (
        ["SPY", "QQQ", "SH", "PSQ", "TLT", "GLD", "VXX", "HYG"], "SPY"),
     # ── Short (2) ───────────────────────────────────────────────────────────
     _e("expert:short:bear_tracker", "Bear Tracker", "short", "fundamental shorts",
-       ["SPY", "QQQ", "ARKK", "TSLA", "PLTR", "SMCI", "COIN"], "SPY", status=PENDING_PROMPT),
+       ["SPY", "QQQ", "ARKK", "TSLA", "PLTR", "SMCI", "COIN"], "SPY",        keywords=["going concern", "material weakness", "restate", "guidance cut", "lowers guidance",
+                 "downgrade", "probe", "subpoena", "fraud", "short seller", "bankrupt", "delist",
+                 "impairment", "misses", "layoff"],
+       notes="context adds up to 10 tradable tickers named in SEC full-text red-flag filings"),
     _e("short:squeeze:squeeze_watch", "Squeeze Watch", "short", "crowded shorts / squeezes",
-       ["IWM", "GME", "AMC", "CVNA", "UPST", "BYND"], "IWM", status=PENDING_PROMPT),
+       # Nasdaq-listed only: Nasdaq's API has no short interest for NYSE names (GME, AMC, CVNA)
+       ["IWM", "UPST", "SOFI", "LCID", "RIVN", "PLUG", "OPEN", "CELH", "BYND"], "IWM",
+              keywords=["short interest", "short squeeze", "squeeze", "short seller", "meme", "retail traders"],
+       notes="context adds Nasdaq short interest (shares, change, days to cover) per stock"),
     # ── Derivatives and odds (2) ────────────────────────────────────────────
     _e("derivatives:options:options_reader", "Options Reader", "derivatives",
-       "options-implied signals", ["SPY", "QQQ", "IWM", "NVDA", "TSLA", "AAPL"], "SPY",
-       status=PENDING_PROMPT),
+       "options-implied signals",
+       ["SPY", "QQQ", "IWM", "NVDA", "TSLA", "AAPL", "AMZN", "META", "AMD"], "SPY",
+              keywords=["options", "unusual activity", "call buying", "put buying", "volatility", "expiration"],
+       notes="context adds Nasdaq option-chain summaries per ticker"),
+    # BLOCKED (2026-09-28), NOT ABANDONED: needs real-money prediction-market odds
+    # (Kalshi / Polymarket public APIs). They are unreachable from the owner's current
+    # location (Riyadh network resets TLS; likely local gambling-site policy) and the
+    # owner chose not to work around local rules. Resume when those APIs are reachable
+    # directly: see SPEC_v3 §13.1 and AGENTS.md "Open work" for the steps.
     _e("derivatives:odds:odds_analyst", "Odds Analyst", "derivatives", "prediction-market odds",
-       ["SPY", "TLT", "GLD", "UUP", "BTC-USD"], "SPY", status=PENDING_PROMPT),
+       ["SPY", "TLT", "GLD", "UUP", "BTC-USD"], "SPY", status=PENDING_PROMPT,
+       notes="BLOCKED: no reachable real-money prediction-market data; see SPEC_v3 §13.1"),
     # ── Cross-market (3) ────────────────────────────────────────────────────
     _e("cross:china:dragon_watch", "Dragon Watch", "cross_market", "China / Asia",
        ["FXI", "KWEB", "MCHI", "ASHR", "BABA", "PDD", "JD", "BIDU", "EWH"], "FXI",
-       status=PENDING_PROMPT),
+              keywords=["china", "chinese", "beijing", "pboc", "yuan", "renminbi", "hong kong", "hang seng",
+                 "stimulus", "xi ", "taiwan", "asia", "alibaba", "tencent", "中国", "央行", "港股",
+                 "A股", "人民币"]),
     _e("cross:japan:carry_watch", "Carry Watch", "cross_market", "Japan and global carry",
-       ["EWJ", "DXJ", "FXY", "UUP", "SPY", "QQQ"], "EWJ", status=PENDING_PROMPT),
+       ["EWJ", "DXJ", "FXY", "UUP", "SPY", "QQQ"], "EWJ",
+       keywords=["japan", "yen", "boj", "bank of japan", "nikkei", "topix", "carry", "ueda",
+                 "jgb"]),
     _e("cross:europe:euro_watch", "Euro Watch", "cross_market", "Europe",
-       ["VGK", "EZU", "FEZ", "EWG", "EWU", "EWQ", "FXE"], "VGK", status=PENDING_PROMPT),
+       ["VGK", "EZU", "FEZ", "EWG", "EWU", "EWQ", "FXE"], "VGK",
+       keywords=["europe", "euro", "ecb", "lagarde", "germany", "german", "france", "french",
+                 "britain", "uk ", "bank of england", "eurozone", "dax", "ftse", "stoxx"]),
 )
 
 
