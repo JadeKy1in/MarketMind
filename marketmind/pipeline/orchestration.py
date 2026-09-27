@@ -787,6 +787,7 @@ async def run_shadows_only(config, verbose: bool = False) -> int:
         print(f"Shadows: {len(news_items)} articles collected")
         await run_v3_shadows(config, news_items)
         print(f"  [tokens] {usage_tracker.summary_line()}")
+        usage_tracker.append_log("shadows")
         return 0
     return await _run_legacy_shadows_only(config, verbose)
 
@@ -921,6 +922,9 @@ async def _run_daily_with_shadows(config, args) -> int:
             pass
         from marketmind.gateway import usage_tracker
         print(f"  [tokens incl. shadows] {usage_tracker.summary_line()}")
+    if not args.mock:
+        from marketmind.gateway import usage_tracker
+        usage_tracker.append_log("daily")
 
     return ret
 

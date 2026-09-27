@@ -63,3 +63,26 @@ def summary_line() -> str:
     return (f"LLM tokens: {t['total_tokens']:,} total in {t['calls']} calls "
             f"(prompt {t['prompt_tokens']:,} / completion {t['completion_tokens']:,}) — "
             + ", ".join(parts))
+
+
+def append_log(mode: str, path=None) -> None:
+    """Append this run's snapshot to <data_dir>/token_usage.jsonl (read by the dashboard)."""
+    import json
+    import logging
+    import os
+    from datetime import datetime, timezone
+    from pathlib import Path
+    snap = snapshot()
+    if not snap["stages"]:
+        return
+    path = Path(path) if path else Path(os.getenv("MARKETMIND_DATA_DIR", "data")) / "token_usage.jsonl"
+    now = datetime.now(timezone.utc)
+    row = {"date": now.strftime("%Y-%m-%d"), "at": now.isoformat(timespec="seconds"),
+           "mode": mode, **snap}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError:
+        logging.getLogger("marketmind.gateway.usage_tracker").warning(
+            "token usage log not written", exc_info=True)

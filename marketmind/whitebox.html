@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MarketMind 白箱</title>
+<style>
+:root{--bg:#f6f7f9;--panel:#fff;--ink:#1c2230;--muted:#667085;--line:#e4e7ec;--accent:#2f6fde;--good:#12805c;--bad:#c4320a;--warn:#b54708;--chip:#eef2f8}
+@media (prefers-color-scheme:dark){:root{--bg:#11151c;--panel:#1a2029;--ink:#e6e9ef;--muted:#98a2b3;--line:#2b3340;--accent:#6b9cff;--good:#3ccb8f;--bad:#ff7a59;--warn:#f5b04b;--chip:#232b37}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+header{display:flex;align-items:center;gap:16px;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:2;flex-wrap:wrap}
+header h1{font-size:16px;margin:0}
+nav{display:flex;gap:4px;flex-wrap:wrap}
+nav button{border:0;background:none;color:var(--muted);padding:6px 10px;border-radius:6px;cursor:pointer;font:inherit}
+nav button.on{background:var(--chip);color:var(--ink);font-weight:600}
+header .meta{margin-left:auto;color:var(--muted);font-size:12px}
+main{padding:16px 20px;max-width:1400px;margin:0 auto}
+section{display:none}section.on{display:block}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+.card h2{font-size:15px;margin:0 0 10px}
+.card h3{font-size:13px;margin:12px 0 6px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+.stat{background:var(--chip);border-radius:8px;padding:10px 12px}
+.stat .v{font-size:20px;font-weight:600}.stat .k{color:var(--muted);font-size:12px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:500;white-space:nowrap}
+tr.click{cursor:pointer}tr.click:hover{background:var(--chip)}
+.tw{overflow-x:auto}
+.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pos{color:var(--good)}.neg{color:var(--bad)}.mut{color:var(--muted)}
+.chip{display:inline-block;padding:1px 8px;border-radius:10px;background:var(--chip);font-size:12px}
+.chip.green{color:var(--good)}.chip.red{color:var(--bad)}.chip.yellow{color:var(--warn)}
+.id{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--accent)}
+pre{white-space:pre-wrap;word-break:break-word;background:var(--chip);padding:10px;border-radius:8px;font-size:12px;max-height:420px;overflow:auto}
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+select,input,textarea{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:5px 8px}
+button.act{font:inherit;border:0;border-radius:6px;padding:6px 14px;background:var(--accent);color:#fff;cursor:pointer}
+button.act:disabled{opacity:.5}
+.empty{color:var(--muted);padding:8px 0}
+#drawer{position:fixed;top:0;right:0;width:min(560px,100%);height:100%;background:var(--panel);border-left:1px solid var(--line);box-shadow:-4px 0 20px rgba(0,0,0,.15);transform:translateX(100%);transition:transform .2s;z-index:5;overflow:auto;padding:16px}
+#drawer.on{transform:none}
+#drawer .close{float:right}
+.msg{margin:8px 0;padding:10px 12px;border-radius:8px;white-space:pre-wrap}
+.msg.q{background:var(--chip)}.msg.a{border:1px solid var(--line)}
+.kv td:first-child{color:var(--muted);width:160px}
+</style>
+</head>
+<body>
+<header>
+  <h1>MarketMind 白箱</h1>
+  <nav id="nav"></nav>
+  <span class="meta" id="meta"></span>
+</header>
+<main>
+  <section id="s-brief"></section>
+  <section id="s-chain"></section>
+  <section id="s-ledger"></section>
+  <section id="s-arena"></section>
+  <section id="s-promo"></section>
+  <section id="s-evidence"></section>
+  <section id="s-holdings"></section>
+  <section id="s-health"></section>
+  <section id="s-reporter"></section>
+</main>
+<div id="drawer"></div>
+<script>
+const TABS=[["brief","今日简报"],["chain","主管线推理链"],["ledger","统一账本"],["arena","影子竞技场"],["promo","晋升淘汰日志"],["evidence","证据层"],["holdings","实盘持仓"],["health","系统健康"],["reporter","汇报员"]];
+const $=s=>document.querySelector(s);
+const esc=v=>String(v??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const NA='<span class="mut">无数据</span>';
+const pct=v=>v==null?NA:`<span class="${v>0?"pos":v<0?"neg":""}">${(v*100).toFixed(2)}%</span>`;
+const num=(v,d=2)=>v==null?NA:Number(v).toFixed(d);
+const usd=v=>v==null?NA:`<span class="${v>0?"pos":v<0?"neg":""}">$${Number(v).toFixed(2)}</span>`;
+const idl=id=>`<a class="id" href="#" onclick="openEntry('${esc(id)}');return false">${esc(id)}</a>`;
+const STATUS={pending:"待入场",open:"持有中",settled:"已结算",void:"作废"};
+const SRC={main:"主管线",main_forced:"主管线·被迫",shadow:"影子",temp_shadow:"临时影子",playground:"Playground",benchmark:"基准",owner:"所有人实盘",evidence:"证据层"};
+async function j(url,opt){const r=await fetch(url,opt);if(r.status===404)return{available:false,reason:"未接入",_404:true};return r.json()}
+const loaded={};
+function show(t){TABS.forEach(([k])=>{$("#s-"+k).classList.toggle("on",k===t)});document.querySelectorAll("#nav button").forEach(b=>b.classList.toggle("on",b.dataset.t===t));try{localStorage.setItem("wb.tab",t)}catch(e){}if(!loaded[t]){loaded[t]=1;LOAD[t]()}}
+$("#nav").innerHTML=TABS.map(([k,n])=>`<button data-t="${k}">${n}</button>`).join("");
+$("#nav").onclick=e=>{if(e.target.dataset.t)show(e.target.dataset.t)};
+
+function kv(obj,keys){return `<table class="kv">${(keys||Object.keys(obj)).filter(k=>obj[k]!=null&&obj[k]!=="").map(k=>`<tr><td>${esc(k)}</td><td>${typeof obj[k]==="object"?`<pre>${esc(JSON.stringify(obj[k],null,2))}</pre>`:esc(obj[k])}</td></tr>`).join("")}</table>`}
+
+// ── brief ──
+let BRIEF=null;
+async function loadBrief(){
+  const d=await j("/api/wb/brief");BRIEF=d;
+  if(!d.available){$("#s-brief").innerHTML=`<div class="card empty">${esc(d.reason)}</div>`;return}
+  const b=d.brief,today=new Date().toISOString().slice(0,10);
+  const cards=(b.decision_cards||[]);
+  $("#s-brief").innerHTML=`
+  <div class="card"><h2>决策简报 ${esc(d.date)} ${d.date!==today?'<span class="chip yellow">不是今天（最近一份）</span>':''}</h2>
+   <div class="grid">
+    <div class="stat"><div class="k">结论</div><div class="v">${b.has_no_trade&&!cards.length?"不交易":cards.length+" 张交易卡"}</div></div>
+    <div class="stat"><div class="k">L3 绿 / 黄 / 红</div><div class="v">${(b.l3_green||[]).length} / ${(b.l3_yellow||[]).length} / ${(b.l3_red||[]).length}</div></div>
+    <div class="stat"><div class="k">红队质疑</div><div class="v">${(b.red_team_challenges||[]).length}</div></div>
+    <div class="stat"><div class="k">脆弱性</div><div class="v">${num(b.fragility_score)}</div></div>
+   </div>
+   <h3>摘要</h3><div>${esc(b.decision_summary||"")||NA}</div>
+   ${b.no_trade_thesis&&b.no_trade_thesis!==b.decision_summary?`<h3>不交易理由</h3><div>${esc(b.no_trade_thesis)}</div>`:""}
+  </div>
+  <div class="card"><h2>交易卡</h2>${cards.length?cards.map(c=>kv(c)).join("<hr>"):'<div class="empty">当天没有交易卡</div>'}</div>
+  ${b.paper_trade?`<div class="card"><h2>被迫纸面交易</h2>${kv(b.paper_trade)}</div>`:""}
+  <div class="card"><h2>脆弱性扫描</h2><div>${esc(b.fragility_summary||"")||NA}</div>${b.fragility_unavailable?`<h3>不可用的指标</h3>${kv(b.fragility_unavailable)}`:""}</div>`;
+}
+
+// ── chain ──
+async function loadChain(){
+  if(!BRIEF)await loadBrief();const d=BRIEF;
+  if(!d.available){$("#s-chain").innerHTML=`<div class="card empty">${esc(d.reason)}</div>`;return}
+  const b=d.brief;let l1=b.l1_analysis;try{l1=JSON.stringify(JSON.parse(l1),null,2)}catch(e){}
+  $("#s-chain").innerHTML=`
+  <div class="card"><h2>① L1 叙事（${esc(d.date)}）</h2><pre>${esc(l1||"无")}</pre></div>
+  <div class="card"><h2>② L2 候选</h2><div>${(b.l2_ticker_candidates||[]).map(t=>`<span class="chip">${esc(t)}</span>`).join(" ")||NA}</div></div>
+  <div class="card"><h2>③ L3 技术面（代码计算）</h2>
+   <div>绿灯 ${(b.l3_green||[]).map(t=>`<span class="chip green">${esc(t)}</span>`).join(" ")||"—"}　黄灯 ${(b.l3_yellow||[]).map(t=>`<span class="chip yellow">${esc(t)}</span>`).join(" ")||"—"}　红灯 ${(b.l3_red||[]).map(t=>`<span class="chip red">${esc(t)}</span>`).join(" ")||"—"}</div>
+   <pre>${esc((b.l3_details||[]).join("\n"))||"无"}</pre></div>
+  <div class="card"><h2>④ 红队质疑</h2>${(b.red_team_challenges||[]).length?`<table>${b.red_team_challenges.map(c=>`<tr><td><span class="chip ${c.severity==="critical"?"red":"yellow"}">${esc(c.severity)}</span></td><td>${esc(c.challenge)}</td></tr>`).join("")}</table>`:'<div class="empty">无</div>'}</div>
+  <div class="card"><h2>⑤ 决策原文（LLM 输出，未经 guard 修改）</h2><pre>${esc(b.decision_raw||"无")}</pre></div>`;
+}
+
+// ── ledger ──
+let LQ={status:"",source_type:"",source_id:"",ticker:"",offset:0};
+async function loadLedger(){
+  const qs=new URLSearchParams({...LQ,limit:100}).toString();
+  const d=await j("/api/wb/ledger?"+qs);
+  if(!d.available){$("#s-ledger").innerHTML=`<div class="card empty">${esc(d.reason)}</div>`;return}
+  const opt=(m,v)=>`<option value="">全部</option>`+Object.entries(m).map(([k,n])=>`<option value="${k}" ${v===k?"selected":""}>${n}</option>`).join("");
+  $("#s-ledger").innerHTML=`<div class="card"><h2>统一账本 <span class="mut">共 ${d.total} 条</span></h2>
+   <div class="filters">
+    <label>状态 <select id="fStatus">${opt(STATUS,LQ.status)}</select></label>
+    <label>来源 <select id="fSrc">${opt(SRC,LQ.source_type)}</select></label>
+    <input id="fSid" placeholder="来源编号（如影子 id）" value="${esc(LQ.source_id)}">
+    <input id="fTk" placeholder="标的" value="${esc(LQ.ticker)}" size="8">
+    <button class="act" id="fGo">筛选</button>
+    <span class="mut">${Object.entries(d.status_counts).map(([k,v])=>`${STATUS[k]||k} ${v}`).join(" · ")}</span>
+   </div>
+   <div class="tw"><table><tr><th>记录编号</th><th>时间</th><th>来源</th><th>标的</th><th>方向</th><th>状态</th><th class="num">确信度</th><th class="num">仓位</th><th class="num">持有期</th><th class="num">净收益</th><th class="num">超额(市场)</th><th>离场</th></tr>
+   ${d.entries.map(e=>`<tr class="click" onclick="openEntry('${e.entry_id}')"><td class="id">${e.entry_id}</td><td>${esc(e.created_at.slice(0,16).replace("T"," "))}</td><td>${SRC[e.source_type]||e.source_type}<div class="mut">${esc(e.source_id)}</div></td><td>${esc(e.ticker)}</td><td>${e.direction==="long"?"多":"空"}</td><td>${STATUS[e.status]||e.status}</td><td class="num">${num(e.confidence)}</td><td class="num">$${num(e.position_usd,0)}</td><td class="num">${e.hold_bars}</td><td class="num">${pct(e.net_return)}</td><td class="num">${pct(e.excess_market)}</td><td>${esc(e.exit_reason||"")}</td></tr>`).join("")||'<tr><td colspan="12" class="empty">没有记录</td></tr>'}
+   </table></div>
+   <div class="filters" style="margin-top:10px">${d.offset>0?'<button class="act" id="pPrev">上一页</button>':""}${d.offset+d.limit<d.total?'<button class="act" id="pNext">下一页</button>':""}<span class="mut">${d.offset+1}–${Math.min(d.offset+d.limit,d.total)}</span></div></div>`;
+  $("#fGo").onclick=()=>{LQ={status:$("#fStatus").value,source_type:$("#fSrc").value,source_id:$("#fSid").value.trim(),ticker:$("#fTk").value.trim(),offset:0};loadLedger()};
+  if($("#pPrev"))$("#pPrev").onclick=()=>{LQ.offset=Math.max(0,LQ.offset-100);loadLedger()};
+  if($("#pNext"))$("#pNext").onclick=()=>{LQ.offset+=100;loadLedger()};
+}
+async function openEntry(id){
+  const d=await j("/api/wb/ledger/"+encodeURIComponent(id));const dr=$("#drawer");
+  dr.innerHTML=`<button class="act close" onclick="$('#drawer').classList.remove('on')">关闭</button><h2 style="font-size:15px">记录 <span class="id">${esc(id)}</span></h2>`+
+   (d.available?kv(d.entry)+`<h3>创建时的行情快照</h3>${d.snapshot?kv(d.snapshot):'<div class="empty">无快照</div>'}`:`<div class="empty">${esc(d.reason)}</div>`);
+  dr.classList.add("on");
+}
+
+// ── arena ──
+async function loadArena(){
+  const d=await j("/api/wb/arena");
+  const rows=d.shadows||[];
+  const body=rows.map(r=>{const s=r.score||{},b=r.random_benchmark||{};return `<tr class="click" onclick="LQ={status:'',source_type:'shadow',source_id:'${esc(r.shadow_id)}',ticker:'',offset:0};loaded.ledger=1;show('ledger');loadLedger()">
+   <td><b>${esc(r.display_name)}</b><div class="mut">${esc(r.domain)}</div></td><td>${esc(r.group)}</td>
+   <td>${r.roster_status==="active"?'<span class="chip green">上线</span>':`<span class="chip yellow">${esc(r.roster_status)}</span>`}</td>
+   <td class="num">${s.records??0}</td><td class="num">${s.pending??0}/${s.open??0}/${s.settled??0}/${s.void??0}</td>
+   <td class="num">${s.win_rate==null?NA:(s.win_rate*100).toFixed(0)+"%"}</td><td class="num">${pct(s.mean_net_return)}</td>
+   <td class="num">${pct(b.mean_net_return)}</td><td class="num">${pct(s.mean_excess_market)}</td><td class="num">${pct(s.mean_excess_domain)}</td>
+   <td class="num">${num(s.mean_brier,3)}</td><td class="num">${s.min_position_share==null?NA:(s.min_position_share*100).toFixed(0)+"%"}</td>
+   <td>${r.last_run?`${esc(r.last_run.status)}${r.last_run.errors&&r.last_run.errors.length?` <span class="neg">${r.last_run.errors.length} 错误</span>`:""}`:NA}</td></tr>`}).join("");
+  const others=(d.other_sources||[]).map(s=>`<tr><td>${SRC[s.source_type]||s.source_type}</td><td>${esc(s.source_id)}</td><td class="num">${s.records}</td><td class="num">${s.settled}</td><td class="num">${s.win_rate==null?NA:(s.win_rate*100).toFixed(0)+"%"}</td><td class="num">${pct(s.mean_net_return)}</td><td class="num">${num(s.mean_brier,3)}</td></tr>`).join("");
+  $("#s-arena").innerHTML=`<div class="card"><h2>影子竞技场 <span class="mut">最近运行 ${esc(d.run_date||"无")}；收益类指标只用已结算记录，点击一行查看该影子的全部账本记录</span></h2>
+  <div class="tw"><table><tr><th>影子</th><th>组</th><th>名册</th><th class="num">记录</th><th class="num">待/持/结/废</th><th class="num">胜率</th><th class="num">平均净收益</th><th class="num">随机基准</th><th class="num">超额·市场</th><th class="num">超额·领域</th><th class="num">Brier</th><th class="num">最小仓位占比</th><th>最近交卷</th></tr>${body}</table></div></div>
+  <div class="card"><h2>其他来源</h2>${others?`<table><tr><th>类型</th><th>来源</th><th class="num">记录</th><th class="num">已结算</th><th class="num">胜率</th><th class="num">平均净收益</th><th class="num">Brier</th></tr>${others}</table>`:'<div class="empty">无</div>'}</div>`;
+}
+
+// ── promotion ──
+async function loadPromo(){
+  const d=await j("/api/wb/promotion");
+  $("#s-promo").innerHTML=`<div class="card"><h2>晋升淘汰日志</h2>
+  <div class="mut" style="margin-bottom:8px">${d.review_implemented?"":"晋升评审（S7）尚未实现：所有影子都在见习期，需满 60 个交易日后才评审。这里只显示进度，不做排名。"}</div>
+  <table><tr><th>影子</th><th>阶段</th><th class="num">见习进度</th><th class="num">已结算</th><th>首条记录</th><th>说明</th></tr>
+  ${(d.rows||[]).map(r=>`<tr><td>${esc(r.display_name)}</td><td>${esc(r.stage)}</td><td class="num">${r.active_days}/${r.probation_days}</td><td class="num">${r.settled}</td><td>${esc(r.first_date||"—")}</td><td class="mut">${esc(r.note)}</td></tr>`).join("")}</table>
+  <h3>事件</h3>${(d.events||[]).length?"":'<div class="empty">暂无晋升或淘汰事件</div>'}</div>`;
+}
+
+// ── evidence (S5) ──
+async function loadEvidence(){
+  const d=await j("/api/wb/evidence");
+  if(!d.available){$("#s-evidence").innerHTML=`<div class="card empty">证据层：${esc(d.reason||"无数据")}</div>`;return}
+  $("#s-evidence").innerHTML=`<div class="card"><h2>叙事与数据背离清单 ${esc(d.date||"")}</h2>
+  <div class="tw"><table><tr><th>说法</th><th>来源</th><th>判定</th><th>一手数据</th><th>账本</th></tr>
+  ${(d.items||[]).map(i=>`<tr><td>${esc(i.claim)}</td><td>${(i.sources||[]).map(s=>`<div class="mut">${esc(s)}</div>`).join("")}<div class="mut">独立来源 ${i.independent_sources??"?"}</div></td><td><span class="chip ${i.verdict==="contradict"?"red":i.verdict==="support"?"green":""}">${esc(i.verdict_cn||i.verdict)}</span></td><td>${esc(i.evidence||"")}</td><td>${i.entry_id?idl(i.entry_id):"—"}</td></tr>`).join("")||'<tr><td colspan="5" class="empty">当天没有背离</td></tr>'}
+  </table></div></div>`;
+}
+
+// ── holdings (S6) ──
+async function loadHoldings(){
+  const d=await j("/api/wb/holdings");
+  if(!d.available){$("#s-holdings").innerHTML=`<div class="card empty">实盘持仓：${esc(d.reason||"无数据")}</div>`;return}
+  $("#s-holdings").innerHTML=`<div class="card"><h2>实盘持仓巡检 ${esc(d.date||"")}</h2>
+  <div class="tw"><table><tr><th>标的</th><th class="num">数量</th><th class="num">成本</th><th class="num">现价</th><th class="num">盈亏</th><th>L3</th><th>结论</th><th>理由</th></tr>
+  ${(d.items||[]).map(h=>`<tr><td>${esc(h.ticker)}</td><td class="num">${num(h.quantity,4)}</td><td class="num">${num(h.cost_basis)}</td><td class="num">${num(h.price)}</td><td class="num">${pct(h.unrealized_return)}</td><td>${h.light?`<span class="chip ${esc(h.light)}">${esc(h.light)}</span>`:NA}</td><td><b>${esc(h.verdict_cn||h.verdict||"")}</b></td><td>${esc(h.reason||"")}${(h.alternatives||[]).length?`<div class="mut">替代：${h.alternatives.map(a=>esc(a.ticker+" R/R "+num(a.reward_risk))).join("，")}</div>`:""}</td></tr>`).join("")||'<tr><td colspan="8" class="empty">没有持仓</td></tr>'}
+  </table></div><div class="mut">${esc(d.note||"")}</div></div>`;
+}
+
+// ── health ──
+async function loadHealth(){
+  const [h,c]=await Promise.all([j("/api/wb/health"),j("/api/cost")]);
+  const L=h.ledger||{},sc=L.status_counts||{};
+  const tu=(h.token_usage||[]).slice().reverse();
+  $("#s-health").innerHTML=`<div class="card"><h2>系统健康</h2><div class="grid">
+   <div class="stat"><div class="k">账本记录</div><div class="v">${L.records??0}</div><div class="k">${Object.entries(sc).map(([k,v])=>`${STATUS[k]||k} ${v}`).join(" · ")||"—"}</div></div>
+   <div class="stat"><div class="k">最近结算</div><div class="v" style="font-size:14px">${esc(L.last_settled_at||"尚无")}</div></div>
+   <div class="stat"><div class="k">最近简报</div><div class="v">${esc(h.latest_brief||"无")}</div></div>
+   <div class="stat"><div class="k">影子交卷（${esc(h.shadow_run&&h.shadow_run.date||"—")}）</div><div class="v">${h.shadow_run?h.shadow_run.submitted+"/"+h.shadow_run.total:NA}</div></div>
+   <div class="stat"><div class="k">今日 token（${esc(c.source||"")}）</div><div class="v">${(c.tokens_used||0).toLocaleString()}</div><div class="k">${c.calls||0} 次调用</div></div>
+  </div>
+  <h3>账本记录的行情来源</h3><div>${Object.entries(L.price_sources||{}).map(([k,v])=>`<span class="chip">${esc(k)} ${v}</span>`).join(" ")||'<span class="mut">尚无已结算记录</span>'}</div>
+  <h3>最近运行的 token 用量</h3>${tu.length?`<table><tr><th>时间</th><th>模式</th><th class="num">调用</th><th class="num">总 token</th><th>主要阶段</th></tr>${tu.map(r=>`<tr><td>${esc(r.at)}</td><td>${esc(r.mode)}</td><td class="num">${r.total.calls}</td><td class="num">${r.total.total_tokens.toLocaleString()}</td><td class="mut">${Object.entries(r.stages||{}).sort((a,b)=>b[1].total_tokens-a[1].total_tokens).slice(0,4).map(([k,v])=>`${esc(k)} ${v.total_tokens.toLocaleString()}`).join("，")}</td></tr>`).join("")}</table>`:'<div class="empty">还没有记录（每日运行结束后写入 data/token_usage.jsonl）</div>'}
+  </div>`;
+}
+
+// ── reporter ──
+const HIST=[];
+function loadReporter(){
+  $("#s-reporter").innerHTML=`<div class="card"><h2>汇报员 <span class="mut">只读；回答引用账本记录编号，代码会核对编号是否存在</span></h2>
+  <div id="rLog"></div><div class="filters"><textarea id="rQ" rows="2" style="flex:1;min-width:240px" placeholder="例如：哪些影子今天做空了？ / 最近一份简报为什么不交易？"></textarea><button class="act" id="rGo">提问</button></div></div>`;
+  $("#rGo").onclick=async()=>{const q=$("#rQ").value.trim();if(!q)return;$("#rGo").disabled=true;
+    $("#rLog").insertAdjacentHTML("beforeend",`<div class="msg q">${esc(q)}</div>`);$("#rQ").value="";
+    try{const r=await j("/api/reporter",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question:q,history:HIST})});
+      const a=r.answer||r.error||"无回答";HIST.push({role:"user",content:q},{role:"assistant",content:a});
+      $("#rLog").insertAdjacentHTML("beforeend",`<div class="msg a">${esc(a).replace(/\b([0-9a-f]{16})\b/g,m=>idl(m))}</div>`)}
+    catch(e){$("#rLog").insertAdjacentHTML("beforeend",`<div class="msg a neg">请求失败</div>`)}
+    $("#rGo").disabled=false};
+}
+const LOAD={brief:loadBrief,chain:loadChain,ledger:loadLedger,arena:loadArena,promo:loadPromo,evidence:loadEvidence,holdings:loadHoldings,health:loadHealth,reporter:loadReporter};
+$("#meta").textContent="只读 · 数据来自账本与运行文件";
+let start="brief";try{start=localStorage.getItem("wb.tab")||"brief"}catch(e){}
+show(TABS.some(t=>t[0]===start)?start:"brief");
+</script>
+</body>
+</html>

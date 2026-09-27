@@ -78,21 +78,28 @@ def get_portfolio() -> dict:
 
 
 def get_cost() -> dict:
-    try:
-        from marketmind.gateway.async_client import get_budget_report
-        budget = get_budget_report()
-    except Exception:
-        logger.warning("budget report fetch failed", exc_info=True)
-        budget = {"status": "error"}
+    """Today's LLM usage from <data_dir>/token_usage.jsonl, written by each run.
+
+    The server process makes no pipeline calls, so its own TokenBudget says
+    nothing about the day; the old version read field names that TokenBudget
+    never had and always showed 0.
+    """
+    from marketmind.api.whitebox import read_token_usage
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    rows = [r for r in read_token_usage(limit=50) if r.get("date") == today]
+    total = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    for r in rows:
+        for k in total:
+            total[k] += (r.get("total") or {}).get(k, 0)
     return {
-        "pro_calls": budget.get("pro_calls_today", 0),
-        "pro_limit": budget.get("pro_call_limit", 50),
-        "flash_calls": budget.get("flash_calls_today", 0),
-        "flash_limit": budget.get("flash_call_limit", 100),
-        "tokens_used": budget.get("tokens_used_today", 0),
-        "token_budget": budget.get("daily_token_budget", 2_000_000),
-        "monthly_est": budget.get("estimated_monthly_cost", 0.0),
-        "circuit_breaker": budget.get("circuit_breaker_state", "unknown"),
+        "date": today,
+        "runs": len(rows),
+        "calls": total["calls"],
+        "tokens_used": total["total_tokens"],
+        "prompt_tokens": total["prompt_tokens"],
+        "completion_tokens": total["completion_tokens"],
+        "token_budget": 2_000_000,
+        "source": "token_usage.jsonl" if rows else "no run recorded today",
     }
 
 

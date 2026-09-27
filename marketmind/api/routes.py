@@ -32,7 +32,8 @@ app.websocket("/ws")(ws_endpoint)
 _alm = get_alert_manager()
 _alm.set_broadcast_fn(broadcast_alert)
 
-DASHBOARD_PATH = Path(__file__).parent.parent / "dashboard.html"
+WHITEBOX_PATH = Path(__file__).parent.parent / "whitebox.html"
+DASHBOARD_PATH = Path(__file__).parent.parent / "dashboard.html"   # legacy page, at /legacy
 EVOLUTION_PATH = Path(__file__).parent.parent / "evolution.html"
 PLAYGROUND_PATH = Path(__file__).parent.parent / "playground.html"
 
@@ -45,12 +46,81 @@ _CACHE_PREVENT_HEADERS = {
 }
 
 
-@app.get("/", response_class=HTMLResponse)
-async def dashboard():
-    content = DASHBOARD_PATH.read_text(encoding="utf-8")
+def _html(path: Path) -> HTMLResponse:
     headers = dict(_CACHE_PREVENT_HEADERS)
-    headers["ETag"] = f'"{int(DASHBOARD_PATH.stat().st_mtime)}"'
-    return HTMLResponse(content=content, headers=headers)
+    headers["ETag"] = f'"{int(path.stat().st_mtime)}"'
+    return HTMLResponse(content=path.read_text(encoding="utf-8"), headers=headers)
+
+
+@app.get("/", response_class=HTMLResponse)
+async def whitebox_page():
+    return _html(WHITEBOX_PATH)
+
+
+@app.get("/legacy", response_class=HTMLResponse)
+async def dashboard():
+    return _html(DASHBOARD_PATH)
+
+
+# ── White box v1 (docs/S4_DESIGN.md) ────────────────────────────────────────
+
+def _wb(fn, *args, **kwargs) -> JSONResponse:
+    try:
+        return JSONResponse(fn(*args, **kwargs))
+    except Exception:
+        logger.warning("white-box provider %s failed", fn.__name__, exc_info=True)
+        return JSONResponse({"available": False, "reason": "provider error (see server log)"},
+                            status_code=500)
+
+
+@app.get("/api/wb/brief")
+async def wb_brief(date: str = ""):
+    from marketmind.api import whitebox
+    return _wb(whitebox.get_brief, date or None)
+
+
+@app.get("/api/wb/ledger")
+async def wb_ledger(status: str = "", source_type: str = "", source_id: str = "",
+                    ticker: str = "", limit: int = 200, offset: int = 0):
+    from marketmind.api import whitebox
+    return _wb(whitebox.get_ledger, status or None, source_type or None, source_id or None,
+               ticker or None, limit, max(0, offset))
+
+
+@app.get("/api/wb/ledger/{entry_id}")
+async def wb_entry(entry_id: str):
+    from marketmind.api import whitebox
+    return _wb(whitebox.get_entry, entry_id)
+
+
+@app.get("/api/wb/arena")
+async def wb_arena():
+    from marketmind.api import whitebox
+    return _wb(whitebox.get_arena)
+
+
+@app.get("/api/wb/promotion")
+async def wb_promotion():
+    from marketmind.api import whitebox
+    return _wb(whitebox.get_promotion_log)
+
+
+@app.get("/api/wb/health")
+async def wb_health():
+    from marketmind.api import whitebox
+    return _wb(whitebox.get_health)
+
+
+@app.post("/api/reporter")
+async def reporter_endpoint(request: dict):
+    from marketmind.api import reporter
+    try:
+        result = await reporter.ask(str(request.get("question", "")), request.get("history"))
+    except Exception:
+        logger.warning("reporter failed", exc_info=True)
+        return JSONResponse({"error": "reporter failed"}, status_code=500)
+    return JSONResponse(result, status_code=400 if result.get("error") == "question is required"
+                        else 200)
 
 
 @app.get("/evolution", response_class=HTMLResponse)
