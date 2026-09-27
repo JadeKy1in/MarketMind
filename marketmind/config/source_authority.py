@@ -46,10 +46,42 @@ SOURCES: list[Source] = [
     Source("Seeking Alpha", SourceTier.RELIABLE, "https://seekingalpha.com/market-news.xml", "rss", 0.78, 2.0),
     Source("Reuters (via Google News)", SourceTier.PRIMARY, "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnVHZ0pWVXlnQVAB", "rss", 0.85, 2.0),
 
+    # ── US official / first-hand (added 2026-09-27, all verified live, key-free) ──
+    Source("Federal Reserve Press", SourceTier.PRIMARY, "https://www.federalreserve.gov/feeds/press_all.xml", "rss", 0.97, 2.0),
+    Source("Federal Reserve Speeches", SourceTier.PRIMARY, "https://www.federalreserve.gov/feeds/speeches.xml", "rss", 0.93, 2.0),
+    # Treasury's own press-release RSS paths 404/time out; its official GovDelivery topic feeds work.
+    Source("US Treasury Press", SourceTier.PRIMARY, "https://public.govdelivery.com/topics/USTREAS_49/feed.rss", "rss", 0.95, 2.0),
+    Source("OFAC Recent Actions", SourceTier.PRIMARY, "https://public.govdelivery.com/topics/USTREAS_61/feed.rss", "rss", 0.95, 2.0),
+    Source("USTR Press", SourceTier.PRIMARY, "https://ustr.gov/rss.xml", "rss", 0.93, 2.0),
+    # Federal Register documents from Commerce/BIS (export controls), USTR and Treasury/OFAC.
+    Source("Federal Register (Trade & Sanctions)", SourceTier.PRIMARY,
+           "https://www.federalregister.gov/api/v1/documents.rss?conditions[agencies][]=industry-and-security-bureau"
+           "&conditions[agencies][]=trade-representative-office-of-united-states"
+           "&conditions[agencies][]=foreign-assets-control-office&order=newest",
+           "rss", 0.95, 2.0),
+    # SEC 8-K current filings (Atom). URL is informational: scout._fetch_sec_edgar builds the
+    # request itself and sends the SEC-required "Org contact@email" User-Agent.
+    Source("SEC EDGAR 8-K", SourceTier.PRIMARY,
+           "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=8-K&output=atom",
+           "sec_api", 0.90, 1.0),
+    # Structured data APIs → pipeline/official_data_sources.py
+    Source("US Treasury Auctions", SourceTier.PRIMARY,
+           "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v1/accounting/od/auctions_query",
+           "fiscaldata_auctions", 0.95, 1.0),
+    Source("NY Fed Reference Rates", SourceTier.PRIMARY,
+           "https://markets.newyorkfed.org/api/rates/all/latest.json", "nyfed_rates", 0.95, 1.0),
+
     # ── China / Greater China ──────────────────────────────────────
     Source("SCMP Business", SourceTier.RELIABLE, "https://www.scmp.com/rss/4/feed/", "rss", 0.80, 2.0),
     Source("China Money Network", SourceTier.RELIABLE, "https://www.chinamoneynetwork.com/feed/", "rss", 0.72, 1.0),  # Replaces Caixin — free English China finance/VC news RSS
-    Source("Xinhua Finance", SourceTier.RELIABLE, "http://www.xinhuanet.com/english/rss/worldrss.xml", "rss", 0.72, 2.0),
+    # DEAD 2026-09-27: feed still returns 200 but newest entry is from 2018; the business/china
+    # variants (businessrss.xml, chinarss.xml, english.news.cn mirrors) are equally frozen (2017-18).
+    Source("Xinhua Finance", SourceTier.RELIABLE, "http://www.xinhuanet.com/english/rss/worldrss.xml", "rss", 0.72, 2.0,
+           status=SourceStatus.DEAD),
+    # Via public RSSHub mirror (rsshub.app itself is Cloudflare-blocked). Content is first-hand
+    # Chinese-language financial news; FRAGILE because the mirror is volunteer-run with no SLA.
+    Source("Caixin Latest (via RSSHub)", SourceTier.FRAGILE, "https://rsshub.rssforever.com/caixin/latest", "rss", 0.70, 1.0),
+    Source("Yicai Brief (via RSSHub)", SourceTier.FRAGILE, "https://rsshub.rssforever.com/yicai/brief", "rss", 0.65, 1.0),
 
     # ── Japan / Asia Pacific ───────────────────────────────────────
     Source("Nikkei Asia", SourceTier.RELIABLE, "https://asia.nikkei.com/rss/feed/nar", "rss", 0.80, 2.0),
@@ -61,7 +93,11 @@ SOURCES: list[Source] = [
     Source("FT World News", SourceTier.PRIMARY, "https://www.ft.com/world?format=rss", "rss", 0.90, 2.0),
     Source("ECB Press", SourceTier.PRIMARY, "https://www.ecb.europa.eu/rss/press.html", "rss", 0.95, 2.0),
     Source("DW Business", SourceTier.RELIABLE, "http://rss.dw.de/rdf/rss-en-bus", "rss", 0.80, 2.0),
-    Source("Euronews Economy", SourceTier.RELIABLE, "https://www.euronews.com/rss?format=mrss&level=theme&name=business", "rss", 0.75, 1.0),
+    # DEGRADED 2026-09-27: Fastly edge returns 406 in time windows regardless of User-Agent/Accept
+    # (8/8 406 with both bot and browser headers in one window, 12/12 200 minutes later).
+    # Header changes do not fix it; stays fetched, scout's failure counter handles bad windows.
+    Source("Euronews Economy", SourceTier.RELIABLE, "https://www.euronews.com/rss?format=mrss&level=theme&name=business", "rss", 0.75, 1.0,
+           status=SourceStatus.DEGRADED),
 
     # ── Middle East / Energy ───────────────────────────────────────
     Source("Al Jazeera Economy", SourceTier.RELIABLE, "https://www.aljazeera.com/xml/rss/all.xml", "rss", 0.72, 1.0),
@@ -75,7 +111,9 @@ SOURCES: list[Source] = [
 
     # ── Crypto / Digital Assets ────────────────────────────────────
     Source("CoinDesk", SourceTier.RELIABLE, "https://www.coindesk.com/arc/outboundfeeds/rss", "rss", 0.82, 2.0),
+    # Note 2026-09-27: ConnectError on the current (restricted) network; left as-is.
     Source("CoinTelegraph", SourceTier.RELIABLE, "https://cointelegraph.com/rss", "rss", 0.78, 2.0),
+    Source("Decrypt", SourceTier.RELIABLE, "https://decrypt.co/feed", "rss", 0.75, 2.0),
 
     # ── Global / Multi-region ─────────────────────────────────────
     Source("BBC Business", SourceTier.PRIMARY, "https://feeds.bbci.co.uk/news/business/rss.xml", "rss", 0.88, 2.0),
@@ -117,9 +155,12 @@ SOURCES: list[Source] = [
     # ── Insider / Smart Money (Phase G Layer 4) ─────────────────────
     # Congress trades revived 2026-05-25 via @anguslin/mcp-capitol-trades
     # (real-time HTML scraping of capitoltrades.com via Node.js MCP subprocess).
+    # DEGRADED 2026-09-27 (was hard-coded WORKING): MCP path hit HTTP 429 and SPEC C12 records it
+    # as unavailable; the site answers 200 to a browser UA, so it stays fetched (once per run)
+    # with failures tolerated rather than being assumed healthy.
     Source("Congress Trades", SourceTier.BEST_EFFORT,
            "https://www.capitoltrades.com/trades",
-           "congress_api", 0.20, 1.0, status=SourceStatus.WORKING),
+           "congress_api", 0.20, 1.0, status=SourceStatus.DEGRADED),
     Source("SEC Form 4", SourceTier.BEST_EFFORT,
            "", "sec_form4", 0.20, 1.0),
     Source("SEC 13F", SourceTier.BEST_EFFORT,

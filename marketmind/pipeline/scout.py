@@ -67,7 +67,8 @@ class NewsItem:
 
     @classmethod
     def from_entry(cls, entry: dict, source: Source) -> "NewsItem":
-        title = entry.get("title", "Untitled").strip()
+        # Some feeds (e.g. Yicai brief via RSSHub) put <b>…</b> markup in the title.
+        title = _strip_html(entry.get("title", "Untitled")) or "Untitled"
         url = entry.get("link", "")
         summary_raw = entry.get("summary", entry.get("description", ""))
         summary = _strip_html(summary_raw)[:500]
@@ -153,6 +154,12 @@ from marketmind.pipeline.insider_sources import (
 # ── Social media sources → pipeline/social_sources.py
 from marketmind.pipeline.social_sources import fetch_apewisdom, fetch_bluesky_posts
 
+# ── Official data APIs (FiscalData auctions, NY Fed rates) → pipeline/official_data_sources.py
+from marketmind.pipeline.official_data_sources import (
+    fetch_treasury_auctions,
+    fetch_nyfed_reference_rates,
+)
+
 async def _fetch_api_source(source: Source, config: MarketMindConfig) -> list[NewsItem]:
     """Fetch from a JSON API source (NewsAPI, GNews, etc.). Injects API key into URL."""
     items: list[NewsItem] = []
@@ -228,6 +235,13 @@ async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsIte
             if items:
                 source.status = SourceStatus.WORKING
                 source.consecutive_failures = 0
+            return items
+        if source.feed_type in ("fiscaldata_auctions", "nyfed_rates"):
+            fetcher = fetch_treasury_auctions if source.feed_type == "fiscaldata_auctions" else fetch_nyfed_reference_rates
+            items = await fetcher(source, config)
+            source.status = SourceStatus.WORKING
+            source.consecutive_failures = 0
+            source.last_checked = datetime.now(timezone.utc).isoformat()
             return items
         if source.name == "ApeWisdom":
             items = await fetch_apewisdom()

@@ -1,4 +1,6 @@
 """Shared fixtures for pipeline tests, including VCR cassette support."""
+import os
+
 import pytest
 from pathlib import Path
 import vcr
@@ -13,15 +15,16 @@ VCR_CASSETTE_DIR = Path(__file__).parent.parent / "fixtures" / "vcr"
 
 @pytest.fixture
 def vcr_news():
-    """VCR fixture configured with record_mode='new_episodes'.
+    """VCR fixture: replay only by default; records new interactions only when
+    MARKETMIND_LIVE_TESTS=1 (network + API keys).
 
-    Replays from the existing cassette for known requests. Records new
-    interactions for unknown requests (requires network + API keys).
-    After initial recording, subsequent runs replay from cassette.
+    Replay-only keeps the default suite offline: sources added after the
+    cassette was recorded fail inside fetch_source and are skipped.
     """
+    live = os.environ.get("MARKETMIND_LIVE_TESTS") == "1"
     my_vcr = vcr.VCR(
         cassette_library_dir=str(VCR_CASSETTE_DIR),
-        record_mode="new_episodes",
+        record_mode="new_episodes" if live else "none",
         # Never write API keys into a committed cassette (a GNews and a NewsAPI
         # key were found recorded here on 2026-09-27).
         filter_query_parameters=["apiKey", "apikey", "api_key", "key", "token"],
