@@ -1,0 +1,251 @@
+"""Daily shadow run: context -> Flash -> validated decisions -> unified ledger.
+
+docs/S3_DESIGN.md §3. One call per active shadow (plus one repair retry when
+the reply fails validation); a shadow with no valid decision after that has
+"missed" the day, which is reported, never filled in. Each shadow that
+submitted also gets a same-domain random benchmark record (§3.6).
+Re-running on the same UTC day skips shadows that already have records.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import random
+import statistics
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+
+from marketmind.gateway import usage_tracker
+from marketmind.gateway.price_history import get_price_histories
+from marketmind.ledger.store import LedgerEntry, LedgerStore
+from marketmind.shadows.v3 import roster as roster_mod
+from marketmind.shadows.v3.context import (
+    FADE_MASTER_ID, NEWS_HOUND_ID, ShadowContext, build_context, news_tickers,
+)
+from marketmind.shadows.v3.decision import OUTPUT_INSTRUCTIONS, ParseResult, parse_decisions
+
+logger = logging.getLogger("marketmind.shadows.v3.runner")
+
+MODEL = "flash"                  # owner decision 2026-09-28: shadows use Flash
+CONCURRENCY = 5
+CALL_TIMEOUT_S = 300
+SCALPER_ID = "momentum:intraday:scalper"
+
+
+@dataclass
+class ShadowResult:
+    shadow_id: str
+    status: str                      # submitted | missed | skipped
+    entry_ids: list[str] = field(default_factory=list)
+    benchmark_id: str | None = None
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    attempts: int = 0
+    raw: list[str] = field(default_factory=list)
+
+
+@dataclass
+class RunReport:
+    date: str
+    results: list[ShadowResult] = field(default_factory=list)
+
+    def summary(self) -> str:
+        n = {s: sum(r.status == s for r in self.results) for s in ("submitted", "missed", "skipped")}
+        records = sum(len(r.entry_ids) for r in self.results)
+        text = (f"shadows: {n['submitted']} submitted ({records} decisions), "
+                f"{n['missed']} missed, {n['skipped']} already done today")
+        missed = [r.shadow_id.rsplit(':', 1)[-1] for r in self.results if r.status == "missed"]
+        return text + (f" — missed: {', '.join(missed)}" if missed else "")
+
+
+def _tradable(ticker: str) -> bool:
+    from marketmind.universe import classify, is_tradable
+    return bool(is_tradable(ticker)) and bool(getattr(classify(ticker), "settleable", False))
+
+
+def _asset_type(ticker: str) -> str:
+    from marketmind.ledger.recorder import classify_ticker
+    return classify_ticker(ticker)[1]
+
+
+def _run_date(e: LedgerEntry) -> str:
+    return (e.meta or {}).get("run_date") or e.created_at[:10]
+
+
+def _already_recorded(store: LedgerStore, today: str) -> set[str]:
+    return {e.source_id for e in store.list(source_type="shadow") if _run_date(e) == today}
+
+
+def _previous_consensus(store: LedgerStore, today: str) -> list[tuple[str, str, str]]:
+    """(source_id, ticker, direction) of the most recent earlier day with shadow records."""
+    rows = [e for e in store.list(source_type="shadow") if _run_date(e) < today]
+    if not rows:
+        return []
+    last = max(_run_date(e) for e in rows)
+    return [(e.source_id, e.ticker, e.direction) for e in rows if _run_date(e) == last]
+
+
+async def _call_llm(system: str, user: str, stage: str) -> str:
+    from marketmind.gateway.async_client import chat_with_integrity
+    token = usage_tracker.set_stage(stage)
+    try:
+        result = await asyncio.wait_for(
+            chat_with_integrity(model=MODEL, system_prompt=system, user_prompt=user,
+                                caller_agent=stage, temperature=0.4),
+            timeout=CALL_TIMEOUT_S)
+    finally:
+        usage_tracker.reset_stage(token)
+    if result.get("error"):
+        raise RuntimeError(f"LLM error: {result.get('error')}")
+    return result.get("content") or ""
+
+
+async def decide(ctx: ShadowContext, call=_call_llm) -> tuple[ParseResult, list[str], int]:
+    """Ask once, retry once with the validation errors; returns (result, raw replies, attempts)."""
+    system = roster_mod.load_prompt(ctx.entry) + "\n\n" + OUTPUT_INSTRUCTIONS
+    user = ctx.render()
+    fixed = 1 if ctx.entry.shadow_id == SCALPER_ID else None
+    stage = f"shadow:{ctx.entry.name}"
+    raws: list[str] = []
+    result = ParseResult()
+    for attempt in (1, 2):
+        try:
+            text = await call(system, user, stage)
+        except Exception as e:  # transport/budget failure: counted as an attempt, reported
+            result = ParseResult(errors=[f"attempt {attempt}: {type(e).__name__}: {e}"])
+            raws.append("")
+            continue
+        raws.append(text)
+        result = parse_decisions(text, ctx.closes, fixed_hold=fixed)
+        if result.ok:
+            return result, raws, attempt
+        user = (ctx.render() + "\n\n## Your previous reply was rejected\n"
+                + "\n".join(f"- {e}" for e in result.errors)
+                + "\nReply again with valid JSON only, at least one decision.")
+    return result, raws, 2
+
+
+def _benchmark_entry(ctx: ShadowContext, holds: list[int], today: str,
+                     snapshot_id: str) -> LedgerEntry | None:
+    """Random same-domain pick: seeded by date + shadow id so it is reproducible."""
+    tickers = sorted(ctx.closes)
+    if not tickers:
+        return None
+    rng = random.Random(f"{today}:{ctx.entry.shadow_id}")
+    ticker = rng.choice(tickers)
+    direction = rng.choice(["long", "short"])
+    hold = int(statistics.median(holds)) if holds else 5
+    return LedgerEntry(
+        source_type="benchmark", source_id=f"random:{ctx.entry.shadow_id}", ticker=ticker,
+        direction=direction, hold_bars=hold, confidence=0.5, position_usd=100.0,
+        falsifier="random benchmark (no thesis)", thesis="same-domain random pick",
+        asset_type=_asset_type(ticker), entry_rule="next_open",
+        domain_benchmark=ctx.entry.domain_benchmark, snapshot_id=snapshot_id,
+        meta={"benchmark": "random_same_domain", "seed": f"{today}:{ctx.entry.shadow_id}",
+              "run_date": today},
+    )
+
+
+async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | None = None,
+                         entries: list | None = None, call=_call_llm, fred_fetch=None,
+                         report_dir: Path | None = None) -> RunReport:
+    today = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    entries = entries if entries is not None else roster_mod.active()
+    report = RunReport(today)
+    done = _already_recorded(store, today)
+    todo = []
+    for e in entries:
+        if e.shadow_id in done:
+            report.results.append(ShadowResult(e.shadow_id, "skipped"))
+        else:
+            todo.append(e)
+    if not todo:
+        return report
+
+    extra = {NEWS_HOUND_ID: news_tickers(news_items, _tradable)}
+    tickers = sorted({t for e in todo for t in (*e.watchlist, *extra.get(e.shadow_id, []))})
+    histories = await get_price_histories(tickers)
+    if fred_fetch is None:
+        from marketmind.gateway.fred_client import get_fred_for_shadow as fred_fetch
+    consensus = _previous_consensus(store, today)
+
+    contexts = []
+    for e in todo:
+        try:
+            fred = await fred_fetch(e.shadow_id)
+        except Exception as exc:
+            logger.warning("FRED for %s failed: %s", e.shadow_id, exc)
+            fred = {}
+        contexts.append(build_context(e, histories, news_items, fred=fred,
+                                      consensus_rows=consensus if e.shadow_id == FADE_MASTER_ID else None,
+                                      extra_tickers=extra.get(e.shadow_id), today=today))
+
+    quotes = {}
+    for ctx in contexts:
+        for v in ctx.views:
+            if v.snap is not None:
+                src = histories[v.ticker].source if histories.get(v.ticker) else None
+                quotes[v.ticker] = (v.snap.close, v.snap.as_of, src)
+    snapshot_id = store.save_snapshot(quotes)
+
+    sem = asyncio.Semaphore(CONCURRENCY)
+
+    async def one(ctx: ShadowContext) -> ShadowResult:
+        async with sem:
+            parsed, raws, attempts = await decide(ctx, call)
+        res = ShadowResult(ctx.entry.shadow_id, "submitted" if parsed.ok else "missed",
+                           errors=parsed.errors, warnings=parsed.warnings,
+                           attempts=attempts, raw=raws)
+        if not parsed.ok:
+            logger.warning("Shadow %s missed today: %s", ctx.entry.shadow_id,
+                           "; ".join(parsed.errors)[:300])
+            return res
+        meta = {"model": MODEL, "shadow": ctx.entry.name, "attempts": attempts,
+                "run_date": today}
+        if ctx.entry.shadow_id == SCALPER_ID:
+            meta["intraday_approx"] = True
+        for d in parsed.decisions:
+            res.entry_ids.append(store.add(LedgerEntry(
+                source_type="shadow", source_id=ctx.entry.shadow_id, ticker=d.ticker,
+                direction=d.direction, hold_bars=d.hold_days, confidence=d.confidence,
+                position_usd=d.position_usd, falsifier=d.falsifier, thesis=d.thesis,
+                asset_type=_asset_type(d.ticker), entry_rule="next_open",
+                stop_loss=d.stop, target_price=d.target, falsifier_rule=d.falsifier_rule,
+                domain_benchmark=ctx.entry.domain_benchmark, snapshot_id=snapshot_id,
+                meta=meta,
+            )))
+        bench = _benchmark_entry(ctx, [d.hold_days for d in parsed.decisions], today, snapshot_id)
+        if bench is not None:
+            res.benchmark_id = store.add(bench)
+        return res
+
+    results = await asyncio.gather(*(one(c) for c in contexts), return_exceptions=True)
+    for ctx, r in zip(contexts, results):
+        if isinstance(r, BaseException):
+            logger.error("Shadow %s crashed", ctx.entry.shadow_id, exc_info=r)
+            r = ShadowResult(ctx.entry.shadow_id, "missed", errors=[f"{type(r).__name__}: {r}"])
+        report.results.append(r)
+
+    if report_dir is not None:
+        _write_report(report, report_dir)
+    logger.info(report.summary())
+    return report
+
+
+def _write_report(report: RunReport, report_dir: Path) -> None:
+    try:
+        report_dir.mkdir(parents=True, exist_ok=True)
+        path = report_dir / f"{report.date}.json"
+        existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        existing.append({"written_at": datetime.now(timezone.utc).isoformat(),
+                         "results": [asdict(r) for r in report.results]})
+        path.write_text(json.dumps(existing, ensure_ascii=False, indent=1), encoding="utf-8")
+    except Exception:
+        logger.warning("Shadow run report not written", exc_info=True)
+
+
+def default_report_dir() -> Path:
+    import os
+    return Path(os.getenv("MARKETMIND_DATA_DIR", "data")) / "shadows" / "v3_runs"

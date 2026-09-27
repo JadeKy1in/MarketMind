@@ -27,6 +27,9 @@ class ShadowSettings:
     """Phase B shadow ecosystem configuration."""
     # General
     shadows_enabled: bool = True
+    # S3 (docs/S3_DESIGN.md): daily runs use shadows/v3 (roster + ledger). The legacy
+    # ShadowMother ecosystem runs only when this is switched on explicitly.
+    legacy_ecosystem_enabled: bool = False
     shadows_db_path: str = "data/shadows/shadows.db"
     max_concurrent_shadows: int = 5
     shadow_flash_quota_default: int = 5

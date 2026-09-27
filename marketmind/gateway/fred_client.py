@@ -44,8 +44,8 @@ _FRED_SERIES: dict[str, tuple[str, str, str, str]] = {
     "T10Y2Y":  ("T10Y2Y",  "10Y-2Y Treasury Spread",        "daily",  "%"),
     "T10Y3M":  ("T10Y3M",  "10Y-3M Treasury Spread",        "daily",  "%"),
     # ── Credit Spreads (Vol Surfer, Crash Hunter, Yield Whisperer) ──
-    "BAMLC0A0CM":   ("BAMLC0A0CM",   "ICE BofA US Corp IG OAS",        "daily", "bp"),
-    "BAMLH0A0HYM2": ("BAMLH0A0HYM2", "ICE BofA US High Yield OAS",     "daily", "bp"),
+    "BAMLC0A0CM":   ("BAMLC0A0CM",   "ICE BofA US Corp IG OAS",        "daily", "%"),
+    "BAMLH0A0HYM2": ("BAMLH0A0HYM2", "ICE BofA US High Yield OAS",     "daily", "%"),
     # ── Mortgage (REIT Analyst) ──
     "MORTGAGE30US": ("MORTGAGE30US", "30-Year Fixed Mortgage Rate",     "weekly", "%"),
     # ── GDP / Growth (Cycle Reader) ──
@@ -84,7 +84,7 @@ _FRED_SERIES: dict[str, tuple[str, str, str, str]] = {
     # ── Trade-Weighted USD (Currency Dealer, Frontier Scout) ──
     "DTWEXBGS":("DTWEXBGS","Trade-Weighted USD Index (broad)",  "daily",  "index"),
     # ── EMBI Spread (Frontier Scout) ──
-    "BAMLEMHBHYCRPIOAS": ("BAMLEMHBHYCRPIOAS", "ICE BofA EM HY Corporate OAS", "daily", "bp"),
+    "BAMLEMHBHYCRPIOAS": ("BAMLEMHBHYCRPIOAS", "ICE BofA EM HY Corporate OAS", "daily", "%"),
     # ── Liquidity / funding stress (fragility scanner) ──
     "RRPONTSYD":   ("RRPONTSYD",   "Overnight Reverse Repo (ON RRP)",   "daily",  "B USD"),
     "WTREGEN":     ("WTREGEN",     "Treasury General Account (TGA)",    "weekly", "M USD"),

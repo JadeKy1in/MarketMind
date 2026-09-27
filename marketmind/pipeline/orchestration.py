@@ -293,8 +293,9 @@ def _record_z0_l1(l1_result) -> None:
 
 
 def _init_shadow_ecosystem(config, shadow_count: int | None, tracker: StageTracker):
-    """Init shadow DB + permanent shadows + optional Phase F modules."""
-    if not (config.shadow.shadows_enabled and shadow_count != 0):
+    """Init shadow DB + permanent shadows + optional Phase F modules (legacy ecosystem only)."""
+    if not (config.shadow.shadows_enabled and shadow_count != 0
+            and getattr(config.shadow, "legacy_ecosystem_enabled", False)):
         return None, None
     tracker.advance(0, "Shadow Mother: scanning events...")
     from marketmind.shadows.shadow_state import ShadowStateDB
@@ -418,6 +419,14 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
 
     # Steps 1-3: Scout → Flash → L1
     news_items = await _do_news_collection(config, tracker, mock=mock)
+
+    # S3 shadows: forced daily decisions into the ledger, in parallel with the main
+    # pipeline; they see only news and prices, never main-pipeline output (§3.5).
+    if (mother is None and config.shadow.shadows_enabled and shadow_count != 0
+            and not mock):
+        _shadow_task = asyncio.create_task(run_v3_shadows(config, news_items, shadow_count))
+        print("  [shadows] daily decisions launched in background")
+
     signals = await _do_flash_preprocessing(news_items, tracker)
     l1_result = await _do_l1_analysis(signals, news_items, tracker, shadow_db=shadow_db)
 
@@ -752,8 +761,38 @@ async def _maybe_run_weekly_audit(shadow_db) -> None:
         logger.warning("_maybe_run_weekly_audit: non-blocking step failed", exc_info=True)
 
 
+async def run_v3_shadows(config, news_items: list, limit: int | None = None):
+    """S3 daily shadow decisions -> ledger; prints a one-line summary."""
+    from marketmind.shadows.v3 import roster
+    from marketmind.shadows.v3.runner import default_report_dir, run_shadow_day
+    entries = roster.active()
+    if limit:
+        entries = entries[:limit]
+    report = await run_shadow_day(_ledger_store(config), news_items, entries=entries,
+                                  report_dir=default_report_dir())
+    print(f"  [shadows] {report.summary()}")
+    return report
+
+
 async def run_shadows_only(config, verbose: bool = False) -> int:
-    """Run ONLY the shadow ecosystem (background mode).
+    """Run ONLY the shadows: S3 daily decisions (legacy ecosystem if enabled in settings)."""
+    if not getattr(config.shadow, "legacy_ecosystem_enabled", False):
+        init_gateway(config.deepseek_api_key, config.deepseek_base_url)
+        from marketmind.gateway import usage_tracker
+        from marketmind.pipeline.scout import fetch_all_sources
+        from marketmind.universe import get_equity_universe
+        usage_tracker.reset()
+        await asyncio.to_thread(get_equity_universe)
+        news_items = await fetch_all_sources(config) or []
+        print(f"Shadows: {len(news_items)} articles collected")
+        await run_v3_shadows(config, news_items)
+        print(f"  [tokens] {usage_tracker.summary_line()}")
+        return 0
+    return await _run_legacy_shadows_only(config, verbose)
+
+
+async def _run_legacy_shadows_only(config, verbose: bool = False) -> int:
+    """Run ONLY the legacy shadow ecosystem (background mode).
 
     Initializes the shadow database and permanent shadows, collects minimal
     news for event detection, then runs the full daily orchestration cycle.
@@ -874,11 +913,17 @@ async def _run_daily_with_shadows(config, args) -> int:
     global _shadow_task
     if _shadow_task and not _shadow_task.done():
         try:
-            await asyncio.wait_for(_shadow_task, timeout=300)
+            await asyncio.wait_for(_shadow_task, timeout=SHADOW_WAIT_S)
         except asyncio.TimeoutError:
-            print("(Shadow ecosystem timed out after 5 minutes — "
+            print(f"(Shadows timed out after {SHADOW_WAIT_S // 60} minutes — "
                   "results may be incomplete)")
         except asyncio.CancelledError:
             pass
+        from marketmind.gateway import usage_tracker
+        print(f"  [tokens incl. shadows] {usage_tracker.summary_line()}")
 
     return ret
+
+
+# 23 shadows, 5 at a time, one Flash call each (+1 retry): allow 15 minutes.
+SHADOW_WAIT_S = 900
