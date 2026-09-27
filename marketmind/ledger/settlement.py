@@ -2,7 +2,8 @@
 
 Rules (all code, no judgement; see docs/S2_DESIGN.md §4):
   Entry   next_open: open of the first bar dated after the record's creation date.
-          zone:      first bar (within hold_bars bars after creation) that trades into
+          zone:      first bar (within ENTRY_WINDOW_BARS bars after creation, or
+                     hold_bars if shorter) that trades into
                      the zone; long fills at min(open, entry_high), short at
                      max(open, entry_low). Never filled inside the window -> void.
   Exit    checked bar by bar from the fill bar, in this order:
@@ -42,6 +43,15 @@ NEW_YORK = ZoneInfo("America/New_York")
 COST_BPS = {"crypto": 50.0}
 DEFAULT_COST_BPS = 5.0
 
+# A zone order not reached within this many bars is void (owner decision
+# 2026-09-27: do not chase; a missed entry is dropped, not left open for the
+# whole holding period).
+ENTRY_WINDOW_BARS = 5
+
+
+def entry_window(e: LedgerEntry) -> int:
+    return min(e.hold_bars, ENTRY_WINDOW_BARS)
+
 
 def cost_bps(asset_type: str) -> float:
     return COST_BPS.get(asset_type, DEFAULT_COST_BPS)
@@ -72,14 +82,15 @@ def _find_fill(e: LedgerEntry, bars: list[Bar]) -> Fill | None | str:
     """Fill on `bars` (already restricted to bars after creation); 'void' if the window lapsed."""
     if e.entry_rule == "next_open":
         return Fill(0, bars[0].open, True) if bars else None
-    for i, b in enumerate(bars[:e.hold_bars]):
+    window = entry_window(e)
+    for i, b in enumerate(bars[:window]):
         if e.direction == "long" and b.low <= e.entry_high:
             price = min(b.open, e.entry_high)
             return Fill(i, price, price == b.open)
         if e.direction == "short" and b.high >= e.entry_low:
             price = max(b.open, e.entry_low)
             return Fill(i, price, price == b.open)
-    return "void" if len(bars) >= e.hold_bars else None
+    return "void" if len(bars) >= window else None
 
 
 def bars_after_creation(e: LedgerEntry, bars: list[Bar]) -> list[Bar]:
@@ -122,7 +133,7 @@ def simulate(e: LedgerEntry, bars: list[Bar]) -> Outcome:
         return Outcome("pending", "waiting for the first bar after creation"
                        if not after else "entry zone not reached yet")
     if fill == "void":
-        return Outcome("void", f"entry zone not reached within {e.hold_bars} bars",
+        return Outcome("void", f"entry zone not reached within {entry_window(e)} bars",
                        exit_reason="unfilled")
 
     long = e.direction == "long"

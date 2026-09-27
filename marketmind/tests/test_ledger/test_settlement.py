@@ -68,6 +68,19 @@ def test_zone_entry_fill_price_and_void_when_never_reached():
     assert simulate(e, flat(DAYS[:3], 120)).status == "pending"
 
 
+def test_zone_entry_window_is_five_bars_even_with_long_hold():
+    e = entry(entry_rule="zone", entry_low=100.0, entry_high=103.0, hold_bars=30)
+    # 5 bars after creation all above the zone -> void, although the hold is 30 bars
+    assert simulate(e, flat(DAYS[:6], 120)).status == "void"
+    assert simulate(e, flat(DAYS[:5], 120)).status == "pending"
+    # reaching the zone on the 6th bar is too late
+    late = flat(DAYS[:6], 120) + [bar("2026-09-07", 104, 105, 101, 102)]
+    assert simulate(e, late).status == "void"
+    # reaching it on the 5th bar still fills
+    ok = flat(DAYS[:5], 120) + [bar("2026-09-06", 104, 105, 101, 102)]
+    assert simulate(e, ok).fill.index == 4
+
+
 def test_zone_fill_bar_does_not_credit_target_but_does_stop():
     bars = flat(DAYS[:1]) + [bar("2026-09-02", 105, 120, 102, 104)] + flat(DAYS[2:10], 104)
     e = entry(entry_rule="zone", entry_low=100.0, entry_high=103.0, target_price=115.0)

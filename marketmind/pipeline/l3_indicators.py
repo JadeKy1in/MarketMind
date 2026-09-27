@@ -20,11 +20,19 @@ Rules (design spec v1.2 §4.3, made explicit):
 
 Levels (long setups only; L3 gates buys):
   support zone  [min low of last 20 sessions, + 0.5 * ATR14]
-  stop          support low - 1 * ATR14
+  stop          max(support low - 1 * ATR14, close - 2 * ATR14)
+                (a 20-day low can sit 2-8 ATR away; risk is capped at 2 ATR)
   entry zone    [max(close * 0.98, stop + 0.5 * ATR14), close * 1.005]
                 (up to 2.5% wide, never a point, always above the stop)
-  target        key resistance if above close, else close + 2 * (close - stop)
+  target        nearest significant swing high more than 0.5 * ATR14 above close,
+                capped at close + 6 * ATR14 (the cap alone when none exists).
+                Significant swing high: a close that is the highest close within
+                +/- 10 sessions and is followed by a drop of >= 2 * ATR14 in the
+                next 10 closes, within the last 252 sessions.
   reward/risk   (target - close) / (close - stop)
+  Owner decision 2026-09-27 (plan B): the earlier 1-year-high target produced
+  R/R 13 on assets far below old highs; nearest swing high + 3 ATR cap produced
+  no R/R >= 2 on any of 30 liquid tickers.
   recommendation  green & R/R >= 2 -> enter; green -> wait; yellow -> wait; red -> avoid
 """
 from __future__ import annotations
@@ -39,6 +47,11 @@ RESISTANCE_EXCLUDE_RECENT = 10
 NEAR_RESISTANCE_PCT = 3.0
 MIN_DAILY_BARS = 60
 DEFAULT_MAX_HOLD_DAYS = 30
+MAX_RISK_ATR = 2.0
+TARGET_CAP_ATR = 6.0
+TARGET_MIN_ATR = 0.5
+SWING_WINDOW = 10
+SWING_DROP_ATR = 2.0
 
 
 @dataclass
@@ -81,6 +94,21 @@ def atr(bars: list[Bar], n: int = 14) -> float:
         trs.append(max(cur.high - cur.low, abs(cur.high - prev.close), abs(cur.low - prev.close)))
     window = trs[-n:]
     return sum(window) / len(window)
+
+
+def nearest_swing_high(daily: list[Bar], close: float, a: float) -> float | None:
+    """Nearest significant swing-high close above close + TARGET_MIN_ATR * ATR."""
+    d = daily[-RESISTANCE_LOOKBACK:]
+    n = SWING_WINDOW
+    found = []
+    for i in range(n, len(d) - n):
+        c = d[i].close
+        if all(c >= d[j].close for j in range(i - n, i + n + 1)):
+            after = min(x.close for x in d[i + 1:i + n + 1])
+            if c - after >= SWING_DROP_ATR * a:
+                found.append(c)
+    above = [x for x in found if x > close + TARGET_MIN_ATR * a]
+    return min(above) if above else None
 
 
 def compute_snapshot(hist: PriceHistory) -> TechnicalSnapshot | None:
@@ -127,16 +155,15 @@ def compute_snapshot(hist: PriceHistory) -> TechnicalSnapshot | None:
     a = atr(daily)
     support_low = recent_low
     support_high = recent_low + 0.5 * a
-    stop = support_low - a
+    stop = max(support_low - a, close - MAX_RISK_ATR * a)
     # Entry zone must sit above the stop, otherwise a fill at the low end is
     # already stopped out (seen live on TLT, 2026-09-25).
     entry_low = min(max(close * 0.98, stop + 0.5 * a), close)
     entry_high = close * 1.005
     risk = close - stop
-    if key_res is not None and key_res > close:
-        target = key_res
-    else:
-        target = close + 2 * risk
+    cap = close + TARGET_CAP_ATR * a
+    swing = nearest_swing_high(daily, close, a)
+    target = min(swing, cap) if swing is not None else cap
     rr = (target - close) / risk if risk > 0 else 0.0
 
     if light == "green":

@@ -41,8 +41,36 @@ def test_steady_uptrend_at_highs_is_green_breakout():
     assert snap.stop_loss < snap.support_low < snap.close
     assert snap.entry_low < snap.close < snap.entry_high
     assert snap.target_price > snap.close
-    assert snap.reward_risk_ratio == pytest.approx(2.0, abs=0.01)
+    # no swing high overhead -> target is the 6 ATR cap; risk capped at 2 ATR
+    assert snap.target_price == pytest.approx(snap.close + 6 * snap.atr14, abs=0.01)
+    assert snap.close - snap.stop_loss <= 2 * snap.atr14 + 0.01
+    assert snap.reward_risk_ratio == pytest.approx(3.0, abs=0.01)
     assert snap.recommendation == "enter"
+
+
+def test_target_is_nearest_significant_swing_high():
+    closes = uptrend()
+    a_peak = closes[-60]
+    # rally to a peak 60 sessions ago, a sharp drop, then recovery to 1.5% under it
+    drop = [a_peak - 0.8 * (i + 1) for i in range(10)]
+    back = [drop[-1] + (a_peak * 0.985 - drop[-1]) * (i + 1) / 49 for i in range(49)]
+    snap = compute_snapshot(make_history(closes[:-59] + drop + back))
+    assert snap.target_price == pytest.approx(a_peak, abs=0.01)
+
+
+def test_minor_swing_without_drop_is_not_a_target():
+    # a local high followed by only a tiny dip is not "significant"
+    snap = compute_snapshot(make_history(uptrend()))
+    assert snap.target_price == pytest.approx(snap.close + 6 * snap.atr14, abs=0.01)
+
+
+def test_far_support_stop_is_capped_at_two_atr():
+    closes = uptrend()
+    # a deep 20-day low far below the close (8% flush, then recovery)
+    closes[-15] = closes[-15] * 0.92
+    snap = compute_snapshot(make_history(closes))
+    assert snap.support_low - snap.atr14 < snap.close - 2 * snap.atr14
+    assert snap.stop_loss == pytest.approx(snap.close - 2 * snap.atr14, abs=0.01)
 
 
 def test_downtrend_is_never_a_buy():
