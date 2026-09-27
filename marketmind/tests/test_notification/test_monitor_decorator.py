@@ -68,3 +68,30 @@ async def test_monitor_timeout():
     assert result is None
     recent = am.recent()
     assert any("timed out" in a["title"] for a in recent)
+
+
+def test_resolve_timeout_precedence(monkeypatch):
+    from marketmind.notification.monitor_decorator import (
+        DEFAULT_TIMEOUT_SEC, STAGE_TIMEOUT_SEC, resolve_timeout,
+    )
+    monkeypatch.delenv("MARKETMIND_TIMEOUT_DECISION", raising=False)
+    assert resolve_timeout("decision") == STAGE_TIMEOUT_SEC["decision"]
+    assert resolve_timeout("unknown_stage") == DEFAULT_TIMEOUT_SEC
+    assert resolve_timeout("decision", 42) == 42
+    monkeypatch.setenv("MARKETMIND_TIMEOUT_DECISION", "600")
+    assert resolve_timeout("decision", 42) == 600
+    monkeypatch.setenv("MARKETMIND_TIMEOUT_DECISION", "bogus")
+    assert resolve_timeout("decision") == STAGE_TIMEOUT_SEC["decision"]
+
+
+@pytest.mark.asyncio
+async def test_monitor_env_timeout_applies_at_call_time(monkeypatch):
+    am = _singleton()
+    @monitor(source="test_env_timeout", impact=ImpactScope.MAIN_PIPELINE)
+    async def slow_func():
+        await asyncio.sleep(1.0)
+        return "done"
+
+    monkeypatch.setenv("MARKETMIND_TIMEOUT_TEST_ENV_TIMEOUT", "0.1")
+    assert await slow_func() is None
+    assert any("timed out after 0.1s" in a["title"] for a in am.recent())
