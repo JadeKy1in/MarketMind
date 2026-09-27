@@ -109,3 +109,102 @@ async def test_fx_settles_against_cash_benchmark(tmp_path):
     assert e.status == "settled" and e.market_benchmark == CASH and e.market_return == 0.0
     assert e.cost_return == pytest.approx(0.0004)
     assert e.excess_market == e.net_return and e.settle_note == ""
+
+
+# ── Twelve Data ─────────────────────────────────────────────────────────────
+
+_real_from_twelvedata = gq.from_twelvedata   # captured before conftest stubs it
+
+
+def test_twelvedata_symbol_mapping():
+    assert gq.twelvedata_symbol("EURUSD=X") == ("EUR/USD", None)
+    assert gq.twelvedata_symbol("JPY=X") == ("USD/JPY", None)
+    assert gq.twelvedata_symbol("BTC-USD") == ("BTC/USD", None)
+    assert gq.twelvedata_symbol("AAPL") == ("AAPL", None)
+    assert gq.twelvedata_symbol("BRK-B") == ("BRK.B", None)
+    assert gq.twelvedata_symbol("7203.T") == ("7203", "XJPX")
+    assert gq.twelvedata_symbol("SAP.DE") == ("SAP", "XETR")
+    for t in ("CL=F", "^N225", "0700.HK", "600519.SS", ""):
+        assert gq.twelvedata_symbol(t) is None
+
+
+def test_twelvedata_parse_newest_first_and_fx_without_volume():
+    bars = gq.parse_twelvedata({"status": "ok", "values": [
+        {"datetime": "2026-09-25", "open": "1.1", "high": "1.2", "low": "1.0", "close": "1.15"},
+        {"datetime": "2026-09-24", "open": "1", "high": "1", "low": "1", "close": "1",
+         "volume": "500"},
+        {"datetime": "2026-09-23", "open": "x"}]})
+    assert [b.date for b in bars] == ["2026-09-24", "2026-09-25"]
+    assert (bars[1].open, bars[1].high, bars[1].low, bars[1].close, bars[1].volume) == \
+        (1.1, 1.2, 1.0, 1.15, 0.0)
+    assert bars[0].volume == 500
+
+
+@pytest.fixture
+def _td(monkeypatch):
+    """Fake Twelve Data endpoint: records every request, answers from `replies`."""
+    import httpx
+    calls, replies = [], {}
+
+    async def _fake_get(client, params, key):
+        calls.append((dict(params), key))
+        return httpx.Response(200, json=replies.get(params["symbol"], {}))
+    monkeypatch.setattr(gq, "_td_get", _fake_get)
+    monkeypatch.setattr(gq, "_td_plan_blocked", set())
+    monkeypatch.setenv("TWELVEDATA_API_KEY", "test-key")
+    return calls, replies
+
+
+@pytest.mark.asyncio
+async def test_twelvedata_fetch_ok(_td):
+    calls, replies = _td
+    replies["EUR/USD"] = {"status": "ok", "values": [
+        {"datetime": "2026-09-25", "open": "1.1", "high": "1.2", "low": "1.0", "close": "1.15"}]}
+    hist = await _real_from_twelvedata("EURUSD=X")
+    assert hist.source == "twelvedata" and hist.daily[0].close == 1.15
+    params, key = calls[0]
+    assert key == "test-key" and "apikey" not in params and "mic_code" not in params
+
+
+@pytest.mark.asyncio
+async def test_twelvedata_plan_block_skips_market(_td):
+    calls, replies = _td
+    replies["SAP"] = {"code": 404, "status": "error",
+                      "message": "This symbol is available starting with the Grow plan."}
+    assert await _real_from_twelvedata("SAP.DE") is None
+    assert calls[0][0]["mic_code"] == "XETR"
+    assert await _real_from_twelvedata("SIE.DE") is None
+    assert len(calls) == 1                      # DE market skipped after the plan error
+    replies["AAPL"] = {"status": "error", "code": 429, "message": "run out of API credits"}
+    assert await _real_from_twelvedata("AAPL") is None
+    assert "US" not in gq._td_plan_blocked      # rate limit is not a plan block
+
+
+@pytest.mark.asyncio
+async def test_twelvedata_without_key_makes_no_request(_td, monkeypatch):
+    calls, _ = _td
+    monkeypatch.delenv("TWELVEDATA_API_KEY")
+    assert await _real_from_twelvedata("AAPL") is None
+    assert await _real_from_twelvedata("CL=F") is None
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_twelvedata_is_last_after_other_fallbacks(monkeypatch):
+    from marketmind.gateway import price_history as ph
+    order = []
+
+    def _src(name, ok=False):
+        async def f(ticker, years=5):
+            order.append(name)
+            return ph.PriceHistory(ticker=ticker, source=name) if ok else None
+        return f
+    ph.clear_cache()
+    monkeypatch.setattr(ph, "_from_yfinance", lambda t, y: _src("yahoo")(t, y))
+    monkeypatch.setattr(gq, "from_eastmoney", _src("eastmoney"))
+    monkeypatch.setattr(gq, "from_tencent", _src("tencent"))
+    monkeypatch.setattr(gq, "from_twelvedata", _src("twelvedata", ok=True))
+    hist = await ph.get_price_history("SAP.DE")
+    assert hist.source == "twelvedata"
+    assert order == ["yahoo", "eastmoney", "tencent", "twelvedata"]
+    ph.clear_cache()

@@ -105,6 +105,10 @@ async def get_price_history(ticker: str, years: int = 5) -> PriceHistory | None:
         if hist is None:
             hist = await from_tencent(ticker, years)
     if hist is None:
+        # last resort for every market; it declines what its plan does not cover
+        from marketmind.gateway.global_quotes import from_twelvedata
+        hist = await from_twelvedata(ticker, years)
+    if hist is None:
         logger.warning("No price history for %s — all sources failed", ticker)
     _cache[key] = hist
     return hist
