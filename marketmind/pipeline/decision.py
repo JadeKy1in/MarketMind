@@ -357,7 +357,7 @@ OUTPUT FORMAT — use EXACTLY these keys, no others:
    "invalidation": "I am wrong if ... (observable, dated condition)",
    "cash_reframing": "if I had cash today, would I buy this?"}],
  (<number> = your own value, never a copied example.
-  position_size_pct: PERCENT of the portfolio, 1-25 (e.g. 8 means 8%).
+  position_size_pct: PERCENT of the portfolio, between 1 and 25, sized to your conviction.
   confidence: your probability, 0-1, that this trade ends profitable; it is scored later
   with a Brier score, so state what you actually believe.)
  "no_trade_card": {"thesis": "why not trading is best", "supporting_evidence": ["..."],
