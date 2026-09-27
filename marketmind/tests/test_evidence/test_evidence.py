@@ -263,3 +263,59 @@ def test_dashboard_evidence_provider(tmp_path, monkeypatch):
         encoding="utf-8")
     d = whitebox.get_evidence()
     assert d["date"] == "2026-09-28" and [i["claim"] for i in d["items"]] == ["b", "a"]
+
+
+def test_tips_and_frn_are_their_own_series():
+    rows = src.parse_auctions({"data": [
+        {"auction_date": "2026-09-17", "security_type": "Note", "security_term": "9-Year 10-Month",
+         "original_security_term": "10-Year", "bid_to_cover_ratio": "2.24",
+         "inflation_index_security": "Yes", "floating_rate": "No"},
+        {"auction_date": "2026-09-23", "security_type": "Note", "security_term": "1-Year 10-Month",
+         "original_security_term": "2-Year", "bid_to_cover_ratio": "2.63",
+         "inflation_index_security": "No", "floating_rate": "Yes"}]})
+    assert [r["type"] for r in rows] == ["FRN", "TIPS"]
+
+
+def test_efts_hits_carry_filing_id():
+    hits = src.parse_efts_hits({"hits": {"hits": [
+        {"_id": "0000950170-26-000001:msft-ex97_1.htm",
+         "_source": {"form": "10-K", "file_date": "2026-07-29", "display_names": ["MSFT"]}}]}})
+    assert hits[0]["adsh"] == "0000950170-26-000001"
+
+
+def test_revenue_prefers_total_when_two_concepts_share_a_quarter():
+    facts = {"facts": {"us-gaap": {
+        "RevenueFromContractWithCustomerExcludingAssessedTax": {"units": {"USD": [
+            _q("2025-04-01", "2025-06-30", 80.0), _q("2026-04-01", "2026-06-30", 90.0)]}},
+        "Revenues": {"units": {"USD": [
+            _q("2025-04-01", "2025-06-30", 100.0), _q("2026-04-01", "2026-06-30", 130.0)]}}}}}
+    assert src.parse_revenue_yoy(facts).concept == "Revenues"
+
+
+@pytest.mark.asyncio
+async def test_unparseable_reply_keeps_day_retryable(tmp_path):
+    async def call(s, u):
+        return "sorry, no json"
+    report = await run_evidence_day(LedgerStore(tmp_path / "l.db"), [_News("n1", "t", "s")],
+                                    today="2026-09-28", call=call, data=FakeData(),
+                                    report_dir=tmp_path)
+    assert report.status == "llm_failed"
+
+
+@pytest.mark.asyncio
+async def test_rerun_after_interruption_does_not_double_book(tmp_path):
+    store = LedgerStore(tmp_path / "ledger.db")
+    reply = json.dumps({"claims": [{"claim": "c", "type": "revenue_growth", "ticker": "ACME",
+                                    "asserted": "up", "news_ids": ["n1"]}]})
+
+    async def call(s, u):
+        return reply
+    rev = src.RevenueYoY("Revenues", "2026-06-30", 80.0, "2025-06-30", 100.0)
+    prices = StaticPriceSource({"ACME": _bars()})
+    kw = dict(today="2026-09-28", call=call, data=FakeData(rev=rev), price_source=prices)
+    await run_evidence_day(store, [_News("n1", "t", "Reuters")], report_dir=tmp_path / "a", **kw)
+    # report lost (e.g. cancelled before writing): a second run must not book again
+    again = await run_evidence_day(store, [_News("n1", "t", "Reuters")],
+                                   report_dir=tmp_path / "b", **kw)
+    assert len(store.list(source_type="evidence")) == 1
+    assert again.items[0].ledger_note == "同日同类型同标的已记一条"

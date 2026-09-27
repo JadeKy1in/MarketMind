@@ -132,11 +132,15 @@ async def test_inspection_end_to_end(env, monkeypatch):
     assert by["WINNER"].alternatives == []
     assert by["GONE"].verdict == hi.UNAVAILABLE and by["GONE"].price is None
 
+    hs.save(holdings)
     path = hi.write_report(reports, today="2026-09-28")
     from marketmind.api import whitebox
     d = whitebox.get_holdings()
     assert d["available"] and d["date"] == "2026-09-28" and len(d["items"]) == 3
     assert path.exists()
+    hs.remove("WINNER")                      # removed holdings drop out of the page
+    d = whitebox.get_holdings()
+    assert len(d["items"]) == 2 and d["removed_since_report"] == 1
 
     sent = []
     monkeypatch.setattr("marketmind.notification.alert_manager.emit_alert",
@@ -148,3 +152,21 @@ def test_dashboard_without_holdings(env):
     from marketmind.api import whitebox
     d = whitebox.get_holdings()
     assert d["available"] is False and "录入" in d["reason"]
+
+
+def test_add_rejects_nan_and_bad_dates(env):
+    for q, c in ((float("nan"), 1.0), (1.0, float("inf"))):
+        with pytest.raises(ValueError):
+            hs.add("AAPL", q, c)
+    with pytest.raises(ValueError):
+        hs.add("AAPL", 1, 1, opened="28/09/2026")
+    with pytest.raises(ValueError):
+        hs.add("AAPL", 1, 1, stop=float("nan"))
+    assert hs.load() == []
+
+
+def test_short_history_is_not_an_exit():
+    snap = _snap(light="yellow", wma200=None, above_200wma=False, structure_intact=False,
+                 reward_risk_ratio=1.5)
+    v, reason = hi.decide(H, snap, [])
+    assert v == hi.HOLD and "不足 200 周" in reason

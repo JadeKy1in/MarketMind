@@ -68,7 +68,7 @@ button.act:disabled{opacity:.5}
 <script>
 const TABS=[["brief","今日简报"],["chain","主管线推理链"],["ledger","统一账本"],["arena","影子竞技场"],["promo","晋升淘汰日志"],["evidence","证据层"],["holdings","实盘持仓"],["health","系统健康"],["reporter","汇报员"]];
 const $=s=>document.querySelector(s);
-const esc=v=>String(v??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const NA='<span class="mut">无数据</span>';
 const pct=v=>v==null?NA:`<span class="${v>0?"pos":v<0?"neg":""}">${(v*100).toFixed(2)}%</span>`;
 const num=(v,d=2)=>v==null?NA:Number(v).toFixed(d);
@@ -136,12 +136,12 @@ async function loadLedger(){
     <input id="fSid" placeholder="来源编号（如影子 id）" value="${esc(LQ.source_id)}">
     <input id="fTk" placeholder="标的" value="${esc(LQ.ticker)}" size="8">
     <button class="act" id="fGo">筛选</button>
-    <span class="mut">${Object.entries(d.status_counts).map(([k,v])=>`${STATUS[k]||k} ${v}`).join(" · ")}</span>
+    <span class="mut">${Object.entries(d.status_counts).map(([k,v])=>`${STATUS[k]||esc(k)} ${v}`).join(" · ")}</span>
    </div>
    <div class="tw"><table><tr><th>记录编号</th><th>时间</th><th>来源</th><th>标的</th><th>方向</th><th>状态</th><th class="num">确信度</th><th class="num">仓位</th><th class="num">持有期</th><th class="num">净收益</th><th class="num">超额(市场)</th><th>离场</th></tr>
-   ${d.entries.map(e=>`<tr class="click" onclick="openEntry('${e.entry_id}')"><td class="id">${e.entry_id}</td><td>${esc(e.created_at.slice(0,16).replace("T"," "))}</td><td>${SRC[e.source_type]||e.source_type}<div class="mut">${esc(e.source_id)}</div></td><td>${esc(e.ticker)}</td><td>${e.direction==="long"?"多":"空"}</td><td>${STATUS[e.status]||e.status}</td><td class="num">${num(e.confidence)}</td><td class="num">$${num(e.position_usd,0)}</td><td class="num">${e.hold_bars}</td><td class="num">${pct(e.net_return)}</td><td class="num">${pct(e.excess_market)}</td><td>${esc(e.exit_reason||"")}</td></tr>`).join("")||'<tr><td colspan="12" class="empty">没有记录</td></tr>'}
+   ${d.entries.map(e=>`<tr class="click" onclick="openEntry('${esc(e.entry_id)}')"><td class="id">${esc(e.entry_id)}</td><td>${esc(String(e.created_at||"").slice(0,16).replace("T"," "))}</td><td>${SRC[e.source_type]||esc(e.source_type)}<div class="mut">${esc(e.source_id)}</div></td><td>${esc(e.ticker)}</td><td>${e.direction==="long"?"多":"空"}</td><td>${STATUS[e.status]||esc(e.status)}</td><td class="num">${num(e.confidence)}</td><td class="num">$${num(e.position_usd,0)}</td><td class="num">${e.hold_bars}</td><td class="num">${pct(e.net_return)}</td><td class="num">${pct(e.excess_market)}</td><td>${esc(e.exit_reason||"")}</td></tr>`).join("")||'<tr><td colspan="12" class="empty">没有记录</td></tr>'}
    </table></div>
-   <div class="filters" style="margin-top:10px">${d.offset>0?'<button class="act" id="pPrev">上一页</button>':""}${d.offset+d.limit<d.total?'<button class="act" id="pNext">下一页</button>':""}<span class="mut">${d.offset+1}–${Math.min(d.offset+d.limit,d.total)}</span></div></div>`;
+   <div class="filters" style="margin-top:10px">${d.offset>0?'<button class="act" id="pPrev">上一页</button>':""}${d.offset+d.limit<d.total?'<button class="act" id="pNext">下一页</button>':""}<span class="mut">${d.total?`${d.offset+1}–${Math.min(d.offset+d.limit,d.total)}`:""}</span></div></div>`;
   $("#fGo").onclick=()=>{LQ={status:$("#fStatus").value,source_type:$("#fSrc").value,source_id:$("#fSid").value.trim(),ticker:$("#fTk").value.trim(),offset:0};loadLedger()};
   if($("#pPrev"))$("#pPrev").onclick=()=>{LQ.offset=Math.max(0,LQ.offset-100);loadLedger()};
   if($("#pNext"))$("#pNext").onclick=()=>{LQ.offset+=100;loadLedger()};
@@ -199,9 +199,14 @@ async function loadHoldings(){
   $("#s-holdings").innerHTML=`<div class="card"><h2>实盘持仓巡检 ${esc(d.date||"")}</h2>
   <div class="tw"><table><tr><th>标的</th><th class="num">数量</th><th class="num">成本</th><th class="num">现价</th><th class="num">盈亏</th><th>L3</th><th>结论</th><th>理由</th></tr>
   ${(d.items||[]).map(h=>`<tr><td>${esc(h.ticker)}</td><td class="num">${num(h.quantity,4)}</td><td class="num">${num(h.cost_basis)}</td><td class="num">${num(h.price)}</td><td class="num">${pct(h.unrealized_return)}</td><td>${h.light?`<span class="chip ${esc(h.light)}">${esc(h.light)}</span>`:NA}</td><td><b>${esc(h.verdict_cn||h.verdict||"")}</b></td><td>${esc(h.reason||"")}${(h.alternatives||[]).length?`<div class="mut">替代：${h.alternatives.map(a=>esc(a.ticker+" R/R "+num(a.reward_risk))).join("，")}</div>`:""}</td></tr>`).join("")||'<tr><td colspan="8" class="empty">没有持仓</td></tr>'}
-  </table></div><div class="mut">${esc(d.note||"")}</div></div>`;
+  </table></div><div class="mut">${esc(d.note||"")}${d.removed_since_report?`；报告后已删除 ${d.removed_since_report} 个持仓，未显示`:""}</div></div>
+  ${alertsCard(d.alerts,"持仓警报")}`;
 }
 
+function alertsCard(list,title){
+  if(!list||!list.length)return "";
+  return `<div class="card"><h2>${esc(title)}</h2><table><tr><th>时间</th><th>级别</th><th>来源</th><th>内容</th></tr>${list.map(a=>`<tr><td>${esc(String(a.timestamp||"").slice(0,16).replace("T"," "))}</td><td><span class="chip ${a.severity==="WARN"||a.severity==="ERROR"||a.severity==="CRITICAL"?"yellow":""}">${esc(a.severity)}</span></td><td>${esc(a.source)}</td><td><b>${esc(a.title)}</b><div class="mut">${esc(a.detail||"")}</div></td></tr>`).join("")}</table></div>`;
+}
 // ── health ──
 async function loadHealth(){
   const [h,c]=await Promise.all([j("/api/wb/health"),j("/api/cost")]);
@@ -216,7 +221,7 @@ async function loadHealth(){
   </div>
   <h3>账本记录的行情来源</h3><div>${Object.entries(L.price_sources||{}).map(([k,v])=>`<span class="chip">${esc(k)} ${v}</span>`).join(" ")||'<span class="mut">尚无已结算记录</span>'}</div>
   <h3>最近运行的 token 用量</h3>${tu.length?`<table><tr><th>时间</th><th>模式</th><th class="num">调用</th><th class="num">总 token</th><th>主要阶段</th></tr>${tu.map(r=>`<tr><td>${esc(r.at)}</td><td>${esc(r.mode)}</td><td class="num">${r.total.calls}</td><td class="num">${r.total.total_tokens.toLocaleString()}</td><td class="mut">${Object.entries(r.stages||{}).sort((a,b)=>b[1].total_tokens-a[1].total_tokens).slice(0,4).map(([k,v])=>`${esc(k)} ${v.total_tokens.toLocaleString()}`).join("，")}</td></tr>`).join("")}</table>`:'<div class="empty">还没有记录（每日运行结束后写入 data/token_usage.jsonl）</div>'}
-  </div>`;
+  </div>${alertsCard(h.alerts,"最近警报")}`;
 }
 
 // ── reporter ──
@@ -228,7 +233,7 @@ function loadReporter(){
     $("#rLog").insertAdjacentHTML("beforeend",`<div class="msg q">${esc(q)}</div>`);$("#rQ").value="";
     try{const r=await j("/api/reporter",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question:q,history:HIST})});
       const a=r.answer||r.error||"无回答";HIST.push({role:"user",content:q},{role:"assistant",content:a});
-      $("#rLog").insertAdjacentHTML("beforeend",`<div class="msg a">${esc(a).replace(/\b([0-9a-f]{16})\b/g,m=>idl(m))}</div>`)}
+      $("#rLog").insertAdjacentHTML("beforeend",`<div class="msg a">${esc(a).replace(/(?<![0-9a-f])[0-9a-f]{16}(?![0-9a-f])/g,m=>idl(m))}</div>`)}
     catch(e){$("#rLog").insertAdjacentHTML("beforeend",`<div class="msg a neg">请求失败</div>`)}
     $("#rGo").disabled=false};
 }

@@ -116,13 +116,15 @@ async def _treasury(_ticker, data) -> Observation:
     auctions = await data.auctions()
     if not auctions:
         return Observation(None, "FiscalData 国债拍卖数据不可用")
-    newest = auctions[0]["date"]
     from datetime import date, timedelta
-    cutoff = (date.fromisoformat(newest) - timedelta(days=AUCTION_DAYS)).isoformat()
+    today = getattr(data, "today", None) or date.fromisoformat(auctions[0]["date"])
+    cutoff = (today - timedelta(days=AUCTION_DAYS)).isoformat()
     ratios, lines = [], []
     for a in auctions:
         if a["date"] <= cutoff:
             break
+        if a["date"] > today.isoformat():
+            continue
         prior = [b["bid_to_cover"] for b in auctions
                  if b["date"] < a["date"] and b["term"] == a["term"] and b["type"] == a["type"]
                  ][:AUCTION_PRIOR]

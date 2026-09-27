@@ -20,7 +20,9 @@ CONTEXT_MAX_CHARS = 60_000
 RECENT_ROWS = 80
 MATCH_ROWS = 40
 HISTORY_TURNS = 6
-_ID_RE = re.compile(r"\b[0-9a-f]{16}\b")
+_ID_RE = re.compile(r"(?<![0-9a-f])[0-9a-f]{16}(?![0-9a-f])")
+# near-misses (wrong length or case) are checked too; \b fails next to Chinese text
+_ID_LIKE_RE = re.compile(r"(?<![0-9A-Fa-f])[0-9A-Fa-f]{15,17}(?![0-9A-Fa-f])")
 _TICKER_RE = re.compile(r"\b[A-Z0-9]{1,6}(?:[.\-=][A-Z0-9]{1,4})?\b")
 
 SYSTEM_PROMPT = """你是 MarketMind 的内置汇报员，只读。
@@ -121,7 +123,9 @@ def render_context(ctx: dict) -> tuple[str, bool]:
 
 def check_citations(answer: str) -> list[str]:
     """Ids in the answer that are not ledger records."""
-    ids = sorted(set(_ID_RE.findall(answer)))
+    # pure-digit runs of other lengths are ordinary numbers, not ids
+    ids = sorted({m for m in _ID_LIKE_RE.findall(answer)
+                  if len(m) == 16 or any(c.isalpha() for c in m)})
     if not ids:
         return []
     store = whitebox._store()
@@ -151,7 +155,8 @@ async def ask(question: str, history: list[dict] | None = None) -> dict[str, Any
                 "error": "llm_unavailable", "unknown_ids": []}
     ctx_text, truncated = render_context(build_context(question))
     turns = []
-    for m in (history or [])[-HISTORY_TURNS:]:
+    history = [m for m in history if isinstance(m, dict)] if isinstance(history, list) else []
+    for m in history[-HISTORY_TURNS:]:
         role = "所有人" if m.get("role") == "user" else "汇报员"
         turns.append(f"{role}：{str(m.get('content', ''))[:1000]}")
     user_prompt = (f"<data>\n{ctx_text}\n</data>\n"

@@ -7,6 +7,7 @@ unified ledger (SPEC §7, "human decision mirror").
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from dataclasses import asdict, dataclass, field
@@ -67,14 +68,17 @@ def add(ticker: str, quantity: float, cost_basis: float, *, opened: str | None =
         stop: float | None = None, note: str = "", ledger: LedgerStore | None = None,
         path: Path | None = None) -> Holding:
     t = validate_ticker(ticker)
-    if quantity <= 0 or cost_basis <= 0:
-        raise ValueError("quantity and cost_basis must be positive")
-    if stop is not None and stop <= 0:
-        raise ValueError("stop must be positive")
+    if not (math.isfinite(quantity) and math.isfinite(cost_basis))             or quantity <= 0 or cost_basis <= 0:
+        raise ValueError("quantity and cost_basis must be positive numbers")
+    if stop is not None and (not math.isfinite(stop) or stop <= 0):
+        raise ValueError("stop must be a positive number")
     opened = opened or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        datetime.strptime(opened, "%Y-%m-%d")
+    except ValueError:
+        raise ValueError("opened must be YYYY-MM-DD") from None
     holdings = load(path)
     existing = next((h for h in holdings if h.ticker == t), None)
-    entry_id = _mirror(ledger, t, quantity, cost_basis, opened, stop, note)
     if existing:
         total = existing.quantity + quantity
         existing.cost_basis = round((existing.quantity * existing.cost_basis
@@ -87,9 +91,11 @@ def add(ticker: str, quantity: float, cost_basis: float, *, opened: str | None =
     else:
         h = Holding(t, quantity, cost_basis, opened, stop, note)
         holdings.append(h)
+    save(holdings, path)          # holding first: a failed save must not leave a ledger orphan
+    entry_id = _mirror(ledger, t, quantity, cost_basis, opened, stop, note)
     if entry_id:
         h.ledger_ids.append(entry_id)
-    save(holdings, path)
+        save(holdings, path)
     return h
 
 

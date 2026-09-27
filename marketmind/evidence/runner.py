@@ -146,6 +146,11 @@ async def run_evidence_day(store: LedgerStore, news_items: list, *, today: str |
         _write(report, report_dir)
         return report
     claims, report.dropped = parse_claims(raw, set(by_id))
+    if not claims and any(d.startswith("no JSON") or d == "claims is not a list"
+                          for d in report.dropped):
+        report.status = "llm_failed"       # unusable reply: leave the day retryable
+        _write(report, report_dir)
+        return report
 
     if data is None:
         from marketmind.evidence.sources import LiveEvidenceData
@@ -169,7 +174,10 @@ async def run_evidence_day(store: LedgerStore, news_items: list, *, today: str |
 async def _book_divergences(store: LedgerStore, report: EvidenceReport, today: str,
                             price_source) -> None:
     pending = []
-    seen: set[tuple[str, str]] = set()
+    # records already booked today (an interrupted earlier run) count as seen
+    seen: set[tuple[str, str]] = {
+        ((e.meta or {}).get("claim_type"), e.ticker)
+        for e in store.list(source_type="evidence") if (e.meta or {}).get("run_date") == today}
     for item in report.items:
         if item.verdict != CONTRADICT:
             continue

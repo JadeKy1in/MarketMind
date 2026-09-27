@@ -79,7 +79,7 @@ def decide(h: Holding, snap, alternatives: list[Alternative]) -> tuple[str, str]
         return EXIT, f"现价 {close:.2f} 已跌破你设的止损 {h.stop:.2f}"
     if snap.light == "red":
         return EXIT, "L3 红灯：长期趋势、结构、阻力三项全部不合格"
-    if not snap.above_200wma and not snap.structure_intact:
+    if snap.wma200 is not None and not snap.above_200wma and not snap.structure_intact:
         return EXIT, "跌破 200 周均线且日线结构已破坏（低点下移或 50 日均线走弱）"
     rr = snap.reward_risk_ratio
     best = alternatives[0] if alternatives else None
@@ -90,7 +90,9 @@ def decide(h: Holding, snap, alternatives: list[Alternative]) -> tuple[str, str]
     parts = [f"L3 {snap.light}", f"风险回报比 {rr:.2f}"]
     if not snap.structure_intact:
         parts.append("结构已破坏，注意")
-    if not snap.above_200wma:
+    if snap.wma200 is None:
+        parts.append("历史不足 200 周，长期趋势无法判断")
+    elif not snap.above_200wma:
         parts.append("在 200 周均线下方")
     return HOLD, "未触发离场或换仓条件：" + "，".join(parts)
 
@@ -149,7 +151,8 @@ def _evidence_for(ticker: str) -> list[dict]:
         ev = get_evidence()
     except Exception:
         return []
-    if not ev.get("available"):
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if not ev.get("available") or ev.get("date") != today:
         return []
     return [{k: i.get(k) for k in ("claim", "verdict_cn", "evidence", "entry_id")}
             for i in ev["items"] if (i.get("ticker") or "").upper() == ticker]

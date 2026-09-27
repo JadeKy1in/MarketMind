@@ -212,3 +212,42 @@ def test_render_context_truncates_recent_rows():
     ctx = {"recent_records": [{"thesis": "x" * 1000} for _ in range(200)]}
     text, truncated = reporter.render_context(ctx)
     assert truncated and len(text) <= reporter.CONTEXT_MAX_CHARS
+
+
+def test_date_parameter_cannot_escape_folder(env):
+    from marketmind.api import whitebox
+    for bad in ("../../config", "C:/Windows/win", "2026-09-27/../x"):
+        assert whitebox.get_brief(bad)["available"] is False
+        assert whitebox.get_evidence(bad)["available"] is False
+
+
+def test_citation_check_catches_ids_next_to_chinese(env):
+    from marketmind.api import reporter
+    _, ids, _ = env
+    text = f"记录{ids['win']}的收益，另见记录abcdef0123456789的收益和 ABCDEF0123456789 以及 12345"
+    unknown = reporter.check_citations(text)
+    assert ids["win"] not in unknown
+    assert "abcdef0123456789" in unknown and "ABCDEF0123456789" in unknown
+    assert "12345" not in unknown
+
+
+@pytest.mark.asyncio
+async def test_reporter_tolerates_bad_history(env):
+    from marketmind.api import reporter
+    fake = AsyncMock(return_value={"content": "ok"})
+    with patch("marketmind.api.reporter._ensure_gateway"),          patch("marketmind.gateway.async_client.chat_flash", fake):
+        r = await reporter.ask("hi", history="not a list")
+    assert r["answer"] == "ok"
+
+
+def test_alerts_read_from_db(env):
+    from marketmind.api import whitebox
+    from marketmind.notification.alert_log import AlertLog
+    _, _, tmp = env
+    log = AlertLog(str(tmp / "alerts.db"))
+    log.insert({"id": "a1", "severity": "WARN", "source": "holdings", "impact_scope": "NONE",
+                "title": "持仓巡检：X 建议离场", "detail": "", "action_advice": "",
+                "degraded_output": 0, "timestamp": "2026-09-28T01:00:00", "resolved": 0,
+                "repeat_count": 1})
+    assert whitebox.get_alerts(source="holdings")["alerts"][0]["title"].startswith("持仓巡检")
+    assert whitebox.get_health()["alerts"][0]["id"] == "a1"

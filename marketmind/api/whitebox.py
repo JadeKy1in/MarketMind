@@ -9,6 +9,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import sqlite3
+from datetime import datetime, timezone
 from dataclasses import asdict
 from pathlib import Path
 
@@ -16,6 +19,7 @@ from marketmind.ledger.scoreboard import PROBATION_DAYS, benchmark_id_for, score
 from marketmind.ledger.store import LedgerStore, default_ledger_path
 
 logger = logging.getLogger("marketmind.api.whitebox")
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 BRIEF_DIR = Path(__file__).resolve().parent.parent / ".claude" / "briefs"
 LEDGER_PAGE_MAX = 500
@@ -52,6 +56,8 @@ def _latest_json(folder: Path) -> tuple[str | None, object | None]:
 def get_brief(date: str | None = None) -> dict:
     folder = brief_dir()
     if date:
+        if not _DATE_RE.match(date):
+            return {"available": False, "reason": "date must be YYYY-MM-DD"}
         p = folder / f"{date}.json"
         if not p.exists():
             return {"available": False, "reason": f"no brief for {date}"}
@@ -193,6 +199,7 @@ def get_health() -> dict:
         "latest_brief": brief_day,
         "shadow_run": {"date": run_day, "submitted": submitted, "total": len(run_results)},
         "token_usage": read_token_usage(),
+        "alerts": get_alerts(limit=15)["alerts"],
     }
 
 
@@ -201,6 +208,8 @@ def get_health() -> dict:
 def get_evidence(date: str | None = None) -> dict:
     folder = data_dir() / "evidence"
     if date:
+        if not _DATE_RE.match(date):
+            return {"available": False, "reason": "date must be YYYY-MM-DD"}
         p = folder / f"{date}.json"
         if not p.exists():
             return {"available": False, "reason": f"no evidence report for {date}"}
@@ -228,6 +237,33 @@ def get_holdings() -> dict:
         reason = ("未录入持仓：python -m marketmind.holdings add <代码> <数量> <成本>" if not n
                   else f"已录入 {n} 个持仓，尚未巡检：python -m marketmind.holdings inspect")
         return {"available": False, "reason": reason}
-    items = report.get("items", [])
-    return {"available": True, "date": day, "items": items,
+    from marketmind.holdings.store import load
+    current = {h.ticker for h in load()}
+    items = [i for i in report.get("items", []) if i.get("ticker") in current]
+    removed = len(report.get("items", [])) - len(items)
+    return {"available": True, "date": day, "items": items, "removed_since_report": removed,
+            "alerts": get_alerts(source="holdings", limit=20)["alerts"],
             "note": "结论由代码规则给出（docs/S6_DESIGN.md），系统不下单；持仓只存在本机 data/holdings.json"}
+
+
+# ── alerts (persisted by notification/alert_log in the process that raised them) ──
+
+def get_alerts(source: str | None = None, limit: int = 50) -> dict:
+    path = data_dir() / "alerts.db"
+    if not path.exists():
+        return {"available": False, "alerts": []}
+    try:
+        conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        sql, args = "SELECT * FROM alerts", []
+        if source:
+            sql += " WHERE source = ?"
+            args.append(source)
+        sql += " ORDER BY timestamp DESC LIMIT ?"
+        args.append(int(limit))
+        rows = [dict(r) for r in conn.execute(sql, args).fetchall()]
+        conn.close()
+    except sqlite3.Error:
+        logger.warning("alerts.db unreadable", exc_info=True)
+        return {"available": False, "alerts": []}
+    return {"available": True, "alerts": rows}

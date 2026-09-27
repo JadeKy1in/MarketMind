@@ -33,8 +33,11 @@ REVENUE_MAX_AGE_DAYS = 200     # older quarter = the filer stopped using the con
 REVENUE_CONCEPTS = ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues",
                     "SalesRevenueNet", "RevenueFromContractWithCustomerIncludingAssessedTax",
                     "RevenuesNetOfInterestExpense")   # banks
-RED_FLAG_PHRASES = ("going concern", "material weakness", "should no longer be relied upon",
-                    "restatement", "delisting", "chapter 11")
+# (phrase, forms). "restatement" is in every 10-K's Exhibit 97 clawback policy, so
+# it and the other event phrases only count in 8-Ks (review 2026-09-28, MSFT).
+RED_FLAG_PHRASES = (("going concern", "8-K,10-Q,10-K"), ("material weakness", "8-K,10-Q,10-K"),
+                    ("should no longer be relied upon", "8-K"), ("restatement", "8-K"),
+                    ("delisting", "8-K"), ("chapter 11", "8-K"))
 
 
 # ── parsers (pure) ──────────────────────────────────────────────────────────
@@ -77,7 +80,8 @@ def parse_revenue_yoy(facts: dict) -> RevenueYoY | None:
             continue
         p = min(prior, key=lambda e: abs(_days(e, last) - 365))
         cand = RevenueYoY(concept, last, quarters[last], p, quarters[p])
-        if best is None or cand.period_end > best.period_end:
+        if best is None or cand.period_end > best.period_end or (
+                cand.period_end == best.period_end and cand.value > best.value):
             best = cand
     return best
 
@@ -93,7 +97,8 @@ def parse_efts_hits(payload: dict) -> list[dict]:
     for h in hits:
         src = h.get("_source") or {}
         out.append({"form": src.get("form") or src.get("root_form"),
-                    "filed": src.get("file_date"), "name": (src.get("display_names") or [""])[0]})
+                    "filed": src.get("file_date"), "name": (src.get("display_names") or [""])[0],
+                    "adsh": src.get("adsh") or str(h.get("_id", "")).split(":")[0]})
     return out
 
 
@@ -132,8 +137,13 @@ def parse_auctions(payload: dict) -> list[dict]:
         term = r.get("security_term")
         if r.get("security_type") in ("Note", "Bond") and r.get("original_security_term")                 not in (None, "", "null"):
             term = r.get("original_security_term")
+        kind = r.get("security_type")
+        if r.get("inflation_index_security") == "Yes":
+            kind = "TIPS"
+        elif r.get("floating_rate") == "Yes":
+            kind = "FRN"
         try:
-            out.append({"date": r["auction_date"], "type": r.get("security_type"),
+            out.append({"date": r["auction_date"], "type": kind,
                         "term": term, "bid_to_cover": float(btc)})
         except (KeyError, ValueError):
             continue
@@ -199,7 +209,9 @@ class LiveEvidenceData:
     async def cik(self, ticker: str) -> int | None:
         if self._cik is None:
             self._cik = parse_cik_map(await self._json(SEC_TICKERS_URL, sec=True) or {})
-        return self._cik.get(ticker.upper().replace("-", "."))
+        t = ticker.upper()
+        return next((self._cik[k] for k in (t, t.replace(".", "-"), t.replace("-", "."))
+                     if k in self._cik), None)
 
     async def revenue_yoy(self, ticker: str) -> RevenueYoY | None:
         cik = await self.cik(ticker)
@@ -218,14 +230,19 @@ class LiveEvidenceData:
             return None
         start = (self.today - timedelta(days=days)).isoformat()
         hits: list[dict] = []
-        for phrase in RED_FLAG_PHRASES:
+        seen: set[tuple[str, str]] = set()
+        for phrase, forms in RED_FLAG_PHRASES:
             payload = await self._json(EFTS_URL, params={
-                "q": f'"{phrase}"', "ciks": f"{cik:010d}", "forms": "8-K,10-Q,10-K",
+                "q": f'"{phrase}"', "ciks": f"{cik:010d}", "forms": forms,
                 "dateRange": "custom", "startdt": start, "enddt": self.today.isoformat()},
                 sec=True)
             if payload is None:
                 return None
-            hits += [dict(h, phrase=phrase) for h in parse_efts_hits(payload)]
+            for h in parse_efts_hits(payload):
+                key = (h["adsh"], phrase)      # one filing's exhibits count once
+                if key not in seen:
+                    seen.add(key)
+                    hits.append(dict(h, phrase=phrase))
         return hits
 
     async def short_interest(self, ticker: str):
@@ -249,8 +266,9 @@ class LiveEvidenceData:
                 break
             if day.weekday() < 5:
                 data = await self._finra_day(day)
-                if data and ticker.upper() in data:
-                    out.append((day.isoformat(), data[ticker.upper()]))
+                sym = ticker.upper().replace("-", "/").replace(".", "/")
+                if data and sym in data:
+                    out.append((day.isoformat(), data[sym]))
             day -= timedelta(days=1)
         return sorted(out)
 
