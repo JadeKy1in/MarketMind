@@ -22,6 +22,10 @@ def vcr_news():
     my_vcr = vcr.VCR(
         cassette_library_dir=str(VCR_CASSETTE_DIR),
         record_mode="new_episodes",
+        # Never write API keys into a committed cassette (a GNews and a NewsAPI
+        # key were found recorded here on 2026-09-27).
+        filter_query_parameters=["apiKey", "apikey", "api_key", "key", "token"],
+        filter_headers=["authorization", "x-api-key"],
         match_on=["method", "scheme", "host", "port", "path", "query"],
     )
     with my_vcr.use_cassette("news_daily.yml"):

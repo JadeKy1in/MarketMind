@@ -9951,7 +9951,7 @@ interactions:
       User-Agent:
       - MarketMind/0.1
     method: GET
-    uri: https://newsapi.org/v2/top-headlines?country=us&category=business&apiKey=be9206cdbeca4f559699f92e86197bf2
+    uri: https://newsapi.org/v2/top-headlines?country=us&category=business
   response:
     body:
       string: !!binary |
@@ -10117,7 +10117,7 @@ interactions:
       User-Agent:
       - MarketMind/0.1
     method: GET
-    uri: https://gnews.io/api/v4/top-headlines?category=business&lang=en&country=us&apikey=f44f5f5c51cb40d752f495420675344f
+    uri: https://gnews.io/api/v4/top-headlines?category=business&lang=en&country=us
   response:
     body:
       string: "{\"information\":{\"realTimeArticles\":{\"message\":\"Real-time news
