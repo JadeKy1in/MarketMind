@@ -74,13 +74,13 @@ def test_parse_date_invalid():
 def test_fomc_detection_within_window():
     """FOMC date within 24h window should be detected."""
     # Use now_utc parameter directly (no fragile datetime patching)
-    mock_now = datetime(2026, 11, 3, 14, 0, 0, tzinfo=timezone.utc)
+    mock_now = datetime(2026, 10, 27, 14, 0, 0, tzinfo=timezone.utc)
     events = _get_fomc_window_events(24, now_utc=mock_now)
 
     assert len(events) >= 1
     fomc_event = next((e for e in events if "FOMC" in e["name"]), None)
     assert fomc_event is not None
-    assert fomc_event["date"] == "2026-11-04"
+    assert fomc_event["date"] == "2026-10-28"
     assert fomc_event["impact"] == "HIGH"
 
 

@@ -21,12 +21,14 @@ logger = logging.getLogger("marketmind.pipeline.economic_calendar")
 
 # ── FOMC Meeting Dates for 2026 ─────────────────────────────────────────────────
 # Industry-wide limitation: no machine-readable FOMC endpoint exists.
-# These 8 meetings/year are the scheduled dates from the Federal Reserve calendar.
+# These 8 meetings/year are the scheduled dates from the Federal Reserve calendar
+# (decision days; checked against federalreserve.gov/json/calendar.json on 2026-09-27,
+# which corrected Apr 29, Oct 28 and Dec 9).
 # After expiry (2026-12-31), a CRITICAL warning is logged and a conservative
 # fail-safe assumes every day COULD be FOMC day.
 FOMC_DATES_2026: list[str] = [
-    "2026-01-28", "2026-03-18", "2026-05-06", "2026-06-17",
-    "2026-07-29", "2026-09-16", "2026-11-04", "2026-12-16",
+    "2026-01-28", "2026-03-18", "2026-04-29", "2026-06-17",
+    "2026-07-29", "2026-09-16", "2026-10-28", "2026-12-09",
 ]
 FOMC_EXPIRY_DATE: str = "2026-12-31"
 FOMC_EXPIRY_WARNING_LOGGED: bool = False
