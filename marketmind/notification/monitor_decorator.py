@@ -7,6 +7,7 @@ import os
 import time
 from marketmind.notification.alert_schema import Severity, ImpactScope
 from marketmind.notification.alert_manager import emit_alert
+from marketmind.gateway.usage_tracker import set_stage, reset_stage
 
 logger = logging.getLogger("marketmind.notification.monitor")
 
@@ -50,6 +51,7 @@ def monitor(source: str, impact: ImpactScope = ImpactScope.MAIN_PIPELINE,
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
             timeout_s_ = resolve_timeout(source, timeout_s)
+            stage_token = set_stage(source)
             try:
                 result = await asyncio.wait_for(
                     func(*args, **kwargs), timeout=timeout_s_
@@ -78,5 +80,7 @@ def monitor(source: str, impact: ImpactScope = ImpactScope.MAIN_PIPELINE,
                     "需要修复 — 查看日志详情", degraded_output=True,
                 )
                 raise
+            finally:
+                reset_stage(stage_token)
         return wrapper
     return decorator

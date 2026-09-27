@@ -404,6 +404,8 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
     tracker = StageTracker(verbose)
     global _shadow_task, _shadow_result
     _shadow_result = None
+    from marketmind.gateway import usage_tracker
+    usage_tracker.reset()
     shadow_db, mother = _init_shadow_ecosystem(config, shadow_count, tracker)
 
     # Settle whatever in the ledger has come due before making new calls (SPEC_v3 §7)
@@ -487,6 +489,7 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
     # Trigger weekly audit if due (every 7 days)
     await _maybe_run_weekly_audit(shadow_db)
 
+    print(f"  [tokens] {usage_tracker.summary_line()}")
     print("\nMarketMind daily pipeline complete.")
     _report_stage_progress(9, "Pipeline complete", "done")
     if _shadow_task and not _shadow_task.done():
@@ -562,6 +565,7 @@ def _save_decision_brief(l1_result, l2_result, l3_result, red_team, resonance, d
     import json
     from datetime import datetime as _dt, timezone as _tz
     from pathlib import Path
+    from marketmind.gateway import usage_tracker
 
     try:
         today = _dt.now(_tz.utc).strftime("%Y-%m-%d")
@@ -667,6 +671,8 @@ def _save_decision_brief(l1_result, l2_result, l3_result, red_team, resonance, d
             "fragility_summary": getattr(fragility, 'summary', '') if fragility else '',
             "fragility_unavailable": getattr(fragility, 'unavailable', {}) if fragility else {},
             "paper_trade": paper_trade,
+            # LLM tokens so far this run; background shadows count under "other"
+            "token_usage": usage_tracker.snapshot(),
         }
         fpath = brief_dir / f"{today}.json"
         with open(fpath, "w", encoding="utf-8") as f:

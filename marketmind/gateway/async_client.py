@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 
 from marketmind.gateway.token_budget import TokenBudget, Priority
+from marketmind.gateway import usage_tracker
 from marketmind.gateway.circuit_breaker import (
     CircuitBreaker, CircuitState, CircuitOpenError, _extract_status_code,
 )
@@ -359,6 +360,7 @@ async def chat_flash(
         return result
     finally:
         budget.settle_flash(estimated, _used_tokens(result, estimated))
+        usage_tracker.record(result)
 
 
 async def chat_pro(
@@ -398,6 +400,7 @@ async def chat_pro(
         return result
     finally:
         budget.settle_pro(estimated, _used_tokens(result, estimated))
+        usage_tracker.record(result)
 
 
 def _used_tokens(result: dict[str, Any] | None, reserved: int) -> int | None:
