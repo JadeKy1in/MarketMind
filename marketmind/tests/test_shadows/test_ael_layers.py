@@ -1,20 +1,6 @@
-"""Smoke tests for three-layer AEL review system (Phase 3)."""
+"""Smoke tests for the AEL evolution engine (weekly/quarterly review modules removed 2026-09-28, dead code)."""
 import pytest
-from marketmind.shadows.ael_weekly_flash import WeeklyFlashReview, run_weekly_flash_review
-from marketmind.shadows.ael_quarterly_pro import QuarterlyStructuralReview, run_quarterly_review
 from marketmind.shadows.ael_evolution import AELEvolutionEngine, AELDebriefResult
-
-
-class TestWeeklyFlashReview:
-    def test_import_ok(self):
-        assert WeeklyFlashReview is not None
-        assert run_weekly_flash_review is not None
-
-
-class TestQuarterlyStructuralReview:
-    def test_import_ok(self):
-        assert QuarterlyStructuralReview is not None
-        assert run_quarterly_review is not None
 
 
 class TestAELEvolution:

@@ -1,4 +1,4 @@
-﻿"""End-to-end tests for the full Shadow Ecosystem."""
+"""End-to-end tests for the full Shadow Ecosystem."""
 import pytest
 import tempfile
 from pathlib import Path
@@ -26,21 +26,19 @@ def e2e_db():
 
 @pytest.fixture
 def mother_with_shadows(e2e_db, settings):
-    """Create 15 expert + 5 daredevil + 1 catfish shadows."""
+    """Create the expert and daredevil shadows (catfish removed 2026-09-28)."""
     from marketmind.shadows.expert_shadows import create_expert_shadows
     from marketmind.shadows.daredevil_shadows import create_daredevil_shadows
-    from marketmind.shadows.catfish_agent import create_catfish_agent
 
     create_expert_shadows(e2e_db, settings)
     create_daredevil_shadows(e2e_db, settings)
-    create_catfish_agent(e2e_db, settings)
     return ShadowMother(settings, e2e_db)
 
 
 def test_full_shadow_setup_21_shadows(mother_with_shadows, e2e_db):
-    """Verify 16 experts + 8 daredevils + 1 catfish = 25 shadows registered."""
+    """Verify 16 experts + 8 daredevils = 24 shadows registered."""
     visible = e2e_db.get_visible_shadows()
-    assert len(visible) == 25
+    assert len(visible) == 24
 
 
 @pytest.mark.asyncio

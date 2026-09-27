@@ -1,4 +1,4 @@
-﻿"""Fact checker: claim extraction -> multi-source verification -> synthesis report."""
+"""Fact checker: claim extraction -> multi-source verification -> synthesis report."""
 from __future__ import annotations
 import logging
 from dataclasses import dataclass, field

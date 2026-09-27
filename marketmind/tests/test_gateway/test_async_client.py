@@ -1,4 +1,4 @@
-﻿"""Tests for async DeepSeek gateway."""
+"""Tests for async DeepSeek gateway."""
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 

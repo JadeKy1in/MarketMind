@@ -13,7 +13,6 @@ async def test_shadow_factory_creates_correct_type(temp_shadow_db):
     from marketmind.shadows.shadow_agent import create_shadow_agent
     from marketmind.shadows.expert_shadows import ExpertShadow
     from marketmind.shadows.daredevil_shadows import DaredevilShadow
-    from marketmind.shadows.catfish_agent import CatfishAgent
     from marketmind.shadows.missed_path import MissedPathAgent
 
     settings = ShadowSettings()
@@ -84,7 +83,6 @@ async def test_all_shadow_types_analyze_without_error(temp_shadow_db):
     from marketmind.shadows.shadow_agent import create_shadow_agent
     from marketmind.shadows.expert_shadows import ExpertShadow
     from marketmind.shadows.daredevil_shadows import DaredevilShadow
-    from marketmind.shadows.catfish_agent import CatfishAgent
 
     settings = ShadowSettings()
     mock_result = {

@@ -1,4 +1,4 @@
-﻿"""Cash Reframing A/B Test -- treatment/control cohorts, Mann-Whitney DE test,
+"""Cash Reframing A/B Test -- treatment/control cohorts, Mann-Whitney DE test,
 non-inferiority TOST, and gateway M1 injection.
 
 Tests whether cash-reframing exit discipline improves returns:

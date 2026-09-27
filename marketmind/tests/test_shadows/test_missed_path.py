@@ -1,4 +1,4 @@
-﻿"""Tests for missed path tracking."""
+"""Tests for missed path tracking."""
 import pytest
 
 from marketmind.shadows.missed_path import (

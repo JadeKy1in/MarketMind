@@ -1,4 +1,4 @@
-﻿"""Tests for progress tracker and indeterminate spinner."""
+"""Tests for progress tracker and indeterminate spinner."""
 import time
 from marketmind.ui.progress import ProgressTracker, IndeterminateSpinner
 

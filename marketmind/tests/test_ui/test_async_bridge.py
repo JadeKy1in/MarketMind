@@ -1,4 +1,4 @@
-﻿"""Tests for async_bridge — daemon-thread asyncio + tkinter bridge."""
+"""Tests for async_bridge — daemon-thread asyncio + tkinter bridge."""
 import time
 import asyncio
 import pytest

@@ -1,4 +1,4 @@
-﻿"""Tests for Fabrication Watchdog M1-M4."""
+"""Tests for Fabrication Watchdog M1-M4."""
 import pytest
 from marketmind.integrity.watchdog import (
     NumericClaim, AgentIntegrityScore, inject_m1_protocol,

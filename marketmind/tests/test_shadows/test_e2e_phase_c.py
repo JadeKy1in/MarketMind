@@ -39,7 +39,6 @@ async def test_full_daily_cycle_with_mock_llm(temp_shadow_db):
     from marketmind.shadows.shadow_mother import ShadowMother
     from marketmind.shadows.expert_shadows import create_expert_shadows
     from marketmind.shadows.daredevil_shadows import create_daredevil_shadows
-    from marketmind.shadows.catfish_agent import create_catfish_agent
 
     settings = ShadowSettings()
     settings.max_concurrent_shadows = 5
@@ -47,11 +46,10 @@ async def test_full_daily_cycle_with_mock_llm(temp_shadow_db):
     # Initialize all permanent shadows in the DB
     create_expert_shadows(temp_shadow_db, settings)
     create_daredevil_shadows(temp_shadow_db, settings)
-    create_catfish_agent(temp_shadow_db, settings)
 
     # Verify 21 shadows registered
     visible = temp_shadow_db.get_visible_shadows()
-    assert len(visible) == 25  # Phase 0-6: 16 experts + 8 daredevils + 1 catfish
+    assert len(visible) == 24  # 16 experts + 8 daredevils (catfish removed)
 
     mother = ShadowMother(settings, temp_shadow_db)
 
@@ -111,11 +109,11 @@ async def test_full_daily_cycle_with_mock_llm(temp_shadow_db):
         result = await mother.orchestrate_daily_cycle(news, {})
 
     # Verify orchestration results
-    assert result.active_shadows == 25  # Phase 0-6: 16 experts + 8 daredevils + 1 catfish
+    assert result.active_shadows == 24  # 16 experts + 8 daredevils (catfish removed)
     assert result.decisions_collected > 0
-    assert len(result.shadow_analyses) == 25
+    assert len(result.shadow_analyses) == 24
 
-    # Catfish deprecated; all shadows produce votes
+    # all shadows produce votes
     assert result.decisions_collected >= 24
 
     # Rankings should be computed (even if empty for insufficient data)

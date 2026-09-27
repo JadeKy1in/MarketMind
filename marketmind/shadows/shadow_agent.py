@@ -654,9 +654,6 @@ def create_shadow_agent(config: ShadowConfig, state_db: ShadowStateDB,
     elif shadow_type == "daredevil":
         from marketmind.shadows.daredevil_shadows import DaredevilShadow
         return DaredevilShadow(config, state_db, settings)
-    elif shadow_type == "catfish":
-        from marketmind.shadows.catfish_agent import CatfishAgent
-        return CatfishAgent(config, state_db, settings)
     elif shadow_type == "missed_path":
         from marketmind.shadows.missed_path import MissedPathAgent
         return MissedPathAgent(config, state_db, settings)

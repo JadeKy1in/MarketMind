@@ -1,4 +1,4 @@
-﻿"""Expert shadows — domain-specific methodologies, structured vote output, factory."""
+"""Expert shadows — domain-specific methodologies, structured vote output, factory."""
 from __future__ import annotations
 
 import json

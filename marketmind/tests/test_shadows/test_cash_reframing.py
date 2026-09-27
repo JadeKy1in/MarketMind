@@ -1,4 +1,4 @@
-﻿"""Tests for cash reframing A/B test."""
+"""Tests for cash reframing A/B test."""
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch

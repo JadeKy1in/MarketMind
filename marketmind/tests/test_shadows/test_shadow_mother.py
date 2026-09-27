@@ -1,4 +1,4 @@
-﻿"""Tests for Shadow Mother — event detection and temp shadow lifecycle."""
+"""Tests for Shadow Mother — event detection and temp shadow lifecycle."""
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 

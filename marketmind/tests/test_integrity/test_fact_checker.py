@@ -1,4 +1,4 @@
-﻿"""Tests for fact checker — claim extraction + Pro verification + report synthesis."""
+"""Tests for fact checker — claim extraction + Pro verification + report synthesis."""
 import json
 from unittest.mock import AsyncMock, patch
 import pytest

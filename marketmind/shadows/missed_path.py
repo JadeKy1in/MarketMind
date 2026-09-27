@@ -1,4 +1,4 @@
-﻿"""Missed path tracking — counterfactual path shadows, survivorship bias warning."""
+"""Missed path tracking — counterfactual path shadows, survivorship bias warning."""
 from __future__ import annotations
 
 import logging

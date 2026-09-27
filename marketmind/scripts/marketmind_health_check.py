@@ -58,7 +58,6 @@ def check_imports() -> int:
         "marketmind.shadows.ranking_engine",
         "marketmind.shadows.expert_shadows",
         "marketmind.shadows.daredevil_shadows",
-        "marketmind.shadows.catfish_agent",
         "marketmind.shadows.challenger_engine",
         "marketmind.shadows.knowledge_filter",
         "marketmind.shadows.paper_live_gap",

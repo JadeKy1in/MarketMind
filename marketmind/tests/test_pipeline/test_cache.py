@@ -1,4 +1,4 @@
-﻿"""Tests for centralized data cache."""
+"""Tests for centralized data cache."""
 import pytest
 from marketmind.pipeline.cache import DataCache
 

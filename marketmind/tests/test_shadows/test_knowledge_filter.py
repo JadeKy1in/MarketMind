@@ -1,4 +1,4 @@
-﻿"""Tests for KnowledgeFilter — Learngenes selective inheritance, ACE risk detection."""
+"""Tests for KnowledgeFilter — Learngenes selective inheritance, ACE risk detection."""
 import pytest
 
 from marketmind.shadows.shadow_state import ShadowStateDB, ShadowConfig

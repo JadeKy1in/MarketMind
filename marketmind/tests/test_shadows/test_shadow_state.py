@@ -1,4 +1,4 @@
-﻿"""Tests for ShadowStateDB -- SQLite-backed shadow persistence."""
+"""Tests for ShadowStateDB -- SQLite-backed shadow persistence."""
 import pytest
 import sqlite3
 import tempfile

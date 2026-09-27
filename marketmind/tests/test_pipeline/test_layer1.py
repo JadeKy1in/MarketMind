@@ -1,4 +1,4 @@
-﻿"""Tests for Layer 1 narrative analysis."""
+"""Tests for Layer 1 narrative analysis."""
 import json
 from unittest.mock import AsyncMock, patch
 import pytest

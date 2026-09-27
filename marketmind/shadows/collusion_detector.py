@@ -1,4 +1,4 @@
-﻿"""Collusion Detector -- detects when shadows move in lockstep.
+"""Collusion Detector -- detects when shadows move in lockstep.
 
 Detects:
 - >=80% agreement for 3 consecutive days -> FLAG (binomial test P~4.4e-5)

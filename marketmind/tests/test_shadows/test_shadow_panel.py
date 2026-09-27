@@ -1,4 +1,4 @@
-﻿"""Tests for ShadowPanel — ranking dashboard UI widget."""
+"""Tests for ShadowPanel — ranking dashboard UI widget."""
 import pytest
 from unittest.mock import MagicMock, patch
 

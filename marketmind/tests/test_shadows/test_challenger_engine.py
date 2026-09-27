@@ -1,4 +1,4 @@
-﻿"""Tests for ChallengerEngine — 3-stage elimination buffer, secret creation, paired t-test comparison."""
+"""Tests for ChallengerEngine — 3-stage elimination buffer, secret creation, paired t-test comparison."""
 import pytest
 from unittest.mock import MagicMock, patch
 

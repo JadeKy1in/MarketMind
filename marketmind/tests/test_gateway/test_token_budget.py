@@ -1,4 +1,4 @@
-﻿"""Tests for TokenBudget manager."""
+"""Tests for TokenBudget manager."""
 from marketmind.gateway.token_budget import TokenBudget, Priority
 
 

@@ -1,4 +1,4 @@
-﻿"""Tests for CollusionDetector -- agreement statistics, convergence vs herding discrimination, escalation pipeline."""
+"""Tests for CollusionDetector -- agreement statistics, convergence vs herding discrimination, escalation pipeline."""
 import pytest
 from unittest.mock import MagicMock
 

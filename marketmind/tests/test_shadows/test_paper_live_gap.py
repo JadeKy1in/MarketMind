@@ -1,4 +1,4 @@
-﻿"""Tests for paper-to-live gap manager."""
+"""Tests for paper-to-live gap manager."""
 import pytest
 import math
 from datetime import datetime, timezone

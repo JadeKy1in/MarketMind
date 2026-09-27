@@ -1,4 +1,4 @@
-﻿"""Tests for ShadowStatusCard — individual shadow detail widget."""
+"""Tests for ShadowStatusCard — individual shadow detail widget."""
 import pytest
 from unittest.mock import MagicMock, patch
 

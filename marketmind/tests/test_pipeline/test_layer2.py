@@ -1,4 +1,4 @@
-﻿"""Tests for Layer 2 fundamental analysis engine."""
+"""Tests for Layer 2 fundamental analysis engine."""
 import json
 from unittest.mock import AsyncMock, patch
 import pytest

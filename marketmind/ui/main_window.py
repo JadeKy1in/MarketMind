@@ -1,4 +1,4 @@
-﻿"""Main MarketMind GUI — multi-panel layout with sidebar navigation and 3-gate flow."""
+"""Main MarketMind GUI — multi-panel layout with sidebar navigation and 3-gate flow."""
 from __future__ import annotations
 from typing import Any
 import customtkinter as ctk

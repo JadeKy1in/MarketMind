@@ -1,4 +1,4 @@
-﻿"""Tests for position patrol."""
+"""Tests for position patrol."""
 import json
 from datetime import date, timedelta
 from unittest.mock import AsyncMock, patch

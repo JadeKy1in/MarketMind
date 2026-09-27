@@ -1,4 +1,4 @@
-﻿"""Paper-to-Live Gap Manager -- virtual slippage, confidence discount,
+"""Paper-to-Live Gap Manager -- virtual slippage, confidence discount,
 inter-shadow GapRatio, and live-ready certification.
 
 Manages the gap between virtual (paper) returns and real-world expected returns:

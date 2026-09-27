@@ -1,4 +1,4 @@
-﻿"""Tests for DSR/CSCV resonance framework — pure math, full coverage."""
+"""Tests for DSR/CSCV resonance framework — pure math, full coverage."""
 import math
 import pytest
 from marketmind.pipeline.resonance import (

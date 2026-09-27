@@ -5,7 +5,7 @@
 ## 开工前必读
 
 1. `docs/SPEC_v3.md`：唯一事实来源。第 13 节是施工顺序，§13.1 是开放问题。
-2. 当前阶段的设计稿：`docs/S2_DESIGN.md`、`docs/S3_DESIGN.md`（后续阶段按同样命名）。
+2. 各阶段设计稿：`docs/S2_DESIGN.md` 至 `docs/S6_DESIGN.md`（后续阶段按同样命名）。
 3. 本文件的"未完成事项"。
 4. `PROGRESS_v3.md` 只存在于所有人本机、不入库。如果你看不到它，以本文件和 SPEC 为准。
 
@@ -26,4 +26,7 @@
   - 卡点：需要 Kalshi / Polymarket 的公开赔率。2026-09 所有人在利雅得，当地网络屏蔽这两个站（疑为博彩类政策）。所有人决定不绕过当地法规：不用代理，也不用云端代抓。
   - 恢复条件：所有人本机能直接访问这两个 API 时（例如回国后）。
   - 做法与步骤：见 `docs/SPEC_v3.md` §13.1；代码位置是 `marketmind/shadows/v3/roster.py` 里的 odds_analyst 条目。
-- [ ] 施工顺序中尚未开始的阶段：S4–S9（见 SPEC §13）。
+- [ ] **Robinhood 加密货币只读持仓同步**（SPEC L2 唯一允许的券商接口）：需要所有人在 Robinhood 申请加密 API 密钥后再做；在此之前持仓用 `python -m marketmind.holdings add` 手动录入（见 `docs/S6_DESIGN.md`）。
+- [ ] **证据层背离清单喂给主管线**（SPEC §5 第 1 步）：S5 只做到"写文件 + 进账本 + 仪表盘"，还没有进入 L1 / 决策的输入；需所有人确认后再接。
+- [ ] 旧影子生态（ShadowMother 链路约 28 个模块）只在 `legacy_ecosystem_enabled=True` 时运行，是否整体删除待所有人决定。
+- [ ] 施工顺序中尚未开始的阶段：S7–S9（见 SPEC §13）。S7 需要账本攒满 60 个交易日。

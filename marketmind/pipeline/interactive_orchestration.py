@@ -103,10 +103,11 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
     print("  - get_economic_calendar: upcoming FOMC, CPI, NFP events")
     print("  - get_earnings_date: earnings dates for ticker(s)\n")
 
-    # 0. Shadow Mother init
+    # 0. Shadow Mother init (legacy ecosystem only; v3 shadows launch after news below)
     shadow_db = None
     mother = None
-    if config.shadow.shadows_enabled and shadow_count != 0:
+    legacy = getattr(config.shadow, "legacy_ecosystem_enabled", False)
+    if legacy and config.shadow.shadows_enabled and shadow_count != 0:
         from marketmind.shadows.shadow_state import ShadowStateDB
         from marketmind.shadows.shadow_mother import ShadowMother
         shadow_db = ShadowStateDB(config.shadow.shadows_db_path)
@@ -134,6 +135,12 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
     from marketmind.pipeline.scout import fetch_all_sources
     news_items = await fetch_all_sources(config)
     ctx.news_items = news_items
+
+    # S3 shadows see news and prices only, never this session's L1 (SPEC §6.1, C26)
+    if not legacy and config.shadow.shadows_enabled and shadow_count != 0             and orchestration._shadow_task is None:
+        orchestration._shadow_task = asyncio.create_task(
+            orchestration.run_v3_shadows(config, news_items or [], shadow_count))
+        print("  [shadows] daily decisions launched in background")
     tracker.result(f"{len(news_items)} articles")
 
     # 1.5 Save raw news to archive (audit trail — always save, cleanup later if needed)
@@ -276,7 +283,7 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
 
     # 3.5A Phase G: Broadcast L1 fact-check data to shadows (before user viewpoints)
     # Per Red Team B4: facts accumulated during discussion, flushed BEFORE .ready sentinel
-    if l1_session.get("fact_broadcast") and config.shadow.shadows_enabled:
+    if legacy and l1_session.get("fact_broadcast") and config.shadow.shadows_enabled:
         try:
             from marketmind.shadows.broadcast import BroadcastWriter, BroadcastMessage
             from datetime import datetime as _dt
@@ -324,7 +331,7 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
             logger.warning("Fact broadcast write failed (non-blocking): %s", e)
 
     # 3.5B Broadcast L1 session data to shadows (Resolution 2 + H6)
-    if l1_session.get("user_ideas") and config.shadow.shadows_enabled:
+    if legacy and l1_session.get("user_ideas") and config.shadow.shadows_enabled:
         try:
             from marketmind.shadows.broadcast import BroadcastWriter
             writer = BroadcastWriter(str(config.data_dir))
@@ -422,25 +429,8 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
     ctx.red_team_report = red_team_report
     tracker.result(f"{len(red_team_report.challenges)} challenges")
 
-    tracker.advance(8, "Resonance: statistical validation...", ctx.stage_times)
-    from marketmind.pipeline.resonance import evaluate_resonance, ResonanceResult
-    signal_returns_data = {}
-    if hasattr(l3_result, 'results'):
-        for r in l3_result.results[:10]:
-            if hasattr(r, 'ticker') and hasattr(r, 'daily_return_pct') and r.daily_return_pct:
-                signal_returns_data[f"technical_{r.ticker}"] = [r.daily_return_pct]
-    if not signal_returns_data:
-        signal_returns_data = {"pending": [0.0]}
-        resonance = ResonanceResult(
-            passed=False, dsr=0, pbo=-1.0, forward_validation_ratio=0,
-            signal_count=0, dimensions_active=[], verdict="INSUFFICIENT_DATA",
-        )
-    else:
-        resonance = evaluate_resonance(
-            signal_returns=signal_returns_data,
-            dimensions=["narrative", "fundamental", "technical", "sentiment"],
-            observed_sharpe=orchestration._DEFAULT_OBSERVED_SHARPE,
-        )
+    # SPEC_v3 §5 step 7: DSR/PBO moved to promotion review; same marker as the daily path
+    resonance = orchestration._resonance_not_evaluated()
     ctx.resonance = resonance
 
     # 8.5 Shadow consensus display (before Decision — shows alongside cards)
@@ -476,7 +466,8 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
 
     # Wait for shadow consensus
     if orchestration._shadow_task and not orchestration._shadow_task.done():
-        timeout = getattr(config.shadow, 'shadow_consensus_timeout_s', 60)
+        timeout = (getattr(config.shadow, 'shadow_consensus_timeout_s', 60) if legacy
+                   else orchestration.SHADOW_WAIT_S)
         try:
             await asyncio.wait_for(orchestration._shadow_task, timeout=timeout)
         except asyncio.TimeoutError:

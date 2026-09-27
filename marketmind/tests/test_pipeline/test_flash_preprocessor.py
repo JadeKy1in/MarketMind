@@ -1,4 +1,4 @@
-﻿"""Tests for Flash preprocessor."""
+"""Tests for Flash preprocessor."""
 import json
 from unittest.mock import AsyncMock, patch
 import pytest

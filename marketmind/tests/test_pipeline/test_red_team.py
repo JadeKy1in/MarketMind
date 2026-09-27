@@ -1,4 +1,4 @@
-﻿"""Tests for Red Team adversarial engine."""
+"""Tests for Red Team adversarial engine."""
 import json
 from unittest.mock import AsyncMock, patch
 import pytest

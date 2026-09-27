@@ -1,4 +1,4 @@
-﻿"""Shared fixtures for shadow ecosystem tests."""
+"""Shared fixtures for shadow ecosystem tests."""
 import pytest
 import tempfile
 from pathlib import Path

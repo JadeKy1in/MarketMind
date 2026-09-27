@@ -1,4 +1,4 @@
-﻿"""Daredevil shadows — direction-forced, event hound, contrarian, sector rotation."""
+"""Daredevil shadows — direction-forced, event hound, contrarian, sector rotation."""
 from __future__ import annotations
 
 import json

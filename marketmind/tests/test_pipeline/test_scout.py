@@ -1,4 +1,4 @@
-﻿"""Tests for news scout."""
+"""Tests for news scout."""
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from marketmind.pipeline.scout import (

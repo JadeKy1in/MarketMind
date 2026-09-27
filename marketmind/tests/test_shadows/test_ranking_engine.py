@@ -1,4 +1,4 @@
-﻿"""Tests for RankingEngine -- pure Python ranking computation."""
+"""Tests for RankingEngine -- pure Python ranking computation."""
 import math
 import pytest
 import random

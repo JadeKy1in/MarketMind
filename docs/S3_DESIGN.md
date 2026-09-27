@@ -109,6 +109,8 @@
 
 新运行器不调用以下模块；旧链路整体关闭后，这些模块也不会再运行：method_breeding、emergency_quota、AEL 季度 / 月度复盘、crystallization、catfish、broadcast 注入。
 
+> 2026-09-28 清理：catfish、AEL 季度 / 周度复盘及约 25 个零引用的旧影子模块已删除；交互模式也改为只在 `legacy_ecosystem_enabled=True` 时启动旧生态（默认改跑 v3 影子，只看新闻和行情），并停止向影子写 broadcast。其余旧模块（ShadowMother 链路约 28 个）现在只在打开旧开关时运行，暂时保留，是否删除待所有人决定。
+
 ## 4. 验收
 
 1. 离线测试：名册完整性（32 个 ID、23 个 active 都有 prompt 文件）；决策 schema 校验（缺字段、弃权、不可交易标的、止损方向错误、确信度越界）；重试与未交卷；仓位缩放；随机基准可复现；信息隔离（prompt 中不出现主管线或其他影子内容）；账本写入字段完整。

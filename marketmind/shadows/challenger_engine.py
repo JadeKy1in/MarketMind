@@ -1,4 +1,4 @@
-﻿"""Challenger Engine — 3-stage elimination buffer, secret challenger creation, paired t-test comparison.
+"""Challenger Engine — 3-stage elimination buffer, secret challenger creation, paired t-test comparison.
 
 Stage 1 (WARNING): 2 consecutive evaluation periods in bottom 20%
 Stage 2 (CHALLENGER): 3 periods → secret challenger shadow created (invisible to rankings)

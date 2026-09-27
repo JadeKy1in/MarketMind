@@ -1,4 +1,4 @@
-﻿"""Tests for Daredevil shadows."""
+"""Tests for Daredevil shadows."""
 import pytest
 from unittest.mock import AsyncMock, patch
 

@@ -1,4 +1,4 @@
-﻿"""Tests for ExpertShadow and factory."""
+"""Tests for ExpertShadow and factory."""
 import pytest
 from unittest.mock import AsyncMock, patch
 

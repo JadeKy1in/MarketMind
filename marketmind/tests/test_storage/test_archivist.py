@@ -1,4 +1,4 @@
-﻿"""Tests for JSON archive + SQLite FTS5."""
+"""Tests for JSON archive + SQLite FTS5."""
 import tempfile
 from pathlib import Path
 from marketmind.storage.archivist import MarketMindArchive, get_archivist
