@@ -4,7 +4,9 @@ Returns ~5 years of daily bars plus derived weekly bars, which is what the
 3-light review needs (200-week MA, 52-week range, ATR). The 3-month OHLCV in
 market_data.py is too short for that.
 
-Sources: yfinance for stocks, ETFs, indices and crypto (e.g. "BTC-USD");
+Sources: Alpaca market data first for US stocks/ETFs when ALPACA_API_KEY_ID and
+ALPACA_API_SECRET_KEY are set (owner decision 2026-09-27); yfinance for stocks,
+ETFs, indices and crypto (e.g. "BTC-USD");
 Binance public klines, then Bybit public spot klines, as crypto fallbacks; the
 Nasdaq public historical API
 (api.nasdaq.com) as a fallback for US stocks/ETFs. No API keys. Returns None
@@ -17,6 +19,12 @@ differ slightly from yfinance auto_adjust closes, more so for high-yield
 tickers. Indices (^...), futures/FX (=), non-US suffix tickers (.SS, .HK, ...)
 and crypto are not sent to Nasdaq. Class shares map "-" -> "." (BRK-B -> BRK.B).
 
+Alpaca (verified live 2026-09-27 on the free Basic plan): consolidated SIP daily
+bars with adjustment=all, i.e. split- AND dividend-adjusted, full-market volume
+(NVDA 2024-06-05 close 122.09 after the 10:1 split; AAPL 194.02 vs raw 195.87).
+The Basic plan cannot query the most recent 15 minutes of SIP data, so `end` is
+set 20 minutes in the past. Same symbol rules as Nasdaq (BRK-B -> BRK.B).
+
 Bybit caveats: "BTC-USD" maps to the spot pair "BTCUSDT", i.e. prices are
 quoted in USDT, treated as ~USD (same assumption as the Binance path). Bars are
 UTC-day candles. Like the Binance path, the current (still-forming) UTC day's
@@ -26,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass, field
 
 import httpx
@@ -48,6 +57,9 @@ _NASDAQ_HEADERS = {
     "Accept": "application/json",
 }
 _NASDAQ_TIMEOUT = 15.0
+_ALPACA_BARS = "https://data.alpaca.markets/v2/stocks/bars"
+_ALPACA_TIMEOUT = 15.0
+_ALPACA_MAX_PAGES = 5
 _YF_CONCURRENCY = asyncio.Semaphore(5)
 _cache: dict[str, "PriceHistory | None"] = {}
 
@@ -75,7 +87,9 @@ async def get_price_history(ticker: str, years: int = 5) -> PriceHistory | None:
     key = f"{ticker.upper()}:{years}"
     if key in _cache:
         return _cache[key]
-    hist = await _from_yfinance(ticker, years)
+    hist = await _from_alpaca(ticker, years)
+    if hist is None:
+        hist = await _from_yfinance(ticker, years)
     if hist is None and ticker.upper().endswith("-USD"):
         hist = await _from_binance(ticker)
         if hist is None:
@@ -293,6 +307,67 @@ async def _from_nasdaq(ticker: str, years: int) -> PriceHistory | None:
         return None
     logger.warning("Nasdaq history empty for %s", ticker)
     return None
+
+
+# ── Alpaca ──────────────────────────────────────────────────────────────────
+
+def _alpaca_headers() -> dict | None:
+    key = os.environ.get("ALPACA_API_KEY_ID", "").strip()
+    secret = os.environ.get("ALPACA_API_SECRET_KEY", "").strip()
+    if not key or not secret:
+        return None
+    return {"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret}
+
+
+def _alpaca_client(headers: dict) -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=_ALPACA_TIMEOUT, headers=headers)
+
+
+def _parse_alpaca(rows) -> list[Bar]:
+    bars: list[Bar] = []
+    for r in rows or []:
+        try:
+            bars.append(Bar(date=str(r["t"])[:10], open=float(r["o"]), high=float(r["h"]),
+                            low=float(r["l"]), close=float(r["c"]), volume=float(r.get("v") or 0)))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return bars
+
+
+async def _from_alpaca(ticker: str, years: int) -> PriceHistory | None:
+    """Split- and dividend-adjusted SIP daily bars; None without credentials or data."""
+    symbol = _nasdaq_symbol(ticker)  # same universe: US stocks/ETFs only
+    headers = _alpaca_headers()
+    if symbol is None or headers is None:
+        return None
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    params = {"symbols": symbol, "timeframe": "1Day", "adjustment": "all", "feed": "sip",
+              "start": (now - timedelta(days=int(365.25 * years))).strftime("%Y-%m-%d"),
+              "end": (now - timedelta(minutes=20)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "limit": 10000}
+    rows: list = []
+    try:
+        async with _alpaca_client(headers) as client:
+            for _ in range(_ALPACA_MAX_PAGES):
+                resp = await client.get(_ALPACA_BARS, params=params)
+                if resp.status_code != 200:
+                    logger.warning("Alpaca bars HTTP %s for %s", resp.status_code, ticker)
+                    return None
+                payload = resp.json()
+                rows.extend(((payload or {}).get("bars") or {}).get(symbol) or [])
+                token = (payload or {}).get("next_page_token")
+                if not token:
+                    break
+                params["page_token"] = token
+    except Exception as exc:
+        logger.warning("Alpaca bars failed for %s: %s", ticker, exc)
+        return None
+    daily = sorted({b.date: b for b in _parse_alpaca(rows)}.values(), key=lambda b: b.date)
+    if not daily:
+        logger.warning("Alpaca bars empty for %s", ticker)
+        return None
+    return PriceHistory(ticker=ticker, source="alpaca", daily=daily, weekly=to_weekly(daily))
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────

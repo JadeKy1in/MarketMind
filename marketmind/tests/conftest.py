@@ -191,3 +191,11 @@ def _offline_equity_universe():
     set_equity_universe(None)
     yield
     reset_equity_universe()
+
+
+@pytest.fixture(autouse=True)
+def _no_alpaca_credentials(monkeypatch):
+    """Price-history tests never call Alpaca with the owner's real keys; tests
+    that exercise the Alpaca path set fake credentials themselves."""
+    monkeypatch.delenv("ALPACA_API_KEY_ID", raising=False)
+    monkeypatch.delenv("ALPACA_API_SECRET_KEY", raising=False)
