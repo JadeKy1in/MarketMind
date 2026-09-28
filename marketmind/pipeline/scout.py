@@ -155,7 +155,7 @@ from marketmind.pipeline.insider_sources import (
 )
 
 # ── Social media sources → pipeline/social_sources.py
-from marketmind.pipeline.social_sources import fetch_apewisdom, fetch_bluesky_posts
+from marketmind.pipeline.social_sources import fetch_bluesky_posts
 
 # ── Official data APIs (FiscalData auctions, NY Fed rates) → pipeline/official_data_sources.py
 from marketmind.pipeline.official_data_sources import (
@@ -311,11 +311,6 @@ async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsIte
             items = await DATA_FETCHERS[source.feed_type](source, config)
             _mark_ok(source)
             source.last_checked = datetime.now(timezone.utc).isoformat()
-            return items
-        if source.name == "ApeWisdom":
-            items = await fetch_apewisdom()
-            if items:
-                _mark_ok(source)
             return items
         if source.feed_type == "api" and source.url:
             items = await _fetch_api_source(source, config)

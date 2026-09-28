@@ -72,7 +72,9 @@ SOURCES: list[Source] = [
     Source("NYT Business", SourceTier.PRIMARY, "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml", "rss", 0.90, 2.0),
     Source("NYT Economy", SourceTier.PRIMARY, "https://rss.nytimes.com/services/xml/rss/nyt/Economy.xml", "rss", 0.90, 2.0),
     Source("Seeking Alpha", SourceTier.RELIABLE, "https://seekingalpha.com/market-news.xml", "rss", 0.78, 2.0),
-    Source("Reuters (via Google News)", SourceTier.PRIMARY, "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnVHZ0pWVXlnQVAB", "rss", 0.85, 2.0),
+    # Google News "Business" topic: an aggregator (Yahoo, CNBC, Reuters, Fox, WSJ, Bloomberg,
+    # NYT ...), not Reuters; renamed 2026-09-28.
+    Source("Google News Business", SourceTier.PRIMARY, "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnVHZ0pWVXlnQVAB", "rss", 0.85, 2.0),
 
     # ── US official / first-hand (added 2026-09-27, all verified live, key-free) ──
     Source("Federal Reserve Press", SourceTier.PRIMARY, "https://www.federalreserve.gov/feeds/press_all.xml", "rss", 0.97, 2.0),

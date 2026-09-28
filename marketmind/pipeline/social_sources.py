@@ -28,29 +28,6 @@ logger = logging.getLogger("marketmind.pipeline.social_sources")
 _apewisdom_dead_warned: bool = False
 
 
-async def fetch_apewisdom() -> list:
-    """Fetch trending tickers from ApeWisdom — API DISCONTINUED.
-
-    The ApeWisdom API (apewisdom.io/api/v1/filter/trending) now returns HTML
-    instead of JSON — the API has been shut down. Reddit WSB RSS (configured in
-    source_authority.py) provides retail sentiment coverage via Reddit's own
-    free, no-auth RSS feed.
-
-    Swiss Finance Institute (2026): finfluencer picks = -2.3% returns;
-    fading them = +6.8% alpha. Retail sentiment is a CONTRARIAN INDICATOR.
-
-    Returns empty list with a one-time warning log.
-    """
-    global _apewisdom_dead_warned
-    if not _apewisdom_dead_warned:
-        _apewisdom_dead_warned = True
-        logger.warning(
-            "ApeWisdom API has been discontinued (now returns HTML instead of JSON). "
-            "Reddit WSB RSS provides retail sentiment coverage. Returning empty list."
-        )
-    return []
-
-
 # Bluesky session cache (module-level, lives for process lifetime)
 _bluesky_session: dict | None = None
 
