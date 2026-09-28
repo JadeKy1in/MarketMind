@@ -133,7 +133,7 @@ async def test_settle_all_scores_returns_costs_benchmarks_brier(tmp_path):
     assert s.net_return == pytest.approx(-0.101) and s.brier == pytest.approx(0.04)
 
     c = store.get(crypto_id)
-    assert c.market_benchmark == "BTC-USD" and c.cost_return == pytest.approx(0.01)
+    assert c.market_benchmark == "BTC-USD" and c.cost_return == pytest.approx(0.02)    # 2 x 100 bp (Robinhood crypto spread)
     assert c.exit_date == "2026-09-04"   # 3 calendar bars: 09-02, 09-03, 09-04
 
     m = store.get(missing_id)

@@ -47,9 +47,14 @@ from marketmind.ledger.store import LedgerEntry, LedgerStore
 logger = logging.getLogger("marketmind.ledger.settlement")
 
 
-# One-way cost in basis points. Crypto reflects Robinhood's quoted spread; the
-# 50 bp figure is an estimate, not a verified number (to confirm in S6).
-COST_BPS = {"crypto": 50.0}
+# One-way cost in basis points. Crypto: Robinhood's default (market-maker)
+# routing quotes a 0.96% buy spread on $100 of BTC, $0.95 of it Robinhood's
+# rebate, for every coin (robinhood.com/us/en/support/articles/crypto-order-routing,
+# checked 2026-09-28) -> 100 bp for BTC/ETH; other coins have wider maker
+# spreads on top (+25 bp is an estimate, not a published number).
+CRYPTO_MAJORS = frozenset({"BTC", "ETH"})
+CRYPTO_MAJOR_BPS = 100.0
+CRYPTO_OTHER_BPS = 125.0
 DEFAULT_COST_BPS = 5.0
 
 # A zone order not reached within this many bars is void (owner decision
@@ -63,10 +68,12 @@ def entry_window(e: LedgerEntry) -> int:
 
 
 def cost_bps(asset_type: str, ticker: str = "") -> float:
-    """One-way cost: per asset type where configured (crypto), else by market."""
-    if asset_type in COST_BPS:
-        return COST_BPS[asset_type]
-    return market_for(ticker).cost_bps if ticker else DEFAULT_COST_BPS
+    """One-way cost: crypto by coin (majors vs the rest), else by market."""
+    market = market_for(ticker) if ticker else None
+    if asset_type == "crypto" or (market is not None and market.code == "CRYPTO"):
+        base = ticker.upper().split("-")[0]
+        return CRYPTO_MAJOR_BPS if base in CRYPTO_MAJORS else CRYPTO_OTHER_BPS
+    return market.cost_bps if market is not None else DEFAULT_COST_BPS
 
 
 def market_benchmark(entry: LedgerEntry) -> str:

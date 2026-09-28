@@ -56,7 +56,7 @@ async def test_gateway_uses_claude_then_falls_back(monkeypatch):
     assert calls == ["pro", "flash"]
 
     async def failing(system, user, tier):
-        return {"content": "", "error": "claude: usage limit"}
+        return {"content": "", "error": "claude: timed out after 300s"}
     monkeypatch.setattr(claude_cli, "call", failing)
     fell_back = []
 
@@ -73,6 +73,21 @@ async def test_gateway_uses_claude_then_falls_back(monkeypatch):
     with pytest.raises(RuntimeError):
         await async_client.chat_flash("s", "u")
     assert calls == ["pro", "flash"]
+
+
+@pytest.mark.asyncio
+async def test_usage_limit_switches_to_deepseek_at_once(monkeypatch):
+    monkeypatch.setenv("MARKETMIND_LLM", "claude")
+    monkeypatch.setattr(async_client, "_claude_failures", 0)
+    calls = []
+
+    async def limited(system, user, tier):
+        calls.append(tier)
+        return {"content": "", "error": "claude: You've hit your session limit"}
+    monkeypatch.setattr(claude_cli, "call", limited)
+    assert await async_client._try_claude("s", "u", "pro") is None
+    assert await async_client._try_claude("s", "u", "flash") is None
+    assert calls == ["pro"]          # the second call no longer tries Claude
 
 
 @pytest.mark.asyncio

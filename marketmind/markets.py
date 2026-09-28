@@ -26,7 +26,7 @@ class Market:
 
 
 US = Market("US", "America/New_York", time(9, 30), time(16, 0), 5.0, "SPY", "equity")
-CRYPTO = Market("CRYPTO", "UTC", time(0, 0), time(23, 59), 50.0, "BTC-USD", "crypto", True)
+CRYPTO = Market("CRYPTO", "UTC", time(0, 0), time(23, 59), 100.0, "BTC-USD", "crypto", True)
 FX = Market("FX", "UTC", time(0, 0), time(23, 59), 2.0, CASH, "fx", True)
 # CME/ICE daily bars are dated by trade date and settle in the New York afternoon.
 FUTURE = Market("FUTURE", "America/New_York", time(9, 30), time(17, 0), 2.0, "DBC", "future")

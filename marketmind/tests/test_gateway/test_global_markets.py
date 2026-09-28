@@ -93,7 +93,8 @@ def test_first_bar_follows_the_exchange_clock():
 
 def test_costs_and_benchmarks_by_market():
     assert cost_bps("stock", "7203.T") == 10.0 and cost_bps("stock", "AAPL") == 5.0
-    assert cost_bps("crypto", "BTC-USD") == 50.0 and cost_bps("unknown", "CL=F") == 2.0
+    assert cost_bps("crypto", "BTC-USD") == 100.0 and cost_bps("unknown", "CL=F") == 2.0
+    assert cost_bps("crypto", "SOL-USD") == 125.0 and cost_bps("stock", "ETH-USD") == 100.0
     assert market_benchmark(_entry("0700.HK", "2026-09-24T00:00:00Z")) == "2800.HK"
     assert market_benchmark(_entry("EURUSD=X", "2026-09-24T00:00:00Z")) == CASH
 

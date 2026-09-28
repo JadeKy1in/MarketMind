@@ -411,14 +411,21 @@ async def chat_pro(
 
 _claude_failures = 0
 CLAUDE_FAILURES_BEFORE_PAUSE = 3
+# Subscription usage limits ("You've hit your session limit" / "weekly limit",
+# code.claude.com/docs, checked 2026-09-28) do not clear within a run.
+_CLAUDE_LIMIT_MARKERS = ("session limit", "weekly limit", "usage limit", "rate limit")
+
+
+def _is_usage_limit(error: str | None) -> bool:
+    return bool(error) and any(m in error.lower() for m in _CLAUDE_LIMIT_MARKERS)
 
 
 async def _try_claude(system_prompt: str, user_prompt: str, tier: str) -> dict[str, Any] | None:
     """Claude via the local CLI when MARKETMIND_LLM=claude (docs/LLM_PROVIDER.md).
 
     Returns the result, or None to fall through to DeepSeek: provider not
-    selected, or the call failed (logged). After 3 failures in a row (e.g. the
-    subscription's usage limit) the rest of the run goes straight to DeepSeek.
+    selected, or the call failed (logged). After 3 failures in a row, or at once
+    on a subscription usage limit, the rest of the run goes straight to DeepSeek.
     """
     global _claude_failures
     from marketmind.gateway import claude_cli
@@ -427,6 +434,8 @@ async def _try_claude(system_prompt: str, user_prompt: str, tier: str) -> dict[s
     result = await claude_cli.call(system_prompt, user_prompt, tier)
     if result.get("error") or not result.get("content"):
         _claude_failures += 1
+        if _is_usage_limit(result.get("error")):      # retrying cannot help: switch now
+            _claude_failures = max(_claude_failures, CLAUDE_FAILURES_BEFORE_PAUSE)
         logger.warning("Claude call failed (%s); this call falls back to DeepSeek",
                        result.get("error") or "empty reply")
         if _claude_failures == CLAUDE_FAILURES_BEFORE_PAUSE:
