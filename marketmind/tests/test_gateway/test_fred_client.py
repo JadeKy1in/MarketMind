@@ -306,6 +306,36 @@ class TestDegradation:
             result = await get_fred_series("DGS10")
             assert result["error"] == "source_unavailable"
 
+    async def test_dot_then_numeric_takes_first_numeric(self):
+        """Holiday "." on the newest date: use the latest numeric value and its date."""
+        _clear_cache()
+        with patch(
+            "marketmind.gateway.fred_client._get_fred_key",
+            return_value="test_key",
+        ), patch.object(
+            httpx.AsyncClient, "get", new_callable=AsyncMock,
+        ) as mock_get:
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = lambda: None
+            mock_resp.json.return_value = {"observations": [
+                {"date": "2026-05-25", "value": "."},
+                {"date": "2026-05-22", "value": "4.41"},
+                {"date": "2026-05-21", "value": "4.39"},
+            ]}
+            mock_get.return_value = mock_resp
+
+            result = await get_fred_series("DGS10")
+            assert "limit=5" in mock_get.call_args.args[0]
+            assert result["value"] == 4.41
+            assert result["date"] == "2026-05-22"
+
+
+def test_tedrate_removed_everywhere():
+    """TEDRATE was discontinued in 2022: not in the catalog or any shadow's series list."""
+    from marketmind.gateway.fred_client import _FRED_SERIES, SHADOW_FRED_SERIES
+    assert "TEDRATE" not in _FRED_SERIES
+    assert all("TEDRATE" not in keys for keys in SHADOW_FRED_SERIES.values())
+
 
 # ---------------------------------------------------------------------------
 # 6. HTTP error handling

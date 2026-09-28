@@ -80,3 +80,15 @@ def is_shadow_tradable(ticker: str) -> bool:
     """Shadows may trade anything with a real market except a bare index (docs/S3_DESIGN §7)."""
     t = (ticker or "").strip().upper()
     return bool(t) and market_for(t).asset_class != "index"
+
+
+def yahoo_symbol(ticker: str) -> str:
+    """Symbol to send to Yahoo/yfinance. HK codes use Yahoo's 4-digit form.
+
+    Yahoo 404s on 5-digit HK codes ("09866.HK") but serves "9866.HK"; "0700.HK" stays.
+    Only the request symbol changes: ledgers keep the ticker as written.
+    """
+    t = (ticker or "").strip()
+    if t.upper().endswith(".HK") and t[:-3].isdigit():
+        return (t[:-3].lstrip("0") or "0").zfill(4) + ".HK"
+    return t

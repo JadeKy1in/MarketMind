@@ -29,16 +29,44 @@ class Source:
     status: SourceStatus = SourceStatus.UNTESTED
     last_checked: str | None = None
     consecutive_failures: int = 0
+    # True when 0 items is a normal outcome (anomaly-only or quiet-day sources), so the
+    # scout report does not flag an empty result as "URL may be broken".
+    zero_is_normal: bool = False
+    # Reason of the most recent failed fetch (None after a successful one).
+    last_error: str | None = None
 
     @property
     def is_available(self) -> bool:
         return self.status in (SourceStatus.WORKING, SourceStatus.DEGRADED)
 
 
+# Public RSSHub mirrors, tried in this order when a source URL is on one of them
+# (all returned 200 with 50 items on 2026-09-28; rssforever times out intermittently).
+RSSHUB_MIRRORS: tuple[str, ...] = (
+    "https://rsshub.rssforever.com",
+    "https://rss.owo.nz",
+    "https://rsshub.ktachibana.party",
+    "https://hub.slarker.me",
+)
+
+
+def rss_candidate_urls(source: Source) -> list[str]:
+    """URLs to try for `source`: the configured one, then the same route on other RSSHub mirrors."""
+    url = source.url or ""
+    for base in RSSHUB_MIRRORS:
+        if url.startswith(base + "/"):
+            route = url[len(base):]
+            return [url] + [m + route for m in RSSHUB_MIRRORS if m != base]
+    return [url]
+
+
 SOURCES: list[Source] = [
     # ── US / Americas ──────────────────────────────────────────────
     Source("CNBC Top News", SourceTier.PRIMARY, "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114", "rss", 0.88, 2.0),
-    Source("Yahoo Finance", SourceTier.PRIMARY, "https://finance.yahoo.com/news/rssindex", "rss", 0.85, 2.0, status=SourceStatus.DEGRADED),
+    # finance.yahoo.com/news/rssindex went stale (newest item 5 days old, 2026-09-28);
+    # the S&P 500 headline feed is fresh.
+    Source("Yahoo Finance", SourceTier.PRIMARY,
+           "https://feeds.finance.yahoo.com/rss/2.0/headline?s=^GSPC&region=US&lang=en-US", "rss", 0.85, 2.0),
     Source("Bloomberg Markets", SourceTier.PRIMARY, "https://feeds.bloomberg.com/markets/news.rss", "rss", 0.90, 2.0),
     Source("MarketWatch", SourceTier.RELIABLE, "https://feeds.content.dowjones.io/public/rss/mw_topstories", "rss", 0.80, 2.0),
     Source("NYT Business", SourceTier.PRIMARY, "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml", "rss", 0.90, 2.0),
@@ -79,23 +107,23 @@ SOURCES: list[Source] = [
            "https://www.bls.gov/schedule/news_release/bls.ics", "bls_calendar", 0.97, 1.0),
     # Positioning / inventory / volatility → pipeline/sources_positioning.py
     # Cboe data: 15-min delayed, personal non-commercial use only.
-    Source("CFTC Commitments of Traders", SourceTier.PRIMARY, "https://publicreporting.cftc.gov/resource/6dca-aqww.json", "cftc_cot", 0.95, 1.0),
-    Source("EIA Weekly Petroleum Status", SourceTier.PRIMARY, "https://ir.eia.gov/wpsr/table1.csv", "eia_petroleum", 0.97, 1.0),
-    Source("EIA Natural Gas Storage", SourceTier.PRIMARY, "https://ir.eia.gov/ngs/wngsr.json", "eia_natgas", 0.97, 1.0),
-    Source("Cboe VIX History", SourceTier.PRIMARY, "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv", "cboe_vix", 0.95, 1.0),
-    Source("Cboe SPX Options (delayed)", SourceTier.RELIABLE, "https://cdn.cboe.com/api/global/delayed_quotes/options/_SPX.json", "cboe_spx_options", 0.90, 0.5),
-    Source("Deribit DVOL", SourceTier.RELIABLE, "https://www.deribit.com/api/v2/public/get_volatility_index_data", "deribit_dvol", 0.85, 1.0),
-    Source("Bybit Perp Funding/OI", SourceTier.RELIABLE, "https://api.bybit.com/v5/market/tickers", "bybit_derivs", 0.80, 1.0),
-    Source("Hyperliquid Perp Funding/OI", SourceTier.FRAGILE, "https://api.hyperliquid.xyz/info", "hyperliquid_derivs", 0.75, 1.0),
+    Source("CFTC Commitments of Traders", SourceTier.PRIMARY, "https://publicreporting.cftc.gov/resource/6dca-aqww.json", "cftc_cot", 0.95, 1.0, zero_is_normal=True),
+    Source("EIA Weekly Petroleum Status", SourceTier.PRIMARY, "https://ir.eia.gov/wpsr/table1.csv", "eia_petroleum", 0.97, 1.0, zero_is_normal=True),
+    Source("EIA Natural Gas Storage", SourceTier.PRIMARY, "https://ir.eia.gov/ngs/wngsr.json", "eia_natgas", 0.97, 1.0, zero_is_normal=True),
+    Source("Cboe VIX History", SourceTier.PRIMARY, "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv", "cboe_vix", 0.95, 1.0, zero_is_normal=True),
+    Source("Cboe SPX Options (delayed)", SourceTier.RELIABLE, "https://cdn.cboe.com/api/global/delayed_quotes/options/_SPX.json", "cboe_spx_options", 0.90, 0.5, zero_is_normal=True),
+    Source("Deribit DVOL", SourceTier.RELIABLE, "https://www.deribit.com/api/v2/public/get_volatility_index_data", "deribit_dvol", 0.85, 1.0, zero_is_normal=True),
+    Source("Bybit Perp Funding/OI", SourceTier.RELIABLE, "https://api.bybit.com/v5/market/tickers", "bybit_derivs", 0.80, 1.0, zero_is_normal=True),
+    Source("Hyperliquid Perp Funding/OI", SourceTier.FRAGILE, "https://api.hyperliquid.xyz/info", "hyperliquid_derivs", 0.75, 1.0, zero_is_normal=True),
     # Attention / alternative data → pipeline/sources_alternative.py (anomalies only)
     Source("Wikipedia Attention Spikes", SourceTier.BEST_EFFORT,
            "https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/en.wikipedia/all-access/user/",
-           "wiki_pageviews", 0.60, 1.0),
+           "wiki_pageviews", 0.60, 1.0, zero_is_normal=True),
     Source("GDELT Events (15-min)", SourceTier.BEST_EFFORT,
-           "http://data.gdeltproject.org/gdeltv2/lastupdate.txt", "gdelt_events", 0.50, 1.0),
+           "http://data.gdeltproject.org/gdeltv2/lastupdate.txt", "gdelt_events", 0.50, 1.0, zero_is_normal=True),
     Source("IMF PortWatch Chokepoints", SourceTier.PRIMARY,
            "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/Daily_Chokepoints_Data/FeatureServer/0/query",
-           "portwatch_chokepoints", 0.85, 1.0),
+           "portwatch_chokepoints", 0.85, 1.0, zero_is_normal=True),
     # FDA approvals, recalls, enforcement: first-hand biotech/pharma catalysts.
     Source("FDA Press", SourceTier.PRIMARY,
            "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-releases/rss.xml",
@@ -113,12 +141,9 @@ SOURCES: list[Source] = [
     # ── China / Greater China ──────────────────────────────────────
     Source("SCMP Business", SourceTier.RELIABLE, "https://www.scmp.com/rss/4/feed/", "rss", 0.80, 2.0),
     Source("China Money Network", SourceTier.RELIABLE, "https://www.chinamoneynetwork.com/feed/", "rss", 0.72, 1.0),  # Replaces Caixin — free English China finance/VC news RSS
-    # DEAD 2026-09-27: feed still returns 200 but newest entry is from 2018; the business/china
-    # variants (businessrss.xml, chinarss.xml, english.news.cn mirrors) are equally frozen (2017-18).
-    Source("Xinhua Finance", SourceTier.RELIABLE, "http://www.xinhuanet.com/english/rss/worldrss.xml", "rss", 0.72, 2.0,
-           status=SourceStatus.DEAD),
     # Via public RSSHub mirror (rsshub.app itself is Cloudflare-blocked). Content is first-hand
     # Chinese-language financial news; FRAGILE because the mirror is volunteer-run with no SLA.
+    # On failure scout retries the same route on the other RSSHUB_MIRRORS.
     Source("Caixin Latest (via RSSHub)", SourceTier.FRAGILE, "https://rsshub.rssforever.com/caixin/latest", "rss", 0.70, 1.0),
     Source("Yicai Brief (via RSSHub)", SourceTier.FRAGILE, "https://rsshub.rssforever.com/yicai/brief", "rss", 0.65, 1.0),
     # Primary company disclosures (unofficial JSON backends of the public sites; one request
@@ -140,9 +165,9 @@ SOURCES: list[Source] = [
     Source("FT World News", SourceTier.PRIMARY, "https://www.ft.com/world?format=rss", "rss", 0.90, 2.0),
     Source("ECB Press", SourceTier.PRIMARY, "https://www.ecb.europa.eu/rss/press.html", "rss", 0.95, 2.0),
     Source("DW Business", SourceTier.RELIABLE, "http://rss.dw.de/rdf/rss-en-bus", "rss", 0.80, 2.0),
-    # DEGRADED 2026-09-27: Fastly edge returns 406 in time windows regardless of User-Agent/Accept
-    # (8/8 406 with both bot and browser headers in one window, 12/12 200 minutes later).
-    # Header changes do not fix it; stays fetched, scout's failure counter handles bad windows.
+    # DEGRADED 2026-09-27: Fastly edge returns 406 in some windows; on 2026-09-28 it alternated
+    # 200/406 by User-Agent. Scout retries a 406 once with browser-style headers; the failure
+    # counter handles windows where both header sets are refused.
     Source("Euronews Economy", SourceTier.RELIABLE, "https://www.euronews.com/rss?format=mrss&level=theme&name=business", "rss", 0.75, 1.0,
            status=SourceStatus.DEGRADED),
 

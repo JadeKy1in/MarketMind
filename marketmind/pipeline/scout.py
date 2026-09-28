@@ -16,7 +16,9 @@ from marketmind.notification.monitor_decorator import monitor
 from marketmind.notification.alert_schema import ImpactScope
 
 from marketmind.config.settings import MarketMindConfig
-from marketmind.config.source_authority import Source, SourceTier, SourceStatus, get_working_sources, SOURCES
+from marketmind.config.source_authority import (
+    Source, SourceTier, SourceStatus, get_working_sources, SOURCES, rss_candidate_urls,
+)
 
 # ── Z1 content analysis extracted to pipeline/scout_content.py ──────────
 from marketmind.pipeline.scout_content import (
@@ -120,8 +122,7 @@ async def _fetch_sec_edgar() -> list[NewsItem]:
                         "count": "20", "start": "0"},
             )
             if resp.status_code != 200:
-                logger.warning("SEC EDGAR returned %d: %s", resp.status_code, resp.text[:200])
-                return items
+                raise RuntimeError(f"SEC EDGAR 8-K returned HTTP {resp.status_code}")
             feed = feedparser.parse(resp.text)
             for entry in feed.entries[:20]:
                 title = entry.get("title", "8-K Filing").strip()
@@ -142,6 +143,7 @@ async def _fetch_sec_edgar() -> list[NewsItem]:
                 ))
     except Exception as e:
         logger.warning("SEC EDGAR API fetch failed: %s", e)
+        raise  # scout.fetch_source records the failure on the source
     return items
 
 # ── Phase G Layer 4: Insider sources → pipeline/insider_sources.py
@@ -204,7 +206,9 @@ async def _fetch_api_source(source: Source, config: MarketMindConfig) -> list[Ne
         api_key = config.gnews_key
 
     if not api_key:
-        return items
+        # Raise instead of returning []: the scout report then shows the source as failed
+        # with this reason rather than leaving it UNTESTED.
+        raise RuntimeError(f"{source.name} API key not configured")
     url = source.url.replace("{API_KEY}", api_key)
     client_kwargs = {"timeout": 30.0, "follow_redirects": True}
     if config.proxy_url:
@@ -235,66 +239,95 @@ async def _fetch_api_source(source: Source, config: MarketMindConfig) -> list[Ne
     return items
 
 
+# Two header sets for RSS: some CDNs (Euronews/Fastly, 2026-09-28) answer 406 to one
+# and 200 to the other, so a 406 is retried once with the alternate set.
+_RSS_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; MarketMind/0.1; Financial Research Bot)",
+    "Accept": "application/rss+xml, application/xml, text/xml, */*",
+}
+_RSS_ALT_HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/128.0 Safari/537.36"),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+}
+# Per-request timeout when a source has mirrors, so trying all of them stays well
+# under the scout timeout.
+RSS_MIRROR_TIMEOUT = 15.0
+
+
+async def _get_rss(client: httpx.AsyncClient, url: str, timeout: float | None = None) -> httpx.Response:
+    kwargs = {"timeout": timeout} if timeout else {}
+    resp = await client.get(url, headers=_RSS_HEADERS, **kwargs)
+    if resp.status_code == 406:
+        logger.info("RSS %s returned 406; retrying once with alternate headers", url)
+        resp = await client.get(url, headers=_RSS_ALT_HEADERS, **kwargs)
+    resp.raise_for_status()
+    return resp
+
+
+async def _fetch_rss_response(client: httpx.AsyncClient, source: Source) -> httpx.Response:
+    """GET the feed, falling back to the other RSSHub mirrors for RSSHub-hosted routes."""
+    urls = rss_candidate_urls(source)
+    timeout = RSS_MIRROR_TIMEOUT if len(urls) > 1 else None
+    last_exc: Exception | None = None
+    for url in urls:
+        try:
+            return await _get_rss(client, url, timeout)
+        except httpx.HTTPError as exc:
+            last_exc = exc
+            if len(urls) > 1:
+                logger.warning("Scout RSS mirror failed for '%s' (%s): %s", source.name, url,
+                               type(exc).__name__)
+    raise last_exc  # type: ignore[misc]
+
+
+def _mark_ok(source: Source) -> None:
+    source.status = SourceStatus.WORKING
+    source.consecutive_failures = 0
+    source.last_error = None
+
+
+# feed_type -> no-arg fetcher for sources whose fetchers build their own requests.
+# They raise on failure; an empty list after a successful request is a quiet day.
+_SELF_CONTAINED_FETCHERS = {
+    "congress_api": lambda: fetch_congress_trades(),
+    "sec_form4": lambda: fetch_form4_insider(),
+    "sec_13f": lambda: fetch_13f_holdings(),
+    "sec_api": lambda: _fetch_sec_edgar(),
+}
+
+
 async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsItem]:
     """Fetch a single source. Track A (RSS/API) → Track B (HTML) fallback."""
     items: list[NewsItem] = []
     try:
         # Phase G Layer 4: Insider / Smart Money sources (pipeline/insider_sources.py)
-        if source.feed_type == "congress_api":
-            items = await fetch_congress_trades()
-            if items:
-                source.status = SourceStatus.WORKING
-                source.consecutive_failures = 0
-            return items
-        if source.feed_type == "sec_form4":
-            items = await fetch_form4_insider()
-            if items:
-                source.status = SourceStatus.WORKING
-                source.consecutive_failures = 0
-            return items
-        if source.feed_type == "sec_13f":
-            items = await fetch_13f_holdings()
-            if items:
-                source.status = SourceStatus.WORKING
-                source.consecutive_failures = 0
-            return items
-        if source.feed_type == "sec_api":
-            items = await _fetch_sec_edgar()
-            if items:
-                source.status = SourceStatus.WORKING
-                source.consecutive_failures = 0
+        if source.feed_type in _SELF_CONTAINED_FETCHERS:
+            items = await _SELF_CONTAINED_FETCHERS[source.feed_type]()
+            _mark_ok(source)
+            source.last_checked = datetime.now(timezone.utc).isoformat()
             return items
         if source.feed_type in DATA_FETCHERS:
             items = await DATA_FETCHERS[source.feed_type](source, config)
-            source.status = SourceStatus.WORKING
-            source.consecutive_failures = 0
+            _mark_ok(source)
             source.last_checked = datetime.now(timezone.utc).isoformat()
             return items
         if source.name == "ApeWisdom":
             items = await fetch_apewisdom()
             if items:
-                source.status = SourceStatus.WORKING
-                source.consecutive_failures = 0
+                _mark_ok(source)
             return items
         if source.feed_type == "api" and source.url:
             items = await _fetch_api_source(source, config)
-            if items:
-                source.status = SourceStatus.WORKING
-                source.consecutive_failures = 0
+            _mark_ok(source)
+            source.last_checked = datetime.now(timezone.utc).isoformat()
             return items
         if source.feed_type == "rss" and source.url:
             client_kwargs = {"timeout": 30.0, "follow_redirects": True}
             if config.proxy_url:
                 client_kwargs["proxy"] = config.proxy_url
             async with httpx.AsyncClient(**client_kwargs) as client:
-                resp = await client.get(
-                    source.url,
-                    headers={
-                        "User-Agent": "Mozilla/5.0 (compatible; MarketMind/0.1; Financial Research Bot)",
-                        "Accept": "application/rss+xml, application/xml, text/xml, */*",
-                    }
-                )
-                resp.raise_for_status()
+                resp = await _fetch_rss_response(client, source)
                 feed = feedparser.parse(resp.text)
                 # Tiered article cap: PRIMARY=20, RELIABLE=10, FRAGILE/BEST_EFFORT=5
                 max_per = 20 if source.tier == SourceTier.PRIMARY else (10 if source.tier == SourceTier.RELIABLE else 5)
@@ -304,12 +337,12 @@ async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsIte
                     except Exception as e:
                         logger.warning("Scout source fetch degraded: %s — %s", source.name, e)
                         continue
-            source.status = SourceStatus.WORKING
-            source.consecutive_failures = 0
+            _mark_ok(source)
         elif source.feed_type == "html":
             source.status = SourceStatus.DEGRADED  # HTML scraping not yet implemented
     except Exception as e:
         logger.warning("Scout source fetch failed for '%s': %s", source.name, e)
+        source.last_error = f"{type(e).__name__}: {e}"[:200]
         source.consecutive_failures += 1
         if source.consecutive_failures >= 3:
             source.status = SourceStatus.DEAD
@@ -375,6 +408,16 @@ def _load_manual_data(items: list) -> None:
 SCOUT_CONCURRENCY = 12
 
 
+def source_issue(source: Source, count: int) -> str | None:
+    """Report line for a source that needs attention after a fetch, else None."""
+    if source.status in (SourceStatus.DEGRADED, SourceStatus.DEAD):
+        reason = f" ({source.last_error})" if source.last_error else ""
+        return f"{source.name}: {source.status.name}{reason}"
+    if count == 0 and source.status == SourceStatus.WORKING and not source.zero_is_normal:
+        return f"{source.name}: 0 articles (URL may be broken)"
+    return None
+
+
 @monitor(source="scout", impact=ImpactScope.INFRASTRUCTURE)
 async def fetch_all_sources(config: MarketMindConfig, use_cross_run_cache: bool = True) -> list[NewsItem]:
     """Fetch from all working sources, deduplicate, return sorted by priority_score descending.
@@ -412,10 +455,9 @@ async def fetch_all_sources(config: MarketMindConfig, use_cross_run_cache: bool 
         before = len(all_items)
         all_items.extend(items)
         source_counts[source.name] = len(all_items) - before
-        if source.status in (SourceStatus.DEGRADED, SourceStatus.DEAD):
-            source_issues.append(f"{source.name}: {source.status.value}")
-        elif source_counts[source.name] == 0 and source.status == SourceStatus.WORKING:
-            source_issues.append(f"{source.name}: 0 articles (URL may be broken)")
+        issue = source_issue(source, source_counts[source.name])
+        if issue:
+            source_issues.append(issue)
 
     # Z0 instrumentation: count API vs RSS articles before dedup
     rss_count = sum(c for name, c in source_counts.items() if name not in ("NewsAPI", "GNews"))

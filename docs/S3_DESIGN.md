@@ -144,7 +144,7 @@
   - 单边成本：美股 5 bp，海外股票 10 bp，期货和外汇 2 bp，加密货币 50 bp。
 - **行情备选**（按顺序尝试，取不到就暂不结算，绝不估算）：
   - 美股：Alpaca → Yahoo → Nasdaq；
-  - 港股、A 股：Yahoo → 东方财富 → 腾讯；
+  - 港股、A 股：Yahoo → 腾讯 → 东方财富（2026-09-28 东方财富各主机均报 RemoteProtocolError，改为腾讯优先）；港股发给 Yahoo 时用 4 位代码（09866.HK → 9866.HK），账本仍记原代码；
   - 期货、外汇、全球指数：Yahoo → 东方财富；
   - 日股、欧股：Yahoo → Twelve Data；
   - 加密货币：Yahoo → Binance → Bybit。

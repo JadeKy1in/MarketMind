@@ -375,8 +375,10 @@ async def test_empty_market_data(monkeypatch):
     monkeypatch.setattr(ft, "THRESHOLD_LIBRARY", [threshold])
     try:
         report = await scan_fragility({})
-        assert len(report.alerts) == 0 or all(not a.crossed for a in report.alerts)
-        assert report.overall_fragility_score == 0.0
+        assert len(report.alerts) == 0
+        # Nothing evaluated: score is None ("not evaluated"), never 0.0 ("no fragility").
+        assert report.overall_fragility_score is None
+        assert "not evaluated" in report.summary
     finally:
         monkeypatch.setattr(ft, "THRESHOLD_LIBRARY", original_library)
 

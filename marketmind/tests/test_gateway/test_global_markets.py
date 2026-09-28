@@ -206,5 +206,5 @@ async def test_twelvedata_is_last_after_other_fallbacks(monkeypatch):
     monkeypatch.setattr(gq, "from_twelvedata", _src("twelvedata", ok=True))
     hist = await ph.get_price_history("SAP.DE")
     assert hist.source == "twelvedata"
-    assert order == ["yahoo", "eastmoney", "tencent", "twelvedata"]
+    assert order == ["yahoo", "tencent", "eastmoney", "twelvedata"]
     ph.clear_cache()

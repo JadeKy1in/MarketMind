@@ -54,7 +54,7 @@ def print_scout_report(sources: list, counts: dict[str, int], issues: list[str],
         elif s.status == SourceStatus.DEGRADED:
             flag = '[DEGRADED]'
         elif c == 0:
-            flag = '[EMPTY]'
+            flag = '[QUIET]' if getattr(s, 'zero_is_normal', False) else '[EMPTY]'
         else:
             flag = ''
         print(f"  [{tier}] {s.name}: {c}篇 {flag}".strip())

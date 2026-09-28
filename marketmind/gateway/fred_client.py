@@ -19,11 +19,15 @@ from typing import Any
 
 import httpx
 
+from marketmind.gateway.macro_data import first_numeric_observation
 from marketmind.integrity.input_guard import sanitize_for_llm_prompt
 
 logger = logging.getLogger("marketmind.gateway.fred_client")
 
 _FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
+# Newest observation can be "." (holiday / not yet published): request a few, sorted
+# newest first, and keep the first numeric one together with its own date.
+_FRED_OBS_LIMIT = 5
 
 # ---------------------------------------------------------------------------
 # Series catalog — ~30 core macro/finance series grouped by domain
@@ -76,7 +80,7 @@ _FRED_SERIES: dict[str, tuple[str, str, str, str]] = {
     # ── Money Market (Vol Surfer, Yield Whisperer) ──
     "SOFR":    ("SOFR",    "Secured Overnight Financing Rate",  "daily",  "%"),
     "DFF":     ("DFF",     "Federal Funds Effective Rate",      "daily",  "%"),
-    "TEDRATE": ("TEDRATE", "TED Spread (3M LIBOR - 3M T-Bill, discontinued)", "daily", "%"),
+    # TEDRATE removed 2026-09-28: discontinued with LIBOR (last observation 2022-01-21).
     # ── Market Valuation (Crash Hunter, Cycle Reader) ──
     "SP500":   ("SP500",   "S&P 500 Index Level",              "daily",  "index"),
     # Note: Wilshire 5000 (WILL5000PR) is not accessible via free FRED API.
@@ -124,7 +128,7 @@ SHADOW_FRED_SERIES: dict[str, list[str]] = {
     "momentum:sector:rotation_engine": ["T10Y2Y", "T10Y3M"],
     "contrarian:consensus:fade_master":["NFCI", "UMCSENT"],
     "contrarian:range_bound:sideways_scout": [],
-    "contrarian:panic:vol_surfer":     ["BAMLC0A0CM", "BAMLH0A0HYM2", "SOFR", "DFF", "TEDRATE"],
+    "contrarian:panic:vol_surfer":     ["BAMLC0A0CM", "BAMLH0A0HYM2", "SOFR", "DFF"],
     "contrarian:crash:hunter":         ["SP500", "BAMLC0A0CM", "BAMLH0A0HYM2"],
 }
 
@@ -255,7 +259,7 @@ async def _fetch_single(series_key: str) -> dict:
         f"&api_key={fred_key}"
         f"&file_type=json"
         f"&sort_order=desc"
-        f"&limit=1"
+        f"&limit={_FRED_OBS_LIMIT}"
     )
 
     # FRED often takes ~15s to answer from the owner's network (measured 2026-09-28);
@@ -265,20 +269,18 @@ async def _fetch_single(series_key: str) -> dict:
         resp = await client.get(url)
         resp.raise_for_status()
         data = resp.json()
-        observations = data.get("observations", [])
-
-        if not observations or observations[0].get("value") in (None, "."):
+        obs = first_numeric_observation(data.get("observations", []))
+        if obs is None:
             return _sanitize({
                 "error": "source_unavailable",
                 "detail": f"No data for {series_key} ({series_id})",
             })
 
-        obs = observations[0]
         return _sanitize({
             "series_key": series_key,
             "series_id": series_id,
             "label": label,
-            "value": _parse_float(obs.get("value")),
+            "value": float(obs["value"]),
             "date": obs.get("date", ""),
             "source": "fred",
             "cadence": cadence,

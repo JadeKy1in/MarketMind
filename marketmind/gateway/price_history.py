@@ -100,10 +100,13 @@ async def get_price_history(ticker: str, years: int = 5) -> PriceHistory | None:
         hist = await _from_nasdaq(ticker, years)
     elif hist is None:
         # non-US markets, futures, FX, indices (docs/S3_DESIGN.md §7)
+        # Tencent first: it covers HK/CN, and Eastmoney hosts failed with
+        # RemoteProtocolError on 2026-09-28. Eastmoney stays for the futures, FX and
+        # indices only it maps (from_tencent returns None for those).
         from marketmind.gateway.global_quotes import from_eastmoney, from_tencent
-        hist = await from_eastmoney(ticker, years)
+        hist = await from_tencent(ticker, years)
         if hist is None:
-            hist = await from_tencent(ticker, years)
+            hist = await from_eastmoney(ticker, years)
     if hist is None:
         # last resort for every market; it declines what its plan does not cover
         from marketmind.gateway.global_quotes import from_twelvedata
@@ -137,7 +140,8 @@ async def _from_yfinance(ticker: str, years: int) -> PriceHistory | None:
 
 
 def _yf_sync(ticker: str, years: int) -> PriceHistory | None:
-    df = yf.Ticker(ticker).history(period=f"{years}y", interval="1d", auto_adjust=True)
+    from marketmind.markets import yahoo_symbol
+    df = yf.Ticker(yahoo_symbol(ticker)).history(period=f"{years}y", interval="1d", auto_adjust=True)
     if df is None or df.empty:
         return None
     df = df.dropna(subset=["Close"])
