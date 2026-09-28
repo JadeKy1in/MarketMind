@@ -115,13 +115,19 @@ def test_arena_pairs_shadow_with_its_random_benchmark(env):
     assert blocked["score"] is None
 
 
-def test_promotion_log_is_honest_about_s7(env):
+def test_promotion_log_reads_ladder_state(env):
     from marketmind.api import whitebox
-    d = whitebox.get_promotion_log()
-    assert d["review_implemented"] is False and d["events"] == []
+    from marketmind.promotion.runner import run_promotion
+    store, _, tmp = env
+    d = whitebox.get_promotion_log()                 # before any review
+    assert d["reviewed_on"] is None and d["events"] == [] and d["thresholds"]
     row = next(r for r in d["rows"] if r["shadow_id"] == SHADOW)
-    assert row["stage"] == "见习" and row["active_days"] == 1 and row["probation_days"] == 60
+    assert row["stage"] == "见习" and row["probation_days"] == 60
+    run_promotion(store, today="2026-09-28", data_dir=tmp)
+    d = whitebox.get_promotion_log()
+    assert d["reviewed_on"] == "2026-09-28"
     assert any(r["stage"] == "暂缓" for r in d["rows"])
+    assert json.loads((tmp / "advisors.json").read_text("utf-8"))["advisors"] == []
 
 
 def test_health_and_token_usage(env):

@@ -655,7 +655,7 @@ async def promotion_step(config) -> None:
     store = _ledger_store(config)
     try:
         summary = run_promotion(store, data_dir=Path(config.data_dir))
-        print(f"  [promotion] {summary.get('stage_counts')}")
+        print(f"  [promotion] stages {summary.get('stages')}; advisors {len(summary.get('advisors', []))}")
     except Exception:
         logger.warning("promotion review failed", exc_info=True)
         print("  [promotion] failed (see log)")

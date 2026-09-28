@@ -186,10 +186,11 @@ async function loadArena(){
 async function loadPromo(){
   const d=await j("/api/wb/promotion");
   $("#s-promo").innerHTML=`<div class="card"><h2>晋升淘汰日志</h2>
-  <div class="mut" style="margin-bottom:8px">${d.review_implemented?"":"晋升评审（S7）尚未实现：所有影子都在见习期，需满 60 个交易日后才评审。这里只显示进度，不做排名。"}</div>
-  <table><tr><th>影子</th><th>阶段</th><th class="num">见习进度</th><th class="num">已结算</th><th>首条记录</th><th>说明</th></tr>
-  ${(d.rows||[]).map(r=>`<tr><td>${esc(r.display_name)}</td><td>${esc(r.stage)}</td><td class="num">${r.active_days}/${r.probation_days}</td><td class="num">${r.settled}</td><td>${esc(r.first_date||"—")}</td><td class="mut">${esc(r.note)}</td></tr>`).join("")}</table>
-  <h3>事件</h3>${(d.events||[]).length?"":'<div class="empty">暂无晋升或淘汰事件</div>'}</div>`;
+  <div class="mut" style="margin-bottom:8px">最近评审：${esc(d.reviewed_on||"尚未评审（每日运行中执行）")}。见习 → 正式需满 60 个交易日且通过全部门槛；排名、Tier 只在正式影子之间计算（数据不足前不评等级）。</div>
+  <table><tr><th>影子</th><th>阶段</th><th class="num">有记录交易日</th><th class="num">已结算</th><th class="num">N_eff / MinTRL</th><th class="num">综合分</th><th>Tier</th><th>说明</th></tr>
+  ${(d.rows||[]).map(r=>`<tr><td>${esc(r.display_name)}</td><td>${esc(r.stage)}</td><td class="num">${r.active_days}/${r.probation_days}</td><td class="num">${r.settled}</td><td class="num">${r.n_eff==null?"—":num(r.n_eff,1)} / ${r.min_trl==null?"—":num(r.min_trl,1)}</td><td class="num">${r.score==null?"—":num(r.score,3)}</td><td>${r.tier?"Tier"+r.tier:"—"}</td><td class="mut">${esc(r.note)}</td></tr>`).join("")}</table>
+  <h3>事件</h3>${(d.events||[]).length?`<table><tr><th>日期</th><th>事件</th><th>影子</th><th>变化</th><th>依据</th></tr>${d.events.map(e=>`<tr><td>${esc(e.date)}</td><td>${esc(e.type)}</td><td>${esc(e.shadow_id)}</td><td>${esc(e.from)} → ${esc(e.to)}</td><td class="mut">${esc(JSON.stringify(e.detail||{}))}</td></tr>`).join("")}</table>`:'<div class="empty">暂无晋升、暂停或挑战事件</div>'}
+  <h3>门槛（promotion/config.py）</h3><pre>${esc(JSON.stringify(d.thresholds||{},null,2))}</pre></div>`;
 }
 
 // ── evidence (S5) ──

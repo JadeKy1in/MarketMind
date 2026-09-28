@@ -145,21 +145,44 @@ def get_arena() -> dict:
             "other_sources": others}
 
 
+STAGE_CN = {"probation": "见习", "formal": "正式", "advisor": "顾问", "paused": "暂停",
+            "blocked": "暂缓"}
+
+
 def get_promotion_log() -> dict:
-    """S7 not built yet: every shadow is on probation; show progress honestly."""
+    """Promotion ladder state written by marketmind/promotion (docs/S7_DESIGN.md)."""
+    from marketmind.promotion import config as pconf
+    root = data_dir() / "promotion"
+    state_path = root / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else None
+    events = []
+    ev_path = root / "events.jsonl"
+    if ev_path.exists():
+        for line in ev_path.read_text(encoding="utf-8").splitlines()[-200:]:
+            try:
+                events.append(json.loads(line))
+            except ValueError:
+                continue
+    events.reverse()
     arena = get_arena()
+    recs = (state or {}).get("shadows", {})
     rows = []
     for r in arena["shadows"]:
+        rec = recs.get(r["shadow_id"], {})
+        m = rec.get("metrics") or {}
         s = r["score"] or {}
-        if r["roster_status"] != "active":
-            stage, note = "暂缓", r["notes"] or r["roster_status"]
-        else:
-            stage, note = "见习", "未评审（晋升评审在 S7 实现）"
+        stage = rec.get("stage") or ("probation" if r["roster_status"] == "active" else "blocked")
         rows.append({"shadow_id": r["shadow_id"], "display_name": r["display_name"],
-                     "stage": stage, "active_days": s.get("active_days", 0),
+                     "stage": STAGE_CN.get(stage, stage), "stage_code": stage,
+                     "active_days": m.get("record_days", s.get("active_days", 0)),
                      "probation_days": PROBATION_DAYS, "settled": s.get("settled", 0),
-                     "first_date": s.get("first_date"), "note": note})
-    return {"review_implemented": False, "rows": rows, "events": []}
+                     "n_eff": m.get("n_eff"), "min_trl": m.get("min_trl"),
+                     "score": rec.get("score"), "tier": rec.get("tier"),
+                     "first_date": s.get("first_date"),
+                     "note": r["notes"] if stage == "blocked" else ""})
+    return {"review_implemented": True, "reviewed_on": (state or {}).get("updated_at"),
+            "pbo": (state or {}).get("pbo"), "rows": rows, "events": events[:100],
+            "thresholds": pconf.thresholds()}
 
 
 # ── health ──────────────────────────────────────────────────────────────────
