@@ -4,8 +4,9 @@ A trial runs a rewritten methodology for a long-term shadow side by side with
 the original for TRIAL_BARS trading days (source_id trial:<id>). When every
 record has settled, both sides' daily P&L (booked on the exit date, / $10,000
 notional, as in the promotion ladder) is differenced day by day and tested
-one-sided with a HAC (Newey-West) t-test, lag = parent's median hold - 1 (>= 1),
-i.e. a Diebold-Mariano test. Trials decided in the same review form one family:
+one-sided with a HAC (Newey-West) t-test, i.e. a Diebold-Mariano test, with
+fixed-b p-values and a bandwidth of half the sample: lag = max(parent's median
+hold - 1, pairs // 2 - 1) (owner decision 2026-09-28; see hac_bandwidth). Trials decided in the same review form one family:
 Holm-adjusted p <= ALPHA passes. Wilcoxon is reported only as a robustness
 statistic. A passing trial only becomes "passed"; the owner must approve it
 before the prompt file changes (SPEC L1).
@@ -168,6 +169,16 @@ async def propose(parent_id: str, kind: str, note: str, *, store=None, call=_cal
     return trial
 
 
+def hac_bandwidth(overlap_lag: int, n: int) -> int:
+    """Newey-West lag for the trial test: at least the holding overlap, and at least
+    half the sample (fixed-b b ~ 0.5). Simulated at n=40 with overlapping fat-tailed
+    P&L (2026-09-28): true-null rejections at a nominal 5% were 5.7% / 6.7% / 10% / 15%
+    for holds of 1 / 5 / 10 / 20 days, against 6% / 12% / 16% / 25% with Student-t
+    and lag = hold - 1. Long holds leave too few independent periods in 40 days for
+    any HAC test to reach 5%."""
+    return max(int(overlap_lag), n // 2 - 1, 1)
+
+
 def roster_entries(folder: Path | None = None, today: str | None = None) -> list[RosterEntry]:
     """Variants that still decide today. After `ends` a trial only waits for its
     records to settle; its later decisions would not count, so it stops calling the LLM."""
@@ -263,12 +274,13 @@ def evaluate(store, *, today: str | None = None, folder: Path | None = None) -> 
         if not paired["done"] and not grace:
             continue
         diffs = paired["diffs"]
-        hac = hac_t_test(diffs, paired["lag"])
+        hac = hac_t_test(diffs, hac_bandwidth(paired["lag"], len(diffs)))
         ready.append((t, {
             "test": "hac_t", "aligned_by": "exit_date", "alpha": ALPHA,
             "pairs": len(diffs), "mean_diff": (sum(diffs) / len(diffs)) if diffs else None,
             "lag": hac["lag"], "parent_hold": paired["parent_hold"],
             "t_stat": hac["t"], "se": hac["se"], "p_value": hac["p_value"],
+            "inference": hac.get("inference"), "p_value_student": hac.get("p_value_student"),
             "wilcoxon_p": _wilcoxon_p(diffs),
             "first_day": paired["days"][0] if paired["days"] else None,
             "last_day": paired["days"][-1] if paired["days"] else None,

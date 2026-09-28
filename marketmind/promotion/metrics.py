@@ -311,15 +311,41 @@ def newey_west_variance(d, lag: int) -> float:
     return max(lrv, 0.0)
 
 
+FIXED_B_DRAWS = 20_000
+_fixed_b_cache: dict[tuple[int, int], np.ndarray] = {}
+
+
+def fixed_b_null(n: int, lag: int, draws: int = FIXED_B_DRAWS) -> np.ndarray:
+    """Sorted null draws of the Newey-West t statistic for sample size n and this lag.
+
+    Fixed-b inference (Kiefer & Vogelsang 2005): with the bandwidth a fixed share
+    b = (lag + 1) / n of the sample, the HAC t is not Student-t even under H0; its
+    limit depends on b only (pivotal, also under serial correlation). The draws use
+    iid N(0,1) series of the same n and lag, so the finite-sample distribution is
+    matched exactly for Gaussian data. Seeded, cached per (n, lag): reproducible.
+    Owner decision 2026-09-28, after a simulation showed the Student-t p-values
+    rejecting a true null 12-25% of the time at a nominal 5% (hold 5-20 days, n=40)."""
+    key = (int(n), int(lag))
+    if key not in _fixed_b_cache:
+        rng = np.random.default_rng(1_000_003 * key[0] + key[1])
+        x = rng.standard_normal((draws, n))
+        xc = x - x.mean(axis=1, keepdims=True)
+        lrv = (xc * xc).sum(axis=1) / n
+        for j in range(1, key[1] + 1):
+            lrv += 2.0 * (1.0 - j / (key[1] + 1)) * (xc[:, j:] * xc[:, :-j]).sum(axis=1) / n
+        t = x.mean(axis=1) / np.sqrt(np.maximum(lrv, 1e-300) / n)
+        _fixed_b_cache[key] = np.sort(t)
+    return _fixed_b_cache[key]
+
+
 def hac_t_test(d, lag: int) -> dict:
     """One-sided test of H0: E[d] <= 0 against E[d] > 0 with a HAC (Newey-West) standard
     error, i.e. the Diebold-Mariano (1995) statistic on a loss/P&L differential:
 
-        t = mean(d) / sqrt(LRV / n),  p = 1 - T_{n-1}(t)
+        t = mean(d) / sqrt(LRV / n),  p = share of fixed-b null draws >= t
 
-    Student-t with n - 1 degrees of freedom instead of the normal limit, as the usual
-    small-sample correction (Harvey, Leybourne & Newbold 1997). p is None when the
-    series has fewer than 2 points or no variation (not testable)."""
+    (`fixed_b_null`; `p_value_student` keeps the old Student-t n-1 value for reference).
+    p is None when the series has fewer than 2 points or no variation (not testable)."""
     d = np.asarray(d, dtype=float)
     n = d.size
     out = {"n": int(n), "lag": max(0, min(int(lag), n - 1)) if n else 0,
@@ -331,7 +357,10 @@ def hac_t_test(d, lag: int) -> dict:
         return out
     se = math.sqrt(lrv / n)
     t = float(d.mean()) / se
-    out.update(se=se, t=t, p_value=float(stats.t.sf(t, df=n - 1)))
+    null = fixed_b_null(n, out["lag"])
+    p = float((null.size - np.searchsorted(null, t, side="left")) / null.size)
+    out.update(se=se, t=t, p_value=max(p, 1.0 / null.size),
+               p_value_student=float(stats.t.sf(t, df=n - 1)), inference="fixed-b")
     return out
 
 

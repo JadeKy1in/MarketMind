@@ -89,8 +89,9 @@ def test_verdict_uses_hac_on_the_difference(env):
     t = trials.evaluate(store, today="2026-11-01")[0]
     r = t.result
     diffs = [(10 + 5 * ((-1) ** i)) / 10_000 for i in range(40)]
-    ref = M.hac_t_test(diffs, 4)
-    assert r["lag"] == 4 and r["p_value"] == pytest.approx(ref["p_value"])
+    ref = M.hac_t_test(diffs, 19)                       # max(hold 5 - 1, 40 // 2 - 1)
+    assert r["lag"] == 19 and r["p_value"] == pytest.approx(ref["p_value"])
+    assert r["inference"] == "fixed-b"
     assert r["t_stat"] == pytest.approx(ref["t"]) and r["aligned_by"] == "exit_date"
     assert t.status == "passed" and r["p_value"] < 0.05
 

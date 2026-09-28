@@ -24,7 +24,8 @@ def test_hac_t_hand_value():
     se = math.sqrt(1.5625 / 4)
     assert out["se"] == pytest.approx(se) and out["t"] == pytest.approx(2.5 / se)
     assert out["t"] == pytest.approx(4.0)
-    assert out["p_value"] == pytest.approx(stats.t.sf(4.0, df=3))
+    assert out["p_value_student"] == pytest.approx(stats.t.sf(4.0, df=3))
+    assert out["inference"] == "fixed-b" and out["p_value"] > out["p_value_student"]
     assert out["lag"] == 1 and out["n"] == 4
 
 
@@ -72,3 +73,12 @@ def test_holm_known_example():
     assert M.holm_adjust([0.03]) == [0.03]
     assert M.holm_adjust([]) == []
     assert M.holm_adjust([0.6, 0.9]) == pytest.approx([1.0, 1.0])
+
+
+def test_fixed_b_p_values_hold_their_size_under_the_null():
+    import numpy as np
+    rng = np.random.default_rng(3)
+    p = [M.hac_t_test(rng.standard_normal(40), 19)["p_value"] for _ in range(1500)]
+    rate = sum(x <= 0.05 for x in p) / len(p)
+    assert 0.03 <= rate <= 0.07
+    assert M.fixed_b_null(40, 19) is M.fixed_b_null(40, 19)      # cached, deterministic
