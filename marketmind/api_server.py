@@ -20,6 +20,13 @@ from marketmind.api.data_providers import add_log_entry  # noqa: E402
 
 
 if __name__ == "__main__":
+    # Started by Task Scheduler with pythonw (docs/AUTOMATION.md) there is no console:
+    # uvicorn's logging would fail on a missing stdout, so write to a log file instead.
+    if sys.stdout is None or sys.stderr is None:
+        import os as _os
+        _log_dir = Path(__file__).resolve().parent.parent / _os.getenv("MARKETMIND_DATA_DIR", "data") / "logs"
+        _log_dir.mkdir(parents=True, exist_ok=True)
+        sys.stdout = sys.stderr = open(_log_dir / "dashboard.log", "a", encoding="utf-8", buffering=1)
     import uvicorn
     from marketmind.api.routes import app
 

@@ -34,14 +34,14 @@ $runSettings = New-ScheduledTaskSettingsSet -WakeToRun -StartWhenAvailable `
 # Daily pre-open run
 $daylight = LocalTimeOfUtc 12 45
 $standard = LocalTimeOfUtc 13 45
-$daily = New-ScheduledTaskAction -Execute $Python -Argument "`"$Wrapper`" --slot weekday" -WorkingDirectory $Root
+$daily = New-ScheduledTaskAction -Execute $PythonW -Argument "`"$Wrapper`" --slot weekday" -WorkingDirectory $Root
 Register-ScheduledTask -TaskPath $Folder -TaskName "Daily" -Action $daily -Principal $principal `
     -Settings $runSettings -Force `
     -Trigger @((New-ScheduledTaskTrigger -Daily -At $daylight), (New-ScheduledTaskTrigger -Daily -At $standard)) `
     -Description "MarketMind pre-open run (08:45 New York). Wrapper runs once per day." | Out-Null
 
 # Weekend crypto run
-$weekend = New-ScheduledTaskAction -Execute $Python -Argument "`"$Wrapper`" --slot weekend" -WorkingDirectory $Root
+$weekend = New-ScheduledTaskAction -Execute $PythonW -Argument "`"$Wrapper`" --slot weekend" -WorkingDirectory $Root
 Register-ScheduledTask -TaskPath $Folder -TaskName "Weekend" -Action $weekend -Principal $principal `
     -Settings $runSettings -Force `
     -Trigger (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Saturday, Sunday -At "12:00") `
@@ -60,3 +60,4 @@ Write-Output ("  Daily     {0:HH:mm} and {1:HH:mm} local (08:45 New York in US d
 Write-Output "  Weekend   Sat, Sun 12:00 local"
 Write-Output "  Dashboard at logon"
 Write-Output "Python: $Python"
+
