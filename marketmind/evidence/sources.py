@@ -49,6 +49,7 @@ class RevenueYoY:
     value: float
     prior_end: str
     prior_value: float
+    filed: str | None = None          # first filing that reported the latest quarter
 
     @property
     def yoy(self) -> float:
@@ -66,12 +67,15 @@ def parse_revenue_yoy(facts: dict) -> RevenueYoY | None:
     for concept in REVENUE_CONCEPTS:
         rows = (((gaap.get(concept) or {}).get("units") or {}).get("USD")) or []
         quarters: dict[str, float] = {}
+        filed: dict[str, str] = {}
         for r in rows:
             s, e, v = r.get("start"), r.get("end"), r.get("val")
             if not (s and e and isinstance(v, (int, float))) or v <= 0:
                 continue
             if 80 <= _days(s, e) <= 100:
                 quarters[e] = float(v)      # later filings overwrite earlier ones
+                if r.get("filed") and (e not in filed or r["filed"] < filed[e]):
+                    filed[e] = r["filed"]
         if not quarters:
             continue
         last = max(quarters)
@@ -79,7 +83,7 @@ def parse_revenue_yoy(facts: dict) -> RevenueYoY | None:
         if not prior:
             continue
         p = min(prior, key=lambda e: abs(_days(e, last) - 365))
-        cand = RevenueYoY(concept, last, quarters[last], p, quarters[p])
+        cand = RevenueYoY(concept, last, quarters[last], p, quarters[p], filed.get(last))
         if best is None or cand.period_end > best.period_end or (
                 cand.period_end == best.period_end and cand.value > best.value):
             best = cand

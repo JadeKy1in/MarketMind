@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from urllib.parse import urlparse
 
 from marketmind.evidence.checks import CLAIM_TYPES, DOWN, UP
 from marketmind.shadows.v3.decision import extract_json
@@ -56,10 +57,28 @@ CHECKABLE_WORDS = re.compile(
     r"做空|空头|回购利率|拍卖|稳定币|资金流", re.I)
 
 
+# Items that come from the primary sources the checks use are data, not narrative
+# (full daily run 2026-09-28: all 7 claims were SEC items checked against SEC).
+PRIMARY_HOSTS = ("sec.gov", "fiscaldata.treasury.gov", "treasurydirect.gov", "newyorkfed.org",
+                 "finra.org", "llama.fi", "nasdaq.com")
+
+
+def is_primary_item(n) -> bool:
+    if getattr(n, "content_type", "news_article") in ("sec_filing", "insider_signal"):
+        return True
+    if str(getattr(n, "source_name", "") or "").upper().startswith("SEC "):
+        return True
+    host = urlparse(str(getattr(n, "url", "") or "")).hostname or ""
+    return any(host == h or host.endswith("." + h) for h in PRIMARY_HOSTS)
+
+
 def pick_news(items: list) -> list:
     """Articles that mention something checkable first, then by priority.
-    Social mentions carry no checkable facts."""
-    usable = [n for n in items if getattr(n, "content_type", "news_article") != "social_mention"]
+    Only media narrative is checked: social mentions carry no checkable facts, and
+    SEC filings are primary data themselves (checking them against SEC data is
+    circular; first full daily run 2026-09-28 produced only such claims)."""
+    usable = [n for n in items if getattr(n, "content_type", "news_article") != "social_mention"
+              and not is_primary_item(n)]
 
     def key(n):
         text = f"{n.title} {getattr(n, 'summary', '') or ''}"

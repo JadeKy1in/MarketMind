@@ -167,11 +167,16 @@ class _News:
     summary: str = ""
     priority_score: float = 1.0
     content_type: str = "news_article"
+    url: str = ""
 
 
 def test_pick_news_skips_social_and_sorts():
     items = [_News("a", "t", "s", priority_score=1), _News("b", "t", "s", priority_score=5),
-             _News("c", "t", "s", priority_score=9, content_type="social_mention")]
+             _News("c", "t", "s", priority_score=9, content_type="social_mention"),
+             _News("e", "going concern", "SEC EDGAR", priority_score=9, content_type="sec_filing"),
+             _News("f", "going concern", "SEC EDGAR Full-Text Flags", priority_score=9),
+             _News("g", "auction results", "Treasury", priority_score=9,
+                   url="https://api.fiscaldata.treasury.gov/x")]
     assert [n.id for n in pick_news(items)] == ["b", "a"]
     items.append(_News("d", "Treasury auction draws weak demand", "s", priority_score=0))
     assert [n.id for n in pick_news(items)] == ["d", "b", "a"]
@@ -319,3 +324,22 @@ async def test_rerun_after_interruption_does_not_double_book(tmp_path):
                                    report_dir=tmp_path / "b", **kw)
     assert len(store.list(source_type="evidence")) == 1
     assert again.items[0].ledger_note == "同日同类型同标的已记一条"
+
+
+@pytest.mark.asyncio
+async def test_revenue_filed_long_ago_is_unverifiable():
+    from datetime import date
+    rev = src.RevenueYoY("Revenues", "2026-05-31", 98.6, "2025-05-31", 97.2, filed="2026-07-10")
+    data = FakeData(rev=rev)
+    data.today = date(2026, 9, 28)
+    assert (await ck.observe("revenue_growth", "EBF", data)).direction is None
+    data.today = date(2026, 7, 20)
+    assert (await ck.observe("revenue_growth", "EBF", data)).direction == "up"   # +1.4% is growth
+
+
+def test_revenue_keeps_first_filing_date():
+    facts = {"facts": {"us-gaap": {"Revenues": {"units": {"USD": [
+        dict(_q("2025-04-01", "2025-06-30", 100.0), filed="2025-08-01"),
+        dict(_q("2026-04-01", "2026-06-30", 120.0), filed="2026-08-05"),
+        dict(_q("2026-04-01", "2026-06-30", 120.0), filed="2027-08-04")]}}}}}
+    assert src.parse_revenue_yoy(facts).filed == "2026-08-05"

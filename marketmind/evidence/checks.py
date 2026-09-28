@@ -13,7 +13,10 @@ UP, DOWN, FLAT = "up", "down", "flat"
 SUPPORT, CONTRADICT, UNVERIFIABLE = "support", "contradict", "unverifiable"
 VERDICT_CN = {SUPPORT: "支持", CONTRADICT: "矛盾（背离）", UNVERIFIABLE: "无法验证"}
 
-REVENUE_BAND = 0.02
+REVENUE_BAND = 0.005
+# News about "results" usually concerns a quarter SEC has not received yet; if the
+# latest XBRL quarter was filed longer ago than this, the claim cannot be checked.
+REVENUE_FRESH_DAYS = 30
 SHORT_INTEREST_BAND = 0.05
 SHORT_VOLUME_BAND = 0.10
 SOFR_BAND_PCT = 0.05          # 5 bp, in percentage points
@@ -68,6 +71,14 @@ async def _revenue(ticker, data) -> Observation:
     r = await data.revenue_yoy(ticker)
     if r is None:
         return Observation(None, f"SEC XBRL 没有 {ticker} 的季度营收")
+    today = getattr(data, "today", None)
+    if today is not None and r.filed:
+        from datetime import date
+        age = (today - date.fromisoformat(r.filed)).days
+        if age > REVENUE_FRESH_DAYS:
+            return Observation(None, f"SEC 最新季度营收（截至 {r.period_end}）报送于 {r.filed}，"
+                                     f"已过 {age} 天；新闻很可能指更新的季度，无法核对",
+                               {"period_end": r.period_end, "filed": r.filed})
     return Observation(_band(r.yoy, REVENUE_BAND),
                        f"SEC XBRL {r.concept}：{r.period_end} 季度营收 {r.value:,.0f}，"
                        f"去年同期（{r.prior_end}）{r.prior_value:,.0f}，同比 {r.yoy:+.1%}",
