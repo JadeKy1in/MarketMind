@@ -14,7 +14,7 @@ def main():
     parser = argparse.ArgumentParser(description="MarketMind — AI Investment Analysis Workstation")
     parser.add_argument("--mode", choices=["daily", "interactive", "gui", "shadows", "scenario", "settle", "evidence"], default="gui",
                         help="Run mode: daily (full pipeline), interactive (L1 Socratic dialogue), "
-                             "shadows (background shadow ecosystem only), scenario (historical scenario backtest), "
+                             "shadows (S3 shadow decisions only), scenario (historical scenario backtest), "
                              "settle (settle due ledger records), evidence (evidence layer only), "
                              "or gui (default: gui)")
     parser.add_argument("--scenario", type=str, default=None, metavar="NAME",
@@ -30,16 +30,7 @@ def main():
     shadow_group.add_argument("--no-shadows", action="store_true",
                               help="Disable shadow ecosystem entirely")
     parser.add_argument("--shadow-only", action="store_true",
-                        help="Run ONLY shadow ecosystem (no main pipeline). "
-                             "Prefer --mode shadows for the canonical interface.")
-    parser.add_argument("--backtest", action="store_true",
-                        help="Run multi-day backtest on shadow consensus signal quality")
-    parser.add_argument("--start", type=str, default=None, metavar="DATE",
-                        help="Backtest start date (YYYY-MM-DD)")
-    parser.add_argument("--end", type=str, default=None, metavar="DATE",
-                        help="Backtest end date (YYYY-MM-DD)")
-    parser.add_argument("--output", type=str, default=None, metavar="PATH",
-                        help="Backtest output path (JSON)")
+                        help="Alias of --mode shadows (S3 shadows only, no main pipeline).")
     parser.add_argument("--lang", type=str, default="zh",
                         help="Output language: zh, en, ja, ko, es, fr, ru, ar, de")
     parser.add_argument("--playground", action="store_true",
@@ -56,16 +47,7 @@ def main():
             print(f"[ERROR] {e}")
         return 1
 
-    if args.backtest:
-        from marketmind.pipeline.orchestration import _run_backtest
-        return _run_backtest(config, args)
-
-    if args.shadow_only:
-        from marketmind.pipeline.orchestration import run_shadows_only
-        ret = asyncio.run(run_shadows_only(config, verbose=args.verbose))
-        asyncio.run(_run_playground_if_requested(args, config))
-        return ret
-    elif args.mode == "shadows":
+    if args.shadow_only or args.mode == "shadows":
         from marketmind.pipeline.orchestration import run_shadows_only
         ret = asyncio.run(run_shadows_only(config, verbose=args.verbose))
         asyncio.run(_run_playground_if_requested(args, config))

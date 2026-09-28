@@ -51,20 +51,9 @@ def check_imports() -> int:
         "marketmind.ui.position_card",
         "marketmind.ui.pause_screen",
         "marketmind.ui.main_window",
-        # Phase B: Shadow Ecosystem
-        "marketmind.shadows.shadow_state",
-        "marketmind.shadows.shadow_agent",
-        "marketmind.shadows.shadow_mother",
-        "marketmind.shadows.ranking_engine",
-        "marketmind.shadows.expert_shadows",
-        "marketmind.shadows.daredevil_shadows",
-        "marketmind.shadows.challenger_engine",
-        "marketmind.shadows.knowledge_filter",
-        "marketmind.shadows.paper_live_gap",
-        "marketmind.shadows.emergency_quota",
-        "marketmind.shadows.collusion_detector",
-        "marketmind.shadows.cash_reframing",
-        "marketmind.shadows.missed_path",
+        # Shadows (S3)
+        "marketmind.shadows.v3.roster",
+        "marketmind.shadows.v3.runner",
         "marketmind.ui.shadow_panel",
         "marketmind.ui.shadow_status_card",
     ]

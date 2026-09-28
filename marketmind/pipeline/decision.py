@@ -18,7 +18,7 @@ from marketmind.pipeline.layer3_technical import Layer3BatchResult
 from marketmind.pipeline.decision_guard import enforce
 from marketmind.pipeline.red_team import RedTeamReport
 from marketmind.pipeline.resonance import ResonanceResult
-from marketmind.shadows.shadow_agent import defang_text
+from marketmind.pipeline.defang import defang_text
 
 # P3-2b: dynamic prompt assembly (replaces static DECISION_SYSTEM_PROMPT)
 _rule_registry = None

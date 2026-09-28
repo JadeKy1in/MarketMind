@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from marketmind.gateway.async_client import chat_pro
 from marketmind.gateway.response_parser import strip_markdown_fences
 from marketmind.pipeline.language_utils import lang_note
-from marketmind.shadows.shadow_agent import defang_text
+from marketmind.pipeline.defang import defang_text
 
 
 @dataclass

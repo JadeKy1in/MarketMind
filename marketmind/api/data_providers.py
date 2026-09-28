@@ -47,34 +47,24 @@ def get_uptime() -> str:
     return str(datetime.now(timezone.utc) - _start_time).split(".")[0]
 
 
-# ── Shadow DB ───────────────────────────────────────────────────────
+# ── Legacy shadow ecosystem (removed) ───────────────────────────────
+# /api/portfolio, /api/shadows/*, /api/history/decisions served the old
+# ShadowStateDB. The ecosystem was deleted on 2026-09-28; these providers keep
+# the old /legacy page from crashing and say plainly that there is no data.
 
-def _get_shadow_db():
-    from marketmind.shadows.shadow_state import ShadowStateDB
-    db_path = os.environ.get("SHADOW_DB", "data/shadows/shadows.db")
-    db = ShadowStateDB(db_path)
-    try:
-        db.init_schema()
-    except Exception:
-        logger.warning("shadow DB schema init failed", exc_info=True)
-    return db
+LEGACY_REMOVED_REASON = "legacy shadow ecosystem removed 2026-09-28; see / (white box)"
+
+
+def _legacy_removed(**payload) -> dict:
+    return {"available": False, "reason": LEGACY_REMOVED_REASON, **payload}
 
 
 # ── Providers ───────────────────────────────────────────────────────
 
 def get_portfolio() -> dict:
-    db = _get_shadow_db()
-    trades = []
-    if hasattr(db, 'get_all_open_trades'):
-        trades = db.get_all_open_trades()
-    total_val = sum(t.get("market_value", 0) for t in trades) if trades else 0
-    return {
-        "positions": trades,
-        "total_value": total_val,
-        "cash_pct": 100.0 if not total_val else round((1 - total_val / 100000) * 100),
-        "patrol_status": "idle",
-        "updated": datetime.now(timezone.utc).isoformat(),
-    }
+    return _legacy_removed(positions=[], total_value=0, cash_pct=100.0,
+                           patrol_status="removed",
+                           updated=datetime.now(timezone.utc).isoformat())
 
 
 def get_cost() -> dict:
@@ -146,163 +136,24 @@ def get_health() -> dict:
 
 
 def get_shadow_overview() -> dict:
-    db = _get_shadow_db()
-    shadows = db.get_visible_shadows()
-    tiers: dict[str, int] = {"elite": 0, "excellent": 0, "normal": 0, "endangered": 0}
-    for s in shadows:
-        snap = db.get_latest_snapshot(s.shadow_id)
-        tier = snap.achievement_tier if snap and snap.achievement_tier else "normal"
-        tiers[tier] = tiers.get(tier, 0) + 1
-    graduates = sum(1 for s in shadows if getattr(s, "status", "") == "graduated")
-    return {
-        "tiers": tiers,
-        "total": len(shadows),
-        "evolutions_today": 0,
-        "challenger_trials": 0,
-        "graduates": graduates,
-        "diversity": "normal",
-    }
+    return _legacy_removed(
+        tiers={"elite": 0, "excellent": 0, "normal": 0, "endangered": 0},
+        total=0, evolutions_today=0, challenger_trials=0, graduates=0,
+        diversity="n/a",
+    )
 
 
 def get_shadow_rankings() -> dict:
-    from marketmind.shadows.shadow_metadata import get_shadow_meta
-    db = _get_shadow_db()
-    shadows = db.get_visible_shadows()
-    top_all = []
-    for s in shadows[:25]:
-        snap = db.get_latest_snapshot(s.shadow_id)
-        meta = get_shadow_meta(s.shadow_id)
-        has_data = snap and snap.votes_produced > 0 if snap else False
-        top_all.append({
-            "shadow_id": s.shadow_id,
-            "name": s.display_name,
-            "cn_name": meta.get("cn_name", s.display_name),
-            "desc": meta.get("desc", ""),
-            "domain_cn": meta.get("domain_cn", ""),
-            "shadow_type": getattr(s, "shadow_type", ""),
-            "domain": getattr(s, "domain", ""),
-            "tier": snap.achievement_tier if snap and snap.achievement_tier else "normal",
-            "score": round(snap.composite_score, 2) if snap and snap.composite_score else 0.0,
-            "status": getattr(s, "status", "active"),
-            # Real performance (only meaningful when has_data)
-            "has_data": has_data,
-            "win_rate": round(snap.win_rate_pct, 3) if has_data else None,
-            "cumulative_return_pct": round(snap.cumulative_return_pct, 4) if snap and snap.cumulative_return_pct is not None else None,
-            "sharpe": round(snap.sharpe_ratio, 3) if snap and snap.sharpe_ratio is not None else None,
-            "max_drawdown_pct": round(snap.max_drawdown_pct, 4) if snap and snap.max_drawdown_pct is not None else None,
-            "trades": snap.votes_produced if snap else 0,
-        })
-    return {"rankings": top_all}
+    return _legacy_removed(rankings=[])
 
 
 def get_shadow_detail(shadow_id: str) -> dict:
-    """Return full detail for a single shadow: config, recent analyses,
-    snapshot history, tier history, and open positions."""
-    db = _get_shadow_db()
-    config = db.get_shadow(shadow_id)
-    if not config:
-        raise ValueError(f"Shadow '{shadow_id}' not found")
-
-    # Recent analyses (last 10 with direction)
-    recent_analyses = db.get_analyses_with_direction(shadow_id, days=90)[:10]
-
-    # Full snapshot history (last 60 days)
-    snapshots = db.get_snapshot_history(shadow_id, days=60)
-
-    # Tier history (last 120 days)
-    tier_history = db.get_tier_history(shadow_id, days=120)
-
-    # Open positions
-    open_trades = db.get_open_trades(shadow_id)
-
-    # Latest snapshot for summary stats
-    latest = db.get_latest_snapshot(shadow_id)
-
-    from marketmind.shadows.shadow_metadata import get_shadow_meta
-    meta = get_shadow_meta(shadow_id)
-
-    return {
-        "shadow_id": config.shadow_id,
-        "display_name": config.display_name,
-        "cn_name": meta.get("cn_name", config.display_name),
-        "desc": meta.get("desc", ""),
-        "method_bilingual": meta.get("method_bilingual", ""),
-        "shadow_type": config.shadow_type,
-        "domain": config.domain,
-        "methodology_prompt": config.methodology_prompt,
-        "virtual_capital": config.virtual_capital,
-        "status": config.status,
-        "generation": config.generation,
-        "model": config.model,
-        "max_positions": config.max_positions,
-        "created_at": config.created_at,
-        "latest_snapshot": {
-            "date": latest.date,
-            "virtual_capital": latest.virtual_capital,
-            "daily_return_pct": latest.daily_return_pct,
-            "cumulative_return_pct": latest.cumulative_return_pct,
-            "max_drawdown_pct": latest.max_drawdown_pct,
-            "win_rate_pct": latest.win_rate_pct,
-            "sharpe_ratio": latest.sharpe_ratio,
-            "composite_score": latest.composite_score,
-            "achievement_tier": latest.achievement_tier,
-            "insights_generated": latest.insights_generated,
-        } if latest else None,
-        "recent_analyses": recent_analyses,
-        "snapshots": [
-            {
-                "date": s.date,
-                "virtual_capital": round(s.virtual_capital, 2) if s.virtual_capital else None,
-                "daily_return_pct": s.daily_return_pct,
-                "cumulative_return_pct": s.cumulative_return_pct,
-                "max_drawdown_pct": s.max_drawdown_pct,
-                "win_rate_pct": s.win_rate_pct,
-                "sharpe_ratio": s.sharpe_ratio,
-                "composite_score": round(s.composite_score, 2) if s.composite_score else None,
-                "achievement_tier": s.achievement_tier,
-            }
-            for s in snapshots
-        ],
-        "tier_history": [{"date": d, "tier": t} for d, t in tier_history],
-        "open_trades": [
-            {
-                "trade_id": t.trade_id,
-                "ticker": t.ticker,
-                "direction": t.direction,
-                "entry_price": t.entry_price,
-                "entry_date": t.entry_date,
-                "position_size_pct": t.position_size_pct,
-                "pnl_pct": t.pnl_pct,
-            }
-            for t in open_trades
-        ],
-    }
+    """No per-shadow detail any more; the route turns this into a 404 with the reason."""
+    raise ValueError(f"Shadow '{shadow_id}' not found: {LEGACY_REMOVED_REASON}")
 
 
 def get_decision_history(limit: int = 10) -> dict:
-    from datetime import date as dt_date, timedelta
-    db = _get_shadow_db()
-    end = dt_date.today().isoformat()
-    start = (dt_date.today() - timedelta(days=90)).isoformat()
-    rows = db.get_analyses_by_date_range(start, end)
-    # Deduplicate: one decision per ticker per date (shadows may overlap)
-    seen = set()
-    decisions = []
-    for r in sorted(rows, key=lambda x: x.get("date", "") + x.get("ticker", ""), reverse=True):
-        key = (r.get("date", ""), r.get("ticker", ""))
-        if key in seen:
-            continue
-        seen.add(key)
-        decisions.append({
-            "date": r.get("date", ""),
-            "ticker": r.get("ticker", "--"),
-            "direction": r.get("direction", ""),
-            "confidence": r.get("confidence", 0),
-            "result": r.get("pnl_pct"),
-        })
-        if len(decisions) >= limit:
-            break
-    return {"decisions": decisions}
+    return _legacy_removed(decisions=[])
 
 
 # ── Evolution Tracking Providers ────────────────────────────────────

@@ -12,7 +12,7 @@ from marketmind.gateway.async_client import chat_pro
 from marketmind.pipeline.language_utils import lang_note, lang_instruction
 from marketmind.pipeline.layer2_fundamental import analyze_layer2, Layer2Result
 from marketmind.pipeline.session_context import SessionContext
-from marketmind.shadows.shadow_agent import defang_text
+from marketmind.pipeline.defang import defang_text
 from marketmind.config.ticker_labels import ticker_cn
 
 logger = logging.getLogger("marketmind.pipeline.l2_interactive")

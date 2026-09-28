@@ -1,13 +1,12 @@
-"""MarketMind pipeline orchestration — daily, shadows, backtest, GUI runners.
+"""MarketMind pipeline orchestration — daily, shadows, settle, evidence, GUI runners.
 
 Extracted from app.py to provide standalone execution paths. All functions
-import directly from gateway, pipeline, and shadows modules — no dependency on app.py.
+import directly from gateway, pipeline, and shadows.v3 modules — no dependency on app.py.
 """
 from __future__ import annotations
 import asyncio
 import json
 import logging
-import sys
 import time
 from pathlib import Path
 
@@ -26,35 +25,14 @@ logger = logging.getLogger(__name__)
 
 _shadow_task: "asyncio.Task | None" = None
 _evidence_task: "asyncio.Task | None" = None
-_shadow_result = None  # stores ShadowOrchestrationResult when background task completes
 
 # Only interactive_orchestration still evaluates resonance (legacy path, to be
 # redesigned with alert-driven interaction). The daily pipeline no longer does.
 _DEFAULT_OBSERVED_SHARPE = 0.5
 
 
-def _shadow_progress_started() -> None:
-    """Called when shadow background task starts."""
-    print("Shadows processing...")
-
-
-def _shadow_progress_done(task: "asyncio.Task") -> None:
-    """Called when shadow background task completes."""
-    if task.cancelled():
-        return
-    try:
-        result = task.result()
-        if result:
-            logger.info("Shadows complete: %s shadows, %s temp created",
-                        result.active_shadows, result.temp_shadows_created)
-            global _shadow_result
-            _shadow_result = result
-    except Exception:
-        logger.exception("Shadows error")
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-# _archive_session — used by both daily legacy and interactive modes
+# _archive_session — used by interactive mode
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def _archive_session(config, l1_result, l2_result, l3_result, verdict: str) -> None:
@@ -73,7 +51,7 @@ async def _archive_session(config, l1_result, l2_result, l3_result, verdict: str
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Shared pipeline step helpers (deduplicated from run_daily / run_daily_legacy)
+# Shared pipeline step helpers
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def _do_news_collection(config, tracker: StageTracker, mock: bool = False) -> list:
@@ -96,27 +74,10 @@ async def _do_flash_preprocessing(news_items: list, tracker: StageTracker) -> li
     return signals
 
 
-async def _do_l1_analysis(signals: list, news_items: list, tracker: StageTracker,
-                          shadow_db=None):
+async def _do_l1_analysis(signals: list, news_items: list, tracker: StageTracker):
     tracker.advance(3, "Layer 1: narrative analysis...")
     from marketmind.pipeline.layer1_narrative import analyze_layer1
-    # Inject calibration context from past prediction accuracy
-    calib = ""
-    if shadow_db is not None:
-        try:
-            from marketmind.pipeline.daily_calibration import get_calibration_context
-            calib = get_calibration_context(shadow_db, days=7)
-        except Exception:
-            logger.warning("_do_l1_analysis: non-blocking step failed", exc_info=True)
-        # Layer 2: weekly tactical audit suggestions
-        try:
-            from marketmind.pipeline.weekly_tactical_audit import get_suggestion_context
-            weekly = get_suggestion_context(shadow_db)
-            if weekly:
-                calib = (calib or "") + "\n" + weekly
-        except Exception:
-            logger.warning("_do_l1_analysis: non-blocking step failed", exc_info=True)
-    result = await analyze_layer1(signals[:15], news_items, calibration_context=calib)
+    result = await analyze_layer1(signals[:15], news_items, calibration_context="")
     if result is None:
         from marketmind.pipeline.layer1_narrative import Layer1Result
         result = Layer1Result.empty_default()
@@ -131,16 +92,14 @@ def _core_l3_tickers(limit: int = 10) -> list[str]:
     return [a.ticker for a in list(ASSET_UNIVERSE.values())[:limit]]
 
 
-async def _do_l2_l3_parallel(l1_result, tracker: StageTracker, shadow_db=None):
+async def _do_l2_l3_parallel(l1_result, tracker: StageTracker):
     """L2 then L3. L3 reviews L2's ticker list (design spec §4.3: it receives the
     list, never L2's reasoning) plus the core market tickers. L3 is code-only and
     fast, so running it after L2 costs no LLM time."""
     tracker.advance(4, "Layer 2+3: fundamental + technical analysis...")
     from marketmind.pipeline.layer2_fundamental import analyze_layer2
     from marketmind.pipeline.layer3_technical import analyze_layer3
-    l2_calib = _get_stage_calibration("l2", shadow_db) if shadow_db else ""
-    l2 = await (analyze_layer2(l1_result, calibration_context=l2_calib) if l2_calib
-                else analyze_layer2(l1_result))
+    l2 = await analyze_layer2(l1_result)
     if l2 is None:
         from marketmind.pipeline.layer2_fundamental import Layer2Result
         l2 = Layer2Result()
@@ -160,16 +119,6 @@ async def _do_l2_l3_parallel(l1_result, tracker: StageTracker, shadow_db=None):
         tracker.result(f"L2: {len(l2.ticker_candidates)} candidates, "
                        f"L3: {len(l3.results)} tickers ({len(l3.green_lights)} green)")
     return l2, l3
-
-
-def _get_stage_calibration(stage: str, shadow_db, days: int = 7) -> str:
-    """Load per-stage calibration context for L2/L3/Decision prompt injection."""
-    try:
-        from marketmind.pipeline.daily_calibration import get_stage_calibration
-        return get_stage_calibration(stage, shadow_db, days)
-    except Exception:
-        logger.warning("stage calibration for %s unavailable", stage, exc_info=True)
-        return ""
 
 
 async def _do_fragility_scan(tracker: StageTracker):
@@ -257,10 +206,6 @@ async def _do_daily_archive(config, l1_result, l2_result, resonance, tracker: St
     tracker.result("Session archived")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Shadow ecosystem init (deduplicated from run_daily / run_daily_legacy)
-# ══════════════════════════════════════════════════════════════════════════════
-
 def _record_z0_flash(input_count: int, signal_count: int) -> None:
     """Z0: append Flash batch metrics to baseline.jsonl."""
     import json as _j, os as _o
@@ -293,126 +238,29 @@ def _record_z0_l1(l1_result) -> None:
         logger.debug("_record_z0_l1: non-blocking step failed", exc_info=True)
 
 
-def _init_shadow_ecosystem(config, shadow_count: int | None, tracker: StageTracker):
-    """Init shadow DB + permanent shadows + optional Phase F modules (legacy ecosystem only)."""
-    if not (config.shadow.shadows_enabled and shadow_count != 0
-            and getattr(config.shadow, "legacy_ecosystem_enabled", False)):
-        return None, None
-    tracker.advance(0, "Shadow Mother: scanning events...")
-    from marketmind.shadows.shadow_state import ShadowStateDB
-    from marketmind.shadows.shadow_mother import ShadowMother
-    db = ShadowStateDB(config.shadow.shadows_db_path)
-    db.init_schema()
-    from marketmind.shadows.expert_shadows import create_expert_shadows
-    from marketmind.shadows.daredevil_shadows import create_daredevil_shadows
-    create_expert_shadows(db, config.shadow)
-    create_daredevil_shadows(db, config.shadow)
-    from marketmind.shadows.zombie_detector import detect_zombies
-    detect_zombies(db)
-    mother = ShadowMother(config.shadow, db)
-    tracker.result(f"Shadow ecosystem initialized with {len(db.get_visible_shadows())} shadows")
-    if getattr(config.shadow, 'scheduler_enabled', False):
-        from marketmind.shadows.background_scheduler import BackgroundScheduler, SchedulerConfig
-        from marketmind.shadows.shadow_memory import ShadowMemoryStore
-        ms = ShadowMemoryStore(db)
-        sc = SchedulerConfig(reflection_interval_minutes=config.shadow.reflection_interval_minutes,
-                             crystallization_interval_hours=config.shadow.crystallization_interval_hours,
-                             max_concurrent_tasks=config.shadow.max_concurrent_tasks, enabled=True)
-        BackgroundScheduler(ms, db, mother, sc).start()
-        tracker.result("Background scheduler started")
-    if getattr(config.shadow, 'gemini_flash_enabled', False):
-        from marketmind.gateway.multimodal_adapter import MultimodalAdapter
-        MultimodalAdapter()
-        tracker.result("Gemini Flash multimodal adapter initialized")
-    return db, mother
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # Pipeline execution functions
 # ══════════════════════════════════════════════════════════════════════════════
-
-async def run_daily_legacy(config, mock: bool = False, verbose: bool = False,
-                            shadow_count: int | None = None) -> int:
-    """Execute full daily analysis pipeline WITH blocking shadow cycle.
-
-    This is the PRE-SEPARATION legacy behavior. Shadows run synchronously
-    and block the main pipeline until complete. Use run_daily() for the
-    new non-blocking shadow pipeline.
-    """
-    from marketmind.config.settings import MarketMindConfig
-    init_gateway(config.deepseek_api_key, config.deepseek_base_url)
-
-    tracker = StageTracker(verbose)
-    shadow_db, mother = _init_shadow_ecosystem(config, shadow_count, tracker)
-
-    # Steps 1-4: Shared pipeline core
-    news_items = await _do_news_collection(config, tracker, mock=mock)
-    signals = await _do_flash_preprocessing(news_items, tracker)
-    l1_result = await _do_l1_analysis(signals, news_items, tracker, shadow_db=shadow_db)
-    l2_result, l3_result = await _do_l2_l3_parallel(l1_result, tracker)
-
-    # Step 5: Shadow ecosystem run (BLOCKING — legacy behavior)
-    if config.shadow.shadows_enabled and mother is not None:
-        tracker.advance(5, "Shadows: running analysis cycle...")
-        orchestration = await mother.orchestrate_daily_cycle(news_items, {})
-        tracker.result(f"{orchestration.active_shadows} shadows, "
-                       f"{orchestration.temp_shadows_created} temp created")
-        if getattr(config.shadow, 'crystallization_enabled', False):
-            tracker.result("Memory updated, crystallization check complete")
-
-    # Steps 6-9: Shared pipeline core
-    red_team = await _do_red_team(l1_result, l2_result, l2_result.ticker_candidates, tracker)
-    resonance = _resonance_not_evaluated()
-    fragility = await _do_fragility_scan(tracker)
-    decision = await _do_decision(l1_result, l2_result, l3_result, red_team, resonance,
-                                   fragility, tracker)
-    await _do_daily_archive(config, l1_result, l2_result, resonance, tracker)
-
-    print("\nMarketMind daily pipeline complete.")
-    return 0
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# H1: Pipeline Separation — new non-blocking shadow pipeline
-# ══════════════════════════════════════════════════════════════════════════════
-#
-# Token Budget Split: 60/40
-#   - 60% reserved for the interactive main pipeline (L1→L2→L3→Decision→Red Team)
-#   - 40% reserved for shadow ecosystem background analysis
-#   Shadows launch as a background asyncio.Task and do NOT block the main pipeline.
-#   The main pipeline completes and displays results immediately; shadow results
-#   are printed to stdout when the background task finishes (typically 5-30s later).
-#
-# WAL mode: Already enabled at shadow_state.py ShadowStateDB._connect() (PRAGMA
-#   journal_mode=WAL). WAL allows concurrent reads from the main pipeline while
-#   shadows write snapshots and votes in the background.
-
 
 async def run_daily(config, mock: bool = False, verbose: bool = False,
                      shadow_count: int | None = None) -> int:
     """Execute full daily analysis pipeline.
 
-    Shadows run as a non-blocking background task so the main pipeline
-    completes and displays results without waiting for all shadow analyses.
-    The shadow ecosystem receives 40% of the rate-limit budget and operates
-    in the background with results printed on completion.
-
-    For the legacy blocking behavior, use run_daily_legacy().
+    S3 shadows (marketmind.shadows.v3) run as a non-blocking background task
+    so the main pipeline completes and displays results without waiting for them.
     """
     init_gateway(config.deepseek_api_key, config.deepseek_base_url)
     from marketmind.gateway.async_client import set_mock_mode
     set_mock_mode(mock)
 
     tracker = StageTracker(verbose)
-    global _shadow_task, _shadow_result
-    _shadow_result = None
+    global _shadow_task
     from marketmind.gateway import usage_tracker
     usage_tracker.reset()
     # Load the tradable universe off the event loop: its first download is a blocking
     # HTTP call that guard / ledger would otherwise make from inside async code.
     from marketmind.universe import get_equity_universe
     await asyncio.to_thread(get_equity_universe)
-    shadow_db, mother = _init_shadow_ecosystem(config, shadow_count, tracker)
 
     # Settle whatever in the ledger has come due before making new calls (SPEC_v3 §7)
     if not mock:
@@ -423,8 +271,7 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
 
     # S3 shadows: forced daily decisions into the ledger, in parallel with the main
     # pipeline; they see only news and prices, never main-pipeline output (§3.5).
-    if (mother is None and config.shadow.shadows_enabled and shadow_count != 0
-            and not mock):
+    if config.shadow.shadows_enabled and shadow_count != 0 and not mock:
         _shadow_task = asyncio.create_task(run_v3_shadows(config, news_items, shadow_count))
         print("  [shadows] daily decisions launched in background")
     # S5 evidence layer: news claims checked against primary data, in the background.
@@ -434,7 +281,7 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
         print("  [evidence] claim checks launched in background")
 
     signals = await _do_flash_preprocessing(news_items, tracker)
-    l1_result = await _do_l1_analysis(signals, news_items, tracker, shadow_db=shadow_db)
+    l1_result = await _do_l1_analysis(signals, news_items, tracker)
 
     # Gate: L1 early terminate — if nothing actionable, skip expensive downstream stages
     skip_to_decision = (
@@ -456,27 +303,8 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
                        f"{len(l3_result.green_lights)} green")
         fragility = await _do_fragility_scan(tracker)
     else:
-        # Steps 4: L2+L3 with per-stage calibration
-        l2_result, l3_result = await _do_l2_l3_parallel(l1_result, tracker, shadow_db=shadow_db)
-
-        # Step 5: Shadow ecosystem → NON-BLOCKING background launch (H1)
-        if config.shadow.shadows_enabled and mother is not None:
-            tracker.advance(5, "Shadows: launching background analysis...")
-            try:
-                from marketmind.gateway.async_client import get_budget
-                budget = await get_budget()
-                if budget:
-                    br = budget.report()
-                    tracker.result(f"Token budget: {br['tokens_pct_used']}% used, "
-                                   f"{br['pro_calls_remaining']} Pro calls remaining")
-            except Exception:
-                logger.warning("run_daily: non-blocking step failed", exc_info=True)
-            _shadow_progress_started()
-            _shadow_task = asyncio.create_task(mother.orchestrate_daily_cycle(news_items, {}))
-            _shadow_task.add_done_callback(_shadow_progress_done)
-            tracker.result("Shadows launched in background (non-blocking)")
-            if getattr(config.shadow, 'crystallization_enabled', False):
-                tracker.result("Memory update + crystallization will run in background")
+        # Step 4: L2+L3
+        l2_result, l3_result = await _do_l2_l3_parallel(l1_result, tracker)
 
         # Steps 6-7b: Red Team → Fragility (Resonance moved to promotion review, SPEC_v3 §5)
         red_team = await _do_red_team(l1_result, l2_result, l2_result.ticker_candidates, tracker)
@@ -506,7 +334,7 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
     )
 
     # Trigger weekly audit if due (every 7 days)
-    await _maybe_run_weekly_audit(shadow_db)
+    await _maybe_run_weekly_audit()
 
     print(f"  [tokens] {usage_tracker.summary_line()}")
     print("\nMarketMind daily pipeline complete.")
@@ -718,7 +546,7 @@ def _record_pipeline_metrics(flash_results=None, l1_result=None, l2_result=None,
         logger.warning("_record_pipeline_metrics: non-blocking step failed", exc_info=True)
 
 
-async def _maybe_run_weekly_audit(shadow_db) -> None:
+async def _maybe_run_weekly_audit() -> None:
     """Run weekly tactical audit if 7+ days since last audit."""
     from pathlib import Path
     from datetime import datetime as _dt, timezone as _tz, timedelta
@@ -742,7 +570,7 @@ async def _maybe_run_weekly_audit(shadow_db) -> None:
         from marketmind.pipeline.weekly_tactical_audit import (
             run_weekly_audit, save_latest_audit,
         )
-        result = await run_weekly_audit(shadow_db)
+        result = await run_weekly_audit()
         if result and result.suggestions:
             save_latest_audit(result)
             logger.info("Weekly audit complete: %d suggestions", len(result.suggestions))
@@ -754,7 +582,7 @@ async def _maybe_run_weekly_audit(shadow_db) -> None:
         from marketmind.pipeline.methodology_evolution import run_cross_stage_attribution
         from marketmind.pipeline.pipeline_metrics import load_recent_metrics
         metrics = load_recent_metrics(days=30)
-        attrib_batch = await run_cross_stage_attribution(metrics, shadow_db=shadow_db)
+        attrib_batch = await run_cross_stage_attribution(metrics)
         if attrib_batch and attrib_batch.attributions:
             for attr in attrib_batch.attributions:
                 logger.info("Attribution: %s (confidence=%.2f) — %s",
@@ -824,82 +652,18 @@ async def run_evidence_only(config) -> int:
 
 
 async def run_shadows_only(config, verbose: bool = False) -> int:
-    """Run ONLY the shadows: S3 daily decisions (legacy ecosystem if enabled in settings)."""
-    if not getattr(config.shadow, "legacy_ecosystem_enabled", False):
-        init_gateway(config.deepseek_api_key, config.deepseek_base_url)
-        from marketmind.gateway import usage_tracker
-        from marketmind.pipeline.scout import fetch_all_sources
-        from marketmind.universe import get_equity_universe
-        usage_tracker.reset()
-        await asyncio.to_thread(get_equity_universe)
-        news_items = await fetch_all_sources(config) or []
-        print(f"Shadows: {len(news_items)} articles collected")
-        await run_v3_shadows(config, news_items)
-        print(f"  [tokens] {usage_tracker.summary_line()}")
-        usage_tracker.append_log("shadows")
-        return 0
-    return await _run_legacy_shadows_only(config, verbose)
-
-
-async def _run_legacy_shadows_only(config, verbose: bool = False) -> int:
-    """Run ONLY the legacy shadow ecosystem (background mode).
-
-    Initializes the shadow database and permanent shadows, collects minimal
-    news for event detection, then runs the full daily orchestration cycle.
-    No main pipeline stages (L1/L2/L3/Decision) are executed.
-    """
+    """Run ONLY the shadows: S3 daily decisions into the ledger."""
     init_gateway(config.deepseek_api_key, config.deepseek_base_url)
-
-    print("Shadow ecosystem: initializing...")
-
-    from marketmind.shadows.shadow_state import ShadowStateDB
-    from marketmind.shadows.shadow_mother import ShadowMother
-
-    shadow_db = ShadowStateDB(config.shadow.shadows_db_path)
-    shadow_db.init_schema()
-
-    # Initialize permanent shadows (16 experts + 8 daredevils)
-    from marketmind.shadows.expert_shadows import create_expert_shadows
-    from marketmind.shadows.daredevil_shadows import create_daredevil_shadows
-    create_expert_shadows(shadow_db, config.shadow)
-    create_daredevil_shadows(shadow_db, config.shadow)
-    from marketmind.shadows.zombie_detector import detect_zombies
-    detect_zombies(shadow_db)
-
-    mother = ShadowMother(config.shadow, shadow_db)
-    print(f"Shadow ecosystem: {len(shadow_db.get_visible_shadows())} shadows initialized")
-
-    # Collect minimal news for event detection
+    from marketmind.gateway import usage_tracker
     from marketmind.pipeline.scout import fetch_all_sources
-    news_items = await fetch_all_sources(config)
-    if verbose:
-        print(f"Shadow ecosystem: {len(news_items)} articles collected for event scanning")
-
-    # N-L4: Report token budget before shadow cycle
-    try:
-        from marketmind.gateway.async_client import get_budget
-        budget = await get_budget()
-        if budget:
-            budget_report = budget.report()
-            if verbose:
-                print(f"Token budget: {budget_report['tokens_pct_used']}% used, "
-                      f"{budget_report['pro_calls_remaining']} Pro calls remaining")
-    except Exception:
-        logger.warning("run_shadows_only: non-blocking step failed", exc_info=True)
-
-    result = await mother.orchestrate_daily_cycle(news_items, {})
-
-    print(f"Shadows complete: {result.active_shadows} shadows, "
-          f"{result.temp_shadows_created} temp created")
-    if verbose:
-        print(f"  Decisions collected: {result.decisions_collected}")
-        print(f"  Ecosystem alerts: {len(result.ecosystem_alerts)}")
-        if result.rankings:
-            print(f"  Rankings computed for {len(result.rankings)} shadows")
-        if result.challenger_actions:
-            for action in result.challenger_actions:
-                print(f"  Challenger: {action}")
-
+    from marketmind.universe import get_equity_universe
+    usage_tracker.reset()
+    await asyncio.to_thread(get_equity_universe)
+    news_items = await fetch_all_sources(config) or []
+    print(f"Shadows: {len(news_items)} articles collected")
+    await run_v3_shadows(config, news_items)
+    print(f"  [tokens] {usage_tracker.summary_line()}")
+    usage_tracker.append_log("shadows")
     return 0
 
 
@@ -914,44 +678,12 @@ def run_gui(config) -> int:
     return 0
 
 
-def _run_backtest(config, args) -> int:
-    """Run multi-day backtest on shadow consensus signal quality."""
-    from datetime import datetime, timezone
-    from marketmind.shadows.shadow_state import ShadowStateDB
-    from marketmind.backtest_runner import BacktestRunner
-
-    import logging
-    logging.basicConfig(level=logging.INFO)
-
-    shadow_db = ShadowStateDB(config.shadow.shadows_db_path)
-    shadow_db.init_schema()
-
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    start = args.start or "2026-01-01"
-    end = args.end or today
-
-    try:
-        runner = BacktestRunner(shadow_db)
-        report = runner.run(start, end, args.output)
-    except (ValueError, FileNotFoundError) as e:
-        print(f"[ERROR] Backtest failed: {e}", file=sys.stderr)
-        return 1
-    except Exception as e:
-        print(f"[ERROR] Unexpected backtest error: {e}", file=sys.stderr)
-        return 1
-
-    print(json.dumps(report, indent=2) if not args.output else
-          f"Backtest report written to {args.output}")
-
-    return 0
-
-
 async def _run_daily_with_shadows(config, args) -> int:
     """Run the daily pipeline, then wait for the background shadow task to finish.
 
     The pipeline prints results immediately (non-blocking from the user's
-    perspective), then we wait for the shadow ecosystem to complete so the
-    process doesn't exit before shadows finish writing to the database.
+    perspective), then we wait for the S3 shadows to complete so the
+    process doesn't exit before they finish writing to the ledger.
     """
     shadow_n = 0 if args.no_shadows else args.shadows
     ret = await run_daily(config, mock=args.mock, verbose=args.verbose,

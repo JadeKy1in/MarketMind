@@ -161,10 +161,10 @@ class TestHandleEliteQuery:
     @pytest.mark.asyncio
     async def test_contrib_without_shadow_name_attribute(self, mock_state, mock_elite_registry, capsys):
         """Contrib object without shadow_name attribute shows 'unknown'."""
-        from marketmind.shadows.elite_participation import EliteContribution
+        from types import SimpleNamespace
 
-        # Use the actual dataclass with shadow_name set to empty string
-        contrib = EliteContribution(
+        # Contribution-shaped object with shadow_name set to empty string
+        contrib = SimpleNamespace(
             shadow_id="sh_x",
             shadow_name="",
             domain="macro",

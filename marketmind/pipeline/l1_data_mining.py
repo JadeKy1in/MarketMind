@@ -8,7 +8,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from marketmind.gateway.async_client import chat_flash
-from marketmind.shadows.shadow_agent import defang_text
+from marketmind.pipeline.defang import defang_text
 
 if TYPE_CHECKING:
     from marketmind.pipeline.layer1_interactive import InteractiveState

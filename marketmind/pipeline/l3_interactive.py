@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from marketmind.gateway.async_client import chat_pro
 from marketmind.pipeline.layer3_technical import analyze_layer3, Layer3BatchResult
 from marketmind.pipeline.session_context import SessionContext
-from marketmind.shadows.shadow_agent import defang_text
+from marketmind.pipeline.defang import defang_text
 
 logger = logging.getLogger("marketmind.pipeline.l3_interactive")
 

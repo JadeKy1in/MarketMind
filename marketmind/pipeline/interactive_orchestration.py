@@ -1,7 +1,7 @@
 """Interactive pipeline orchestration — extracted from app.py.
 
 Orchestrates the full interactive pipeline: news fetching, Flash preprocessing,
-L1 Socratic dialogue, L2 fundamental, shadow ecosystem, L3 technical,
+L1 Socratic dialogue, L2 fundamental, S3 shadows (background), L3 technical,
 Red Team, Resonance, and Decision stages.
 """
 from __future__ import annotations
@@ -39,11 +39,10 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
     """Run L1 as an interactive Socratic dialogue with the user.
 
     Steps:
-      0. Shadow ecosystem init (background)
-      1-2. News + Flash preprocessing
+      1. News (S3 shadows launch in background right after)
+      2. Flash preprocessing
       3. L1 interactive dialogue (replaces single-shot analysis)
       4. L2+L3 (if user chooses to proceed)
-      5. Shadow ecosystem → background
       6-8. Red Team + Resonance + Decision
       9. Archive
     """
@@ -58,7 +57,6 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
 
     tracker = orchestration._StageTracker(verbose)
     orchestration._shadow_task = None
-    orchestration._shadow_result = None
 
     print("\n" + "=" * 60)
     print("  MarketMind — Interactive Investment Analysis")
@@ -103,21 +101,6 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
     print("  - get_economic_calendar: upcoming FOMC, CPI, NFP events")
     print("  - get_earnings_date: earnings dates for ticker(s)\n")
 
-    # 0. Shadow Mother init (legacy ecosystem only; v3 shadows launch after news below)
-    shadow_db = None
-    mother = None
-    legacy = getattr(config.shadow, "legacy_ecosystem_enabled", False)
-    if legacy and config.shadow.shadows_enabled and shadow_count != 0:
-        from marketmind.shadows.shadow_state import ShadowStateDB
-        from marketmind.shadows.shadow_mother import ShadowMother
-        shadow_db = ShadowStateDB(config.shadow.shadows_db_path)
-        shadow_db.init_schema()
-        from marketmind.shadows.expert_shadows import create_expert_shadows
-        from marketmind.shadows.daredevil_shadows import create_daredevil_shadows
-        create_expert_shadows(shadow_db, config.shadow)
-        create_daredevil_shadows(shadow_db, config.shadow)
-        mother = ShadowMother(config.shadow, shadow_db)
-
     # 0.5 Economic calendar check (before news — informs pipeline confidence)
     from marketmind.pipeline.economic_calendar import check_economic_calendar, get_event_confidence_discount
     ctx.economic_events = await check_economic_calendar(
@@ -137,7 +120,8 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
     ctx.news_items = news_items
 
     # S3 shadows see news and prices only, never this session's L1 (SPEC §6.1, C26)
-    if not legacy and config.shadow.shadows_enabled and shadow_count != 0             and orchestration._shadow_task is None:
+    if (config.shadow.shadows_enabled and shadow_count != 0
+            and orchestration._shadow_task is None):
         orchestration._shadow_task = asyncio.create_task(
             orchestration.run_v3_shadows(config, news_items or [], shadow_count))
         print("  [shadows] daily decisions launched in background")
@@ -180,12 +164,10 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
     ctx.social_items = [n for n in non_news_items if getattr(n, 'content_type', '') == 'social_mention']
     tracker.result(f"{len(signals)} signals + {len(ctx.insider_items)} insider + {len(ctx.social_items)} social")
 
-    # 3. L1 Interactive Socratic dialogue (shadows launch AFTER L1 to receive broadcast)
+    # 3. L1 Interactive Socratic dialogue
     tracker.advance(3, "L1: Starting interactive analysis...", ctx.stage_times)
     from marketmind.pipeline.layer1_interactive import run_l1_interactive
-    from marketmind.shadows.elite_participation import EliteRegistry
     from marketmind.pipeline.l1_tools import L1ToolRegistry
-    elite_registry = EliteRegistry()
 
     # Phase G: Create tool registry for AI-initiated investigation
     l1_tool_registry = L1ToolRegistry(
@@ -203,7 +185,7 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
 
     l1_result, should_observe, l1_session = await run_l1_interactive(
         signals[:15], news_items, user_input_handler=_cli_handler, mock=mock,
-        elite_registry=elite_registry,
+        elite_registry=None,
         tool_registry=l1_tool_registry,
         insider_items=ctx.insider_items,
         social_items=ctx.social_items,
@@ -242,35 +224,6 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
         except Exception as e:
             logger.debug("Tool efficacy log skipped (non-critical): %s", e)
 
-    # ── R4: Shadow Readiness Dashboard ────────────────────────────────────
-    def _show_shadow_readiness():
-        """R4: Display shadow analysis progress after L1 completes.
-        C2: Shadow text NEVER enters main AI prompts — display only.
-        C3: Passive display does NOT trigger quarantine.
-        Non-blocking — no new LLM calls, no waiting."""
-        task = orchestration._shadow_task
-
-        if task is None:
-            return  # shadows not launched yet
-
-        if task.cancelled():
-            return
-
-        if not task.done():
-            print("  影子分析中...")
-            return
-
-        # Task is done — show readiness dashboard
-        try:
-            task.result()
-            if shadow_db:
-                from datetime import datetime as _dt
-                today = _dt.now(timezone.utc).strftime("%Y-%m-%d")
-                completed, total = shadow_db.get_ready_count(today)
-                print(f"  影子生态系统: {completed}/{total} 完成")
-        except Exception:
-            pass
-
     # Budget check (G: token visibility)
     try:
         from marketmind.gateway.async_client import get_budget
@@ -280,81 +233,6 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
             print(f"  [Budget] Pro剩余:{br['pro_calls_remaining']}次 | 用量:{br['tokens_pct_used']}%")
     except Exception:
         pass
-
-    # 3.5A Phase G: Broadcast L1 fact-check data to shadows (before user viewpoints)
-    # Per Red Team B4: facts accumulated during discussion, flushed BEFORE .ready sentinel
-    if legacy and l1_session.get("fact_broadcast") and config.shadow.shadows_enabled:
-        try:
-            from marketmind.shadows.broadcast import BroadcastWriter, BroadcastMessage
-            from datetime import datetime as _dt
-            writer = BroadcastWriter(str(config.data_dir))
-            now = _dt.now(timezone.utc)
-            for i, fact in enumerate(l1_session["fact_broadcast"]):
-                # Build query_context from tool+args
-                tool = fact.get("tool", "unknown")
-                if tool == "lookup_fundamentals":
-                    query_ctx = f"Verifying fundamentals for {fact.get('ticker', 'unknown')}"
-                elif tool == "search_news":
-                    query_ctx = f"News search: {fact.get('query', 'unknown')}"
-                elif tool == "get_elite_opinion":
-                    query_ctx = f"ELITE shadow opinion on {fact.get('domain', 'unknown')}"
-                else:
-                    query_ctx = f"Tool call: {tool}"
-
-                # Format extracted text from fact data
-                from marketmind.pipeline.l1_tools import ToolResult
-                temp_tr = ToolResult(
-                    tool_name=tool,
-                    query=fact.get("ticker") or fact.get("query") or fact.get("domain", ""),
-                    data=fact.get("data", {}),
-                    timestamp=now.isoformat(),
-                )
-                broadcast_text = temp_tr.to_broadcast_text(query_context=query_ctx)
-
-                msg = BroadcastMessage(
-                    message_id=f"l1_fact_{now.strftime('%Y%m%d')}_{i}",
-                    source_type="l1_fact_check",
-                    source_path="",
-                    extracted_text=broadcast_text,
-                    metadata={
-                        "tool": tool,
-                        "curated_by": "l1_tool",
-                        "query_context": query_ctx,
-                        "source": fact.get("source", "unknown"),
-                        "timestamp": now.isoformat(),
-                    },
-                    confidence=0.85 if fact.get("source") == "yfinance" else 0.70,
-                )
-                writer.write(msg)
-            logger.info("L1 fact broadcast: %d facts written to shadows", len(l1_session["fact_broadcast"]))
-        except Exception as e:
-            logger.warning("Fact broadcast write failed (non-blocking): %s", e)
-
-    # 3.5B Broadcast L1 session data to shadows (Resolution 2 + H6)
-    if legacy and l1_session.get("user_ideas") and config.shadow.shadows_enabled:
-        try:
-            from marketmind.shadows.broadcast import BroadcastWriter
-            writer = BroadcastWriter(str(config.data_dir))
-            writer.write_chat_history(
-                user_ideas=l1_session.get("user_ideas", []),
-                ai_responses=[],  # H5: AI responses excluded (prevents anchoring bias)
-                chat_context="",  # H5: no mixed chat (discussion_text contains AI responses)
-            )
-            logger.info("L1 session broadcast to shadows: %d user ideas", len(l1_session.get("user_ideas", [])))
-        except Exception as e:
-            logger.warning("Broadcast write failed (non-blocking): %s", e)
-
-    # 3.6 Launch shadow ecosystem AFTER broadcast (shadows now see user L1 viewpoints)
-    if config.shadow.shadows_enabled and mother is not None and orchestration._shadow_task is None:
-        tracker.advance(0, "Shadows: launching background analysis...", ctx.stage_times)
-        orchestration._shadow_task = asyncio.create_task(
-            mother.orchestrate_daily_cycle(news_items, {})
-        )
-        orchestration._shadow_task.add_done_callback(orchestration._shadow_progress_done)
-        tracker.result(f"Shadows launched — {len(shadow_db.get_visible_shadows())} shadows analyzing (with L1 broadcast)")
-
-    # R4: Show shadow readiness dashboard (non-blocking display)
-    _show_shadow_readiness()
 
     # 4. L2 Fundamental — medium-low interaction density (extracted module)
     tracker.advance(4, "L2: fundamental analysis (AI working)...", ctx.stage_times)
@@ -366,48 +244,6 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
     l2_result = ctx.l2_result
     selected_tickers = ctx.selected_tickers
     tracker.result(f"L2: {len(selected_tickers)} tickers selected, {l2_result.macro_quadrant}")
-
-    # 4.5 ELITE Shadow check (H7) — populate registry from completed shadow results
-
-    if shadow_db and orchestration._shadow_task and orchestration._shadow_task.done() \
-            and not orchestration._shadow_task.cancelled():
-        try:
-            result = orchestration._shadow_task.result()
-            for sid, output in (result.shadow_analyses if hasattr(result, 'shadow_analyses') else {}).items():
-                shadow = shadow_db.get_shadow(sid)
-                if shadow:
-                    snapshot = shadow_db.get_latest_snapshot(sid)
-                    if snapshot and getattr(snapshot, 'achievement_tier', '') == 'elite':
-                        elite_registry.register_shadow_analysis(
-                            shadow_id=sid,
-                            shadow_name=getattr(shadow, 'display_name', sid),
-                            domain=getattr(shadow, 'domain', ''),
-                            analysis_text=(
-                                " ".join(getattr(output, 'insights', []))
-                                or getattr(output, 'methodology_notes', '')
-                            )[:500],
-                            confidence=0.5,  # sentinel: ShadowAnalysisOutput has no confidence field
-                        )
-            # Populate ctx.elite_opinions from registry contributions (for downstream stages)
-            ctx.elite_opinions = [
-                f"[{c.shadow_name}] {c.opinion[:200]}"
-                for c in elite_registry._contributions.values()
-            ]
-        except Exception:
-            pass  # shadow results not yet available — non-blocking
-
-    elite_shadows_available = bool(elite_registry._contributions) if hasattr(elite_registry, '_contributions') else False
-    if elite_shadows_available:
-        print(f"\n  [ELITE] {len(elite_registry._contributions)}个ELITE影子已完成分析")
-        # Check domain match with L2 sectors
-        if l2_result.sector_shortlist:
-            sector_text = " ".join(l2_result.sector_shortlist) + " " + " ".join(selected_tickers)
-            matched = elite_registry.detect_domain_trigger(sector_text)
-            if matched:
-                print(f"  与讨论相关的影子: {', '.join(matched[:5])}")
-
-    # 5. Shadows already launched in background (see step 2.5 after Flash preprocessing)
-    #    ELITE results will be available by Decision stage if analysis has completed.
 
     # 6. L3 Technical — lowest interaction density (extracted module)
     tracker.advance(6, "L3: technical analysis (AI working)...", ctx.stage_times)
@@ -433,25 +269,6 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
     resonance = orchestration._resonance_not_evaluated()
     ctx.resonance = resonance
 
-    # 8.5 Shadow consensus display (before Decision — shows alongside cards)
-    if orchestration._shadow_task and orchestration._shadow_task.done() \
-            and not orchestration._shadow_task.cancelled():
-        try:
-            s_result = orchestration._shadow_task.result()
-            if hasattr(s_result, 'active_shadows') and s_result.active_shadows:
-                print(f"\n  ┌─ 影子生态系统（独立参考）─────────────┐")
-                print(f"  │ {s_result.active_shadows}个影子完成独立分析                │")
-                if hasattr(s_result, 'ecosystem_interpretation') and s_result.ecosystem_interpretation:
-                    interpretation = s_result.ecosystem_interpretation[:150]
-                    print(f"  │ 共识: {interpretation} │")
-                if hasattr(s_result, 'health_alerts') and s_result.health_alerts:
-                    alert_count = sum(len(v) for v in s_result.health_alerts.values())
-                    if alert_count:
-                        print(f"  │ 系统: {alert_count}个健康提醒                     │")
-                print(f"  └{'─'*42}┘")
-        except Exception:
-            pass
-
     # 9. Decision — interactive (extracted module)
     tracker.advance(9, "Decision: synthesis...", ctx.stage_times)
     from marketmind.pipeline.decision_interactive import run_decision_interactive
@@ -464,24 +281,13 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
     tracker.advance(10, "Archive: saving session...", ctx.stage_times)
     await orchestration._archive_session(config, l1_result, l2_result, l3_result, resonance.verdict)
 
-    # Wait for shadow consensus
+    # Wait for the background S3 shadow task
     if orchestration._shadow_task and not orchestration._shadow_task.done():
-        timeout = (getattr(config.shadow, 'shadow_consensus_timeout_s', 60) if legacy
-                   else orchestration.SHADOW_WAIT_S)
+        timeout = orchestration.SHADOW_WAIT_S
         try:
             await asyncio.wait_for(orchestration._shadow_task, timeout=timeout)
         except asyncio.TimeoutError:
-            partial_note = ""
-            try:
-                r = orchestration._shadow_task.result() if orchestration._shadow_task.done() \
-                    and not orchestration._shadow_task.cancelled() else None
-                if r and hasattr(r, 'active_shadows'):
-                    completed = r.active_shadows
-                    total = len(shadow_db.get_visible_shadows()) if shadow_db else 0
-                    partial_note = f" — {completed}/{total} shadows completed"
-            except Exception:
-                pass
-            print(f"(Shadow ecosystem timed out after {timeout}s{partial_note} — partial results may be incomplete)")
+            print(f"(Shadow ecosystem timed out after {timeout}s — partial results may be incomplete)")
         except asyncio.CancelledError:
             pass
 

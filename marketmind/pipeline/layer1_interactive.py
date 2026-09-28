@@ -31,7 +31,7 @@ from marketmind.pipeline.l1_tool_executor import (
 from marketmind.pipeline.l1_elite import handle_elite_query
 from marketmind.pipeline.l1_bias_check import run_bias_check
 from marketmind.pipeline.l1_data_mining import is_data_mining_request, execute_data_mining
-from marketmind.shadows.shadow_agent import defang_text
+from marketmind.pipeline.defang import defang_text
 
 logger = logging.getLogger("marketmind.pipeline.layer1_interactive")
 

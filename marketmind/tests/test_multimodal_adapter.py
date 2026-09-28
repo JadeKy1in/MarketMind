@@ -20,7 +20,7 @@ from marketmind.gateway.ocr_helpers import (
     _pdfplumber_extract,
     _write_temp_image,
 )
-from marketmind.shadows.shadow_agent import ExternalObservation
+from marketmind.gateway.multimodal_adapter import ExternalObservation
 
 
 # ---------------------------------------------------------------------------

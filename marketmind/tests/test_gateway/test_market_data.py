@@ -16,7 +16,7 @@ from marketmind.gateway.market_data import (
     _yf_semaphore,
     _sanitize_value,
 )
-from marketmind.shadows.shadow_agent import defang_text
+from marketmind.pipeline.defang import defang_text
 
 # ---------------------------------------------------------------------------
 # Helpers

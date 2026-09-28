@@ -151,6 +151,29 @@ def test_decision_history_db_unavailable(client):
     assert r.json() == {"decisions": []}
 
 
+# ── Legacy shadow endpoints (ecosystem removed 2026-09-28) ──────────────
+
+@pytest.mark.parametrize("url,key,empty", [
+    ("/api/portfolio", "positions", []),
+    ("/api/shadows/overview", "total", 0),
+    ("/api/shadows/rankings", "rankings", []),
+    ("/api/history/decisions", "decisions", []),
+])
+def test_legacy_shadow_endpoints_report_removed(client, url, key, empty):
+    r = client.get(url)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["available"] is False
+    assert "removed" in body["reason"]
+    assert body[key] == empty
+
+
+def test_legacy_shadow_detail_is_404_with_reason(client):
+    r = client.get("/api/shadows/expert_gold")
+    assert r.status_code == 404
+    assert "removed" in r.json()["error"]
+
+
 # ── Info Inject ───────────────────────────────────────────────────────
 
 def test_info_inject_post_returns_ok(client):

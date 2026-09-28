@@ -2,8 +2,8 @@
 
 DeepSeek V4 has no native multimodal support. This adapter bridges that gap
 by converting non-text inputs into plain text that the MarketMind pipeline
-can consume. All extractors are async and integrate with the shadow agent's
-ExternalObservation dataclass.
+can consume. All extractors are async and return the ExternalObservation
+dataclass defined here.
 
 Architecture:
   Image/PDF/Screenshot → Gemini Flash Vision / OCR / pdfplumber → ExternalObservation → Pipeline
@@ -19,18 +19,31 @@ import base64
 import logging
 import os
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
 
-from marketmind.shadows.shadow_agent import ExternalObservation
 from marketmind.gateway.ocr_helpers import _tesseract_ocr, _pil_metadata, _pdfplumber_extract, _write_temp_image
 
 logger = logging.getLogger("marketmind.gateway.multimodal_adapter")
 
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 DEFAULT_TIMEOUT = httpx.Timeout(45.0)
+
+
+@dataclass
+class ExternalObservation:
+    """Observation from external multi-modal input (screenshot, PDF, audio, text)."""
+    observation_id: str
+    source_type: str          # "image" | "pdf" | "screenshot" | "text" | "audio"
+    source_path: str          # original file path or URI
+    extracted_text: str       # text extracted by Gemini Flash / OCR
+    metadata: dict = field(default_factory=dict)
+    confidence: float = 1.0   # extraction confidence 0.0-1.0
+    source_attribution: str = ""  # who/what provided this observation
+    evaluated_at: str = ""    # ISO 8601 timestamp of ingestion
 
 MIME_MAP = {
     ".png": "image/png",

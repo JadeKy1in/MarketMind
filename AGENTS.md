@@ -28,5 +28,4 @@
   - 做法与步骤：见 `docs/SPEC_v3.md` §13.1；代码位置是 `marketmind/shadows/v3/roster.py` 里的 odds_analyst 条目。
 - [ ] **Robinhood 加密货币只读持仓同步**（SPEC L2 唯一允许的券商接口）：所有人 2026-09-28 决定暂不做，持仓用 `python -m marketmind.holdings add` 手动录入（见 `docs/S6_DESIGN.md`）；实盘开始投加密后再议。
 - [ ] **证据层背离清单喂给主管线**（SPEC §5 第 1 步）：所有人 2026-09-28 决定先不接，等背离记录在账本里结算、证明有用后再接。
-- [ ] 旧影子生态（ShadowMother 链路约 28 个模块）只在 `legacy_ecosystem_enabled=True` 时运行，是否整体删除待所有人决定。
 - [ ] 施工顺序中尚未开始的阶段：S7–S9（见 SPEC §13）。S7 需要账本攒满 60 个交易日。

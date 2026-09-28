@@ -117,40 +117,6 @@ async def test_stage4_l2_l3_real():
 
 @pytest.mark.slow
 @pytest.mark.asyncio
-async def test_stage5_shadows_real():
-    """Stage 5: Shadows — shadow ecosystem with real LLM votes."""
-    from marketmind.config.settings import MarketMindConfig, ShadowSettings
-    from marketmind.pipeline.scout import fetch_all_sources
-    from marketmind.shadows.shadow_mother import ShadowMother
-    from marketmind.shadows.shadow_state import ShadowStateDB
-    from marketmind.shadows.expert_shadows import create_expert_shadows
-    import tempfile
-
-    config = MarketMindConfig.from_env()
-    items = (await fetch_all_sources(config, use_cross_run_cache=False))[:20]
-    news_dicts = [{"headline": item.title, "source": item.source_name} for item in items]
-
-    fd, tmp = tempfile.mkstemp(suffix=".db")
-    import os as _os; _os.close(fd)
-    shadow_cfg = ShadowSettings(shadows_db_path=tmp)
-    db = ShadowStateDB(tmp)
-    db.init_schema()
-    try:
-        create_expert_shadows(db, shadow_cfg)
-        mother = ShadowMother(shadow_cfg, db)
-        t0 = time.time()
-        result = await mother.orchestrate_daily_cycle(news_dicts, {})
-        elapsed = time.time() - t0
-        assert result.active_shadows > 0, "Must have active shadows"
-        assert result.decisions_collected > 0, "Must have votes collected"
-        print(f"PASS: {result.active_shadows} shadows, {result.decisions_collected} votes in {elapsed:.1f}s")
-    finally:
-        db.close()
-        _os.unlink(tmp)
-
-
-@pytest.mark.slow
-@pytest.mark.asyncio
 async def test_stage6_red_team_real():
     """Stage 6: Red Team — adversarial challenge with real LLM."""
     from marketmind.config.settings import MarketMindConfig

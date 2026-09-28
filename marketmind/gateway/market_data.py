@@ -21,7 +21,7 @@ from typing import Any
 
 import httpx
 
-from marketmind.shadows.shadow_agent import defang_text
+from marketmind.pipeline.defang import defang_text
 
 logger = logging.getLogger("marketmind.gateway.market_data")
 
