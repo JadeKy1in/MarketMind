@@ -144,3 +144,13 @@ def test_trial_still_waiting_is_not_in_the_family(env, monkeypatch):
     decided = trials.evaluate(store, today="2026-11-01")
     assert [t.trial_id for t in decided] == ["t1"] and decided[0].result["holm_family"] == 1
     assert decided[0].status == "passed"
+
+
+def test_trial_window_grows_with_the_parent_hold(env):
+    store, _ = env
+    assert [trials.trial_bars_for(h) for h in (1, 5, 6, 10, 20)] == [40, 40, 48, 80, 120]
+    assert trials.parent_hold(None, PARENT) == 1
+    _add(store, "shadow", PARENT, "2026-09-01", "2026-09-15", 1.0, hold=10)
+    _add(store, "shadow", PARENT, "2026-09-02", "2026-09-16", 1.0, hold=10)
+    _add(store, "shadow", PARENT, "2026-09-03", "2026-09-08", 1.0, hold=3)
+    assert trials.parent_hold(store, PARENT) == 10

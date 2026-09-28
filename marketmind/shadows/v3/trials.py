@@ -38,6 +38,10 @@ MAX_RUNNING = 5                  # owner decision 2026-09-28
 # had power close to its size, so most passes were false. 40 trading days, HAC t,
 # alpha 0.05 with Holm across the trials decided in the same review.
 TRIAL_BARS = 40                  # trading days of decisions per trial (was 10)
+# Long holds leave too few independent periods in 40 days (owner decision 2026-09-28):
+# the window grows to WINDOW_PER_HOLD x the parent's median hold, capped.
+WINDOW_PER_HOLD = 8
+TRIAL_BARS_MAX = 120
 MIN_PAIRS = 30                   # exit-date days in the paired P&L series (was 5)
 ALPHA = 0.05                     # one-sided, family-wise via Holm (was p < 0.10 per trial)
 SETTLE_GRACE_DAYS = 60           # give up waiting for open records after this
@@ -135,6 +139,20 @@ async def _call_llm(system: str, user: str) -> str:
     return result.get("content") or ""
 
 
+def trial_bars_for(hold: int) -> int:
+    """Trial window in trading days: 40, or 8 x the parent's median hold, at most 120."""
+    return min(TRIAL_BARS_MAX, max(TRIAL_BARS, WINDOW_PER_HOLD * max(1, int(hold))))
+
+
+def parent_hold(store, parent_id: str) -> int:
+    """Median holding period of the parent's ledger records (1 when it has none)."""
+    if store is None:
+        return 1
+    holds = sorted(e.hold_bars for e in store.list()
+                   if e.source_type == "shadow" and e.source_id == parent_id)
+    return holds[len(holds) // 2] if holds else 1
+
+
 async def propose(parent_id: str, kind: str, note: str, *, store=None, call=_call_llm,
                   today: str | None = None, folder: Path | None = None) -> Trial:
     if kind not in ("challenger", "beta"):
@@ -160,7 +178,7 @@ async def propose(parent_id: str, kind: str, note: str, *, store=None, call=_cal
     if errors:
         raise ValueError("variant rejected: " + "; ".join(errors))
     trial = Trial(uuid.uuid4().hex[:8], kind, parent_id, note.strip()[:500], today,
-                  add_trading_days(today, TRIAL_BARS))
+                  add_trading_days(today, trial_bars_for(parent_hold(store, parent_id))))
     pf = prompt_file(trial.trial_id, folder)
     pf.parent.mkdir(parents=True, exist_ok=True)
     pf.write_text(variant + "\n", encoding="utf-8")
