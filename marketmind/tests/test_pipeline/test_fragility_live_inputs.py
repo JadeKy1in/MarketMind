@@ -8,6 +8,25 @@ from marketmind.gateway import fragility_inputs as fi
 from marketmind.pipeline.fragility_scanner import scan_fragility
 
 
+@pytest.fixture(autouse=True)
+def _no_network_for_new_sources(monkeypatch):
+    """Keep these tests offline: the non-catalog sources report unavailable by default."""
+    async def fred_obs(series_id, limit=5):
+        return "FRED unavailable (test)"
+
+    async def unavailable():
+        return None, "", "unavailable (test)"
+
+    async def gold():
+        return "yfinance GC=F unavailable (test)"
+
+    monkeypatch.setattr(fi, "_fred_observations", fred_obs)
+    monkeypatch.setattr(fi, "_ofr_fsi_latest", unavailable)
+    monkeypatch.setattr(fi, "_worldbank_em_import_cover", unavailable)
+    monkeypatch.setattr(fi, "_defillama_cex_7d_change", unavailable)
+    monkeypatch.setattr(fi, "_gold_monthly_avg", gold)
+
+
 @pytest.mark.asyncio
 async def test_missing_metrics_are_listed_not_treated_as_safe():
     report = await scan_fragility({"vix": 20.0}, unavailable={"on_rrp": "FRED unavailable"})
@@ -18,7 +37,8 @@ async def test_missing_metrics_are_listed_not_treated_as_safe():
 
 
 def test_thresholds_have_real_validation_date_so_staleness_can_fire():
-    assert all(t.last_validated == ft.THRESHOLDS_RESEARCHED_ON for t in ft.THRESHOLD_LIBRARY)
+    allowed = {ft.THRESHOLDS_RESEARCHED_ON, ft.THRESHOLDS_REVIEWED_2026_09_28}
+    assert all(t.last_validated in allowed for t in ft.THRESHOLD_LIBRARY)
     assert any("STALE" in w for w in ft.validate_thresholds())   # 2026-05-18 is > 90 days ago
 
 

@@ -6,6 +6,9 @@ from datetime import datetime, timezone
 # Threshold values come from the 2026-05-18 methodology research
 # (docs/archive/project-docs/dev/research/pipeline-methodology-gap.md).
 THRESHOLDS_RESEARCHED_ON = "2026-05-18T00:00:00+00:00"
+# Thresholds (re)sourced against live data on 2026-09-28 (owner decision: fill the
+# remaining gaps and add financial-stress inputs). Each carries its basis inline.
+THRESHOLDS_REVIEWED_2026_09_28 = "2026-09-28T00:00:00+00:00"
 
 
 @dataclass
@@ -24,6 +27,9 @@ class FragilityThreshold:
     # which meant the 90-day staleness check could never fire.
     last_validated: str = THRESHOLDS_RESEARCHED_ON
     is_active: bool = True
+    # False = MONITOR-only: the value is shown but the threshold has no defensible
+    # calibration, so it can never be "crossed" and does not enter the score.
+    crossable: bool = True
 
 
 THRESHOLD_LIBRARY: list[FragilityThreshold] = [
@@ -98,7 +104,17 @@ THRESHOLD_LIBRARY: list[FragilityThreshold] = [
         threshold_value=2.5, unit="percent_of_GDP", direction="above",
         mechanism="Margin debt >2.5% GDP → systemic leverage at historical extremes → forced deleveraging risk on any drawdown",
         cascade=["margin_call_cascade", "retail_liquidation", "broker_liquidity_stress"],
-        data_source="FINRA margin statistics; BEA GDP", source_document="FINRA Monthly Margin",
+        # Source (2026-09-28): Fed Z.1 broker-dealer "margin loans and other receivables"
+        # (FRED BOGZ1FL663067003Q, millions USD, quarter-end) / nominal GDP (FRED GDP,
+        # billions USD SAAR), same quarter: pct = M / (B*1000) * 100. Includes "other
+        # receivables", so it is a broader measure than FINRA debit balances.
+        # Basis for 2.5%: on this series' own FRED history the ratio has exceeded 2.5%
+        # only once, at the 2000Q1 dot-com peak (max 2.64%); 2008Q3 peaked 2.38%,
+        # 2021 ~2.14%. 2026Q2 = 2.29%. The 2.5% line therefore marks "near the
+        # historical extreme" on the series actually fed.
+        data_source="FRED:BOGZ1FL663067003Q / FRED:GDP",
+        source_document="Fed Z.1 Financial Accounts; BEA NIPA GDP",
+        last_validated=THRESHOLDS_REVIEWED_2026_09_28,
     ),
     FragilityThreshold(
         metric="dollar_index", name_zh="美元指数",
@@ -112,7 +128,17 @@ THRESHOLD_LIBRARY: list[FragilityThreshold] = [
         threshold_value=3.5, unit="ratio", direction="below",
         mechanism="Copper/gold ratio <3.5 → industrial demand pessimism vs safe-haven demand → recession pricing",
         cascade=["commodity_selloff", "industrial_production_contraction", "risk_asset_rotation"],
-        data_source="LME:Copper; COMEX:Gold", source_document="LME / CME futures",
+        # Fed as the market convention: copper USD/lb divided by gold USD/troy oz, x1000
+        # (copper = FRED PCOPPUSDM USD/metric ton / 2204.62262; gold = GC=F closes averaged
+        # over the same month). July 2026 = 6.14 / 4079 x1000 = 1.51.
+        # MONITOR-only: the 3.5 level has no source and fits no convention. On the x1000
+        # convention the ratio has been far below 3.5 for over a decade (secular gold
+        # outperformance), so "below 3.5" would be permanently crossed; on x100 it would
+        # never be near 3.5. Kept for reference; not crossable until re-researched.
+        crossable=False,
+        data_source="FRED:PCOPPUSDM; yfinance:GC=F",
+        source_document="IMF primary commodity prices (via FRED); COMEX gold futures",
+        last_validated=THRESHOLDS_REVIEWED_2026_09_28,
     ),
 
     # ── International / EM thresholds ──
@@ -121,16 +147,74 @@ THRESHOLD_LIBRARY: list[FragilityThreshold] = [
         threshold_value=3, unit="months_import_cover", direction="below",
         mechanism="EM FX reserves <3 months import cover → balance of payments crisis → capital flight → sovereign default risk",
         cascade=["capital_controls", "imf_bailout", "contagion_to_other_em"],
-        data_source="IMF IFS; national central banks", source_document="IMF International Financial Statistics",
+        # Source (2026-09-28): World Bank WDI FI.RES.TOTL.MO (total reserves incl. gold,
+        # in months of imports; annual) for the "Low & middle income" aggregate (LMY).
+        # 2025 = 9.9 months. Basis for 3 months: the traditional IMF import-cover
+        # adequacy rule of thumb (IMF, "Assessing Reserve Adequacy", 2011). Caveat: the
+        # aggregate is dominated by China and large reserve holders, so it cannot show
+        # stress in individual EMs; a cross only occurs in a broad EM reserve crisis.
+        data_source="WorldBank:FI.RES.TOTL.MO (LMY aggregate)",
+        source_document="World Bank WDI; IMF Assessing Reserve Adequacy (2011)",
+        last_validated=THRESHOLDS_REVIEWED_2026_09_28,
     ),
 
     # ── Crypto / digital asset threshold ──
     FragilityThreshold(
         metric="crypto_exchange_reserves", name_zh="交易所加密资产储备月变动",
-        threshold_value=-20, unit="percent_monthly_change", direction="below",
-        mechanism="Exchange reserves declining >20%/month → exchange run risk → withdrawal freezes → cascading trust failure",
+        threshold_value=-10, unit="percent_7d_change", direction="below",
+        mechanism="CEX-held assets falling >10% in a week → exchange run risk → withdrawal freezes → cascading trust failure",
         cascade=["stablecoin_depeg", "defi_liquidity_crunch", "contagion_to_tradfi"],
-        data_source="CryptoQuant; Glassnode", source_document="CryptoQuant Exchange Reserve Monitor",
+        # Proxy (2026-09-28): aggregate 7-day % change of USD TVL over DefiLlama category
+        # "CEX" (/protocols; ~$318B across 80 exchanges). DefiLlama's free API has no
+        # monthly field and per-exchange history is ~30MB+ per call, so the original
+        # -20%/month rule (CryptoQuant, coin units) cannot be computed. Drawdown rule
+        # (inference, not a cited level): -10% in 7 days = half the old monthly
+        # threshold compressed into one week. Caveat: USD-valued, so a broad crypto price
+        # fall also moves it; it measures exchange-held value, not coin outflows alone.
+        data_source="DefiLlama:/protocols category=CEX change_7d",
+        source_document="DefiLlama CEX transparency dashboard",
+        last_validated=THRESHOLDS_REVIEWED_2026_09_28,
+    ),
+
+    # ── Financial-stress indices (added 2026-09-28) ──
+    FragilityThreshold(
+        metric="stlfsi", name_zh="圣路易斯联储金融压力指数",
+        threshold_value=1.0, unit="index", direction="above",
+        mechanism="STLFSI >1 → financial stress one standard deviation above average → funding and credit markets tightening",
+        cascade=["credit_spread_widening", "risk_off", "dealer_stress"],
+        # Basis: the index is constructed with mean 0 ("normal" stress) and unit standard
+        # deviation (verified on FRED 1993-2026: mean 0.00, sd 1.00). 1.0 = +1 sd (~p92);
+        # crossed in 2008 (9.7), 2011 (1.39), 2016 (1.27), 2020 (5.6), SVB 2023 (1.13).
+        # 2026-09-18 = -0.91.
+        data_source="FRED:STLFSI4", source_document="St. Louis Fed Financial Stress Index",
+        last_validated=THRESHOLDS_REVIEWED_2026_09_28,
+    ),
+    FragilityThreshold(
+        metric="ofr_fsi", name_zh="OFR金融压力指数",
+        threshold_value=4.1, unit="index", direction="above",
+        mechanism="OFR FSI >4.1 → global market stress one standard deviation above average → cross-asset deleveraging",
+        cascade=["volatility_spike", "funding_stress", "safe_asset_bid"],
+        # Basis: 0 = average stress by construction, but not unit-variance. Verified on
+        # the OFR CSV 2000-2026: mean -0.04, sd 4.10 -> threshold +1 sd = 4.1 (~p89).
+        # Crossed in 2008 (29.3), 2011 (6.9), 2020 (10.3); not in 2022 (3.5) or SVB (2.4).
+        # 2026-09-23 = -2.66.
+        data_source="OFR:financial-stress-index/data/fsi.csv",
+        source_document="OFR Financial Stress Index",
+        last_validated=THRESHOLDS_REVIEWED_2026_09_28,
+    ),
+    FragilityThreshold(
+        metric="bbb_oas", name_zh="BBB级公司债利差",
+        threshold_value=200, unit="basis_points", direction="above",
+        mechanism="BBB OAS >200bp → lowest-IG tier repricing → fallen-angel risk → IG fund outflows",
+        cascade=["fallen_angel_downgrades", "ig_outflows", "corporate_refinancing_stress"],
+        # FRED BAMLC0A4CBBB is in percent (x100 -> bp). FRED only exposes the last 3
+        # years of ICE data (2023-09..2026-09: median 107bp, max 163bp; 2026-09-24 97bp),
+        # so a long-history percentile cannot be re-verified here. Basis (inference from
+        # recalled history, NOT re-verified): BBB OAS reached ~200bp+ in the 2015-16
+        # energy selloff and the 2022 rate shock, ~400bp+ in March 2020 and ~700bp+ in
+        # 2008; 200bp therefore marks "episode-level" BBB stress.
+        data_source="FRED:BAMLC0A4CBBB", source_document="ICE BofA BBB US Corporate Index OAS",
+        last_validated=THRESHOLDS_REVIEWED_2026_09_28,
     ),
 ]
 
