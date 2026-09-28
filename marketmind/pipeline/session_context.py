@@ -1,8 +1,4 @@
-"""Session context — shared state across interactive pipeline stages.
-
-Red Team condition 1: _shadow_task remains module-level global in app.py.
-Modules receive snapshots via elite_opinions, not direct shadow DB access.
-"""
+"""Session context — shared state across interactive pipeline stages."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -41,9 +37,6 @@ class SessionContext:
     # User selections
     selected_tickers: list[str] = field(default_factory=list)
     selected_strategy: str = ""  # "conservative" | "neutral" | "aggressive" | "" (not chosen)
-
-    # ELITE snapshot (populated once after L1, before L2)
-    elite_opinions: list[str] = field(default_factory=list)
 
     # Pre-Decision artifacts (set by glue layer after Red Team + Resonance)
     red_team_report: Any = None

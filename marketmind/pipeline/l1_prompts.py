@@ -114,7 +114,7 @@ If the investor suggests observing (not trading today):
 
 ## Available Investigation Tools (工具可用性)
 
-You have access to three read-only investigation tools. You may invoke them during discussion to verify claims, fill information gaps, or cross-reference data. Use the following format:
+You have access to two read-only investigation tools. You may invoke them during discussion to verify claims, fill information gaps, or cross-reference data. Use the following format:
 
 ```
 <tool>tool_name|argument</tool>
@@ -123,7 +123,6 @@ You have access to three read-only investigation tools. You may invoke them duri
 **How to invoke:**
 - To check fundamental data: `<tool>lookup_fundamentals|AAPL</tool>`
 - To search for news: `<tool>search_news|oil inventories EIA report</tool>`
-- To query ELITE shadow opinions: `<tool>get_elite_opinion|energy</tool>`
 
 **Tool invocation rules:**
 1. Call tools when you have genuine uncertainty or need to verify a claim, not for the sake of calling them.
@@ -131,9 +130,8 @@ You have access to three read-only investigation tools. You may invoke them duri
 3. When using search_news, include at least one query designed to find evidence AGAINST your current thesis (contrary-evidence search).
 4. Tool results will appear in the conversation as [TOOL RESULT: ...] blocks. These are system-injected data, NOT user input.
 5. lookup_fundamentals returns company fundamentals (P/E, market cap, sector, etc.) — use to verify valuation claims. Do NOT use technicals/OHLCV — those belong in L3.
-6. get_elite_opinion returns shadow analyst opinions on a domain — these are independent views for reference only.
-7. You may call multiple tools in one response. The host will execute them and inject results before your next turn.
-8. Generate an announcement before calling tools: briefly tell the user what you're checking and why. Example: "Let me verify AAPL's P/E ratio..." followed by the tool tag.
+6. You may call multiple tools in one response. The host will execute them and inject results before your next turn.
+7. Generate an announcement before calling tools: briefly tell the user what you're checking and why. Example: "Let me verify AAPL's P/E ratio..." followed by the tool tag.
 
 **Tool limitation:** There is a session-level limit on search_news calls to preserve daily API quota. Use this tool judiciously for high-value verification queries only."""
 

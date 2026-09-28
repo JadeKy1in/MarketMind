@@ -28,7 +28,6 @@ from marketmind.pipeline.l1_display import (
 from marketmind.pipeline.l1_tool_executor import (
     execute_ai_tool_calls, execute_ai_tool_calls_mock, strip_tool_tags,
 )
-from marketmind.pipeline.l1_elite import handle_elite_query
 from marketmind.pipeline.l1_bias_check import run_bias_check
 from marketmind.pipeline.l1_data_mining import is_data_mining_request, execute_data_mining
 from marketmind.pipeline.defang import defang_text
@@ -64,7 +63,6 @@ class InteractiveState:
     forecast_predictions: list[dict] = field(default_factory=list)  # directional scenarios: dominant, alternative, tail-risk
     stage: str = "initial"              # initial | discussing | mining | confirming | done
     should_observe: bool = False         # both agree to skip trading today
-    elite_registry: Any = None            # EliteRegistry (injected by app.py)
     tools: ToolState = field(default_factory=ToolState)  # Phase G: tool invocation state
     source_numbers: set[float] = field(default_factory=set)  # Phase G: dynamic whitelist for output_filter
 
@@ -75,7 +73,7 @@ from marketmind.pipeline.l1_prompts import (
 )
 from marketmind.pipeline.l1_mock_data import (
     MOCK_DEEP_ANALYSIS, MOCK_DISCUSSION_RESPONSE, MOCK_MINING_RESPONSE,
-    MOCK_FUNDAMENTALS_AAPL, MOCK_NEWS_SEARCH_RESULTS, MOCK_ELITE_OPINIONS,
+    MOCK_FUNDAMENTALS_AAPL, MOCK_NEWS_SEARCH_RESULTS,
 )
 
 # ── Interactive L1 Pipeline ─────────────────────────────────────────────────
@@ -85,7 +83,6 @@ async def run_l1_interactive(
     news_items: list,
     user_input_handler=None,  # async callable(str) -> str
     mock: bool = False,       # use canned responses, no API calls
-    elite_registry=None,      # EliteRegistry (injected by app.py)
     tool_registry=None,        # L1ToolRegistry (Phase G, injected by app.py)
     **kwargs,                 # extensible: insider_items, etc.
 ) -> tuple[Layer1Result, bool, dict]:
@@ -103,11 +100,9 @@ async def run_l1_interactive(
         (Layer1Result, should_observe, session_data)
         session_data = {"user_ideas": [...], "discussion_text": "...", "fact_broadcast": [...]}
     """
-    state = InteractiveState(elite_registry=elite_registry)
+    state = InteractiveState()
     if tool_registry is not None:
         state.tools.tool_registry = tool_registry
-        if elite_registry is not None:
-            tool_registry.set_elite_registry(elite_registry)
 
     # Inject current date — factual only, no meta-commentary that triggers cutoff thinking
     today_str = datetime.now(timezone.utc).strftime("%Y年%m月%d日")
@@ -174,7 +169,6 @@ async def run_l1_interactive(
     safe_print(concise_summary)
     print(f"{'='*60}")
     print(f"\n你可以：提问 / 质疑推理 / 建议探索方向 / 回复'好'进入L2 / 回复'observe'观望")
-    print(f"  输入 'elite' 查看可用的ELITE领域专家影子")
 
     # ── Step 3: Discussion loop ──────────────────────────────────────────
     discussion_history: list[dict] = [
@@ -219,11 +213,6 @@ async def run_l1_interactive(
                 "\n[L1] 同意——今日观望。现金也是一种仓位。\n"
             )
             break
-
-        # Handle ELITE shadow query
-        if user_text.lower().startswith("elite") or user_text.lower() == "影子":
-            await handle_elite_query(user_text, state)
-            continue
 
         # Check if user wants data mining
         if is_data_mining_request(user_text):

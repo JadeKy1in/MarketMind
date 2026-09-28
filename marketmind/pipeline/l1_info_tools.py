@@ -1,4 +1,4 @@
-"""L1 Agent Information Tools — news search, elite opinions, calendar, earnings.
+"""L1 Agent Information Tools — news search, calendar, earnings.
 
 Extracted from l1_tools.py per modular architecture rules (CLAUDE.md §3.1).
 Each tool preserves ToolResult wrapping and rate cap logic.
@@ -72,70 +72,6 @@ async def _tool_search_news(registry: "L1ToolRegistry", query: str) -> ToolResul
         "query": query,
         "source": "GNews",
         "data": articles[:10],
-    })
-
-    return tr
-
-
-async def _tool_get_elite_opinion(registry: "L1ToolRegistry", domain: str) -> ToolResult:
-    """Query ELITE shadow analysts for domain-specific opinions.
-
-    Wraps the existing EliteRegistry query mechanism as an AI-callable tool.
-    """
-    domain = domain.strip().lower()
-    timestamp = datetime.now(timezone.utc).isoformat()
-    t0 = datetime.now(timezone.utc)
-
-    if registry._elite_registry is None:
-        return ToolResult(
-            tool_name="get_elite_opinion", query=domain, data={},
-            timestamp=timestamp,
-            error="ELITE registry not initialized. Shadows may not have completed analysis yet.",
-        )
-
-    matched_domains = registry._elite_registry.detect_domain_trigger(domain)
-    if not matched_domains:
-        available = list(registry._elite_registry.DOMAIN_KEYWORDS.keys())[:10]
-        return ToolResult(
-            tool_name="get_elite_opinion", query=domain, data={},
-            timestamp=timestamp,
-            error=f"No ELITE domain matched '{domain}'. Available domains: {', '.join(available)}",
-        )
-
-    domain_name = matched_domains[0]
-    contributions = getattr(registry._elite_registry, '_contributions', {})
-
-    opinions = []
-    for sid, contrib in contributions.items():
-        if contrib.domain == domain_name or domain_name in contrib.domain:
-            opinions.append({
-                "shadow_name": getattr(contrib, 'shadow_name', sid),
-                "opinion": getattr(contrib, 'opinion', '')[:500],
-                "confidence": getattr(contrib, 'confidence', 0.5),
-            })
-
-    if not opinions:
-        return ToolResult(
-            tool_name="get_elite_opinion", query=domain,
-            data={"domain": domain_name, "status": "pending"},
-            timestamp=timestamp,
-            error=None,
-        )
-
-    elapsed_ms = (datetime.now(timezone.utc) - t0).total_seconds() * 1000
-    tr = ToolResult(
-        tool_name="get_elite_opinion", query=domain,
-        data={"domain": domain_name, "opinions": opinions[:3]},
-        timestamp=timestamp,
-    )
-    registry.tool_calls.append(tr)
-    registry._record_efficacy(tr, elapsed_ms)
-
-    registry.fact_broadcast.append({
-        "tool": "get_elite_opinion",
-        "domain": domain_name,
-        "source": "elite_shadows",
-        "data": opinions[:3],
     })
 
     return tr

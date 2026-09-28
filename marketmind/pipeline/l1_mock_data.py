@@ -103,11 +103,3 @@ MOCK_NEWS_SEARCH_RESULTS = [
     {"title": "Oil demand growth slows in China — bearish signal for crude", "source": "SCMP", "publishedAt": "2026-05-15T08:00:00Z"},
 ]
 
-MOCK_ELITE_OPINIONS = {
-    "domain": "energy",
-    "opinions": [
-        {"shadow_name": "energy_hawk", "opinion": "Oil supply disruption is likely short-term. OPEC+ spare capacity at 3M bbl/day provides ample buffer.", "confidence": 0.75},
-        {"shadow_name": "macro_bear", "opinion": "Energy sector is overbought on geopolitical premium. Fundamentals don't support $90+ Brent.", "confidence": 0.65},
-    ],
-}
-
