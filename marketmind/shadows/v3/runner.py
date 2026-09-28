@@ -217,7 +217,8 @@ def _benchmark_entry(ctx: ShadowContext, holds: list[int], today: str,
 
 async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | None = None,
                          entries: list | None = None, call=_call_llm, fred_fetch=None,
-                         derivs_fetch=None, report_dir: Path | None = None) -> RunReport:
+                         derivs_fetch=None, report_dir: Path | None = None,
+                         feeds_fetch=None) -> RunReport:
     today = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     entries = entries if entries is not None else roster_mod.active()
     report = RunReport(today)
@@ -240,6 +241,13 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
     consensus = _previous_consensus(store, today)
 
     derivs = await _derivatives_lines(todo, histories, today, derivs_fetch)
+    if feeds_fetch is None:
+        from marketmind.shadow_feeds import gather as feeds_fetch
+    try:
+        feeds = await feeds_fetch([e.name for e in todo], today)
+    except Exception:
+        logger.warning("shadow feeds unavailable", exc_info=True)
+        feeds = {}
 
     contexts = []
     for e in todo:
@@ -252,7 +260,7 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
         contexts.append(build_context(e, histories, news_items, fred=fred, fred_failed=fred_failed,
                                       consensus_rows=consensus if e.shadow_id == FADE_MASTER_ID else None,
                                       extra_tickers=extra.get(e.shadow_id), today=today,
-                                      **derivs.get(e.shadow_id, {})))
+                                      feeds=feeds.get(e.name), **derivs.get(e.shadow_id, {})))
 
     quotes = {}
     for ctx in contexts:

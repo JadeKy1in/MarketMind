@@ -219,3 +219,14 @@ def _no_real_claude(monkeypatch):
     """Tests never reach the owner's Claude subscription, whatever MARKETMIND_LLM
     the machine is set to (docs/LLM_PROVIDER.md); provider tests set it themselves."""
     monkeypatch.setenv("MARKETMIND_LLM", "deepseek")
+
+
+@pytest.fixture(autouse=True)
+def _offline_shadow_feeds(monkeypatch):
+    """Shadow runs in tests never fetch marketmind/shadow_feeds over the network;
+    feed tests call their fetch functions with mocked HTTP themselves."""
+    import marketmind.shadow_feeds as sf
+
+    async def _none(entry_names, today, feeds=None):
+        return {}
+    monkeypatch.setattr(sf, "gather", _none)

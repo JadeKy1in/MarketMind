@@ -177,6 +177,7 @@ class ShadowContext:
     consensus: list[str] = field(default_factory=list)
     short_interest: list[str] = field(default_factory=list)
     options: list[str] = field(default_factory=list)
+    feeds: dict[str, list[str]] = field(default_factory=dict)   # marketmind/shadow_feeds
     today: str = ""
     off_context: dict[str, float] = field(default_factory=dict)  # priced after the reply
 
@@ -207,6 +208,8 @@ class ShadowContext:
                       "OTM put/call price ratio compares ~5% OTM put and call mids "
                       "(higher = more downside protection demand). Walls = largest open "
                       "interest strikes.", *self.options]
+        for title, lines in self.feeds.items():
+            parts += ["", f"## {title}", *lines]
         parts += ["", "## Today's headlines", *(self.headlines or ["- (no relevant headlines today)"])]
         return "\n".join(parts)
 
@@ -216,6 +219,7 @@ def build_context(entry: RosterEntry, histories: dict[str, PriceHistory | None],
                   consensus_rows: list | None = None, extra_tickers: list[str] | None = None,
                   today: str | None = None, short_interest: list[str] | None = None,
                   options: list[str] | None = None,
+                  feeds: dict[str, list[str]] | None = None,
                   fred_failed: bool = False) -> ShadowContext:
     tickers = list(dict.fromkeys([*entry.watchlist, *(extra_tickers or [])]))
     views = [ticker_view(t, histories.get(t)) for t in tickers]
@@ -226,5 +230,6 @@ def build_context(entry: RosterEntry, histories: dict[str, PriceHistory | None],
         fred=[FRED_UNAVAILABLE_LINE] if fred_failed else fred_lines(fred or {}),
         consensus=consensus_lines(consensus_rows or []) if entry.shadow_id == FADE_MASTER_ID else [],
         short_interest=list(short_interest or []), options=list(options or []),
+        feeds=dict(feeds or {}),
         today=today or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
     )
