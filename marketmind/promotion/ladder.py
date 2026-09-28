@@ -14,6 +14,8 @@ Per-shadow series:
 - Sharpe / skew / kurtosis / MinTRL for the probation gate use per-trade net returns,
   because N_eff counts independent trades; DSR, MPPM, Calmar, Omega, PBO, CUSUM and the
   stress test use the daily return series.
+- "beats random" is a Monte Carlo gate (promotion/random_mc.py), evaluated for
+  probation shadows once the days gate is met; bars come from `bars_for`.
 """
 from __future__ import annotations
 
@@ -25,6 +27,7 @@ import numpy as np
 from marketmind.ledger.store import LedgerEntry
 from marketmind.promotion import config as C
 from marketmind.promotion import metrics as M
+from marketmind.promotion.random_mc import BarsFor, mc_baseline
 from marketmind.shadows.v3.roster import ACTIVE, RosterEntry
 
 MAIN_SOURCES = ("main", "main_forced")
@@ -67,8 +70,12 @@ def _days_after(calendar: list[str], start: str, end: str) -> list[str]:
 
 # ── Per-shadow statistics ───────────────────────────────────────────────
 
-def shadow_stats(sid: str, entries: list[LedgerEntry], calendar: list[str], today: str) -> dict:
-    """Everything the gates and the composite score need for one shadow."""
+def shadow_stats(sid: str, entries: list[LedgerEntry], calendar: list[str], today: str,
+                 watchlist: tuple[str, ...] | list[str] = ()) -> dict:
+    """Everything the gates and the composite score need for one shadow.
+
+    `pool` = the Monte Carlo ticker pool: `watchlist` plus every ticker the ledger's
+    random-baseline shadow has drawn for this shadow."""
     rows = [e for e in entries if e.source_type in CANDIDATE_SOURCES and e.source_id == sid
             and e.created_at and _day(e.created_at) <= today]
     settled = [e for e in rows if e.status == "settled" and e.exit_date
@@ -92,6 +99,8 @@ def shadow_stats(sid: str, entries: list[LedgerEntry], calendar: list[str], toda
     excess_dom = [e.excess_domain for e in settled if e.excess_domain is not None]
     briers = [e.brier for e in settled if e.brier is not None]
     return {
+        "settled_rows": settled,
+        "pool": sorted(set(watchlist) | {e.ticker for e in bench}),
         "records": len(rows), "record_days": len(record_days), "first_day": first,
         "settled": len(settled), "series": series, "market": market, "window": window,
         "sharpe_trade": sr_trade, "skew": g3, "kurtosis": g4,
@@ -113,14 +122,16 @@ def shadow_stats(sid: str, entries: list[LedgerEntry], calendar: list[str], toda
     }
 
 
-def probation_gates(s: dict) -> dict[str, bool]:
-    """Probation -> formal: every gate must pass (S7 §一 阶段与门槛)."""
+def probation_gates(s: dict, random_mc: dict | None = None) -> dict[str, bool]:
+    """Probation -> formal: every gate must pass (S7 §一 阶段与门槛).
+
+    beat_random: the Monte Carlo baseline (`random_mc` = mc_baseline result) passed;
+    missing, not evaluated or not evaluable fails closed."""
     mn = s["mean_net"]
     return {
         "days": s["record_days"] >= C.PROBATION_DAYS,
         "min_trl": s["n_eff"] >= s["min_trl"],
-        "beat_random": mn is not None and s["random_mean_net"] is not None
-                       and mn > s["random_mean_net"],
+        "beat_random": bool(random_mc) and random_mc.get("status") == "pass",
         "beat_domain": s["mean_excess_domain"] is not None and s["mean_excess_domain"] > 0,
         "beat_main": mn is not None and s["main_mean_net"] is not None
                      and mn > s["main_mean_net"],
@@ -183,11 +194,14 @@ CANDIDATE_SOURCES = ("shadow", "playground")
 
 def evaluate(entries: list[LedgerEntry], roster_entries: list[RosterEntry], today: str,
              state: dict | None, trial_count: int, *, calendar: list[str] | None = None,
-             active_ids: set[str] | None = None) -> tuple[dict, list[dict]]:
+             active_ids: set[str] | None = None,
+             bars_for: BarsFor | None = None) -> tuple[dict, list[dict]]:
     """Run one day of the ladder. Returns (new_state, events).
 
     `active_ids` defaults to roster shadows with status active and a prompt file.
-    `trial_count` is the number of trials for the DSR (see runner)."""
+    `trial_count` is the number of trials for the DSR (see runner).
+    `bars_for(tickers) -> {ticker: bars}` feeds the Monte Carlo "beats random" gate;
+    without it that gate is not evaluable and fails closed."""
     state = dict(state or {})
     prev = state.get("shadows", {})
     period = dict(state.get("period") or {"start": None, "index": 0})
@@ -211,7 +225,7 @@ def evaluate(entries: list[LedgerEntry], roster_entries: list[RosterEntry], toda
         if rec["stage"] == "blocked":
             rec["stage"] = rec.pop("resume_stage", None) or "probation"
         recs[r.shadow_id] = rec
-        stats[r.shadow_id] = shadow_stats(r.shadow_id, entries, cal, today)
+        stats[r.shadow_id] = shadow_stats(r.shadow_id, entries, cal, today, r.watchlist)
 
     # 1. paused -> formal on the next evaluation day (no tenure)
     for sid, rec in recs.items():
@@ -219,15 +233,32 @@ def evaluate(entries: list[LedgerEntry], roster_entries: list[RosterEntry], toda
             rec.update(stage="formal", since=today, formal_since=today, advisor_since=None)
             events.append(_event(today, "resume", sid, "paused", "formal"))
 
-    # 2. probation -> formal
+    # 2. probation -> formal. The Monte Carlo baseline runs for probation shadows past
+    # the days gate (the only ones it can promote); later stages keep the result from
+    # their promotion day.
+    need = [sid for sid, s in stats.items() if recs[sid]["stage"] == "probation"
+            and s["record_days"] >= C.PROBATION_DAYS]
+    bars = {}
+    if need and bars_for is not None:
+        bars = bars_for(sorted({t for sid in need for t in stats[sid]["pool"]}))
     for sid, s in stats.items():
         rec = recs[sid]
-        gates = probation_gates(s)
+        if rec["stage"] == "probation":
+            if sid not in need:
+                rec["random_mc"] = {"method": "monte_carlo", "status": "not_evaluated",
+                                    "reason": f"record days < {C.PROBATION_DAYS}"}
+            elif bars_for is None:
+                rec["random_mc"] = {"method": "monte_carlo", "status": "not_evaluable",
+                                    "reason": "no price source"}
+            else:
+                rec["random_mc"] = mc_baseline(sid, s["settled_rows"], s["pool"], bars, today)
+        gates = probation_gates(s, rec.get("random_mc"))
         rec["probation_gates"] = gates
         if rec["stage"] == "probation" and all(gates.values()):
             rec.update(stage="formal", since=today, formal_since=today)
             events.append(_event(today, "promote", sid, "probation", "formal",
-                                 n_eff=s["n_eff"], min_trl=s["min_trl"]))
+                                 n_eff=s["n_eff"], min_trl=s["min_trl"],
+                                 random_p=(rec.get("random_mc") or {}).get("p_value")))
 
     # 3. composite score among shadows past probation (C04: nobody else is ranked)
     ranked = {sid: stats[sid] for sid, rec in recs.items()
@@ -316,7 +347,8 @@ def evaluate(entries: list[LedgerEntry], roster_entries: list[RosterEntry], toda
         s = stats.get(sid)
         if s is not None:
             rec["metrics"] = _clean({k: v for k, v in s.items()
-                                     if k not in ("series", "market", "window")})
+                                     if k not in ("series", "market", "window", "settled_rows",
+                                                  "pool")})
         rec["last_eval"] = today
         recs[sid] = _clean(rec)
 

@@ -173,7 +173,7 @@ async def test_propose_validates_variant_and_capacity(env):
     with pytest.raises(ValueError, match="headings"):
         await trials.propose(PARENT, "beta", "加成交量确认", call=bad, today=TODAY)
     t = await trials.propose(PARENT, "beta", "加成交量确认", call=good, store=store, today=TODAY)
-    assert t.ends == "2026-10-12" and trials.prompt_file(t.trial_id).exists()
+    assert t.ends == "2026-11-23" and trials.prompt_file(t.trial_id).exists()   # 40 trading days
     with pytest.raises(ValueError, match="already has"):
         await trials.propose(PARENT, "beta", "again", call=good, today=TODAY)
     entries = trials.roster_entries()
@@ -182,31 +182,44 @@ async def test_propose_validates_variant_and_capacity(env):
         await trials.propose("nope", "beta", "x", call=good, today=TODAY)
 
 
-def _settled(store, source_type, source_id, day, net):
-    e = LedgerEntry(source_type, source_id, "SPY", "long", 3, 0.6, 200, "x",
+def _settled(store, source_type, source_id, day, net, exit_=None, hold=1):
+    e = LedgerEntry(source_type, source_id, "SPY", "long", hold, 0.6, 200, "x",
                     meta={"run_date": day})
-    e.status, e.net_return = "settled", net
+    e.status, e.net_return, e.pnl_usd = "settled", net, net * 200
+    e.entry_date, e.exit_date = day, exit_ or day
     store.add(e, created_at=f"{day}T10:00:00+00:00")
 
 
+TRIAL_END = trials.add_trading_days("2026-09-01", trials.TRIAL_BARS)
+
+
 def _trial(tmp, status="running"):
-    t = trials.Trial("t1", "challenger", PARENT, "n", "2026-09-01", "2026-09-15", status)
+    t = trials.Trial("t1", "challenger", PARENT, "n", "2026-09-01", TRIAL_END, status)
     trials.save([t])
     trials.prompt_file("t1").parent.mkdir(parents=True, exist_ok=True)
     trials.prompt_file("t1").write_text("## x", encoding="utf-8")
     return t
 
 
+def _trial_days(n=trials.TRIAL_BARS):
+    days, d = [], "2026-08-31"
+    for _ in range(n):
+        d = trials.add_trading_days(d, 1)
+        days.append(d)
+    return days
+
+
 def test_evaluate_passes_a_clearly_better_variant(env):
     store, tmp = env
     _trial(tmp)
-    days = [f"2026-09-{d:02d}" for d in (1, 2, 3, 4, 7, 8, 9, 10)]
-    for i, d in enumerate(days):
-        _settled(store, "shadow", PARENT, d, -0.01 + i * 0.001)
-        _settled(store, "temp_shadow", "trial:t1", d, 0.02 + i * 0.001)
-    decided = trials.evaluate(store, today="2026-09-20")
-    assert decided[0].status == "passed" and decided[0].result["pairs"] == 8
-    assert decided[0].result["p_value"] < 0.10
+    for i, d in enumerate(_trial_days()):
+        _settled(store, "shadow", PARENT, d, -0.01 + (i % 5) * 0.002)
+        _settled(store, "temp_shadow", "trial:t1", d, 0.02 + (i % 3) * 0.002)
+    decided = trials.evaluate(store, today="2026-11-20")
+    r = decided[0].result
+    assert decided[0].status == "passed" and r["pairs"] == 40 and r["test"] == "hac_t"
+    assert r["p_value"] < 0.05 and r["p_holm"] == r["p_value"] and r["holm_family"] == 1
+    assert r["wilcoxon_p"] < 0.05                                   # reported only
 
 
 def test_evaluate_waits_for_open_records_and_flags_small_samples(env):
@@ -215,8 +228,8 @@ def test_evaluate_waits_for_open_records_and_flags_small_samples(env):
     _settled(store, "shadow", PARENT, "2026-09-01", 0.01)
     store.add(LedgerEntry("temp_shadow", "trial:t1", "SPY", "long", 3, 0.6, 200, "x",
                           meta={"run_date": "2026-09-01"}), created_at="2026-09-01T10:00:00+00:00")
-    assert trials.evaluate(store, today="2026-09-20") == []                 # still pending
-    assert trials.evaluate(store, today="2026-12-01")[0].status == "insufficient"
+    assert trials.evaluate(store, today="2026-11-20") == []                 # still pending
+    assert trials.evaluate(store, today="2027-01-20")[0].status == "insufficient"
 
 
 def test_approve_writes_prompt_with_backup(env, tmp_path):

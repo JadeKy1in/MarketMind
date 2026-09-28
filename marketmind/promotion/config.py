@@ -10,6 +10,16 @@ MIN_POSITION_USD = 100.0         # "minimum position" trades (SPEC §6.1)
 PROBATION_DAYS = 60              # trading days with records
 MINTRL_CONFIDENCE = 0.95         # Bailey & Lopez de Prado MinTRL, benchmark Sharpe 0
 MINTRL_BENCHMARK_SHARPE = 0.0
+# "Beats random" gate (owner decision 2026-09-28): Monte Carlo random portfolios instead
+# of the ledger's one-trade-a-day random shadow (promotion/random_mc.py).
+MC_DRAWS = 1000                  # random portfolios per shadow and review day
+MC_QUANTILE = 0.95               # shadow mean net return >= this quantile of the draws ...
+MC_ALPHA = 0.05                  # ... and one-sided p = (1 + #draws >= mean) / (1 + valid) <= this
+MC_MIN_VALID = 200               # fewer valid draws -> "not evaluable" (gate fails closed)
+MC_MAX_POOL_MISSING = 0.5        # more than this share of the ticker pool without bars -> not evaluable
+MC_MAX_GAP_DAYS = 4              # a pool ticker's first/last bar in a trade window may be at most
+                                 # this many calendar days inside the window (holidays, weekends)
+MC_FETCH_BUDGET_S = 120.0        # wall-clock budget for loading uncached bars in one review
 
 # ── Composite score (formal shadows only) ──────────────────────────────
 SCORE_WEIGHTS = {"mppm": 0.35, "calmar": 0.25, "omega": 0.20, "win_rate": 0.20}

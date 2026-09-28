@@ -2,9 +2,13 @@
 
 A trial runs a rewritten methodology for a long-term shadow side by side with
 the original for TRIAL_BARS trading days (source_id trial:<id>). When every
-record has settled, daily mean net returns are paired and compared with a
-one-sided Wilcoxon signed-rank test. A passing trial only becomes "passed";
-the owner must approve it before the prompt file changes (SPEC L1).
+record has settled, both sides' daily P&L (booked on the exit date, / $10,000
+notional, as in the promotion ladder) is differenced day by day and tested
+one-sided with a HAC (Newey-West) t-test, lag = parent's median hold - 1 (>= 1),
+i.e. a Diebold-Mariano test. Trials decided in the same review form one family:
+Holm-adjusted p <= ALPHA passes. Wilcoxon is reported only as a robustness
+statistic. A passing trial only becomes "passed"; the owner must approve it
+before the prompt file changes (SPEC L1).
 
 CLI: python -m marketmind.shadows.v3.trials {list,propose,approve,reject}
 """
@@ -29,9 +33,12 @@ from marketmind.shadows.v3.roster import RosterEntry
 logger = logging.getLogger("marketmind.shadows.v3.trials")
 
 MAX_RUNNING = 5                  # owner decision 2026-09-28
-TRIAL_BARS = 10                  # "2-week paired trial"
-MIN_PAIRS = 5
-P_PASS = 0.10
+# Owner decision 2026-09-28 (docs/S7_DESIGN.md §二 判定): the 10-day Wilcoxon at p < 0.10
+# had power close to its size, so most passes were false. 40 trading days, HAC t,
+# alpha 0.05 with Holm across the trials decided in the same review.
+TRIAL_BARS = 40                  # trading days of decisions per trial (was 10)
+MIN_PAIRS = 30                   # exit-date days in the paired P&L series (was 5)
+ALPHA = 0.05                     # one-sided, family-wise via Holm (was p < 0.10 per trial)
 SETTLE_GRACE_DAYS = 60           # give up waiting for open records after this
 
 SYSTEM_PROMPT = """你负责改写一个虚拟基金经理（影子）的方法论，用于对比试验。
@@ -178,47 +185,105 @@ def roster_entries(folder: Path | None = None) -> list[RosterEntry]:
     return out
 
 
-def paired_days(store, t: Trial) -> tuple[list[tuple[str, float, float]], bool]:
-    """([(run_date, parent mean, variant mean)], every record settled)."""
+def _run_date(e) -> str:
+    return (e.meta or {}).get("run_date") or e.created_at[:10]
+
+
+def daily_differences(store, t: Trial) -> dict:
+    """Paired daily P&L of a trial, aligned by exit (settlement) date.
+
+    Rows = parent and variant records whose decision (run) date lies in
+    [started, ends). Each side's settled P&L is booked on its exit date / notional
+    (promotion ladder convention); the series runs over the trading calendar (exit
+    dates of all settled ledger rows, plus both sides' own) from the first to the last
+    exit of either side, days without exits count 0. Returns diffs (variant - parent),
+    the HAC lag, and whether every record has settled."""
+    from marketmind.promotion import config as PC
+    from marketmind.promotion.metrics import trading_calendar
+
     def rows(source_type, source_id):
         return [e for e in store.list(source_type=source_type) if e.source_id == source_id
-                and t.started <= ((e.meta or {}).get("run_date") or e.created_at[:10]) < t.ends]
+                and t.started <= _run_date(e) < t.ends]
     parent, variant = rows("shadow", t.parent_id), rows("temp_shadow", f"trial:{t.trial_id}")
     done = all(e.status in ("settled", "void") for e in parent + variant)
 
-    def by_day(es):
-        out: dict[str, list[float]] = {}
+    def pnl(es):
+        out: dict[str, float] = {}
         for e in es:
-            if e.status == "settled" and e.net_return is not None:
-                out.setdefault((e.meta or {}).get("run_date") or e.created_at[:10], []).append(e.net_return)
-        return {d: sum(v) / len(v) for d, v in out.items()}
-    p, v = by_day(parent), by_day(variant)
-    return [(d, p[d], v[d]) for d in sorted(set(p) & set(v))], done
+            if e.status == "settled" and e.exit_date and e.pnl_usd is not None:
+                d = e.exit_date[:10]
+                out[d] = out.get(d, 0.0) + e.pnl_usd / PC.NOTIONAL_USD
+        return out
+    p, v = pnl(parent), pnl(variant)
+    exits = set(p) | set(v)
+    holds = sorted(e.hold_bars for e in (parent or variant))
+    typical = holds[len(holds) // 2] if holds else 1
+    out = {"diffs": [], "days": [], "done": done, "lag": max(1, typical - 1),
+           "parent_hold": typical, "parent_rows": len(parent), "variant_rows": len(variant)}
+    if not exits:
+        return out
+    lo, hi = min(exits), max(exits)
+    cal = sorted({d for d in trading_calendar(store.list(status="settled")) if lo <= d <= hi}
+                 | exits)
+    out["days"] = cal
+    out["diffs"] = [v.get(d, 0.0) - p.get(d, 0.0) for d in cal]
+    return out
+
+
+def _wilcoxon_p(diffs: list[float]) -> float | None:
+    """One-sided Wilcoxon signed-rank p (reported only, not a pass criterion)."""
+    from scipy.stats import wilcoxon
+    nonzero = [d for d in diffs if d != 0]
+    if len(nonzero) < 2:
+        return None
+    try:
+        return float(wilcoxon(nonzero, alternative="greater").pvalue)
+    except ValueError:
+        logger.warning("wilcoxon not computable", exc_info=True)
+        return None
 
 
 def evaluate(store, *, today: str | None = None, folder: Path | None = None) -> list[Trial]:
-    """Judge running trials whose window has ended; returns the trials decided now."""
-    from scipy.stats import wilcoxon
+    """Judge running trials whose window has ended; returns the trials decided now.
+
+    Every trial ready in this call (window over and all records settled, or the
+    settlement grace period passed) belongs to one Holm family."""
+    from marketmind.promotion.metrics import hac_t_test, holm_adjust
     today = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     trials = load(folder)
-    decided = []
+    ready: list[tuple[Trial, dict]] = []
     for t in trials:
         if t.status != "running" or t.ends > today:
             continue
-        pairs, done = paired_days(store, t)
+        paired = daily_differences(store, t)
         grace = (date.fromisoformat(today) - date.fromisoformat(t.ends)).days > SETTLE_GRACE_DAYS
-        if not done and not grace:
+        if not paired["done"] and not grace:
             continue
-        diffs = [v - p for _, p, v in pairs]
-        result = {"pairs": len(pairs), "mean_diff": (sum(diffs) / len(diffs)) if diffs else None}
-        if len(pairs) < MIN_PAIRS:
+        diffs = paired["diffs"]
+        hac = hac_t_test(diffs, paired["lag"])
+        ready.append((t, {
+            "test": "hac_t", "aligned_by": "exit_date", "alpha": ALPHA,
+            "pairs": len(diffs), "mean_diff": (sum(diffs) / len(diffs)) if diffs else None,
+            "lag": hac["lag"], "parent_hold": paired["parent_hold"],
+            "t_stat": hac["t"], "se": hac["se"], "p_value": hac["p_value"],
+            "wilcoxon_p": _wilcoxon_p(diffs),
+            "first_day": paired["days"][0] if paired["days"] else None,
+            "last_day": paired["days"][-1] if paired["days"] else None,
+            "settled_all": paired["done"],
+        }))
+    tested = [(t, r) for t, r in ready if r["pairs"] >= MIN_PAIRS and r["p_value"] is not None]
+    adjusted = holm_adjust([r["p_value"] for _, r in tested])
+    for (t, r), p_holm in zip(tested, adjusted):
+        r["p_holm"], r["holm_family"] = p_holm, len(tested)
+    decided = []
+    for t, r in ready:
+        if r["pairs"] < MIN_PAIRS:
             t.status = "insufficient"
+        elif r["p_value"] is None:
+            t.status, r["note"] = "failed", "no variation in the daily P&L difference"
         else:
-            nonzero = [d for d in diffs if d != 0]
-            p_value = float(wilcoxon(nonzero, alternative="greater").pvalue) if len(nonzero) >= MIN_PAIRS else 1.0
-            result["p_value"] = p_value
-            t.status = "passed" if result["mean_diff"] > 0 and p_value < P_PASS else "failed"
-        t.result = result
+            t.status = "passed" if r["mean_diff"] > 0 and r["p_holm"] <= ALPHA else "failed"
+        t.result = r
         t.decided_at = today
         decided.append(t)
     if decided:
