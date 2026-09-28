@@ -117,3 +117,11 @@ def test_derivative_sections_render():
     assert "## Short interest (Nasdaq" in ctx.render() and "UPST: short interest" in ctx.render()
     ctx = build_context(by["derivatives:options:options_reader"], {}, [], options=["- SPY options"])
     assert "## Option chains" in ctx.render() and "Implied move" in ctx.render()
+
+
+def test_failed_fred_fetch_is_stated_not_omitted():
+    entry = roster.by_id()["expert:gold:bullion_broker"]
+    ctx = build_context(entry, {}, [], fred={}, fred_failed=True, today="2026-09-28")
+    text = ctx.render()
+    assert "## Macro data (FRED" in text
+    assert "FRED data unavailable" in text

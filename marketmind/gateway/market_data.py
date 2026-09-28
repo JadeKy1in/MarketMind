@@ -1,7 +1,9 @@
 """On-demand, single-ticker, session-cached market data fetcher.
 
 Primary source: yfinance (universal US stock/ETF coverage, no API key)
-Secondary source: Finnhub (free API key, 60 calls/min, env FINNHUB_KEY)
+Secondary source: Finnhub fundamentals only (free API key, env FINNHUB_KEY). Its
+/stock/candle OHLCV endpoint returns 403 on the free key (2026-09-28), so OHLCV has
+no Finnhub fallback; long-horizon bars come from gateway/price_history.py.
 Crypto source: Binance public REST API (no key, tickers ending in "-USD")
 
 Architecture — Per the Red Team audit (red-team-market-data-design.md):
@@ -21,6 +23,7 @@ from typing import Any
 
 import httpx
 
+from marketmind.markets import yahoo_symbol
 from marketmind.pipeline.defang import defang_text
 
 logger = logging.getLogger("marketmind.gateway.market_data")
@@ -175,7 +178,7 @@ def _yf_fundamentals_sync(ticker: str) -> dict:
     is invalid, delisted, or the upstream source is broken.
     """
     try:
-        t = yf.Ticker(ticker)  # type: ignore[union-attr]
+        t = yf.Ticker(yahoo_symbol(ticker))  # type: ignore[union-attr]
         info = t.info
         if not info:
             return {}
@@ -204,7 +207,7 @@ def _yf_ohlcv_sync(ticker: str) -> dict:
     data is available.
     """
     try:
-        t = yf.Ticker(ticker)  # type: ignore[union-attr]
+        t = yf.Ticker(yahoo_symbol(ticker))  # type: ignore[union-attr]
         hist = t.history(period="3mo")
         if hist is None or hist.empty:
             logger.debug("yfinance returned empty history for ticker %s", ticker)
@@ -238,15 +241,13 @@ async def _fetch_finnhub(ticker: str, data_type: str) -> dict:
     invoked when yfinance is unavailable, so we stay well within quota
     under normal conditions.
     """
-    if not _FINNHUB_KEY:
+    if not _FINNHUB_KEY or data_type != "fundamentals":
+        # /stock/candle (OHLCV) is 403 on the free key: no Finnhub OHLCV fallback.
         return {}
 
     client = httpx.AsyncClient(timeout=httpx.Timeout(10.0))
     try:
-        if data_type == "fundamentals":
-            return await _finnhub_fundamentals(client, ticker)
-        else:  # ohlcv / technical
-            return await _finnhub_ohlcv(client, ticker)
+        return await _finnhub_fundamentals(client, ticker)
     except Exception as exc:
         logger.warning("Finnhub fetch failed for %s/%s: %s", ticker, data_type, exc)
         return {}
@@ -276,26 +277,6 @@ async def _finnhub_fundamentals(client: httpx.AsyncClient, ticker: str) -> dict:
         return {}
 
     return {"source": "finnhub", "profile": profile, "metrics": metrics}
-
-
-async def _finnhub_ohlcv(client: httpx.AsyncClient, ticker: str) -> dict:
-    """Fetch Finnhub daily candles (1 year lookback)."""
-    to_time = int(time.time())
-    from_time = to_time - 365 * 24 * 3600
-    candles_url = (
-        f"{_FINNHUB_BASE}/stock/candle?symbol={ticker}"
-        f"&resolution=D&from={from_time}&to={to_time}&token={_FINNHUB_KEY}"
-    )
-    try:
-        resp = await client.get(candles_url)
-        if resp.status_code != 200:
-            return {}
-        data = resp.json()
-        if data.get("s") != "ok":
-            return {}
-        return {"source": "finnhub", "candles": data}
-    except Exception:
-        return {}
 
 
 # ===================================================================

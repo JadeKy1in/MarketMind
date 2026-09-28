@@ -243,12 +243,13 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
 
     contexts = []
     for e in todo:
+        fred_failed = False
         try:
             fred = await fred_fetch(e.shadow_id)
         except Exception as exc:
             logger.warning("FRED for %s failed: %s", e.shadow_id, exc)
-            fred = {}
-        contexts.append(build_context(e, histories, news_items, fred=fred,
+            fred, fred_failed = {}, True
+        contexts.append(build_context(e, histories, news_items, fred=fred, fred_failed=fred_failed,
                                       consensus_rows=consensus if e.shadow_id == FADE_MASTER_ID else None,
                                       extra_tickers=extra.get(e.shadow_id), today=today,
                                       **derivs.get(e.shadow_id, {})))

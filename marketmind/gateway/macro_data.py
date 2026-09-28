@@ -2,7 +2,8 @@
 
 Three public functions, all using direct httpx (no new dependencies):
 
-- get_macro_indicator("BDI" | "GSCPI") — FRED API (free key, env FRED_KEY)
+- get_macro_indicator("BDI" | "GSCPI") — BDI proxy from FRED (free key, env FRED_KEY);
+  GSCPI from the NY Fed's own CSV (it is not a FRED series)
 - get_cot_data("ES" | "CL" | "GC" | "NG") — CFTC SODA API (no key, public JSON)
 - get_eia_inventory("crude" | "gasoline" | "distillate") — EIA API v2 (free key, env EIA_KEY)
 
@@ -36,17 +37,23 @@ _FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
 
 # Series IDs for supported macro indicators
 _FRED_SERIES: dict[str, dict[str, str]] = {
+    # The Baltic Dry Index itself is not on FRED; same proxy as gateway/fred_client.py.
     "BDI": {
-        "series_id": "DRSAGRGQ086SBEA",
-        "label": "Baltic Dry Index",
-        "cadence": "daily",
-    },
-    "GSCPI": {
-        "series_id": "GSCPI",
-        "label": "Global Supply Chain Pressure Index",
+        "series_id": "PCU483111483111",
+        "label": "PPI: Deep Sea Freight (BDI proxy)",
         "cadence": "monthly",
     },
 }
+# Observations requested per FRED call: the newest can be "." (holiday / not yet
+# published), so take the first numeric value among the latest few.
+_FRED_OBS_LIMIT = 5
+
+# GSCPI is published by the NY Fed only (not on FRED). The page's "gscpi_data.xlsx"
+# download is really a legacy .xls that openpyxl cannot read; the interactive CSV
+# (verified 2026-09-28) has one row per month and one column per vintage, the last
+# column being the current vintage ("#N/A" where that vintage has no value).
+_GSCPI_CSV = "https://www.newyorkfed.org/medialibrary/research/interactives/data/gscpi/gscpi_interactive_data.csv"
+_GSCPI_LABEL = "Global Supply Chain Pressure Index"
 
 # ---------------------------------------------------------------------------
 # CFTC SODA API constants (public, no key)
@@ -150,7 +157,7 @@ async def get_macro_indicator(indicator: str) -> dict:
         if key in _cache:
             return _cache[key]
 
-        result = await _fetch_fred(indicator)
+        result = await (_fetch_gscpi() if indicator == "GSCPI" else _fetch_fred(indicator))
         _cache[key] = result
         return result
 
@@ -227,7 +234,7 @@ async def _fetch_fred(indicator: str) -> dict:
     if series_info is None:
         return {
             "error": "source_unavailable",
-            "detail": f"Unknown indicator: '{indicator}'. Supported: BDI, GSCPI",
+            "detail": f"Unknown indicator: '{indicator}'. Supported: BDI (FRED), GSCPI (NY Fed)",
         }
 
     fred_key = _get_fred_key()
@@ -241,7 +248,7 @@ async def _fetch_fred(indicator: str) -> dict:
         f"&api_key={fred_key}"
         f"&file_type=json"
         f"&sort_order=desc"
-        f"&limit=1"
+        f"&limit={_FRED_OBS_LIMIT}"
     )
 
     client = httpx.AsyncClient(timeout=httpx.Timeout(10.0))
@@ -249,16 +256,14 @@ async def _fetch_fred(indicator: str) -> dict:
         resp = await client.get(url)
         resp.raise_for_status()
         data = resp.json()
-        observations = data.get("observations", [])
-
-        if not observations or observations[0].get("value") in (None, "."):
+        obs = first_numeric_observation(data.get("observations", []))
+        if obs is None:
             return {"error": "source_unavailable", "detail": f"No data for {indicator}"}
 
-        obs = observations[0]
         return {
             "indicator": indicator,
             "label": series_info["label"],
-            "value": _parse_float(obs.get("value")),
+            "value": float(obs["value"]),
             "date": obs.get("date", ""),
             "source": "fred",
             "cadence": series_info["cadence"],
@@ -272,6 +277,66 @@ async def _fetch_fred(indicator: str) -> dict:
         return {"error": "source_unavailable", "detail": str(e)}
     finally:
         await client.aclose()
+
+
+def first_numeric_observation(observations: list) -> dict | None:
+    """First observation (newest first) whose value is a number; FRED uses "." for none."""
+    for obs in observations or []:
+        try:
+            float(obs.get("value"))
+        except (TypeError, ValueError):
+            continue
+        return obs
+    return None
+
+
+async def _fetch_gscpi() -> dict:
+    """Latest GSCPI value (current vintage) from the NY Fed CSV."""
+    client = httpx.AsyncClient(timeout=httpx.Timeout(30.0), follow_redirects=True)
+    try:
+        resp = await client.get(_GSCPI_CSV, headers={"User-Agent": "Mozilla/5.0 (MarketMind research)"})
+        resp.raise_for_status()
+        latest = parse_gscpi_csv(resp.text)
+    except Exception as e:
+        logger.warning("GSCPI (NY Fed) fetch failed: %s", e)
+        return {"error": "source_unavailable", "detail": f"NY Fed GSCPI: {e}"}
+    finally:
+        await client.aclose()
+    if latest is None:
+        return {"error": "source_unavailable", "detail": "NY Fed GSCPI CSV had no numeric value"}
+    date, value = latest
+    return {
+        "indicator": "GSCPI",
+        "label": _GSCPI_LABEL,
+        "value": value,
+        "date": date,
+        "source": "nyfed",
+        "cadence": "monthly",
+        "series_id": "GSCPI",
+    }
+
+
+def parse_gscpi_csv(text: str) -> tuple[str, float] | None:
+    """(YYYY-MM-DD, value) of the newest month in the CSV's last (current-vintage) column."""
+    import csv
+    import io
+    rows = [r for r in csv.reader(io.StringIO(text)) if r and r[0].strip()]
+    if len(rows) < 2:
+        return None
+    col = len(rows[0]) - 1
+    for row in reversed(rows[1:]):
+        if len(row) <= col:
+            continue
+        try:
+            value = float(row[col])
+        except ValueError:
+            continue
+        try:
+            date = datetime.strptime(row[0].strip(), "%d-%b-%Y").strftime("%Y-%m-%d")
+        except ValueError:
+            date = row[0].strip()
+        return date, value
+    return None
 
 
 # ===================================================================

@@ -138,7 +138,8 @@ async def _do_fragility_scan(tracker: StageTracker):
     try:
         inputs = await fetch_fragility_inputs()
         report = await scan_fragility(inputs.values, unavailable=inputs.unavailable)
-        tracker.result(f"fragility={report.overall_fragility_score:.2f}, "
+        score = report.overall_fragility_score
+        tracker.result(f"fragility={'not evaluated' if score is None else f'{score:.2f}'}, "
                        f"crossed={len(report.crossed)}, evaluated={len(report.alerts)}, "
                        f"unavailable={len(report.unavailable)}")
         return report
@@ -146,7 +147,7 @@ async def _do_fragility_scan(tracker: StageTracker):
         logger.exception("Fragility scan failed")
         tracker.result("Fragility scan FAILED — not evaluated (see log)")
         return FragilityReport(alerts=[], crossed=[], warnings=[],
-                               overall_fragility_score=0.0, staleness_warnings=[],
+                               overall_fragility_score=None, staleness_warnings=[],
                                summary="fragility not evaluated (scan failed)",
                                unavailable={"*": "scan failed"})
 
@@ -511,10 +512,10 @@ def _save_decision_brief(l1_result, l2_result, l3_result, red_team, resonance, d
             }
 
         # Fragility
-        fragility_score = 0.0
+        fragility_score = None  # None = not evaluated (never shown as 0 = "no fragility")
         fragility_crossed = 0
         if fragility:
-            fragility_score = getattr(fragility, 'overall_fragility_score', 0.0) or 0.0
+            fragility_score = getattr(fragility, 'overall_fragility_score', None)
             fragility_crossed = len(getattr(fragility, 'crossed', []) or [])
 
         brief = {

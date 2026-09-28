@@ -486,14 +486,15 @@ async def generate_decision(
         fragility: Optional FragilityReport from market fragility scan.
                    fragility_crossed > 2 adds a risk warning to the no-trade card.
     """
-    fragility_score = getattr(fragility, 'overall_fragility_score', 0.0) if fragility else 0.0
+    fragility_score = getattr(fragility, 'overall_fragility_score', None) if fragility else None
     fragility_crossed = len(getattr(fragility, 'crossed', []) or []) if fragility else 0
 
     if not l3.green_lights:
         paper = _pick_paper_trade(l1, l2, l3, red_team, resonance)
         fragility_note = ""
         if fragility_crossed > 2:
-            fragility_note = f" [Fragility: {fragility_crossed} thresholds crossed, score={fragility_score:.2f}]"
+            score_txt = "n/a" if fragility_score is None else f"{fragility_score:.2f}"
+            fragility_note = f" [Fragility: {fragility_crossed} thresholds crossed, score={score_txt}]"
         return DecisionOutput(
             no_trade_card=NoTradeCard(
                 thesis=_t("no_signal_thesis") + fragility_note,

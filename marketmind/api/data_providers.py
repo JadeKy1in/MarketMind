@@ -109,12 +109,12 @@ def get_source_status() -> list[dict]:
     # Fallback: hardcoded list from config
     if not sources:
         for name, url, has_key in [
-            ("FRED", "api.stlouisfed.org", bool(os.environ.get("FRED_KEY"))),
+            ("FRED", "api.stlouisfed.org", bool(os.environ.get("FRED_KEY") or os.environ.get("FRED_API_KEY"))),
             ("CBOE CSV", "cboe.com", True),
             ("DefiLlama", "api.llama.fi", True),
             ("Crypto F&G", "alternative.me", True),
             ("Blockchain", "blockchain.info", True),
-            ("EIA", "eia.gov", bool(os.environ.get("EIA_KEY"))),
+            ("EIA", "eia.gov", bool(os.environ.get("EIA_KEY") or os.environ.get("EIA_API_KEY"))),
             ("BLS", "bls.gov", True),
             ("CFTC COT", "cftc.gov", True),
             ("World Bank", "worldbank.org", True),

@@ -139,6 +139,9 @@ def red_flag_tickers(news_items: list, tradable, limit: int = MAX_NEWS_TICKERS) 
     return [t for t, _ in counts.most_common() if tradable(t)][:limit]
 
 
+FRED_UNAVAILABLE_LINE = "- FRED data unavailable today (fetch failed); do not assume any macro values."
+
+
 def fred_lines(series: dict[str, dict]) -> list[str]:
     lines = []
     for key, r in series.items():
@@ -212,13 +215,15 @@ def build_context(entry: RosterEntry, histories: dict[str, PriceHistory | None],
                   news_items: list, fred: dict[str, dict] | None = None,
                   consensus_rows: list | None = None, extra_tickers: list[str] | None = None,
                   today: str | None = None, short_interest: list[str] | None = None,
-                  options: list[str] | None = None) -> ShadowContext:
+                  options: list[str] | None = None,
+                  fred_failed: bool = False) -> ShadowContext:
     tickers = list(dict.fromkeys([*entry.watchlist, *(extra_tickers or [])]))
     views = [ticker_view(t, histories.get(t)) for t in tickers]
     headlines = news_lines(filter_news(news_items, entry.news_keywords))
     return ShadowContext(
         entry=entry, views=views, headlines=headlines,
-        fred=fred_lines(fred or {}),
+        # A failed FRED fetch is stated, not silently dropped (the section would vanish).
+        fred=[FRED_UNAVAILABLE_LINE] if fred_failed else fred_lines(fred or {}),
         consensus=consensus_lines(consensus_rows or []) if entry.shadow_id == FADE_MASTER_ID else [],
         short_interest=list(short_interest or []), options=list(options or []),
         today=today or datetime.now(timezone.utc).strftime("%Y-%m-%d"),

@@ -23,7 +23,9 @@ class FragilityReport:
     alerts: list[FragilityAlert]
     crossed: list[FragilityAlert]
     warnings: list[FragilityAlert]
-    overall_fragility_score: float  # 0 (stable) to 1 (extreme fragility)
+    # 0 (stable) to 1 (extreme fragility); None = not evaluated (scan failed or no
+    # threshold had data) so readers cannot mistake it for "no fragility".
+    overall_fragility_score: float | None
     staleness_warnings: list[str]
     summary: str
     generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -113,14 +115,16 @@ async def scan_fragility(
     crossed = [a for a in alerts if a.crossed]
     warnings_list = [a for a in alerts if a.severity == "WARNING"]
 
-    score = _compute_fragility_score(alerts)
+    score = _compute_fragility_score(alerts) if alerts else None
 
     crossed_count = len(crossed)
     warning_count = len(warnings_list)
     monitor_count = sum(1 for a in alerts if a.severity == "MONITOR")
     total_count = len(alerts)
 
-    if crossed_count == 0 and warning_count == 0:
+    if score is None:
+        summary = "Fragility not evaluated: no threshold had data"
+    elif crossed_count == 0 and warning_count == 0:
         summary = f"Fragility score {score:.2f}: all {total_count} monitored thresholds clear"
     elif crossed_count == 0:
         summary = f"Fragility score {score:.2f}: {warning_count} WARNING, {monitor_count} MONITOR out of {total_count} thresholds"

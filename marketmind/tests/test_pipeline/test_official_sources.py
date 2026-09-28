@@ -83,9 +83,8 @@ def test_status_corrections():
     assert "disclosures-clerk.house.gov" in by["Congress Trades"].url
     assert by["Euronews Economy"].status == SourceStatus.DEGRADED
     assert by["Euronews Economy"].is_available
-    # Xinhua feed frozen since 2018: documented but not fetched.
-    assert by["Xinhua Finance"].status == SourceStatus.DEAD
-    assert by["Xinhua Finance"] not in get_working_sources()
+    # Xinhua feed frozen since 2018: entry deleted 2026-09-28.
+    assert "Xinhua Finance" not in by
 
 
 # ── Scout dispatch ──────────────────────────────────────────────────────────

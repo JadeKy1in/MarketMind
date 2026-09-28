@@ -23,13 +23,12 @@ logger = logging.getLogger("marketmind.pipeline.insider_sources")
 
 
 async def fetch_congress_trades() -> list[Any]:
-    """Recent House PTR stock trades (official House Clerk disclosures, no key)."""
+    """Recent House PTR stock trades (official House Clerk disclosures, no key).
+
+    Raises on failure so scout records the source as failed (not silently empty).
+    """
     from marketmind.pipeline.house_ptr import fetch_house_ptr_items
-    try:
-        return await fetch_house_ptr_items()
-    except Exception as e:
-        logger.warning("Congress Trades (House PTR) fetch failed: %s", e)
-        return []
+    return await fetch_house_ptr_items()
 
 
 async def fetch_form4_insider() -> list[Any]:
@@ -52,8 +51,7 @@ async def fetch_form4_insider() -> list[Any]:
                         "count": "20", "start": "0"},
             )
             if resp.status_code != 200:
-                logger.warning("SEC Form 4 returned %d: %s", resp.status_code, resp.text[:200])
-                return items
+                raise RuntimeError(f"SEC Form 4 returned HTTP {resp.status_code}")
             feed = feedparser.parse(resp.text)
             for entry in feed.entries[:20]:
                 title = entry.get("title", "Form 4 Filing").strip()
@@ -75,6 +73,7 @@ async def fetch_form4_insider() -> list[Any]:
                 ))
     except Exception as e:
         logger.warning("SEC Form 4 fetch failed: %s", e)
+        raise  # scout.fetch_source records the failure on the source
     return items
 
 
@@ -99,8 +98,7 @@ async def fetch_13f_holdings() -> list[Any]:
                         "count": "20", "start": "0"},
             )
             if resp.status_code != 200:
-                logger.warning("SEC 13F returned %d: %s", resp.status_code, resp.text[:200])
-                return items
+                raise RuntimeError(f"SEC 13F returned HTTP {resp.status_code}")
             feed = feedparser.parse(resp.text)
             for entry in feed.entries[:20]:
                 title = entry.get("title", "13F Filing").strip()
@@ -122,6 +120,7 @@ async def fetch_13f_holdings() -> list[Any]:
                 ))
     except Exception as e:
         logger.warning("SEC 13F fetch failed: %s", e)
+        raise  # scout.fetch_source records the failure on the source
     return items
 
 

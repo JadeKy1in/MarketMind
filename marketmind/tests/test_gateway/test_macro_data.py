@@ -64,7 +64,9 @@ class TestFredBDI:
             assert result["value"] == 1450.0
             assert result["date"] == "2026-05-15"
             assert result["source"] == "fred"
-            assert result["cadence"] == "daily"
+            # BDI proxy: PPI Deep Sea Freight (the old series id did not exist on FRED)
+            assert result["series_id"] == "PCU483111483111"
+            assert result["cadence"] == "monthly"
             assert "error" not in result
 
     async def test_bdi_case_insensitive(self):
@@ -93,31 +95,57 @@ class TestFredBDI:
 
 @pytest.mark.asyncio
 class TestFredGSCPI:
-    """FRED API returns Global Supply Chain Pressure Index data."""
+    """GSCPI is not a FRED series: it comes from the NY Fed CSV (current vintage = last column)."""
 
     async def test_gscpi_returns_indicator_dict(self):
         _clear_cache()
-        fixture = _load_fixture("fred_gscpi.json")
-
-        with patch(
-            "marketmind.gateway.macro_data._get_fred_key",
-            return_value="test_key",
-        ), patch.object(
-            httpx.AsyncClient, "get", new_callable=AsyncMock,
-        ) as mock_get:
+        csv_text = (
+            "Date,Jul-26,Aug-26,Sep-26\n"
+            "31-Jul-2026,0.50,0.52,0.55\n"
+            "31-Aug-2026,#N/A,#N/A,1.06\n"
+            "30-Sep-2026,#N/A,#N/A,#N/A\n"
+            ",,,\n"
+        )
+        with patch.object(httpx.AsyncClient, "get", new_callable=AsyncMock) as mock_get:
             mock_resp = MagicMock()
             mock_resp.raise_for_status = lambda: None
-            mock_resp.json.return_value = fixture
+            mock_resp.text = csv_text
             mock_get.return_value = mock_resp
 
             result = await get_macro_indicator("GSCPI")
 
+            assert "newyorkfed.org" in mock_get.call_args.args[0]
             assert result["indicator"] == "GSCPI"
-            assert result["value"] == -0.35
-            assert result["date"] == "2026-04-01"
-            assert result["source"] == "fred"
+            assert result["value"] == 1.06
+            assert result["date"] == "2026-08-31"
+            assert result["source"] == "nyfed"
             assert result["cadence"] == "monthly"
             assert "error" not in result
+
+    async def test_gscpi_http_error_is_unavailable(self):
+        _clear_cache()
+        with patch.object(httpx.AsyncClient, "get", new_callable=AsyncMock,
+                          side_effect=httpx.ConnectError("down")):
+            result = await get_macro_indicator("GSCPI")
+        assert result["error"] == "source_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_fred_skips_dot_placeholder_and_keeps_its_date():
+    """Newest FRED observation "." (holiday) -> first numeric one, with its own date."""
+    _clear_cache()
+    payload = {"observations": [{"date": "2026-09-28", "value": "."},
+                                {"date": "2026-09-01", "value": "101.5"}]}
+    with patch("marketmind.gateway.macro_data._get_fred_key", return_value="test_key"), \
+            patch.object(httpx.AsyncClient, "get", new_callable=AsyncMock) as mock_get:
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = lambda: None
+        mock_resp.json.return_value = payload
+        mock_get.return_value = mock_resp
+        result = await get_macro_indicator("BDI")
+    assert "limit=5" in mock_get.call_args.args[0]
+    assert result["value"] == 101.5
+    assert result["date"] == "2026-09-01"
 
 
 # ---------------------------------------------------------------------------
