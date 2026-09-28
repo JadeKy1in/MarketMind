@@ -97,7 +97,6 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
     print("\nAI can also actively investigate using tools:")
     print("  - lookup_fundamentals: verify P/E, market cap, sector")
     print("  - search_news: search GNews for additional articles")
-    print("  - get_elite_opinion: query ELITE shadow analysts")
     print("  - get_economic_calendar: upcoming FOMC, CPI, NFP events")
     print("  - get_earnings_date: earnings dates for ticker(s)\n")
 
@@ -185,7 +184,6 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
 
     l1_result, should_observe, l1_session = await run_l1_interactive(
         signals[:15], news_items, user_input_handler=_cli_handler, mock=mock,
-        elite_registry=None,
         tool_registry=l1_tool_registry,
         insider_items=ctx.insider_items,
         social_items=ctx.social_items,

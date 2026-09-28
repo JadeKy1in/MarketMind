@@ -108,7 +108,6 @@ def test_regex_matches_valid_format():
     valid = [
         "<tool>lookup_fundamentals|AAPL</tool>",
         "<tool>search_news|oil inventories EIA</tool>",
-        "<tool>get_elite_opinion|energy</tool>",
         "<TOOL>lookup_fundamentals|MSFT</TOOL>",
         "<tool>  lookup_fundamentals  |  NVDA  </tool>",
     ]
@@ -172,11 +171,13 @@ async def test_search_news_cap_reached():
 
 
 @pytest.mark.asyncio
-async def test_get_elite_opinion_no_registry():
+async def test_get_elite_opinion_is_no_longer_a_tool():
     registry = L1ToolRegistry()
-    result = await registry.get_elite_opinion("energy")
+    assert not hasattr(registry, "get_elite_opinion")
+    result = await registry.execute("get_elite_opinion", "energy")
     assert result.status == "error"
-    assert "ELITE registry not initialized" in result.error
+    assert "Unknown tool" in result.error
+    assert "elite" not in result.error.split("Available:")[1]
 
 
 @pytest.mark.asyncio
@@ -296,17 +297,6 @@ def test_inject_tool_results_empty_list():
     base = "Original prompt text."
     result = inject_tool_results_into_prompt(base, [])
     assert result == base
-
-
-# ── L1ToolRegistry set_elite_registry ─────────────────────────────────────────
-
-def test_set_elite_registry():
-    class MockRegistry:
-        pass
-    registry = L1ToolRegistry()
-    mr = MockRegistry()
-    registry.set_elite_registry(mr)
-    assert registry._elite_registry is mr
 
 
 # ── ToolState integration (via layer1_interactive imports) ────────────────────

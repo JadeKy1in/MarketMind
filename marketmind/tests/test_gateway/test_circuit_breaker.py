@@ -14,7 +14,6 @@ from marketmind.gateway.async_client import (
     _call_with_retry,
     RateLimitError,
 )
-from marketmind.config.settings import ShadowSettings
 
 
 # ---------------------------------------------------------------------------
@@ -323,39 +322,3 @@ class TestFallbackOutputFormat:
             result_fallback = await chat_flash("sys", "user")
             assert set(result_fallback.keys()) == expected_keys
             assert result_fallback["content"] == "fallback"
-
-
-# ---------------------------------------------------------------------------
-# Test 8: Config ordering (settings load correctly)
-# ---------------------------------------------------------------------------
-
-class TestConfigOrdering:
-    """New ShadowSettings fields must have correct defaults and be accessible."""
-
-    def test_default_values(self):
-        s = ShadowSettings()
-        assert s.fallback_provider_url == ""
-        assert s.fallback_model == ""
-        assert s.circuit_breaker_threshold == 3
-        assert s.circuit_breaker_timeout_s == 30
-
-    def test_custom_values(self):
-        s = ShadowSettings(
-            fallback_provider_url="https://custom.example.com/v1",
-            fallback_model="custom-model",
-            circuit_breaker_threshold=5,
-            circuit_breaker_timeout_s=60,
-        )
-        assert s.fallback_provider_url == "https://custom.example.com/v1"
-        assert s.fallback_model == "custom-model"
-        assert s.circuit_breaker_threshold == 5
-        assert s.circuit_breaker_timeout_s == 60
-
-    def test_fields_present_in_dataclass(self):
-        """Verify the fields actually exist on the dataclass (no typo in attribute name)."""
-        s = ShadowSettings()
-        # These should not raise AttributeError
-        _ = s.fallback_provider_url
-        _ = s.fallback_model
-        _ = s.circuit_breaker_threshold
-        _ = s.circuit_breaker_timeout_s

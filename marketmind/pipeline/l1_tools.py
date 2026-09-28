@@ -1,7 +1,7 @@
 """L1 Agent Tools — on-demand data access for the L1 discussion loop.
 
 Phase G: Gives L1 the ability to actively investigate — call market data,
-search additional news, query elite opinions during discussion.
+search additional news during discussion.
 
 Red Team compliant (per red-team-l1-agent-tools.md):
 - Delimiter-based tool-call protocol (DeepSeek has no function-calling API)
@@ -147,10 +147,9 @@ class ToolCallRecord:
 class L1ToolRegistry:
     """Registry for L1 tool execution with host-enforced rate caps and fact accumulation.
 
-    Eight tools available (per Red Team audit resolution):
+    Seven tools available (per Red Team audit resolution):
     - lookup_fundamentals: yfinance fundamentals (P/E, market cap, sector, etc.)
     - search_news: GNews search (capped at 10/session)
-    - get_elite_opinion: query ELITE shadow registry
     - get_macro_indicator: FRED macro indicators (BDI, GSCPI)
     - get_cot_data: CFTC Commitments of Traders (ES, CL, GC, NG)
     - get_eia_inventory: EIA petroleum inventory (crude, gasoline, distillate)
@@ -177,14 +176,7 @@ class L1ToolRegistry:
         # Efficacy records for learning mechanism
         self._efficacy_records: list[ToolCallRecord] = []
 
-        # Lazy import guard
-        self._elite_registry = None
-
     # ── Public API ──────────────────────────────────────────────────────────
-
-    def set_elite_registry(self, registry) -> None:
-        """Inject the EliteRegistry for get_elite_opinion tool."""
-        self._elite_registry = registry
 
     def parse_tool_calls(self, ai_text: str) -> list[tuple[str, str]]:
         """Parse AI text for delimiter-based tool calls.
@@ -204,8 +196,6 @@ class L1ToolRegistry:
             return await self.lookup_fundamentals(args_str)
         elif tool_name == "search_news":
             return await self.search_news(args_str)
-        elif tool_name == "get_elite_opinion":
-            return await self.get_elite_opinion(args_str)
         elif tool_name == "get_macro_indicator":
             return await self.get_macro_indicator(args_str)
         elif tool_name == "get_cot_data":
@@ -221,7 +211,7 @@ class L1ToolRegistry:
                 tool_name=tool_name,
                 query=args_str,
                 data={},
-                error=f"Unknown tool: '{tool_name}'. Available: lookup_fundamentals, search_news, get_elite_opinion, get_macro_indicator, get_cot_data, get_eia_inventory, get_economic_calendar, get_earnings_date",
+                error=f"Unknown tool: '{tool_name}'. Available: lookup_fundamentals, search_news, get_macro_indicator, get_cot_data, get_eia_inventory, get_economic_calendar, get_earnings_date",
                 timestamp=datetime.now(timezone.utc).isoformat(),
             )
 
@@ -234,10 +224,6 @@ class L1ToolRegistry:
     async def search_news(self, query: str) -> ToolResult:
         from marketmind.pipeline.l1_info_tools import _tool_search_news
         return await _tool_search_news(self, query)
-
-    async def get_elite_opinion(self, domain: str) -> ToolResult:
-        from marketmind.pipeline.l1_info_tools import _tool_get_elite_opinion
-        return await _tool_get_elite_opinion(self, domain)
 
     async def get_macro_indicator(self, indicator: str) -> ToolResult:
         from marketmind.pipeline.l1_market_tools import _tool_get_macro_indicator

@@ -97,7 +97,6 @@ async def execute_ai_tool_calls_mock(
     from marketmind.pipeline.l1_mock_data import (
         MOCK_FUNDAMENTALS_AAPL,
         MOCK_NEWS_SEARCH_RESULTS,
-        MOCK_ELITE_OPINIONS,
     )
 
     registry = state.tools.tool_registry
@@ -126,11 +125,6 @@ async def execute_ai_tool_calls_mock(
             result = ToolResult(
                 tool_name="search_news", query=arg,
                 data=MOCK_NEWS_SEARCH_RESULTS, timestamp=timestamp,
-            )
-        elif name == "get_elite_opinion":
-            result = ToolResult(
-                tool_name="get_elite_opinion", query=arg,
-                data=MOCK_ELITE_OPINIONS, timestamp=timestamp,
             )
         else:
             result = ToolResult(

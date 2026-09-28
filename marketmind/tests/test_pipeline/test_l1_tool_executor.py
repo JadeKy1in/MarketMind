@@ -290,23 +290,6 @@ class TestExecuteAiToolCallsMock:
         assert mock_state.tools.tool_results[0].tool_name == "search_news"
 
     @pytest.mark.asyncio
-    async def test_get_elite_opinion_mock(self, mock_state, discussion_history):
-        mock_state.tools.tool_registry.parse_tool_calls.return_value = [
-            ("get_elite_opinion", "gold forecast"),
-        ]
-
-        with patch("marketmind.pipeline.l1_tool_executor.strip_tool_tags", return_value="clean"):
-            with patch("marketmind.pipeline.l1_display.safe_print"):
-                result = await execute_ai_tool_calls_mock(
-                    "<tool>get_elite_opinion|gold forecast</tool>",
-                    mock_state, discussion_history,
-                )
-
-        assert result is True
-        assert len(mock_state.tools.tool_results) == 1
-        assert mock_state.tools.tool_results[0].tool_name == "get_elite_opinion"
-
-    @pytest.mark.asyncio
     async def test_unknown_tool_mock(self, mock_state, discussion_history):
         mock_state.tools.tool_registry.parse_tool_calls.return_value = [
             ("unknown_tool", "some arg"),
@@ -345,7 +328,7 @@ class TestExecuteAiToolCallsMock:
         mock_state.tools.tool_registry.parse_tool_calls.return_value = [
             ("lookup_fundamentals", "AAPL"),
             ("search_news", "oil"),
-            ("get_elite_opinion", "gold"),
+            ("search_news", "gold"),
         ]
 
         with patch("marketmind.pipeline.l1_tool_executor.strip_tool_tags", return_value="clean"):
