@@ -167,9 +167,19 @@ async function loadArena(){
    <td class="num">${num(s.mean_brier,3)}</td><td class="num">${s.min_position_share==null?NA:(s.min_position_share*100).toFixed(0)+"%"}</td>
    <td>${r.last_run?`${esc(r.last_run.status)}${r.last_run.errors&&r.last_run.errors.length?` <span class="neg">${r.last_run.errors.length} 错误</span>`:""}`:NA}</td></tr>`}).join("");
   const others=(d.other_sources||[]).map(s=>`<tr><td>${SRC[s.source_type]||s.source_type}</td><td>${esc(s.source_id)}</td><td class="num">${s.records}</td><td class="num">${s.settled}</td><td class="num">${s.win_rate==null?NA:(s.win_rate*100).toFixed(0)+"%"}</td><td class="num">${pct(s.mean_net_return)}</td><td class="num">${num(s.mean_brier,3)}</td></tr>`).join("");
+  const tmp=await j("/api/wb/temp_shadows");
+  const sc=s=>s?`${s.records} 笔，已结算 ${s.settled}，胜率 ${s.win_rate==null?"—":(s.win_rate*100).toFixed(0)+"%"}，平均净收益 ${s.mean_net_return==null?"—":(s.mean_net_return*100).toFixed(2)+"%"}`:'<span class="mut">还没有记录</span>';
+  const ev=(tmp.events||[]).map(e=>`<tr><td>${e.status==="active"?'<span class="chip green">活跃</span>':'<span class="chip">退役</span>'}</td><td>${esc(e.type)}</td><td><b>${esc(e.title)}</b><div class="mut">${esc(e.summary||"")}</div></td><td>${esc((e.watchlist||[]).join(", "))}</td><td>${esc(e.spawned)} → ${esc(e.expires)}</td><td class="num">${num(e.impact)}</td><td>${sc(e.score)}</td></tr>`).join("");
+  const et=Object.entries(tmp.event_types||{}).map(([k,v])=>`<span class="chip">${esc(k)} ${esc(v.name)}：${v.records||0} 笔${v.win_rate!=null?`，胜率 ${(v.win_rate*100).toFixed(0)}%`:""}</span>`).join(" ");
+  const tr=(tmp.trials||[]).map(t=>`<tr><td class="id">${esc(t.trial_id)}</td><td>${esc(t.kind)}</td><td>${esc(t.parent_id)}</td><td>${esc(t.status)}</td><td>${esc(t.started)} → ${esc(t.ends)}</td><td>${esc(t.note)}</td><td>${t.result&&t.result.pairs!=null?`配对 ${t.result.pairs} 天，差值 ${t.result.mean_diff==null?"—":(t.result.mean_diff*100).toFixed(2)+"%"}${t.result.p_value!=null?`，p=${num(t.result.p_value,3)}`:""}`:""}</td></tr>`).join("");
+  const tempHtml=`<div class="card"><h2>临时影子 <span class="mut">事件影子最多 ${tmp.limits?tmp.limits.events:5} 个同时运行（寿命 30 天）；挑战者 / beta 试验最多 ${tmp.limits?tmp.limits.trials:5} 个</span></h2>
+   <h3>事件影子（按类型汇总：哪类事件值得跟）</h3><div>${et||'<span class="mut">还没有事件影子</span>'}</div>
+   ${ev?`<div class="tw"><table><tr><th>状态</th><th>类型</th><th>事件</th><th>标的</th><th>寿命</th><th class="num">影响分</th><th>成绩</th></tr>${ev}</table></div>`:""}
+   <h3>missed_path（主管线放弃的候选，纯代码记录）</h3><div>${sc(tmp.missed_path)}</div>
+   <h3>挑战者 / beta 试验</h3>${tr?`<div class="tw"><table><tr><th>编号</th><th>类型</th><th>原影子</th><th>状态</th><th>期间</th><th>改动</th><th>结果</th></tr>${tr}</table></div>`:'<div class="empty">没有试验。发起 beta：python -m marketmind.shadows.v3.trials propose &lt;影子编号&gt; --note "改动说明"</div>'}</div>`;
   $("#s-arena").innerHTML=`<div class="card"><h2>影子竞技场 <span class="mut">最近运行 ${esc(d.run_date||"无")}；收益类指标只用已结算记录，点击一行查看该影子的全部账本记录</span></h2>
   <div class="tw"><table><tr><th>影子</th><th>组</th><th>名册</th><th class="num">记录</th><th class="num">待/持/结/废</th><th class="num">胜率</th><th class="num">平均净收益</th><th class="num">随机基准</th><th class="num">超额·市场</th><th class="num">超额·领域</th><th class="num">Brier</th><th class="num">最小仓位占比</th><th>最近交卷</th></tr>${body}</table></div></div>
-  <div class="card"><h2>其他来源</h2>${others?`<table><tr><th>类型</th><th>来源</th><th class="num">记录</th><th class="num">已结算</th><th class="num">胜率</th><th class="num">平均净收益</th><th class="num">Brier</th></tr>${others}</table>`:'<div class="empty">无</div>'}</div>`;
+  ${tempHtml}<div class="card"><h2>其他来源</h2>${others?`<table><tr><th>类型</th><th>来源</th><th class="num">记录</th><th class="num">已结算</th><th class="num">胜率</th><th class="num">平均净收益</th><th class="num">Brier</th></tr>${others}</table>`:'<div class="empty">无</div>'}</div>`;
 }
 
 // ── promotion ──

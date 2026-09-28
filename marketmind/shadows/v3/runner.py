@@ -111,7 +111,8 @@ def _run_date(e: LedgerEntry) -> str:
 
 
 def _already_recorded(store: LedgerStore, today: str) -> set[str]:
-    return {e.source_id for e in store.list(source_type="shadow") if _run_date(e) == today}
+    return {e.source_id for st in ("shadow", "temp_shadow") for e in store.list(source_type=st)
+            if _run_date(e) == today}
 
 
 def _previous_consensus(store: LedgerStore, today: str) -> list[tuple[str, str, str]]:
@@ -274,6 +275,8 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
             return res
         meta = {"model": MODEL, "shadow": ctx.entry.name, "attempts": attempts,
                 "run_date": today}
+        if ctx.entry.source_type != "shadow":
+            meta["temp"] = ctx.entry.group        # temp_event | trial
         if ctx.entry.shadow_id == SCALPER_ID:
             meta["intraday_approx"] = True
         for d in parsed.decisions:
@@ -281,7 +284,7 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
             if d.ticker in ctx.off_context:
                 d_meta["off_context"] = True
             res.entry_ids.append(store.add(LedgerEntry(
-                source_type="shadow", source_id=ctx.entry.shadow_id, ticker=d.ticker,
+                source_type=ctx.entry.source_type, source_id=ctx.entry.shadow_id, ticker=d.ticker,
                 direction=d.direction, hold_bars=d.hold_days, confidence=d.confidence,
                 position_usd=d.position_usd, falsifier=d.falsifier, thesis=d.thesis,
                 asset_type=_asset_type(d.ticker), entry_rule="next_open",
@@ -289,7 +292,9 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
                 domain_benchmark=ctx.entry.domain_benchmark, snapshot_id=snapshot_id,
                 meta=d_meta,
             )))
-        bench = _benchmark_entry(ctx, [d.hold_days for d in parsed.decisions], today, snapshot_id)
+        # random benchmarks pair with long-term shadows; trials compare with their parent
+        bench = (_benchmark_entry(ctx, [d.hold_days for d in parsed.decisions], today, snapshot_id)
+                 if ctx.entry.source_type == "shadow" else None)
         if bench is not None:
             res.benchmark_id = store.add(bench)
         return res

@@ -325,6 +325,7 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
     # Every card / forced paper trade goes into the unified ledger (mock runs never do)
     if not mock:
         await _record_to_ledger(config, decision, l3_result)
+        _record_missed_path(config)
 
     # Record pipeline metrics for weekly tactical audit
     _record_pipeline_metrics(
@@ -602,10 +603,79 @@ async def run_v3_shadows(config, news_items: list, limit: int | None = None):
     entries = roster.active()
     if limit:
         entries = entries[:limit]
+    else:
+        entries = entries + await _temp_shadow_entries(news_items, entries)
     report = await run_shadow_day(_ledger_store(config), news_items, entries=entries,
                                   report_dir=default_report_dir())
     print(f"  [shadows] {report.summary()}")
     return report
+
+
+async def _temp_shadow_entries(news_items: list, long_term: list) -> list:
+    """S7 temporary shadows that trade today: event shadows (detected now) + running trials."""
+    from marketmind.gateway.price_history import get_price_histories
+    from marketmind.shadows.v3 import temp_event, trials
+    out = []
+    try:
+        tickers = sorted({t for e in long_term for t in e.watchlist})
+        histories = await get_price_histories(tickers)      # shared cache with the shadow run
+        summary = await temp_event.daily_events(news_items, histories)
+        if summary.get("spawned"):
+            print(f"  [temp_event] new: {'; '.join(summary['spawned'])}")
+        today = summary["date"]
+        out += temp_event.roster_entries(temp_event.load(), today)
+    except Exception:
+        logger.warning("event shadows unavailable today", exc_info=True)
+    try:
+        out += trials.roster_entries()
+    except Exception:
+        logger.warning("trial shadows unavailable today", exc_info=True)
+    return out
+
+
+def _record_missed_path(config) -> None:
+    """S7 missed_path: main-pipeline candidates not traded, from today's brief."""
+    import json
+    from datetime import datetime as _dt, timezone as _tz
+    from marketmind.shadows.v3 import missed_path
+    today = _dt.now(_tz.utc).strftime("%Y-%m-%d")
+    path = Path(__file__).resolve().parent.parent / ".claude" / "briefs" / f"{today}.json"
+    try:
+        brief = json.loads(path.read_text(encoding="utf-8"))
+        ids = missed_path.record(_ledger_store(config), brief, today=today)
+        print(f"  [missed_path] {len(ids)} passed-over candidates recorded")
+    except Exception:
+        logger.warning("missed_path not recorded", exc_info=True)
+
+
+async def promotion_step(config) -> None:
+    """S7: promotion ladder (writes data/advisors.json), trial verdicts, new challengers."""
+    from marketmind.promotion.runner import run_promotion
+    from marketmind.shadows.v3 import trials
+    store = _ledger_store(config)
+    try:
+        summary = run_promotion(store, data_dir=Path(config.data_dir))
+        print(f"  [promotion] {summary.get('stage_counts')}")
+    except Exception:
+        logger.warning("promotion review failed", exc_info=True)
+        print("  [promotion] failed (see log)")
+        return
+    try:
+        for t in trials.evaluate(store):
+            print(f"  [trials] {t.trial_id} ({t.kind} of {t.parent_id}): {t.status}")
+        for ev in summary.get("events", []):
+            if ev.get("type") != "challenge":
+                continue
+            try:
+                t = await trials.propose(ev["shadow_id"], "challenger",
+                                         "连续 3 个评估期综合分在后 20%：针对最弱的指标修改方法论。"
+                                         + (f"指标：{ev.get('detail')}" if ev.get("detail") else ""),
+                                         store=store)
+                print(f"  [trials] challenger {t.trial_id} started for {t.parent_id}")
+            except ValueError as e:
+                print(f"  [trials] challenger for {ev['shadow_id']} not started: {e}")
+    except Exception:
+        logger.warning("trial step failed", exc_info=True)
 
 
 async def run_evidence(config, news_items: list):
@@ -728,6 +798,7 @@ async def _run_daily_with_shadows(config, args) -> int:
             pass
     if not args.mock:
         await inspect_holdings_step(config)
+        await promotion_step(config)
         await alerts_step(config)
         from marketmind.gateway import usage_tracker
         usage_tracker.append_log("daily")

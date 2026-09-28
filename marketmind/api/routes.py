@@ -129,6 +129,12 @@ async def wb_big_alerts():
     return _wb(whitebox.get_big_alerts)
 
 
+@app.get("/api/wb/temp_shadows")
+async def wb_temp_shadows():
+    from marketmind.api import whitebox
+    return _wb(whitebox.get_temp_shadows)
+
+
 @app.post("/api/reporter")
 async def reporter_endpoint(request: dict):
     from marketmind.api import reporter

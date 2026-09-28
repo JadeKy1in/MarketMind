@@ -36,6 +36,9 @@ class RosterEntry:
     status: str = ACTIVE
     news_keywords: tuple[str, ...] = field(default_factory=tuple)  # empty = all news
     notes: str = ""
+    # Temporary shadows (docs/S7_DESIGN.md): ledger source type and an inline methodology
+    source_type: str = "shadow"
+    prompt_text: str = ""
 
     @property
     def prompt_path(self) -> Path:
@@ -193,4 +196,4 @@ def active() -> list[RosterEntry]:
 
 
 def load_prompt(entry: RosterEntry) -> str:
-    return entry.prompt_path.read_text(encoding="utf-8")
+    return entry.prompt_text or entry.prompt_path.read_text(encoding="utf-8")

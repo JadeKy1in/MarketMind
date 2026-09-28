@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from dataclasses import asdict
 from pathlib import Path
 
-from marketmind.ledger.scoreboard import PROBATION_DAYS, benchmark_id_for, scoreboard
+from marketmind.ledger.scoreboard import PROBATION_DAYS, benchmark_id_for, score, scoreboard
 from marketmind.ledger.store import LedgerStore, default_ledger_path
 
 logger = logging.getLogger("marketmind.api.whitebox")
@@ -287,3 +287,29 @@ def get_big_alerts() -> dict:
         return {"available": False,
                 "reason": "警报尚未运行（每日运行最后一步，或 python -m marketmind.alerts run）"}
     return {"available": True, "date": day, "report": report, "history": history}
+
+
+# ── temporary shadows (S7) ──────────────────────────────────────────────────
+
+def get_temp_shadows() -> dict:
+    from marketmind.shadows.v3 import temp_event, trials
+    store = _store()
+    rows = store.list(source_type="temp_shadow") if store else []
+    scores = {s.source_id: s.to_dict() for s in scoreboard(rows)}
+    events = []
+    by_type: dict[str, list] = {}
+    for e in temp_event.load():
+        sid = f"temp_event:{e.event_id}"
+        sc = scores.get(sid)
+        events.append({**e.__dict__, "shadow_id": sid, "score": sc})
+        by_type.setdefault(e.type, []).extend(r for r in rows if r.source_id == sid)
+    type_scores = {}
+    for t, rs in by_type.items():
+        d = score(rs).to_dict() if rs else {"records": 0}
+        d["name"] = temp_event.TYPES[t][0]
+        type_scores[t] = d
+    trial_rows = [{**t.__dict__, "score": scores.get(f"trial:{t.trial_id}")} for t in trials.load()]
+    return {"events": sorted(events, key=lambda e: (e["status"] != "active", e["spawned"]), reverse=False),
+            "event_types": type_scores, "trials": trial_rows,
+            "missed_path": scores.get("missed_path:main"),
+            "limits": {"events": temp_event.MAX_ACTIVE, "trials": trials.MAX_RUNNING}}
