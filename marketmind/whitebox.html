@@ -87,12 +87,22 @@ function kv(obj,keys){return `<table class="kv">${(keys||Object.keys(obj)).filte
 
 // ── brief ──
 let BRIEF=null;
+function md(t){  // minimal Markdown: headings, bullets, bold; everything escaped first
+  return esc(t).split("\n").map(l=>{
+    l=l.replace(/\*\*(.+?)\*\*/g,"<b>$1</b>");
+    if(/^#{1,3} /.test(l))return `<h3>${l.replace(/^#+ /,"")}</h3>`;
+    if(/^\s*[-*] /.test(l))return `<div style="margin-left:1em">• ${l.replace(/^\s*[-*] /,"")}</div>`;
+    return l?`<div>${l}</div>`:"";
+  }).join("");
+}
 async function loadBrief(){
+  const rep=await j("/api/wb/daily_report");
+  const repHtml=rep.available?`<div class="card"><h2>今日汇报 ${esc(rep.date)} <span class="mut">${rep.source==="llm"?"":"（LLM 不可用，原始事实）"} 有问题可到"汇报员"页追问</span></h2>${md(rep.markdown)}</div>`:"";
   const d=await j("/api/wb/brief");BRIEF=d;
-  if(!d.available){$("#s-brief").innerHTML=`<div class="card empty">${esc(d.reason)}</div>`;return}
+  if(!d.available){$("#s-brief").innerHTML=repHtml+`<div class="card empty">${esc(d.reason)}</div>`;return}
   const b=d.brief,today=new Date().toISOString().slice(0,10);
   const cards=(b.decision_cards||[]);
-  $("#s-brief").innerHTML=`
+  $("#s-brief").innerHTML=repHtml+`
   <div class="card"><h2>决策简报 ${esc(d.date)} ${d.date!==today?'<span class="chip yellow">不是今天（最近一份）</span>':''}</h2>
    <div class="grid">
     <div class="stat"><div class="k">结论</div><div class="v">${b.has_no_trade&&!cards.length?"不交易":cards.length+" 张交易卡"}</div></div>

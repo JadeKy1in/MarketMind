@@ -277,6 +277,9 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
 
     # Steps 1-3: Scout → Flash → L1
     news_items = await _do_news_collection(config, tracker, mock=mock)
+    if not mock:
+        from marketmind.reports.daily import save_headlines
+        save_headlines(news_items or [])
 
     # S3 shadows: forced daily decisions into the ledger, in parallel with the main
     # pipeline; they see only news and prices, never main-pipeline output (§3.5).
@@ -740,6 +743,20 @@ async def run_evidence(config, news_items: list):
     return report
 
 
+async def daily_report_step(config) -> None:
+    """Owner request 2026-09-28: today's report on the dashboard and in WeChat."""
+    from marketmind.reports.daily import build_report, push
+    try:
+        report = await build_report(store=_ledger_store(config))
+        sent = await push(report)
+    except Exception:
+        logger.warning("daily report failed", exc_info=True)
+        print("  [report] failed (see log)")
+        return
+    ok = [r["channel"] for r in sent if r.get("ok")]
+    print(f"  [report] written ({report['source']}); pushed: {', '.join(ok) or 'none'}")
+
+
 async def alerts_step(config) -> None:
     """S8: big-move alert conditions, after shadows have filed today's decisions."""
     from marketmind.alerts.notify import send
@@ -880,6 +897,7 @@ async def _run_daily_with_shadows(config, args) -> int:
         await inspect_holdings_step(config)
         await promotion_step(config)
         await alerts_step(config)
+        await daily_report_step(config)
         from marketmind.gateway import usage_tracker
         usage_tracker.append_log("daily")
 

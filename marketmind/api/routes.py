@@ -198,6 +198,12 @@ async def holdings_inspect(request: Request):
     return JSONResponse({"inspected": len(reports)})
 
 
+@app.get("/api/wb/daily_report")
+async def wb_daily_report():
+    from marketmind.api import whitebox
+    return _wb(whitebox.get_daily_report)
+
+
 @app.post("/api/reporter")
 async def reporter_endpoint(request: dict):
     from marketmind.api import reporter

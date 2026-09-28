@@ -118,7 +118,10 @@ def build_context(question: str) -> dict[str, Any]:
             "near_misses": [{k: n.get(k) for k in ("ticker", "a_ok", "b_ok", "c_ok", "met")}
                             for n in rep.get("near_misses", [])][:10],
             "history": big.get("history", [])[:20]}
-    ctx["promotion"] = "所有影子处于见习期；晋升评审（S7）尚未实现"
+    rep = whitebox.get_daily_report()
+    if rep.get("available"):
+        ctx["daily_report"] = {"date": rep["date"], "markdown": rep["markdown"][:6000]}
+    ctx["promotion"] = "晋升评审每天运行；账本满 60 个交易日前所有影子都在见习期"
     return ctx
 
 

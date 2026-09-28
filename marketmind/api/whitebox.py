@@ -356,3 +356,14 @@ def get_temp_shadows() -> dict:
             "event_types": type_scores, "trials": trial_rows,
             "missed_path": scores.get("missed_path:main"),
             "limits": {"events": temp_event.MAX_ACTIVE, "trials": trials.MAX_RUNNING}}
+
+
+# ── daily report (owner request 2026-09-28) ────────────────────────────────
+
+def get_daily_report() -> dict:
+    from marketmind.reports.daily import latest
+    r = latest()
+    if not r:
+        return {"available": False, "reason": "还没有今日汇报（每个工作日自动运行后生成）"}
+    return {"available": True, "date": r.get("date"), "source": r.get("source"),
+            "markdown": r.get("markdown", ""), "written_at": r.get("written_at")}

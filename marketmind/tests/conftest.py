@@ -212,3 +212,10 @@ def _offline_global_quotes(monkeypatch):
     monkeypatch.setattr(global_quotes, "from_eastmoney", _none)
     monkeypatch.setattr(global_quotes, "from_tencent", _none)
     monkeypatch.setattr(global_quotes, "from_twelvedata", _none)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_claude(monkeypatch):
+    """Tests never reach the owner's Claude subscription, whatever MARKETMIND_LLM
+    the machine is set to (docs/LLM_PROVIDER.md); provider tests set it themselves."""
+    monkeypatch.setenv("MARKETMIND_LLM", "deepseek")

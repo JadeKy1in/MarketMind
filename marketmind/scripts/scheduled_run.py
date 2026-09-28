@@ -107,12 +107,15 @@ def acquire_lock(lock: Path) -> bool:
 
 
 PUSH_VARS = ("SERVERCHAN_SENDKEY", "PUSHPLUS_TOKEN", "WECOM_WEBHOOK_KEY", "FEISHU_WEBHOOK_TOKEN",
-             "FEISHU_WEBHOOK_SECRET")
+             "FEISHU_WEBHOOK_SECRET",
+             # LLM provider switch (docs/LLM_PROVIDER.md)
+             "MARKETMIND_LLM", "MARKETMIND_CLAUDE_PRO_MODEL", "MARKETMIND_CLAUDE_FLASH_MODEL")
 
 
 def load_user_push_env() -> None:
     """Task Scheduler may start us with an environment captured before the owner
-    saved a push key (setx); read missing ones from the user's registry settings."""
+    saved a push key or switched the LLM provider (setx / switch_llm.ps1); read
+    missing ones from the user's registry settings."""
     if os.name != "nt":
         return
     import winreg
@@ -129,6 +132,12 @@ def load_user_push_env() -> None:
             continue
         if value:
             os.environ[name] = str(value)
+    # the Claude CLI lives in the user's npm folder, which a scheduled task's PATH may lack
+    if not os.environ.get("MARKETMIND_CLAUDE_BIN"):
+        import shutil
+        candidate = Path(os.environ.get("APPDATA", "")) / "npm" / "claude.cmd"
+        if not shutil.which("claude") and candidate.exists():
+            os.environ["MARKETMIND_CLAUDE_BIN"] = str(candidate)
 
 
 def notify_failure(slot: str, key: str, log_path: Path, reason: str) -> list[dict]:

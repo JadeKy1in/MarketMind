@@ -338,6 +338,9 @@ async def chat_flash(
     Note: Flash model does NOT support thinking/reasoning_effort."""
     if _mock_mode:
         return dict(_MOCK_FLASH_RESPONSE)
+    claude = await _try_claude(system_prompt, user_prompt, "flash")
+    if claude is not None:
+        return claude
     gw = await get_gateway()
     budget = await get_budget()
     max_tokens = max(max_tokens, FLASH_MIN_MAX_TOKENS)
@@ -374,6 +377,9 @@ async def chat_pro(
     Shadow agents MUST use chat_with_integrity() instead."""
     if _mock_mode:
         return dict(_MOCK_PRO_RESPONSE)
+    claude = await _try_claude(system_prompt, user_prompt, "pro")
+    if claude is not None:
+        return claude
     gw = await get_gateway()
     budget = await get_budget()
     estimated = max_tokens + 2048
@@ -401,6 +407,39 @@ async def chat_pro(
     finally:
         budget.settle_pro(estimated, _used_tokens(result, estimated))
         usage_tracker.record(result)
+
+
+_claude_failures = 0
+CLAUDE_FAILURES_BEFORE_PAUSE = 3
+
+
+async def _try_claude(system_prompt: str, user_prompt: str, tier: str) -> dict[str, Any] | None:
+    """Claude via the local CLI when MARKETMIND_LLM=claude (docs/LLM_PROVIDER.md).
+
+    Returns the result, or None to fall through to DeepSeek: provider not
+    selected, or the call failed (logged). After 3 failures in a row (e.g. the
+    subscription's usage limit) the rest of the run goes straight to DeepSeek.
+    """
+    global _claude_failures
+    from marketmind.gateway import claude_cli
+    if claude_cli.provider() != "claude" or _claude_failures >= CLAUDE_FAILURES_BEFORE_PAUSE:
+        return None
+    result = await claude_cli.call(system_prompt, user_prompt, tier)
+    if result.get("error") or not result.get("content"):
+        _claude_failures += 1
+        logger.warning("Claude call failed (%s); this call falls back to DeepSeek",
+                       result.get("error") or "empty reply")
+        if _claude_failures == CLAUDE_FAILURES_BEFORE_PAUSE:
+            logger.warning("Claude failed %d times in a row; DeepSeek for the rest of this run",
+                           CLAUDE_FAILURES_BEFORE_PAUSE)
+            emit_alert(Severity.WARN, "gateway", ImpactScope.INFRASTRUCTURE,
+                       "Claude unavailable, switched to DeepSeek",
+                       f"连续 {CLAUDE_FAILURES_BEFORE_PAUSE} 次 Claude 调用失败（{result.get('error')}），"
+                       "本次运行其余调用改用 DeepSeek", "检查 Claude 登录或额度")
+        return None
+    _claude_failures = 0
+    usage_tracker.record(result)
+    return result
 
 
 def _used_tokens(result: dict[str, Any] | None, reserved: int) -> int | None:
