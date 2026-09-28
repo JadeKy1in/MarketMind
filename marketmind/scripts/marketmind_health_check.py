@@ -24,7 +24,6 @@ def check_imports() -> int:
     errors = 0
     modules = [
         "marketmind.config.settings",
-        "marketmind.config.asset_universe",
         "marketmind.config.source_authority",
         "marketmind.gateway.async_client",
         "marketmind.gateway.token_budget",

@@ -248,24 +248,10 @@ def _parse_layer2_response(content: str) -> Layer2Result:
             "tier_challenges": ["L2 JSON parsing failed — partial results may be missing"],
         }
 
-    # If sector_shortlist is populated but ticker_candidates is empty,
-    # fall back to asset universe matching so L3 has something to analyze
+    # An empty ticker_candidates list stays empty: L3 always also reviews the core
+    # market-context tickers (pipeline.orchestration.CORE_L3_TICKERS).
     sectors = data.get("sector_shortlist", [])
     tickers = data.get("ticker_candidates", [])
-    if sectors and not tickers:
-        try:
-            from marketmind.config.asset_universe import ASSET_UNIVERSE
-            sector_keywords = {s.lower(): s for s in sectors}
-            for asset in ASSET_UNIVERSE.values():
-                if hasattr(asset, 'sector') and asset.sector.lower() in sector_keywords:
-                    tickers.append(asset.ticker)
-                if len(tickers) >= 15:
-                    break
-            if tickers:
-                logger.info("L2 fallback: filled %d tickers from asset universe for sectors %s",
-                           len(tickers), sectors[:3])
-        except Exception:
-            pass
 
     # Parse new Phase B fields (optional — backward compatible)
     sector_directions = data.get("sector_directions", [])

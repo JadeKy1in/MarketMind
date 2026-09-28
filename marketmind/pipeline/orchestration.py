@@ -86,10 +86,18 @@ async def _do_l1_analysis(signals: list, news_items: list, tracker: StageTracker
     return result
 
 
+# Market-context tickers L3 always reviews, so it has a cross-asset read even when
+# L1/L2 surface nothing: broad equity indices (large/small cap, Dow), long Treasuries,
+# precious metals, energy and agriculture. A deliberate, small curated list for
+# market context only -- which tickers are tradable is decided by marketmind.universe.
+CORE_L3_TICKERS: tuple[str, ...] = (
+    "SPY", "QQQ", "IWM", "DIA", "TLT", "GLD", "SLV", "USO", "UNG", "DBA",
+)
+
+
 def _core_l3_tickers(limit: int = 10) -> list[str]:
-    """Market-context tickers L3 always reviews (index/sector ETFs from the universe)."""
-    from marketmind.config.asset_universe import ASSET_UNIVERSE
-    return [a.ticker for a in list(ASSET_UNIVERSE.values())[:limit]]
+    """Market-context tickers L3 always reviews (see CORE_L3_TICKERS)."""
+    return list(CORE_L3_TICKERS[:limit])
 
 
 async def _do_l2_l3_parallel(l1_result, tracker: StageTracker):
