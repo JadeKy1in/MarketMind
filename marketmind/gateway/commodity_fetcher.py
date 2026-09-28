@@ -424,7 +424,7 @@ def _get_eia_key() -> str:
             return cfg.eia_key
     except (ImportError, AttributeError) as e:
         logger.warning("EIA API key not available from MarketMindConfig: %s", e)
-    return os.environ.get("EIA_KEY", "").strip()
+    return (os.environ.get("EIA_KEY") or os.environ.get("EIA_API_KEY") or "").strip()
 
 
 def _parse_float(val: Any) -> float:

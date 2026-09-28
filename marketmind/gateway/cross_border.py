@@ -368,7 +368,7 @@ def _get_fred_key() -> str:
     except (ImportError, AttributeError) as e:
         logger.debug("FRED API key not available from MarketMindConfig: %s", e)
     import os
-    return os.environ.get("FRED_KEY", "").strip()
+    return (os.environ.get("FRED_KEY") or os.environ.get("FRED_API_KEY") or "").strip()
 
 
 def _parse_float(val: Any) -> float:
