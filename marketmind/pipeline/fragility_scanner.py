@@ -101,6 +101,12 @@ async def scan_fragility(
             missing.setdefault(t.metric, "no data supplied")
             continue
 
+        if not t.crossable:
+            # MONITOR-only threshold: show the value, never cross, keep out of the score.
+            alerts.append(FragilityAlert(threshold=t, current_value=current_value,
+                                         distance_pct=None, crossed=False, severity="MONITOR"))
+            continue
+
         distance_pct = _compute_distance(current_value, t.threshold_value, t.direction)
         severity, crossed = _classify_alert(distance_pct)
 
@@ -115,7 +121,8 @@ async def scan_fragility(
     crossed = [a for a in alerts if a.crossed]
     warnings_list = [a for a in alerts if a.severity == "WARNING"]
 
-    score = _compute_fragility_score(alerts) if alerts else None
+    scored = [a for a in alerts if a.threshold.crossable]
+    score = _compute_fragility_score(scored) if scored else None
 
     crossed_count = len(crossed)
     warning_count = len(warnings_list)
