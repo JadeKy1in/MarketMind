@@ -27,7 +27,7 @@ async def test_inputs_convert_units_and_fall_back_to_yfinance():
     fred = {
         "DGS10": {"error": "source_unavailable"},
         "RRPONTSYD": {"value": 45.0}, "WTREGEN": {"value": 850_000.0},
-        "WRESBAL": {"value": 3_100.0}, "SOFR": {"value": 4.40}, "IORB": {"value": 4.30},
+        "WRESBAL": {"value": 3_100_000.0}, "SOFR": {"value": 4.40}, "IORB": {"value": 4.30},
         "BAMLH0A3HYC": {"value": 9.5},
         # Recorded shape of FRED 2026-09-24 observations (percent units)
         "BAMLH0A0HYM2": {"value": 2.80, "date": "2026-09-24"},
@@ -41,7 +41,7 @@ async def test_inputs_convert_units_and_fall_back_to_yfinance():
     assert v["us10y_yield"] == 4.8 and out.sources["us10y_yield"] == "yfinance:^TNX"
     assert v["on_rrp"] == 45.0
     assert v["tga"] == 850.0                    # M -> B USD
-    assert v["bank_reserves"] == 3.1            # B -> T USD
+    assert v["bank_reserves"] == 3.1            # FRED millions -> trillions USD
     assert v["sofr_iorb_spread"] == pytest.approx(10.0)   # % -> bp
     assert v["ccc_treasury_spread"] == 950.0
     assert v["hyg_lqd_spread"] == pytest.approx(201.0)   # (HY OAS - IG OAS) % -> bp

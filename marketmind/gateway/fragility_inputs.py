@@ -58,8 +58,10 @@ async def fetch_fragility_inputs() -> FragilityInputs:
     put("on_rrp", fred["RRPONTSYD"], "FRED:RRPONTSYD", fred_missing)
     put("tga", fred["WTREGEN"] / 1000 if fred["WTREGEN"] is not None else None,
         "FRED:WTREGEN (M->B USD)", fred_missing)
-    put("bank_reserves", fred["WRESBAL"] / 1000 if fred["WRESBAL"] is not None else None,
-        "FRED:WRESBAL (B->T USD)", fred_missing)
+    # WRESBAL is published in millions of USD (checked 2026-09-28: 2,930,193 = $2.93T);
+    # the threshold is in trillions. It was divided by 1,000 before, showing 2930.
+    put("bank_reserves", fred["WRESBAL"] / 1_000_000 if fred["WRESBAL"] is not None else None,
+        "FRED:WRESBAL (M->T USD)", fred_missing)
     spread = (fred["SOFR"] - fred["IORB"]) * 100 if None not in (fred["SOFR"], fred["IORB"]) else None
     put("sofr_iorb_spread", spread, "FRED:SOFR-IORB (bp)", fred_missing)
     put("ccc_treasury_spread", fred["BAMLH0A3HYC"] * 100 if fred["BAMLH0A3HYC"] is not None else None,
