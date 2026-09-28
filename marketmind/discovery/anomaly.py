@@ -9,7 +9,9 @@ For one series `[(date, value)]`:
              lookback (ties count half), 0-100;
 - new_high / new_low = latest strictly above / below every prior value in the lookback.
 
-Anomaly if |z| >= 2, level_pct <= 5 or >= 95, or a new lookback high / low.
+Anomaly if |z| >= 2; or level_pct <= 5 / >= 95 or a new lookback high / low
+together with |z| >= 1 (alone only when there is no z) - a trending series
+otherwise sits at its extreme every day.
 Too little history: no z (fewer than `min_changes` changes) and / or no level
 statistics (fewer than `min_level_obs` prior values, or the history spans fewer
 than `min_history_days`); the latest level is still reported.
@@ -39,6 +41,10 @@ class AnomalyConfig:
     min_history_days: int = 60
     short_history_days: int = 330      # history shorter than this is flagged `short_history`
     stale_days: dict = field(default_factory=lambda: {"daily": 10, "weekly": 21, "monthly": 75})
+    # A level extreme or new high/low alone keeps firing on trending series (bill
+    # holdings, JGB yields); it counts only with an unusual change (|z| >= this),
+    # or on its own when the series is too short for a z.
+    level_needs_z: float = 1.0
     cold_max_coverage: int = 2         # coverage <= this -> cold
     news_days: int = 7
 
@@ -129,13 +135,14 @@ def compute_stats(obs: list[tuple[str, float]], frequency: str, cfg: AnomalyConf
 
     if s.z is not None and abs(s.z) >= cfg.z_threshold:
         s.triggers.append("z")
-    if s.level_pct is not None and s.level_pct >= cfg.pct_high:
+    level_counts = s.z is None or abs(s.z) >= cfg.level_needs_z
+    if level_counts and s.level_pct is not None and s.level_pct >= cfg.pct_high:
         s.triggers.append("level_high")
-    if s.level_pct is not None and s.level_pct <= cfg.pct_low:
+    if level_counts and s.level_pct is not None and s.level_pct <= cfg.pct_low:
         s.triggers.append("level_low")
-    if s.new_high:
+    if level_counts and s.new_high:
         s.triggers.append("new_high")
-    if s.new_low:
+    if level_counts and s.new_low:
         s.triggers.append("new_low")
 
     if "z" in s.triggers:           # direction of the surprise vs the usual change

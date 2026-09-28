@@ -54,6 +54,25 @@ class Series:
     prior: str = ""                           # why the implied directions were chosen
     window: int | None = None                 # override of the frequency's change window
     lookback_days: int | None = None          # override of the 1-year stats lookback
+    release_lag_days: int | None = None       # override of RELEASE_LAG_DAYS (see below)
+
+
+# Days after the observation date whose close still predates publication, so the
+# "already priced in" move is measured from the last close before the market
+# could see the number. Daily FRED/MOF/ECB/Cboe data and Treasury auction results
+# are out by the next session; H.4.1 / SOMA (Wednesday data) come Thursday after
+# the close; EIA petroleum stocks (as of Friday) come the next Wednesday morning;
+# STLFSI4 (week ending Friday) comes the next Thursday.
+RELEASE_LAG_DAYS = {"daily": 0, "weekly": 1, "monthly": 0}
+RELEASE_LAG_OVERRIDES = {"fred:STLFSI4": 5, "eia:WCESTUS1": 4, "eia:WGTSTUS1": 4, "eia:WDISTUS1": 4}
+
+
+def pricing_base_date(s: "Series", obs_date: str) -> str:
+    from datetime import date as _date, timedelta as _td
+    lag = s.release_lag_days
+    if lag is None:
+        lag = RELEASE_LAG_OVERRIDES.get(s.id, RELEASE_LAG_DAYS.get(s.frequency, 0))
+    return (_date.fromisoformat(obs_date) + _td(days=lag)).isoformat()
 
 
 class FetchContext:

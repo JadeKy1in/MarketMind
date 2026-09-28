@@ -82,3 +82,22 @@ async def test_push_truncates_long_reports(monkeypatch):
     res = await daily.push({"date": TODAY, "markdown": "字" * 10000})
     assert res[0]["ok"] and TODAY in sent["title"]
     assert len(sent["body"]) < daily.PUSH_MAX_CHARS + 100 and "仪表盘" in sent["body"]
+
+
+def test_gather_facts_includes_discovery_and_watchlist(env):
+    store, briefs, tmp = env
+    (tmp / "discovery").mkdir()
+    (tmp / "discovery" / f"{TODAY}.json").write_text(json.dumps({
+        "counts": {"anomalies": 1, "cold": 1},
+        "anomalies": [{"series": "fred:WRESBAL", "title": "Reserves", "z": -2.4, "coverage": 0,
+                       "cold": True, "proxies": [{"ticker": "SPY", "direction": "short",
+                                                  "bucket": "not_priced", "move_atr": 0.1}]}],
+        "unavailable": [{"series": "eia:WCESTUS1", "reason": "timeout"}]}), encoding="utf-8")
+    from marketmind.watchlist.store import WatchlistStore
+    WatchlistStore(tmp / "watchlist.db")
+    f = daily.gather_facts(TODAY, store, briefs)
+    a = f["discovery"]["anomalies"][0]
+    assert a["series"] == "fred:WRESBAL" and a["news_coverage"] == 0 and a["proxies"][0]["bucket"] == "not_priced"
+    assert f["discovery"]["unavailable"] == ["eia:WCESTUS1"]
+    assert f["watchlist"]["watching"] == 0 and f["watchlist"]["new"] == []
+    assert "冷门数据异常：1" in daily.fallback_text(f)

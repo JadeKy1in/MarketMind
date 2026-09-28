@@ -100,7 +100,7 @@ def _core_l3_tickers(limit: int = 10) -> list[str]:
     return list(CORE_L3_TICKERS[:limit])
 
 
-async def _do_l2_l3_parallel(l1_result, tracker: StageTracker):
+async def _do_l2_l3_parallel(l1_result, tracker: StageTracker, extra_tickers: list | None = None):
     """L2 then L3. L3 reviews L2's ticker list (design spec §4.3: it receives the
     list, never L2's reasoning) plus the core market tickers. L3 is code-only and
     fast, so running it after L2 costs no LLM time."""
@@ -112,7 +112,8 @@ async def _do_l2_l3_parallel(l1_result, tracker: StageTracker):
         from marketmind.pipeline.layer2_fundamental import Layer2Result
         l2 = Layer2Result()
     l2_list = [str(t).strip().upper() for t in (l2.ticker_candidates or []) if str(t).strip()]
-    l3 = await analyze_layer3(l2_list + _core_l3_tickers())
+    # S10: cold-data anomaly proxies are a candidate source next to L2's picks
+    l3 = await analyze_layer3(list(dict.fromkeys(l2_list + list(extra_tickers or []) + _core_l3_tickers())))
     if l3 is None:
         from marketmind.pipeline.layer3_technical import Layer3BatchResult
         l3 = Layer3BatchResult()
@@ -172,12 +173,12 @@ async def _do_red_team(l1_result, l2_result, selected_tickers: list, tracker: St
 
 
 async def _do_decision(l1_result, l2_result, l3_result, red_team, resonance,
-                       fragility, tracker: StageTracker):
+                       fragility, tracker: StageTracker, discovery_text: str = ""):
     tracker.advance(8, "Decision: synthesis...")
     from marketmind.pipeline.decision import generate_decision
     decision = await generate_decision(l1=l1_result, l2=l2_result, l3=l3_result,
                                         red_team=red_team, resonance=resonance,
-                                        fragility=fragility)
+                                        fragility=fragility, discovery_text=discovery_text)
     if decision is None:
         # @monitor returns None on timeout/exception. "No trade" must still be explicit.
         from marketmind.pipeline.decision import DecisionOutput, NoTradeCard, _pick_paper_trade
@@ -194,6 +195,7 @@ async def _do_decision(l1_result, l2_result, l3_result, red_team, resonance,
             summary="decision stage unavailable",
         )
     tracker.result(f"cards={len(decision.decision_cards)}, "
+                   f"watch={len(getattr(decision, 'watch_cards', []) or [])}, "
                    f"no_trade={'present' if decision.no_trade_card else 'none'}")
     return decision
 
@@ -281,6 +283,9 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
         from marketmind.reports.daily import save_headlines
         save_headlines(news_items or [])
 
+    # S10 cold-data discovery: code-only, in the background until L3 needs its tickers.
+    discovery_task = asyncio.create_task(run_discovery_step(news_items)) if not mock else None
+
     # S3 shadows: forced daily decisions into the ledger, in parallel with the main
     # pipeline; they see only news and prices, never main-pipeline output (§3.5).
     if config.shadow.shadows_enabled and shadow_count != 0 and not mock:
@@ -306,6 +311,8 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
         and len(signals) == 0
     )
     resonance = _resonance_not_evaluated()
+    discovery = await _await_discovery(discovery_task)
+    discovery_tickers = _discovery_tickers(discovery)
     if skip_to_decision:
         tracker.advance(4, "No actionable signals (grade=E, observe_skip, 0 signals) — "
                            "skipping L2+Shadows+RedTeam (LLM); L3 + fragility still run (code-only)")
@@ -313,14 +320,14 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
         from marketmind.pipeline.layer3_technical import analyze_layer3
         from marketmind.pipeline.red_team import RedTeamReport
         l2_result = Layer2Result()
-        l3_result = await analyze_layer3(_core_l3_tickers())
+        l3_result = await analyze_layer3(_core_l3_tickers() + discovery_tickers)
         red_team = RedTeamReport()
         tracker.result(f"L3 market context: {len(l3_result.results)} tickers, "
                        f"{len(l3_result.green_lights)} green")
         fragility = await _do_fragility_scan(tracker)
     else:
         # Step 4: L2+L3
-        l2_result, l3_result = await _do_l2_l3_parallel(l1_result, tracker)
+        l2_result, l3_result = await _do_l2_l3_parallel(l1_result, tracker, discovery_tickers)
 
         # Steps 6-7b: Red Team → Fragility (Resonance moved to promotion review, SPEC_v3 §5)
         red_team = await _do_red_team(l1_result, l2_result, l2_result.ticker_candidates, tracker)
@@ -328,7 +335,7 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
 
     # Step 8: Decision — always runs (with fragility + per-stage calibration)
     decision = await _do_decision(l1_result, l2_result, l3_result, red_team, resonance,
-                                   fragility, tracker)
+                                   fragility, tracker, discovery_text=_discovery_text(discovery))
     await _do_daily_archive(config, l1_result, l2_result, resonance, tracker)
 
     # Mock runs must not overwrite today's real brief or calibration record
@@ -343,8 +350,9 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
 
     # Every card / forced paper trade goes into the unified ledger (mock runs never do)
     if not mock:
-        await _record_to_ledger(config, decision, l3_result)
+        await _record_to_ledger(config, decision, l3_result, discovery)
         _record_missed_path(config)
+        await watchlist_step(config, decision, discovery)
 
     # Record pipeline metrics for weekly tactical audit
     _record_pipeline_metrics(
@@ -382,12 +390,12 @@ async def settle_ledger(config) -> str:
         return "ledger settlement failed"
 
 
-async def _record_to_ledger(config, decision, l3_result) -> None:
+async def _record_to_ledger(config, decision, l3_result, discovery: dict | None = None) -> None:
     try:
         from marketmind.ledger.prices import HistoryPriceSource
         from marketmind.ledger.recorder import record_main_decision
         ids = await record_main_decision(decision, l3_result, _ledger_store(config),
-                                         HistoryPriceSource())
+                                         HistoryPriceSource(), origins=_discovery_origins(discovery))
         print(f"  [ledger] recorded {len(ids)} entr{'y' if len(ids) == 1 else 'ies'}")
     except Exception:
         logger.error("Ledger recording failed — today's calls are NOT in the ledger", exc_info=True)
@@ -523,6 +531,10 @@ def _save_decision_brief(l1_result, l2_result, l3_result, red_team, resonance, d
             "decision_summary": dec_summary[:2000],
             "no_trade_thesis": no_trade_thesis[:1000],
             "decision_cards": dec_cards,
+            "watch_cards": [{"ticker": w.ticker, "direction": w.direction, "thesis": w.thesis,
+                             "conditions": w.conditions, "invalidation": w.invalidation,
+                             "expiry_days": w.expiry_days}
+                            for w in (getattr(decision, "watch_cards", None) or [])],
             "decision_raw": getattr(decision, 'raw_response', '') if decision else '',
             "l3_details": [getattr(r, 'raw_analysis', '') for r in (getattr(l3_result, 'results', []) or [])],
             "l1_analysis": l1_text[:1500],
@@ -733,6 +745,118 @@ def playground_candidates() -> list:
             for m in discover_agents(DEFAULT_PLAYGROUND_DIR)]
 
 
+DISCOVERY_WAIT_S = 300
+ANOMALY_WATCH_MAX = 5              # anomaly-origin watch items added per run
+
+
+async def run_discovery_step(news_items: list, registry=None) -> dict | None:
+    """S10 §1-2: cold official series -> anomalies -> how much the proxies already moved."""
+    from marketmind.discovery.runner import run_discovery
+    try:
+        report = await run_discovery(news_items, registry=registry)
+    except Exception:
+        logger.warning("discovery scan failed", exc_info=True)
+        print("  [discovery] failed (see log)")
+        return None
+    c = report.get("counts") or {}
+    print(f"  [discovery] {c.get('ok', 0)}/{c.get('series', 0)} series, "
+          f"{c.get('anomalies', 0)} anomalies ({c.get('cold', 0)} cold), "
+          f"{c.get('unavailable', 0)} unavailable")
+    return report
+
+
+async def _await_discovery(task) -> dict | None:
+    if task is None:
+        return None
+    try:
+        return await asyncio.wait_for(task, timeout=DISCOVERY_WAIT_S)
+    except asyncio.TimeoutError:
+        logger.warning("discovery scan timed out after %ss; the main pipeline goes on without it",
+                       DISCOVERY_WAIT_S)
+        print(f"  [discovery] timed out after {DISCOVERY_WAIT_S // 60} minutes")
+    except Exception:
+        logger.warning("discovery scan failed", exc_info=True)
+    return None
+
+
+def _discovery_tickers(discovery: dict | None) -> list[str]:
+    if not discovery:
+        return []
+    from marketmind.discovery.runner import candidate_tickers
+    return candidate_tickers(discovery)
+
+
+def _discovery_text(discovery: dict | None) -> str:
+    if not discovery:
+        return ""
+    from marketmind.discovery.runner import prompt_block
+    return prompt_block(discovery)
+
+
+def _discovery_origins(discovery: dict | None) -> dict[str, dict]:
+    if not discovery:
+        return {}
+    from marketmind.discovery.runner import candidates
+    return {c["ticker"].upper(): dict(c["origin"]) for c in candidates(discovery)}
+
+
+# decision WatchCard conditions carry "value"; the watchlist names the field per type
+_WATCH_FIELD = {"close_above": "price", "close_below": "price", "close_above_ma": "period",
+                "close_below_ma": "period", "volume_ratio_at_least": "ratio", "after_date": "date"}
+
+
+def _watch_condition(c: dict) -> dict:
+    key = _WATCH_FIELD.get(c.get("type", ""))
+    return {"type": c["type"], key: c["value"]} if key else {"type": c.get("type")}
+
+
+def watch_items(decision, discovery: dict | None) -> list[dict]:
+    """Main-pipeline watch cards plus cold, not-yet-priced anomaly proxies (S10 §3)."""
+    origins = _discovery_origins(discovery)
+    items = [dict(ticker=w.ticker, direction=w.direction, source="main_pipeline", thesis=w.thesis,
+                  conditions=[_watch_condition(c) for c in w.conditions],
+                  invalidation=[_watch_condition(c) for c in w.invalidation],
+                  expiry_bars=w.expiry_days, origin=origins.get(w.ticker.upper(), {"kind": "news"}))
+             for w in (getattr(decision, "watch_cards", None) or [])]
+    if discovery:
+        from marketmind.discovery.runner import candidates
+        picked = 0
+        for c in candidates(discovery):
+            if picked >= ANOMALY_WATCH_MAX:
+                break
+            if not c.get("cold") or c.get("priced_in") not in ("not_priced", "partial"):
+                continue
+            z = "n/a" if c.get("z") is None else f"{c['z']:+.1f}"
+            items.append(dict(ticker=c["ticker"], direction=c["direction"], source="anomaly",
+                              thesis=f"{c['title']} ({c['series']}) z {z}, news coverage "
+                                     f"{c['coverage']}, {c['priced_in']}",
+                              origin=dict(c["origin"])))
+            picked += 1
+    return items
+
+
+async def watchlist_step(config, decision=None, discovery: dict | None = None,
+                         crypto_only: bool = False) -> None:
+    """S10 §3: add today's watch items, check every item on complete bars, push
+    main-pipeline triggers (owner decision 2026-09-28)."""
+    from marketmind.ledger.prices import HistoryPriceSource
+    from marketmind.watchlist import add_items, check_all, notify_triggers
+    try:
+        ledger, src = _ledger_store(config), HistoryPriceSource()
+        items = watch_items(decision, discovery)
+        added = await add_items(items, src, ledger=ledger) if items else {}
+        rep = await check_all(src, ledger=ledger, crypto_only=crypto_only)
+        pushed = await notify_triggers(rep)
+    except Exception:
+        logger.warning("watchlist step failed", exc_info=True)
+        print("  [watchlist] failed (see log)")
+        return
+    print(f"  [watchlist] added {len(added.get('added', []))}, refreshed "
+          f"{len(added.get('refreshed', []))}, rejected {len(added.get('rejected', []))}; "
+          f"triggered {len(rep.get('triggered', []))}, expired {len(rep.get('expired', []))}, "
+          f"invalidated {len(rep.get('invalidated', []))}; pushed {len(pushed.get('pushed', []))}")
+
+
 async def run_evidence(config, news_items: list):
     """S5 evidence layer -> data/evidence/<date>.json + divergences into the ledger."""
     from marketmind.evidence.runner import run_evidence_day
@@ -812,9 +936,19 @@ async def run_weekend(config) -> int:
     report = await run_shadow_day(_ledger_store(config), news_items, entries=crypto_shadows(),
                                   report_dir=default_report_dir())
     print(f"  [shadows] {report.summary()}")
+    discovery = await run_discovery_step(news_items, registry=crypto_registry())
+    await watchlist_step(config, None, discovery, crypto_only=True)
     print(f"  [tokens] {usage_tracker.summary_line()}")
     usage_tracker.append_log("weekend")
     return 0 if "failed" not in summary else 1
+
+
+def crypto_registry() -> list:
+    """Discovery series whose proxies trade over the weekend (crypto only)."""
+    from marketmind.discovery.series import default_registry
+    from marketmind.markets import market_for
+    return [s for s in default_registry()
+            if s.proxies and all(market_for(t).code == "CRYPTO" for t, _ in s.proxies)]
 
 
 async def run_evidence_only(config) -> int:

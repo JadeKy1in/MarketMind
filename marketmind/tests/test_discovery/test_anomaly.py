@@ -48,12 +48,18 @@ def test_drop_triggers_low_side_and_downward_move():
     assert "level_low" in s.triggers and s.move == -1
 
 
-def test_level_percentile_alone_can_trigger():
-    # steady random-ish walk: the latest value is high in the range but the change is normal
+def test_level_extreme_with_a_normal_change_is_not_an_anomaly():
+    # steady walk: the latest value is high in the range but the change is normal (z ~ 0.4)
     vals = [100 + (i % 20) for i in range(300)] + [118.6]
     s = compute_stats(_daily(vals), "daily")
-    assert s.level_pct >= 95 and not s.new_high
-    assert "level_high" in s.triggers
+    assert s.level_pct >= 95 and not s.new_high and abs(s.z) < 1
+    assert s.triggers == [] and not s.is_anomaly
+
+
+def test_level_extreme_counts_with_a_moderately_unusual_change():
+    vals = [100 + (i % 20) for i in range(300)] + [118.6]
+    s = compute_stats(_daily(vals), "daily", AnomalyConfig(level_needs_z=0.3))
+    assert "level_high" in s.triggers and s.move == 1
 
 
 def test_thresholds_come_from_config():

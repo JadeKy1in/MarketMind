@@ -29,7 +29,7 @@ from marketmind.discovery.anomaly import AnomalyConfig, compute_stats, is_stale,
 from marketmind.discovery.priced_in import (
     NOT_PRICED, PARTIAL, SECTOR_ETF, UNAVAILABLE, PricedInConfig, assess,
 )
-from marketmind.discovery.series import FetchContext, Series, default_registry
+from marketmind.discovery.series import FetchContext, Series, default_registry, pricing_base_date
 
 logger = logging.getLogger("marketmind.discovery.runner")
 
@@ -142,6 +142,7 @@ async def run_discovery(news_items, today=None, *, registry: list[Series] | None
         cov = news_coverage(news_items, s.keywords, day, cfg.news_days)
         anomalies.append({
             "anomaly_id": f"{run_date}:{s.id}", **base, "obs_date": st.last_date,
+            "priced_from": pricing_base_date(s, st.last_date),
             "latest": st.latest, "change": st.change, "change_from": st.change_from,
             "change_pct": st.change_pct, "window": st.window, "z": st.z,
             "level_pct": st.level_pct, "new_high": st.new_high, "new_low": st.new_low,
@@ -161,7 +162,7 @@ async def run_discovery(news_items, today=None, *, registry: list[Series] | None
         for t, implied in a.pop("_proxies"):
             bars, why = prices.get(t, (None, "not loaded"))
             etf = SECTOR_ETF.get(t)
-            row = assess(t, bars, a["obs_date"], implied, pcfg,
+            row = assess(t, bars, a["priced_from"], implied, pcfg,
                          sector_bars=prices.get(etf, (None, ""))[0] if etf else None, sector_etf=etf)
             if row["bucket"] == UNAVAILABLE and why:
                 row["reason"] = why

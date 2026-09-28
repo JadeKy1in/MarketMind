@@ -24,8 +24,10 @@ SYSTEM_PROMPT = """你是 MarketMind 的每日汇报员，给所有人写今天�
 1. 只使用 <facts> 里的信息；不得补充任何 facts 以外的事实、价格、数字或预测。
 2. 用中文，结构如下（Markdown，每节 2–6 条要点，没有内容的节写"今日无"）：
    ## 今日要闻（从 headlines 里挑最重要的 5–8 条，说明为什么重要）
+   ## 冷门数据异常（discovery：新闻很少报道的官方数据异动；写出序列、z 值、新闻覆盖篇数、代理标的是否已被价格反映）
    ## 证据层（叙事与数据是否背离）
    ## 主管线决策（交易卡或不交易的理由、被迫纸面交易、红队最重要的质疑）
+   ## 观察名单（watchlist：今天新增 / 触发 / 到期 / 失效的项目与等待的确认条件）
    ## 影子动向（多空分布、共识集中的标的、新出现的事件影子）
    ## 实盘持仓（巡检结论；没有持仓就写"未录入持仓"）
    ## 大行情警报（触发 / 接近触发；观察模式要注明不推送）
@@ -74,8 +76,26 @@ def gather_facts(today: str, store=None, brief_dir: Path | None = None) -> dict:
             "decision_summary": brief.get("decision_summary"),
             "no_trade": brief.get("has_no_trade"), "no_trade_thesis": brief.get("no_trade_thesis"),
             "decision_cards": brief.get("decision_cards"), "paper_trade": brief.get("paper_trade"),
+            "watch_cards": brief.get("watch_cards"),
             "l3_green": brief.get("l3_green"), "red_team_top": (brief.get("red_team_challenges") or [])[:3],
             "fragility": brief.get("fragility_summary")}
+    disc = _read(d / "discovery" / f"{today}.json")
+    if disc:
+        facts["discovery"] = {"counts": disc.get("counts"), "anomalies": [
+            {"series": a.get("series"), "title": a.get("title"), "obs_date": a.get("obs_date"),
+             "latest": a.get("latest"), "unit": a.get("unit"), "z": a.get("z"),
+             "triggers": a.get("triggers"), "news_coverage": a.get("coverage"), "cold": a.get("cold"),
+             "proxies": [{k: p.get(k) for k in ("ticker", "direction", "bucket", "move_atr")}
+                         for p in (a.get("proxies") or [])]}
+            for a in (disc.get("anomalies") or [])[:10]],
+            "unavailable": [u.get("id") or u.get("series") for u in disc.get("unavailable") or []]}
+    if (d / "watchlist.db").exists():
+        try:
+            from marketmind.watchlist import daily_summary
+            from marketmind.watchlist.store import WatchlistStore
+            facts["watchlist"] = daily_summary(today, WatchlistStore(d / "watchlist.db"))
+        except Exception:
+            logger.warning("watchlist summary unavailable", exc_info=True)
     ev = _read(d / "evidence" / f"{today}.json")
     if ev:
         facts["evidence"] = {"divergences": ev.get("divergences"), "items": [
@@ -127,6 +147,9 @@ def fallback_text(facts: dict) -> str:
     lines = [f"## 今日汇报（{facts['date']}，LLM 不可用，以下为原始事实）",
              f"- 主管线：{mp.get('decision_summary') or '无简报'}",
              f"- 影子：{sh.get('decisions', 0)} 笔（多 {sh.get('long', 0)} / 空 {sh.get('short', 0)}）",
+             f"- 冷门数据异常：{((facts.get('discovery') or {}).get('counts') or {}).get('anomalies', 0)}",
+             f"- 观察名单：新增 {len((facts.get('watchlist') or {}).get('new', []))}，"
+             f"触发 {len((facts.get('watchlist') or {}).get('triggered', []))}",
              f"- 证据层背离：{(facts.get('evidence') or {}).get('divergences', 0)}",
              f"- 警报：{(facts.get('alerts') or {}).get('fired') or '无'}"]
     lines += [f"- 要闻：{h['title']}（{h['source']}）" for h in facts.get("headlines", [])[:5]]
