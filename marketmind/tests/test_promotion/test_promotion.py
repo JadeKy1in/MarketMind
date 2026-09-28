@@ -9,10 +9,13 @@ import numpy as np
 import pytest
 from scipy import stats
 
+from marketmind.gateway.price_history import Bar
+from marketmind.ledger.prices import StaticPriceSource
 from marketmind.ledger.store import LedgerEntry, LedgerStore
 from marketmind.promotion import config as C
 from marketmind.promotion import metrics as M
 from marketmind.promotion.ladder import composite_scores, evaluate, probation_gates, shadow_stats
+from marketmind.promotion.random_mc import static_loader
 from marketmind.promotion.runner import run_promotion, trial_count
 from marketmind.shadows.v3.roster import PENDING_PROMPT, ROSTER, RosterEntry
 
@@ -176,8 +179,29 @@ def _main(days, net):
     return [_row("main", "main", DAYS[i], DAYS[i + 1], net) for i in range(days)]
 
 
+POOL = ("AAA", "BBB", "CCC", "DDD")
+
+
+def _bars(drift=0.0, sd=0.01, seed=11) -> dict[str, list[Bar]]:
+    """Daily bars for the Monte Carlo ticker pool on every day of DAYS."""
+    rng = np.random.default_rng(seed)
+    out = {}
+    for t in POOL:
+        px, bars = 100.0, []
+        for d in DAYS:
+            o = px * (1 + drift / 2 + sd / 2 * rng.standard_normal())
+            px = o * (1 + drift / 2 + sd / 2 * rng.standard_normal())
+            bars.append(Bar(d, o, max(o, px), min(o, px), px, 1e6))
+        out[t] = bars
+    return out
+
+
+BARS = _bars()                    # zero drift: random portfolios earn ~ -cost
+TREND_BARS = _bars(drift=0.03)    # +3% a day: random longs beat every shadow here
+
+
 def _roster(*ids, status="active"):
-    return [RosterEntry(s, s, s, "fundamental", "d", ("SPY",), "SPY", status) for s in ids]
+    return [RosterEntry(s, s, s, "fundamental", "d", POOL, "SPY", status) for s in ids]
 
 
 def _world(days=130, a_kw=None, b_kw=None, bench=-0.01, main=-0.01):
@@ -187,9 +211,9 @@ def _world(days=130, a_kw=None, b_kw=None, bench=-0.01, main=-0.01):
     return rows
 
 
-def _run(rows, day_idx, state=None, ids=("A", "B"), trials=2, **kw):
+def _run(rows, day_idx, state=None, ids=("A", "B"), trials=2, bars=BARS, **kw):
     return evaluate(rows, _roster(*ids), DAYS[day_idx], state, trials,
-                    active_ids=set(ids), **kw)
+                    active_ids=set(ids), bars_for=static_loader(bars), **kw)
 
 
 # ── Probation -> formal ─────────────────────────────────────────────────
@@ -206,27 +230,71 @@ def test_probation_progress_then_formal():
     assert {e["shadow_id"] for e in ev if e["type"] == "promote"} == {"A", "B"}
 
 
-@pytest.mark.parametrize("gate,rows_fn", [
-    ("days", lambda: _world(days=59)),
-    ("min_trl", lambda: _shadow("A", 100, 0.001, 0.02, 7) + _bench("A", 100, -0.1)
-     + _main(100, -0.1)),
-    ("beat_random", lambda: _world(bench=0.05)),
-    ("beat_domain", lambda: _world(a_kw={"excess_domain": -0.01})),
-    ("beat_main", lambda: _world(main=0.05)),
+@pytest.mark.parametrize("gate,rows_fn,bars", [
+    ("days", lambda: _world(days=59), BARS),
+    ("min_trl", lambda: _shadow("A", 100, 0.01, 0.1, 3) + _bench("A", 100, -0.1)
+     + _main(100, -0.1), BARS),
+    ("beat_random", lambda: _world(), TREND_BARS),
+    ("beat_domain", lambda: _world(a_kw={"excess_domain": -0.01}), BARS),
+    ("beat_main", lambda: _world(main=0.05), BARS),
 ])
-def test_each_probation_gate_blocks_alone(gate, rows_fn):
+def test_each_probation_gate_blocks_alone(gate, rows_fn, bars):
     rows = rows_fn()
-    st, ev = _run(rows, 60 if gate != "min_trl" else 100, ids=("A",))
+    st, ev = _run(rows, 60 if gate != "min_trl" else 100, ids=("A",), bars=bars)
     gates = st["shadows"]["A"]["probation_gates"]
     assert gates[gate] is False
-    assert all(v for k, v in gates.items() if k != gate), gates
+    if gate != "days":            # below the days gate the Monte Carlo is not run at all
+        assert all(v for k, v in gates.items() if k != gate), gates
     assert st["shadows"]["A"]["stage"] == "probation" and not ev
+
+
+def test_beat_random_is_monte_carlo_not_the_ledger_random_shadow():
+    rows = _world(bench=0.05)       # the ledger's random shadow did better than A ...
+    st, _ = _run(rows, 60, ids=("A",))
+    mc = st["shadows"]["A"]["random_mc"]
+    assert st["shadows"]["A"]["probation_gates"]["beat_random"] is True    # ... irrelevant now
+    assert mc["status"] == "pass" and mc["valid_draws"] == C.MC_DRAWS
+    assert mc["p_value"] == pytest.approx(1 / (C.MC_DRAWS + 1))
+    # pool = watchlist + tickers the ledger's random shadow drew (SPY here, without bars)
+    assert mc["pool"] == len(POOL) + 1 and mc["missing_tickers"] == ["SPY"]
+    assert mc["trades"] == 60
+    # the old ledger comparison is still reported for the dashboard
+    assert st["shadows"]["A"]["metrics"]["random_mean_net"] == pytest.approx(0.05)
+    st, _ = _run(rows, 60, ids=("A",), bars=TREND_BARS)
+    assert st["shadows"]["A"]["random_mc"]["status"] == "fail"
+
+
+def test_beat_random_fails_closed_and_is_only_run_when_needed():
+    rows = _world()
+    st, _ = _run(rows, 30, ids=("A",))
+    assert st["shadows"]["A"]["random_mc"]["status"] == "not_evaluated"
+    st, _ = _run(rows, 60, ids=("A",), bars={})                   # no bars at all
+    mc = st["shadows"]["A"]["random_mc"]
+    assert mc["status"] == "not_evaluable" and mc["missing_tickers"] == sorted((*POOL, "SPY"))
+    assert st["shadows"]["A"]["stage"] == "probation"
+    st, _ = evaluate(rows, _roster("A"), DAYS[60], None, 1, active_ids={"A"})   # no price source
+    assert st["shadows"]["A"]["random_mc"]["status"] == "not_evaluable"
+    assert st["shadows"]["A"]["probation_gates"]["beat_random"] is False
+
+
+def test_formal_shadow_keeps_its_promotion_day_monte_carlo():
+    rows = _world()
+    st, _ = _run(rows, 60, ids=("A",))
+    mc = st["shadows"]["A"]["random_mc"]
+    calls = []
+
+    def spy(tickers):
+        calls.append(tickers)
+        return {}
+    st2, _ = evaluate(rows, _roster("A"), DAYS[61], st, 2, active_ids={"A"}, bars_for=spy)
+    assert calls == [] and st2["shadows"]["A"]["random_mc"] == mc
 
 
 def test_blocked_roster_shadow_listed():
     rows = _world()
     roster = _roster("A") + _roster("Z", status=PENDING_PROMPT)
-    st, _ = evaluate(rows, roster, DAYS[60], None, 1, active_ids={"A"})
+    st, _ = evaluate(rows, roster, DAYS[60], None, 1, active_ids={"A"},
+                     bars_for=static_loader(BARS))
     assert st["shadows"]["Z"]["stage"] == "blocked"
     assert st["shadows"]["A"]["stage"] == "formal"
 
@@ -359,7 +427,8 @@ def test_run_promotion_files_and_idempotent(tmp_path):
     for e in _world(days=90):
         store.add(e, created_at=e.created_at)
     roster = _roster("A", "B") + _roster("Z", status=PENDING_PROMPT)
-    kw = dict(data_dir=tmp_path, roster=roster, active_ids={"A", "B"})
+    kw = dict(data_dir=tmp_path, roster=roster, active_ids={"A", "B"},
+              price_source=StaticPriceSource(BARS))
 
     run_promotion(store, today=DAYS[10], **kw)
     adv = json.loads((tmp_path / "advisors.json").read_text(encoding="utf-8"))

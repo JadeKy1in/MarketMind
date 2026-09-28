@@ -288,3 +288,62 @@ def stress_test(shadow_r, market_r, worst_share: float = C.STRESS_WORST_SHARE,
     return bool(s_mean >= multiple * min(m_mean, 0.0)), {
         "market_days": int(idx.size), "worst_days": int(n_worst),
         "shadow_mean": s_mean, "market_mean": m_mean}
+
+
+# ── Paired comparison (variant trials, docs/S7_DESIGN.md §二) ─────────────
+
+def newey_west_variance(d, lag: int) -> float:
+    """Newey-West (1987) long-run variance of a series with Bartlett weights:
+
+        LRV = g_0 + 2 * sum_{j=1..L} (1 - j / (L + 1)) * g_j,
+        g_j = (1/n) * sum_{t=j+1..n} (d_t - mean)(d_{t-j} - mean)
+
+    `lag` is clipped to [0, n - 1]. Non-negative by construction."""
+    d = np.asarray(d, dtype=float)
+    n = d.size
+    if n == 0:
+        return 0.0
+    x = d - d.mean()
+    lag = max(0, min(int(lag), n - 1))
+    lrv = float(x @ x) / n
+    for j in range(1, lag + 1):
+        lrv += 2.0 * (1.0 - j / (lag + 1)) * float(x[j:] @ x[:-j]) / n
+    return max(lrv, 0.0)
+
+
+def hac_t_test(d, lag: int) -> dict:
+    """One-sided test of H0: E[d] <= 0 against E[d] > 0 with a HAC (Newey-West) standard
+    error, i.e. the Diebold-Mariano (1995) statistic on a loss/P&L differential:
+
+        t = mean(d) / sqrt(LRV / n),  p = 1 - T_{n-1}(t)
+
+    Student-t with n - 1 degrees of freedom instead of the normal limit, as the usual
+    small-sample correction (Harvey, Leybourne & Newbold 1997). p is None when the
+    series has fewer than 2 points or no variation (not testable)."""
+    d = np.asarray(d, dtype=float)
+    n = d.size
+    out = {"n": int(n), "lag": max(0, min(int(lag), n - 1)) if n else 0,
+           "mean": float(d.mean()) if n else None, "se": None, "t": None, "p_value": None}
+    if n < 2:
+        return out
+    lrv = newey_west_variance(d, lag)
+    if lrv <= 1e-18:
+        return out
+    se = math.sqrt(lrv / n)
+    t = float(d.mean()) / se
+    out.update(se=se, t=t, p_value=float(stats.t.sf(t, df=n - 1)))
+    return out
+
+
+def holm_adjust(p_values: list[float]) -> list[float]:
+    """Holm (1979) step-down adjusted p-values, same order as the input:
+    sorted ascending, p_adj(i) = max_{j<=i} min(1, (m - j + 1) * p(j)).
+    Rejecting where p_adj <= alpha controls the family-wise error rate at alpha."""
+    m = len(p_values)
+    order = sorted(range(m), key=lambda i: p_values[i])
+    adj = [0.0] * m
+    running = 0.0
+    for rank, i in enumerate(order):
+        running = max(running, min(1.0, (m - rank) * p_values[i]))
+        adj[i] = running
+    return adj
