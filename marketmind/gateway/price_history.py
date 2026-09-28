@@ -7,7 +7,8 @@ market_data.py is too short for that.
 Sources: Alpaca market data first for US stocks/ETFs when ALPACA_API_KEY_ID and
 ALPACA_API_SECRET_KEY are set (owner decision 2026-09-27); yfinance for stocks,
 ETFs, indices and crypto (e.g. "BTC-USD");
-Binance public klines, then Bybit public spot klines, as crypto fallbacks; the
+Binance public klines, then Bybit public spot klines, then Coinbase Exchange
+daily candles, as crypto fallbacks; the
 Nasdaq public historical API
 (api.nasdaq.com) as a fallback for US stocks/ETFs. No API keys. Returns None
 when every source fails — callers must report "data unavailable", never guess.
@@ -29,6 +30,13 @@ Bybit caveats: "BTC-USD" maps to the spot pair "BTCUSDT", i.e. prices are
 quoted in USDT, treated as ~USD (same assumption as the Binance path). Bars are
 UTC-day candles. Like the Binance path, the current (still-forming) UTC day's
 bar is kept as the last bar. Only "-USD" tickers are sent to Bybit.
+
+Coinbase Exchange caveats (verified live 2026-09-28): public
+api.exchange.coinbase.com/products/<BASE>-USD/candles, granularity=86400, rows
+[time, low, high, open, close, volume] newest first, at most 300 candles per
+request, so `years` of history is paged back with start/end (ISO 8601). Real USD
+pairs (not USDT). UTC-day candles; the current UTC day's partial bar is kept as
+the last bar, like Binance / Bybit (callers drop it with complete_bars).
 """
 from __future__ import annotations
 
@@ -50,6 +58,9 @@ _BINANCE_KLINES = "https://api.binance.com/api/v3/klines"
 _BYBIT_KLINES = "https://api.bybit.com/v5/market/kline"
 _BYBIT_TIMEOUT = 15.0
 _BYBIT_PAGE = 1000
+_COINBASE_CANDLES = "https://api.exchange.coinbase.com/products/{product}/candles"
+_COINBASE_TIMEOUT = 15.0
+_COINBASE_PAGE = 300
 _NASDAQ_HISTORICAL = "https://api.nasdaq.com/api/quote/{symbol}/historical"
 _NASDAQ_HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -96,6 +107,8 @@ async def get_price_history(ticker: str, years: int = 5) -> PriceHistory | None:
         hist = await _from_binance(ticker)
         if hist is None:
             hist = await _from_bybit(ticker, years)
+        if hist is None:
+            hist = await _from_coinbase(ticker, years)
     elif hist is None and market is US:
         hist = await _from_nasdaq(ticker, years)
     elif hist is None:
@@ -252,6 +265,76 @@ async def _from_bybit(ticker: str, years: int) -> PriceHistory | None:
         logger.warning("Bybit klines empty for %s", ticker)
         return None
     return PriceHistory(ticker=ticker, source="bybit", daily=daily, weekly=to_weekly(daily))
+
+
+# ── Coinbase Exchange (third crypto fallback) ─────────────────────────────
+
+def _coinbase_product(ticker: str) -> str | None:
+    """"BTC-USD" -> "BTC-USD" (a real USD pair); None for non-crypto."""
+    t = ticker.strip().upper()
+    if not t.endswith("-USD") or len(t) <= 4:
+        return None
+    return t
+
+
+def _coinbase_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=_COINBASE_TIMEOUT,
+                             headers={"User-Agent": "MarketMind/0.1", "Accept": "application/json"})
+
+
+def _parse_coinbase(rows) -> list[Bar]:
+    """Coinbase candles [time, low, high, open, close, volume] -> ascending bars, deduped."""
+    from datetime import datetime, timezone
+    by_date: dict[str, Bar] = {}
+    for r in rows or []:
+        try:
+            d = datetime.fromtimestamp(int(r[0]), tz=timezone.utc).strftime("%Y-%m-%d")
+            by_date[d] = Bar(date=d, open=float(r[3]), high=float(r[2]), low=float(r[1]),
+                             close=float(r[4]), volume=float(r[5]))
+        except (IndexError, TypeError, ValueError, OverflowError, OSError):
+            continue
+    return [by_date[d] for d in sorted(by_date)]
+
+
+async def _from_coinbase(ticker: str, years: int) -> PriceHistory | None:
+    product = _coinbase_product(ticker)
+    if product is None:
+        return None
+    from datetime import datetime, timedelta, timezone
+    fmt = "%Y-%m-%dT%H:%M:%SZ"
+    now = datetime.now(timezone.utc)
+    start_dt = now - timedelta(days=int(365.25 * years))
+    cutoff = start_dt.strftime("%Y-%m-%d")
+    url = _COINBASE_CANDLES.format(product=product)
+    raw: list = []
+    end = now
+    try:
+        async with _coinbase_client() as client:
+            while end > start_dt:
+                # 299 days + end-inclusive stays within the 300-candle cap
+                start = max(start_dt, end - timedelta(days=_COINBASE_PAGE - 1))
+                resp = await client.get(url, params={"granularity": 86400,
+                                                     "start": start.strftime(fmt),
+                                                     "end": end.strftime(fmt)})
+                if resp.status_code != 200:
+                    logger.warning("Coinbase candles HTTP %s for %s", resp.status_code, ticker)
+                    return None
+                rows = resp.json()
+                if not isinstance(rows, list):
+                    logger.warning("Coinbase candles malformed for %s", ticker)
+                    return None
+                if not rows:
+                    break            # before the product's listing
+                raw.extend(rows)
+                end = start - timedelta(seconds=1)
+    except Exception as exc:
+        logger.warning("Coinbase candles failed for %s: %s", ticker, exc)
+        return None
+    daily = [b for b in _parse_coinbase(raw) if b.date >= cutoff]
+    if not daily:
+        logger.warning("Coinbase candles empty for %s", ticker)
+        return None
+    return PriceHistory(ticker=ticker, source="coinbase", daily=daily, weekly=to_weekly(daily))
 
 
 # ── Nasdaq (US stock/ETF fallback) ─────────────────────────────────────────

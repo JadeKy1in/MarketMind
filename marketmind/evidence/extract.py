@@ -20,6 +20,7 @@ SYSTEM_PROMPT = f"""你是证据层的说法抽取员。从新闻里找出**能�
 - funding_rates：美国短端资金利率/回购利率在上行(up)或下行(down)。
 - treasury_demand：美国国债拍卖需求强劲(up)或疲弱(down)。
 - stablecoin_supply：稳定币供应/流入在增加(up)或减少(down)。
+- fed_liquidity：美联储在投放流动性/资产负债表扩张(up)，或在回收流动性/缩表(QT)(down)。
 - etf_flows：ETF 资金在流入(up)或流出(down)。
 规则：
 1. 只抽新闻明确写出的说法，不要自己推断；一条新闻可以没有说法。
@@ -53,8 +54,10 @@ CHECKABLE_WORDS = re.compile(
     r"revenue|sales|quarterly results|earnings|short interest|short seller|short sell|"
     r"shorts|short squeeze|repo|sofr|funding market|money market|liquidity|treasury auction|"
     r"auction|bid-to-cover|bond sale|stablecoin|tether|usdt|usdc|etf (?:in|out)flow|inflow|"
+    r"fed(?:'s)? balance sheet|balance[- ]sheet runoff|"
+    r"quantitative (?:tightening|easing)|\bqt\b|reserve management|"
     r"outflow|going concern|material weakness|restat|delist|chapter 11|bankrupt|营收|收入|"
-    r"做空|空头|回购利率|拍卖|稳定币|资金流", re.I)
+    r"做空|空头|回购利率|拍卖|稳定币|资金流|缩表|扩表|资产负债表", re.I)
 
 
 # Items that come from the primary sources the checks use are data, not narrative
