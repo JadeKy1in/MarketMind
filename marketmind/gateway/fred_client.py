@@ -258,7 +258,9 @@ async def _fetch_single(series_key: str) -> dict:
         f"&limit=1"
     )
 
-    client = httpx.AsyncClient(timeout=httpx.Timeout(10.0))
+    # FRED often takes ~15s to answer from the owner's network (measured 2026-09-28);
+    # a 10s timeout made every FRED metric unavailable.
+    client = httpx.AsyncClient(timeout=httpx.Timeout(30.0))
     try:
         resp = await client.get(url)
         resp.raise_for_status()

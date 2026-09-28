@@ -16,7 +16,6 @@ logger = logging.getLogger("marketmind.gateway.fragility_inputs")
 
 # Metrics we deliberately do not feed yet, with the reason shown to the user.
 UNSOURCED: dict[str, str] = {
-    "hyg_lqd_spread": "no free OAS source wired",
     "margin_debt_gdp": "FINRA margin statistics not wired",
     "copper_gold_ratio": "threshold 3.5 has no verified unit convention (HG/GC*1000 ~1.5 today)",
     "em_import_cover": "IMF IFS not wired",
@@ -33,12 +32,15 @@ class FragilityInputs:
 
 async def fetch_fragility_inputs() -> FragilityInputs:
     out = FragilityInputs(unavailable=dict(UNSOURCED))
-    fred_keys = ["DGS10", "RRPONTSYD", "WTREGEN", "WRESBAL", "SOFR", "IORB", "BAMLH0A3HYC"]
+    fred_keys = ["DGS10", "RRPONTSYD", "WTREGEN", "WRESBAL", "SOFR", "IORB", "BAMLH0A3HYC",
+                 "BAMLH0A0HYM2", "BAMLC0A0CM"]
     fred_results, yf_results = await asyncio.gather(
         asyncio.gather(*(get_fred_series(k) for k in fred_keys)),
         asyncio.gather(*(_yf_last(s) for s in ("^VIX", "^TNX", "DX-Y.NYB"))),
     )
     fred = {k: _fred_value(r) for k, r in zip(fred_keys, fred_results)}
+    fred_dates = {k: r.get("date") if isinstance(r, dict) else None
+                  for k, r in zip(fred_keys, fred_results)}
     vix, tnx, dxy = yf_results
 
     def put(metric: str, value: float | None, source: str, missing_reason: str) -> None:
@@ -62,6 +64,19 @@ async def fetch_fragility_inputs() -> FragilityInputs:
     put("sofr_iorb_spread", spread, "FRED:SOFR-IORB (bp)", fred_missing)
     put("ccc_treasury_spread", fred["BAMLH0A3HYC"] * 100 if fred["BAMLH0A3HYC"] is not None else None,
         "FRED:BAMLH0A3HYC (%->bp)", fred_missing)
+    # hyg_lqd_spread: threshold is "HY vs IG spread >200bp" sourced from ICE BofA OAS
+    # data, so we read it as HY OAS minus IG OAS, in basis points. FRED publishes both
+    # indices' OAS in percent (e.g. 2.80 and 0.79), so the difference is x100 -> bp.
+    # These are the index OAS the HYG/LQD ETFs track, not the ETFs' own spreads.
+    hy, ig = fred["BAMLH0A0HYM2"], fred["BAMLC0A0CM"]
+    hy_ig, hy_ig_missing = None, fred_missing
+    if None not in (hy, ig):
+        if fred_dates["BAMLH0A0HYM2"] == fred_dates["BAMLC0A0CM"]:
+            hy_ig = (hy - ig) * 100
+        else:
+            hy_ig_missing = (f"HY/IG OAS dates differ ({fred_dates['BAMLH0A0HYM2']} vs "
+                             f"{fred_dates['BAMLC0A0CM']})")
+    put("hyg_lqd_spread", hy_ig, "FRED:BAMLH0A0HYM2-BAMLC0A0CM (%->bp)", hy_ig_missing)
     put("vix", vix, "yfinance:^VIX", "yfinance ^VIX unavailable")
     put("dollar_index", dxy, "yfinance:DX-Y.NYB", "yfinance DX-Y.NYB unavailable")
     return out

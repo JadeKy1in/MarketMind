@@ -86,7 +86,10 @@ THRESHOLD_LIBRARY: list[FragilityThreshold] = [
         threshold_value=200, unit="basis_points", direction="above",
         mechanism="HY vs IG spread >200bp → credit differentiation breaking down → risk-off rotation accelerating",
         cascade=["etf_redemption_surge", "dealer_inventory_buildup", "corporate_bond_illiquidity"],
-        data_source="Bloomberg:HYG, LQD OAS", source_document="ICE BofA OAS data",
+        # Read as ICE BofA US HY OAS minus US Corporate (IG) OAS, in bp. Note: this
+        # differential has rarely been far below ~200bp (it was ~201bp in Sep 2026),
+        # so the 200bp line flags "not tight", not acute stress. Unrevised since 2026-05-18.
+        data_source="FRED:BAMLH0A0HYM2 - BAMLC0A0CM", source_document="ICE BofA OAS data",
     ),
 
     # ── Macro / structural thresholds ──
