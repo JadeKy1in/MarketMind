@@ -27,9 +27,8 @@ _shadow_task: "asyncio.Task | None" = None
 _evidence_task: "asyncio.Task | None" = None
 _playground_task: "asyncio.Task | None" = None
 
-# Only interactive_orchestration still evaluates resonance (legacy path, to be
-# redesigned with alert-driven interaction). The daily pipeline no longer does.
-_DEFAULT_OBSERVED_SHARPE = 0.5
+# Resonance (DSR/PBO) is not evaluated in the daily or the interactive path;
+# both pass the NOT_EVALUATED marker (SPEC_v3 §5 step 7).
 
 
 # ══════════════════════════════════════════════════════════════════════════════
