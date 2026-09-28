@@ -5,7 +5,7 @@
 ## 开工前必读
 
 1. `docs/SPEC_v3.md`：唯一事实来源。第 13 节是施工顺序，§13.1 是开放问题。
-2. 各阶段设计稿：`docs/S2_DESIGN.md` 至 `docs/S6_DESIGN.md`（后续阶段按同样命名）。
+2. 各阶段设计稿：`docs/S2_DESIGN.md` 至 `docs/S6_DESIGN.md`、`docs/S8_DESIGN.md`（后续阶段按同样命名）。
 3. 本文件的"未完成事项"。
 4. `PROGRESS_v3.md` 只存在于所有人本机、不入库。如果你看不到它，以本文件和 SPEC 为准。
 
@@ -28,4 +28,5 @@
   - 做法与步骤：见 `docs/SPEC_v3.md` §13.1；代码位置是 `marketmind/shadows/v3/roster.py` 里的 odds_analyst 条目。
 - [ ] **Robinhood 加密货币只读持仓同步**（SPEC L2 唯一允许的券商接口）：所有人 2026-09-28 决定暂不做，持仓用 `python -m marketmind.holdings add` 手动录入（见 `docs/S6_DESIGN.md`）；实盘开始投加密后再议。
 - [ ] **证据层背离清单喂给主管线**（SPEC §5 第 1 步）：所有人 2026-09-28 决定先不接，等背离记录在账本里结算、证明有用后再接。
-- [ ] 施工顺序中尚未开始的阶段：S7–S9（见 SPEC §13）。S7 需要账本攒满 60 个交易日。
+- [ ] **S8 剩余部分**：警报框架已完成（`docs/S8_DESIGN.md`，观察模式）；顾问（S7 毕业影子写入 `data/advisors.json` 后自动转正式模式并推送）、Playground 接回未做。推送渠道：所有人回国后在 Server酱 / PushPlus / 企业微信 / 飞书中选一个，设好环境变量后跑 `python -m marketmind.alerts test-notify`。
+- [ ] 施工顺序中尚未开始的阶段：S7、S9（见 SPEC §13）。S7 需要账本攒满 60 个交易日。

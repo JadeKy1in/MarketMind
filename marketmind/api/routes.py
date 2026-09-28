@@ -123,6 +123,12 @@ async def wb_holdings():
     return _wb(whitebox.get_holdings)
 
 
+@app.get("/api/wb/big_alerts")
+async def wb_big_alerts():
+    from marketmind.api import whitebox
+    return _wb(whitebox.get_big_alerts)
+
+
 @app.post("/api/reporter")
 async def reporter_endpoint(request: dict):
     from marketmind.api import reporter

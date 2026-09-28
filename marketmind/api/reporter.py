@@ -105,6 +105,16 @@ def build_context(question: str) -> dict[str, Any]:
             "items": [{k: i.get(k) for k in ("ticker", "unrealized_return", "light", "reward_risk",
                                               "verdict_cn", "reason", "alternatives")}
                       for i in hold["items"]]}
+    big = whitebox.get_big_alerts()
+    if big.get("available"):
+        rep = big.get("report") or {}
+        ctx["big_move_alerts"] = {
+            "date": big.get("date"), "mode": rep.get("mode"),
+            "fired": [{k: f.get(k) for k in ("ticker", "entry_id", "groups")}
+                      for f in rep.get("fired", [])],
+            "near_misses": [{k: n.get(k) for k in ("ticker", "a_ok", "b_ok", "c_ok", "met")}
+                            for n in rep.get("near_misses", [])][:10],
+            "history": big.get("history", [])[:20]}
     ctx["promotion"] = "所有影子处于见习期；晋升评审（S7）尚未实现"
     return ctx
 

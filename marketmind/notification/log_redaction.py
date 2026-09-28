@@ -15,12 +15,16 @@ _SECRET_PARAM = re.compile(
     r"[^&\s'\"<>]+"
 )
 _BEARER = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._\-]{8,}")
+# push webhooks that carry the key in the URL path (alerts/notify.py)
+_PATH_SECRET = re.compile(r"(?i)(sctapi\.ftqq\.com/|/bot/v2/hook/|\.push\.ft07\.com/send/)"
+                          r"[^/\s?&'\"<>]+")
 
 _installed = False
 
 
 def redact(text: str) -> str:
     text = _SECRET_PARAM.sub(r"\1***", text)
+    text = _PATH_SECRET.sub(r"\1***", text)
     return _BEARER.sub(r"\1***", text)
 
 

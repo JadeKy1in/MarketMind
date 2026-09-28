@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SOURCE_TYPES = ("main", "main_forced", "shadow", "temp_shadow", "playground", "benchmark", "owner",
-                "evidence")
+                "evidence", "alert")
 ENTRY_RULES = ("next_open", "zone")
 # pending: waiting for the entry fill; open: filled, not yet exited;
 # settled: exited and scored; void: never filled within the window.

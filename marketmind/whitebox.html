@@ -61,12 +61,13 @@ button.act:disabled{opacity:.5}
   <section id="s-promo"></section>
   <section id="s-evidence"></section>
   <section id="s-holdings"></section>
+  <section id="s-alerts"></section>
   <section id="s-health"></section>
   <section id="s-reporter"></section>
 </main>
 <div id="drawer"></div>
 <script>
-const TABS=[["brief","今日简报"],["chain","主管线推理链"],["ledger","统一账本"],["arena","影子竞技场"],["promo","晋升淘汰日志"],["evidence","证据层"],["holdings","实盘持仓"],["health","系统健康"],["reporter","汇报员"]];
+const TABS=[["brief","今日简报"],["chain","主管线推理链"],["ledger","统一账本"],["arena","影子竞技场"],["promo","晋升淘汰日志"],["evidence","证据层"],["holdings","实盘持仓"],["alerts","大行情警报"],["health","系统健康"],["reporter","汇报员"]];
 const $=s=>document.querySelector(s);
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const NA='<span class="mut">无数据</span>';
@@ -75,7 +76,7 @@ const num=(v,d=2)=>v==null?NA:Number(v).toFixed(d);
 const usd=v=>v==null?NA:`<span class="${v>0?"pos":v<0?"neg":""}">$${Number(v).toFixed(2)}</span>`;
 const idl=id=>`<a class="id" href="#" onclick="openEntry('${esc(id)}');return false">${esc(id)}</a>`;
 const STATUS={pending:"待入场",open:"持有中",settled:"已结算",void:"作废"};
-const SRC={main:"主管线",main_forced:"主管线·被迫",shadow:"影子",temp_shadow:"临时影子",playground:"Playground",benchmark:"基准",owner:"所有人实盘",evidence:"证据层"};
+const SRC={main:"主管线",main_forced:"主管线·被迫",shadow:"影子",temp_shadow:"临时影子",playground:"Playground",benchmark:"基准",owner:"所有人实盘",evidence:"证据层",alert:"大行情警报"};
 async function j(url,opt){const r=await fetch(url,opt);if(r.status===404)return{available:false,reason:"未接入",_404:true};return r.json()}
 const loaded={};
 function show(t){TABS.forEach(([k])=>{$("#s-"+k).classList.toggle("on",k===t)});document.querySelectorAll("#nav button").forEach(b=>b.classList.toggle("on",b.dataset.t===t));try{localStorage.setItem("wb.tab",t)}catch(e){}if(!loaded[t]){loaded[t]=1;LOAD[t]()}}
@@ -237,7 +238,21 @@ function loadReporter(){
     catch(e){$("#rLog").insertAdjacentHTML("beforeend",`<div class="msg a neg">请求失败</div>`)}
     $("#rGo").disabled=false};
 }
-const LOAD={brief:loadBrief,chain:loadChain,ledger:loadLedger,arena:loadArena,promo:loadPromo,evidence:loadEvidence,holdings:loadHoldings,health:loadHealth,reporter:loadReporter};
+// ── big-move alerts (S8) ──
+async function loadAlerts(){
+  const d=await j("/api/wb/big_alerts");
+  if(!d.available){$("#s-alerts").innerHTML=`<div class="card empty">${esc(d.reason||"无数据")}</div>`;return}
+  const r=d.report||{};
+  const ok=v=>v?'<span class="chip green">✓</span>':(v===null||v===undefined)?'<span class="mut">—</span>':'<span class="chip red">✗</span>';
+  const row=c=>`<tr><td><b>${esc(c.ticker)}</b></td><td>${ok(c.a_ok)} <span class="mut">${(c.advisors_long||[]).length} 多 / ${(c.advisors_short||[]).length} 空，${esc((c.groups||[]).join(", "))}</span></td><td>${ok(c.b_ok)} <span class="mut">${(c.evidence||[]).length} 条</span></td><td>${ok(c.c_ok)} <span class="mut">${esc((c.l3||{}).light||"")}</span></td><td>${c.entry_id?idl(c.entry_id):`<span class="mut">${esc(c.note||"")}</span>`}</td></tr>`;
+  const live=r.mode==="live";
+  $("#s-alerts").innerHTML=`<div class="card"><h2>大行情警报 ${esc(d.date||"")} <span class="chip ${live?"green":"yellow"}">${live?"正式":"观察模式"}</span></h2>
+  <div class="mut" style="margin-bottom:8px">三个条件同时满足才触发：A 至少 3 个${live?"顾问":"影子"}（≥2 个组）近 5 天做多；B 证据层同向背离；C L3 三灯全绿。只列 Robinhood 可执行、非期权、做多。${live?"":"S7 产生顾问之前是观察模式：记账本、不推送手机。"}</div>
+  <h3>触发</h3>${(r.fired||[]).length?`<table><tr><th>标的</th><th>A 一致</th><th>B 背离</th><th>C 趋势</th><th>账本</th></tr>${r.fired.map(row).join("")}</table>`:'<div class="empty">今天没有触发</div>'}
+  <h3>接近触发（满足 2 条）</h3>${(r.near_misses||[]).length?`<table><tr><th>标的</th><th>A 一致</th><th>B 背离</th><th>C 趋势</th><th>说明</th></tr>${r.near_misses.map(row).join("")}</table>`:'<div class="empty">无</div>'}</div>
+  <div class="card"><h2>历史警报与你的回应</h2>${(d.history||[]).length?`<table><tr><th>记录</th><th>日期</th><th>模式</th><th>标的</th><th>回应</th><th>状态</th><th class="num">净收益</th></tr>${d.history.map(h=>`<tr><td>${idl(h.entry_id)}</td><td>${esc(String(h.created_at).slice(0,10))}</td><td>${esc(h.mode)}</td><td>${esc(h.ticker)}</td><td>${h.response==="accept"?"接受":h.response==="reject"?"拒绝（放弃）":'<span class="mut">未回应</span>'}</td><td>${STATUS[h.status]||esc(h.status)}</td><td class="num">${pct(h.net_return)}</td></tr>`).join("")}</table>`:'<div class="empty">还没有警报</div>'}</div>`;
+}
+const LOAD={brief:loadBrief,alerts:loadAlerts,chain:loadChain,ledger:loadLedger,arena:loadArena,promo:loadPromo,evidence:loadEvidence,holdings:loadHoldings,health:loadHealth,reporter:loadReporter};
 $("#meta").textContent="只读 · 数据来自账本与运行文件";
 let start="brief";try{start=localStorage.getItem("wb.tab")||"brief"}catch(e){}
 show(TABS.some(t=>t[0]===start)?start:"brief");

@@ -621,6 +621,21 @@ async def run_evidence(config, news_items: list):
     return report
 
 
+async def alerts_step(config) -> None:
+    """S8: big-move alert conditions, after shadows have filed today's decisions."""
+    from marketmind.alerts.notify import send
+    from marketmind.alerts.runner import OBSERVE, run_alerts
+    try:
+        report = await run_alerts(_ledger_store(config), notifier=send)
+    except Exception:
+        logger.warning("alerts step failed", exc_info=True)
+        print("  [alerts] failed (see log)")
+        return
+    mode = "observe" if report["mode"] == OBSERVE else "live"
+    fired = ", ".join(f["ticker"] for f in report["fired"]) or "none"
+    print(f"  [alerts] {mode}: fired {fired}; near misses {len(report['near_misses'])}")
+
+
 async def inspect_holdings_step(config) -> None:
     """S6: inspect the owner's real holdings last, so today's shadow picks can be alternatives."""
     from marketmind.holdings.inspect import run_inspection
@@ -713,6 +728,7 @@ async def _run_daily_with_shadows(config, args) -> int:
             pass
     if not args.mock:
         await inspect_holdings_step(config)
+        await alerts_step(config)
         from marketmind.gateway import usage_tracker
         usage_tracker.append_log("daily")
 

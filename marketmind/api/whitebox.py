@@ -267,3 +267,23 @@ def get_alerts(source: str | None = None, limit: int = 50) -> dict:
         logger.warning("alerts.db unreadable", exc_info=True)
         return {"available": False, "alerts": []}
     return {"available": True, "alerts": rows}
+
+
+# ── big-move alerts (S8) ────────────────────────────────────────────────────
+
+def get_big_alerts() -> dict:
+    from marketmind.alerts.runner import load_responses
+    day, report = _latest_json(data_dir() / "alerts")
+    store = _store()
+    responses = load_responses()
+    history = []
+    for e in (store.list(source_type="alert") if store else []):
+        r = responses.get(e.entry_id, {})
+        history.append({"entry_id": e.entry_id, "created_at": e.created_at, "mode": e.source_id,
+                        "ticker": e.ticker, "status": e.status, "net_return": e.net_return,
+                        "response": r.get("decision"), "note": r.get("note", "")})
+    history.reverse()
+    if report is None and not history:
+        return {"available": False,
+                "reason": "警报尚未运行（每日运行最后一步，或 python -m marketmind.alerts run）"}
+    return {"available": True, "date": day, "report": report, "history": history}
