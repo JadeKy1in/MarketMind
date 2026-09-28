@@ -59,6 +59,7 @@ button.act:disabled{opacity:.5}
   <section id="s-ledger"></section>
   <section id="s-arena"></section>
   <section id="s-promo"></section>
+  <section id="s-discovery"></section>
   <section id="s-evidence"></section>
   <section id="s-holdings"></section>
   <section id="s-alerts"></section>
@@ -67,7 +68,7 @@ button.act:disabled{opacity:.5}
 </main>
 <div id="drawer"></div>
 <script>
-const TABS=[["brief","今日简报"],["chain","主管线推理链"],["ledger","统一账本"],["arena","影子竞技场"],["promo","晋升淘汰日志"],["evidence","证据层"],["holdings","实盘持仓"],["alerts","大行情警报"],["health","系统健康"],["reporter","汇报员"]];
+const TABS=[["brief","今日简报"],["chain","主管线推理链"],["ledger","统一账本"],["arena","影子竞技场"],["promo","晋升淘汰日志"],["discovery","冷门发现"],["evidence","证据层"],["holdings","实盘持仓"],["alerts","大行情警报"],["health","系统健康"],["reporter","汇报员"]];
 const $=s=>document.querySelector(s);
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const NA='<span class="mut">无数据</span>';
@@ -76,7 +77,7 @@ const num=(v,d=2)=>v==null?NA:Number(v).toFixed(d);
 const usd=v=>v==null?NA:`<span class="${v>0?"pos":v<0?"neg":""}">$${Number(v).toFixed(2)}</span>`;
 const idl=id=>`<a class="id" href="#" onclick="openEntry('${esc(id)}');return false">${esc(id)}</a>`;
 const STATUS={pending:"待入场",open:"持有中",settled:"已结算",void:"作废"};
-const SRC={main:"主管线",main_forced:"主管线·被迫",shadow:"影子",temp_shadow:"临时影子",playground:"Playground",benchmark:"基准",owner:"所有人实盘",evidence:"证据层",alert:"大行情警报"};
+const SRC={main:"主管线",main_forced:"主管线·被迫",shadow:"影子",temp_shadow:"临时影子",playground:"Playground",benchmark:"基准",owner:"所有人实盘",evidence:"证据层",alert:"大行情警报",watch:"观察名单·触发",watch_counterfactual:"观察名单·立即入场对照"};
 async function j(url,opt){const r=await fetch(url,opt);if(r.status===404)return{available:false,reason:"未接入",_404:true};return r.json()}
 const loaded={};
 function show(t){TABS.forEach(([k])=>{$("#s-"+k).classList.toggle("on",k===t)});document.querySelectorAll("#nav button").forEach(b=>b.classList.toggle("on",b.dataset.t===t));try{localStorage.setItem("wb.tab",t)}catch(e){}if(!loaded[t]){loaded[t]=1;LOAD[t]()}}
@@ -203,6 +204,25 @@ async function loadPromo(){
   <h3>门槛（promotion/config.py）</h3><pre>${esc(JSON.stringify(d.thresholds||{},null,2))}</pre></div>`;
 }
 
+// ── cold-data discovery + watchlist (S10) ──
+const BUCKET={not_priced:["未反映","green"],partial:["部分反映","yellow"],priced_in:["已反映","red"],unavailable:["无数据",""]};
+const WSTAT={watching:"等待中",triggered:"已触发",expired:"已到期",invalidated:"已失效"};
+async function loadDiscovery(){
+  const d=await j("/api/wb/discovery");
+  if(d._404||(!d.available&&!(d.by_origin||[]).length)){$("#s-discovery").innerHTML=`<div class="card empty">冷门发现：${esc(d.reason||"无数据")}</div>`;return}
+  const c=d.counts||{};
+  const an=(d.anomalies||[]).map(a=>`<tr><td><b>${esc(a.title)}</b><div class="mut">${esc(a.series)} · ${esc(a.obs_date)}</div></td><td class="num">${num(a.latest,2)} <span class="mut">${esc(a.unit||"")}</span></td><td class="num">${a.z==null?NA:num(a.z,2)}</td><td class="mut">${esc((a.triggers||[]).join(", "))}</td><td class="num">${a.coverage??"?"}${a.cold?' <span class="chip green">冷门</span>':""}</td><td>${(a.proxies||[]).map(p=>{const b=BUCKET[p.bucket]||[p.bucket,""];return `<div>${esc(p.ticker)} ${p.direction==="long"?"多":p.direction==="short"?"空":""} <span class="chip ${b[1]}">${esc(b[0])}</span> <span class="mut">${p.move_atr==null?"":num(p.move_atr,1)+" ATR"}</span></div>`}).join("")}</td></tr>`).join("");
+  const w=(d.watchlist||[]).map(i=>`<tr><td>${esc(i.ticker)}</td><td>${i.direction==="long"?"多":"空"}</td><td>${i.source==="main_pipeline"?"主管线":"冷门异常"}</td><td>${esc(WSTAT[i.status]||i.status)}${i.status==="watching"?` <span class="mut">剩 ${i.bars_left} 根</span>`:""}</td><td>${(i.conditions||[]).map(x=>`<div>${esc(x)}</div>`).join("")}${(i.invalidation||[]).length?`<div class="mut">失效：${(i.invalidation||[]).map(esc).join("；")}</div>`:""}</td><td class="mut">${esc(i.thesis||"")}</td><td>${i.counterfactual_entry_id?idl(i.counterfactual_entry_id):""}${i.triggered_entry_id?"<div>"+idl(i.triggered_entry_id)+"</div>":""}</td></tr>`).join("");
+  const o=(d.by_origin||[]).map(s=>`<tr><td>${esc(s.source_id)}</td><td class="num">${s.records}</td><td class="num">${s.settled}</td><td class="num">${s.win_rate==null?NA:(s.win_rate*100).toFixed(0)+"%"}</td><td class="num">${pct(s.mean_net_return)}</td><td class="num">${num(s.mean_brier,3)}</td></tr>`).join("");
+  $("#s-discovery").innerHTML=`<div class="card"><h2>冷门数据异常 ${esc(d.date||"")}</h2>
+  <div class="mut" style="margin-bottom:8px">序列 ${c.ok??"?"}/${c.series??"?"} 可用，异常 ${c.anomalies??0} 条（冷门 ${c.cold??0}）。z = 近期变化相对过去一年同窗口变化的偏离；覆盖 = 近 7 天抓到的新闻中提到它的篇数；反映程度 = 代理标的自数据公布后已走的 ATR 倍数与方向。</div>
+  ${an?`<div class="tw"><table><tr><th>序列</th><th class="num">最新值</th><th class="num">z</th><th>触发</th><th class="num">新闻覆盖</th><th>代理标的 / 是否已反映</th></tr>${an}</table></div>`:'<div class="empty">今天没有异常</div>'}
+  ${(d.unavailable||[]).length?`<div class="mut" style="margin-top:8px">不可用：${d.unavailable.map(u=>esc((u.series||"")+"（"+(u.reason||"")+"）")).join("；")}</div>`:""}</div>
+  <div class="card"><h2>观察名单</h2><div class="mut" style="margin-bottom:8px">条件全部满足才触发，次日开盘入账；主管线观察项触发时推送微信。每项创建时同时记一笔"立即入场"对照，用来衡量"等待"值不值。</div>
+  ${w?`<div class="tw"><table><tr><th>标的</th><th>方向</th><th>来源</th><th>状态</th><th>确认条件</th><th>理由</th><th>账本</th></tr>${w}</table></div>`:'<div class="empty">观察名单为空</div>'}</div>
+  <div class="card"><h2>按数据来源的成绩</h2>${o?`<table><tr><th>来源</th><th class="num">记录</th><th class="num">已结算</th><th class="num">胜率</th><th class="num">平均净收益</th><th class="num">Brier</th></tr>${o}</table>`:'<div class="empty">还没有带来源的账本记录</div>'}</div>`;
+}
+
 // ── evidence (S5) ──
 async function loadEvidence(){
   const d=await j("/api/wb/evidence");
@@ -297,7 +317,7 @@ async function loadAlerts(){
   <h3>接近触发（满足 2 条）</h3>${(r.near_misses||[]).length?`<table><tr><th>标的</th><th>A 一致</th><th>B 背离</th><th>C 趋势</th><th>说明</th></tr>${r.near_misses.map(row).join("")}</table>`:'<div class="empty">无</div>'}</div>
   <div class="card"><h2>历史警报与你的回应</h2>${(d.history||[]).length?`<table><tr><th>记录</th><th>日期</th><th>模式</th><th>标的</th><th>回应</th><th>状态</th><th class="num">净收益</th></tr>${d.history.map(h=>`<tr><td>${idl(h.entry_id)}</td><td>${esc(String(h.created_at).slice(0,10))}</td><td>${esc(h.mode)}</td><td>${esc(h.ticker)}</td><td>${h.response==="accept"?"接受":h.response==="reject"?"拒绝（放弃）":'<span class="mut">未回应</span>'}</td><td>${STATUS[h.status]||esc(h.status)}</td><td class="num">${pct(h.net_return)}</td></tr>`).join("")}</table>`:'<div class="empty">还没有警报</div>'}</div>`;
 }
-const LOAD={brief:loadBrief,alerts:loadAlerts,chain:loadChain,ledger:loadLedger,arena:loadArena,promo:loadPromo,evidence:loadEvidence,holdings:loadHoldings,health:loadHealth,reporter:loadReporter};
+const LOAD={brief:loadBrief,alerts:loadAlerts,chain:loadChain,ledger:loadLedger,arena:loadArena,promo:loadPromo,evidence:loadEvidence,discovery:loadDiscovery,holdings:loadHoldings,health:loadHealth,reporter:loadReporter};
 $("#meta").textContent="只读 · 数据来自账本与运行文件";
 let start="brief";try{start=localStorage.getItem("wb.tab")||"brief"}catch(e){}
 show(TABS.some(t=>t[0]===start)?start:"brief");

@@ -274,6 +274,45 @@ def get_evidence(date: str | None = None) -> dict:
             "dropped": report.get("dropped", []), "news_considered": report.get("news_considered")}
 
 
+# ── cold-data discovery and watchlist (S10) ─────────────────────────────────
+
+def origin_label(meta: dict | None) -> str:
+    o = (meta or {}).get("origin") or {}
+    kind = o.get("kind")
+    if not kind:
+        return "unrecorded"
+    series = ",".join(o.get("series") or [])
+    return f"{kind}:{series}" if series else kind
+
+
+def get_discovery(date: str | None = None) -> dict:
+    """Latest discovery report, the watchlist, and ledger results by data origin."""
+    from dataclasses import replace
+    folder = data_dir() / "discovery"
+    if date:
+        if not _DATE_RE.match(date):
+            return {"available": False, "reason": "date must be YYYY-MM-DD"}
+        p = folder / f"{date}.json"
+        day, report = (date, json.loads(p.read_text(encoding="utf-8"))) if p.exists() else (date, None)
+    else:
+        day, report = _latest_json(folder)
+    watch = []
+    if (data_dir() / "watchlist.db").exists():
+        from marketmind.watchlist import dashboard_items
+        from marketmind.watchlist.store import WatchlistStore
+        watch = dashboard_items(WatchlistStore(data_dir() / "watchlist.db"))
+    store = _store()
+    rows = [replace(e, source_type="origin", source_id=origin_label(e.meta))
+            for e in (store.list() if store else [])
+            if (e.meta or {}).get("origin")]
+    by_origin = [s.to_dict() for s in scoreboard(rows)]
+    return {"available": report is not None or bool(watch), "date": day,
+            "counts": (report or {}).get("counts"), "anomalies": (report or {}).get("anomalies", []),
+            "unavailable": (report or {}).get("unavailable", []), "watchlist": watch,
+            "by_origin": by_origin,
+            "reason": None if report is not None else "冷门数据扫描尚未运行（每日运行后生成）"}
+
+
 # ── owner holdings (S6) ─────────────────────────────────────────────────────
 
 def get_holdings() -> dict:

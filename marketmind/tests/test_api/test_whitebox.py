@@ -257,3 +257,23 @@ def test_alerts_read_from_db(env):
                 "repeat_count": 1})
     assert whitebox.get_alerts(source="holdings")["alerts"][0]["title"].startswith("持仓巡检")
     assert whitebox.get_health()["alerts"][0]["id"] == "a1"
+
+
+def test_discovery_view_groups_ledger_by_origin(tmp_path, monkeypatch):
+    from marketmind.api import whitebox
+    monkeypatch.setenv("MARKETMIND_DATA_DIR", str(tmp_path))
+    store = LedgerStore(tmp_path / "ledger.db")
+    origin = {"kind": "anomaly", "series": ["fred:WRESBAL"], "anomaly_id": "2026-09-28:fred:WRESBAL"}
+    store.add(_settled(_e("main", "pipeline", meta={"origin": origin}), 0.03, 9.0))
+    store.add(_e("main", "pipeline", ticker="NVDA", meta={"origin": {"kind": "news"}}))
+    store.add(_e())                                           # no origin: left out
+    (tmp_path / "discovery").mkdir()
+    (tmp_path / "discovery" / "2026-09-28.json").write_text(json.dumps(
+        {"counts": {"series": 34, "ok": 33, "anomalies": 1, "cold": 1},
+         "anomalies": [{"series": "fred:WRESBAL", "title": "Reserves"}], "unavailable": []}), "utf-8")
+    d = whitebox.get_discovery()
+    assert d["available"] and d["date"] == "2026-09-28" and d["anomalies"][0]["series"] == "fred:WRESBAL"
+    by = {s["source_id"]: s for s in d["by_origin"]}
+    assert set(by) == {"anomaly:fred:WRESBAL", "news"} and by["anomaly:fred:WRESBAL"]["settled"] == 1
+    assert d["watchlist"] == []
+    assert whitebox.get_discovery("bad-date")["available"] is False

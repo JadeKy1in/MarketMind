@@ -117,6 +117,12 @@ async def wb_evidence(date: str = ""):
     return _wb(whitebox.get_evidence, date or None)
 
 
+@app.get("/api/wb/discovery")
+async def wb_discovery(date: str = ""):
+    from marketmind.api import whitebox
+    return _wb(whitebox.get_discovery, date or None)
+
+
 @app.get("/api/wb/holdings")
 async def wb_holdings():
     from marketmind.api import whitebox
