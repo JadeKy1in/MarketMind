@@ -28,6 +28,7 @@ SOFR_URL = "https://markets.newyorkfed.org/api/rates/secured/sofr/last/30.json"
 AUCTIONS_URL = ("https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v1/"
                 "accounting/od/auctions_query")
 STABLE_URL = "https://stablecoins.llama.fi/stablecoincharts/all"
+SOMA_URL = "https://markets.newyorkfed.org/api/soma/summary.json"
 
 REVENUE_MAX_AGE_DAYS = 200     # older quarter = the filer stopped using the concept
 REVENUE_CONCEPTS = ("RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues",
@@ -168,6 +169,17 @@ def parse_stablecoin_supply(payload: list) -> list[tuple[str, float]]:
     return sorted(out)
 
 
+def parse_soma(payload: dict) -> list[tuple[str, float]]:
+    """(Wednesday as-of date, SOMA total holdings USD) oldest first."""
+    out = []
+    for r in ((payload or {}).get("soma") or {}).get("summary") or []:
+        try:
+            out.append((str(r["asOfDate"]), float(r["total"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return sorted(out)
+
+
 # ── live wiring ─────────────────────────────────────────────────────────────
 
 class LiveEvidenceData:
@@ -293,3 +305,8 @@ class LiveEvidenceData:
         if "stable" not in self._cache:
             self._cache["stable"] = parse_stablecoin_supply(await self._json(STABLE_URL) or [])
         return self._cache["stable"]
+
+    async def soma(self) -> list[tuple[str, float]]:
+        if "soma" not in self._cache:
+            self._cache["soma"] = parse_soma(await self._json(SOMA_URL) or {})
+        return self._cache["soma"]

@@ -26,6 +26,11 @@ AUCTION_DAYS = 7
 AUCTION_PRIOR = 6
 STABLE_BAND = 0.01
 STABLE_DAYS = 30
+# SOMA total over ~4 weeks. 0.1% of ~$6.4T is ~$6B (~$80B a year): week-to-week
+# noise is ~$1-3B, while QT (~$40-95B a month) or reserve-management bill buying
+# (~$10B a month, 2026-09) clears it.
+SOMA_BAND = 0.001
+SOMA_LOOKBACK_DAYS = 28
 
 # type -> (needs ticker, ledger proxy (None = the claim's own ticker), ledger direction when data is up)
 CLAIM_TYPES: dict[str, tuple[bool, str | None, str | None]] = {
@@ -36,6 +41,7 @@ CLAIM_TYPES: dict[str, tuple[bool, str | None, str | None]] = {
     "funding_rates": (False, "TLT", "short"),
     "treasury_demand": (False, "TLT", "long"),
     "stablecoin_supply": (False, "BTC-USD", "long"),
+    "fed_liquidity": (False, "TLT", "long"),
     "etf_flows": (False, None, None),
 }
 
@@ -165,6 +171,24 @@ async def _stablecoins(_ticker, data) -> Observation:
                        {"last": last, "past": past, "change": change})
 
 
+async def _fed_liquidity(_ticker, data) -> Observation:
+    rows = await data.soma()
+    if len(rows) < 2:
+        return Observation(None, "纽约联储 SOMA 持仓数据不可用")
+    from datetime import date, timedelta
+    last = rows[-1]
+    cutoff = (date.fromisoformat(last[0]) - timedelta(days=SOMA_LOOKBACK_DAYS)).isoformat()
+    prior = [r for r in rows if r[0] <= cutoff]
+    if not prior:
+        return Observation(None, "纽约联储 SOMA 持仓历史不足 4 周")
+    past = prior[-1]
+    change = last[1] / past[1] - 1
+    return Observation(_band(change, SOMA_BAND),
+                       f"纽约联储 SOMA 持仓 {last[0]} ${last[1] / 1e9:,.1f}B，{past[0]} "
+                       f"${past[1] / 1e9:,.1f}B（{(last[1] - past[1]) / 1e9:+,.1f}B，{change:+.2%}）",
+                       {"last": last, "past": past, "change": change})
+
+
 async def _red_flags(ticker, data) -> Observation:
     hits = await data.red_flag_filings(ticker)
     if hits is None:
@@ -185,6 +209,7 @@ _CHECKS = {
     "short_selling_pressure": _short_volume, "funding_rates": _funding,
     "treasury_demand": _treasury, "stablecoin_supply": _stablecoins,
     "filing_red_flag": _red_flags, "etf_flows": _etf_flows,
+    "fed_liquidity": _fed_liquidity,
 }
 
 
