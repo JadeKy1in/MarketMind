@@ -8,6 +8,11 @@ from datetime import datetime, timezone
 THRESHOLDS_RESEARCHED_ON = "2026-05-18T00:00:00+00:00"
 # Thresholds (re)sourced against live data on 2026-09-28 (owner decision: fill the
 # remaining gaps and add financial-stress inputs). Each carries its basis inline.
+# 2026-09-28 revision (owner decision; research accessed 2026-09-28, URLs in each
+# entry's source_document): HY-IG 200->450bp; CCC 1000->1300bp; SOFR-IORB 25bp ->
+# 10bp persisting 3 observations; bank reserves $2.7T -> reserves/GDP 9% warning / 8%
+# stress; BBB OAS 200bp warning + 300bp stress; ON RRP, US 10Y and CEX reserves ->
+# MONITOR-only (shown, never crossed, not scored).
 THRESHOLDS_REVIEWED_2026_09_28 = "2026-09-28T00:00:00+00:00"
 
 
@@ -20,7 +25,7 @@ class FragilityThreshold:
     direction: str           # "below" (crossed when value drops below threshold) | "above"
     mechanism: str           # what happens when crossed
     cascade: list[str]       # second-order effects
-    data_source: str         # "FRED:WRBWFRBL"
+    data_source: str         # "FRED:WRESBAL"
     source_document: str     # "Fed H.4.1", "BIS Quarterly Review", etc.
     current_value: float | None = None
     # Date the threshold value was last researched. It used to default to "now",
@@ -30,37 +35,78 @@ class FragilityThreshold:
     # False = MONITOR-only: the value is shown but the threshold has no defensible
     # calibration, so it can never be "crossed" and does not enter the score.
     crossable: bool = True
+    # Optional earlier "warning" line for two-tier thresholds (same unit and direction).
+    # When set, threshold_value is the stress line (crossed -> CRITICAL) and passing
+    # warning_value only raises the alert to WARNING (not crossed).
+    warning_value: float | None = None
 
 
 THRESHOLD_LIBRARY: list[FragilityThreshold] = [
     # ── Liquidity / reserve thresholds ──
     FragilityThreshold(
-        metric="bank_reserves", name_zh="银行准备金",
-        threshold_value=2.7, unit="USD_trillion", direction="below",
-        mechanism="SOFR spikes above IORB → repo market freeze → broad asset selloff",
+        metric="bank_reserves", name_zh="银行准备金/名义GDP",
+        # Two tiers (owner decision 2026-09-28): < 9% of nominal GDP = warning,
+        # < 8% = stress (crossed). Replaces the absolute < $2.7T line, which does not
+        # scale with the economy or the banking system.
+        threshold_value=8.0, warning_value=9.0, unit="percent_of_GDP", direction="below",
+        mechanism="Reserves/GDP falling toward the edge of 'ample' → banks hoard reserves → SOFR trades above IORB → repo market strain → broad asset selloff",
         cascade=["repo_spike", "dealer_stress", "equity_correlation_1"],
-        data_source="FRED:WRBWFRBL", source_document="Fed H.4.1",
+        # Input: FRED WRESBAL (reserve balances, millions USD, weekly) / FRED GDP (nominal,
+        # billions USD SAAR, latest quarter): pct = M / (B*1000) * 100. Data source was
+        # listed as WRBWFRBL while the inputs fetched WRESBAL; both now say WRESBAL.
+        # Basis (owner decision 2026-09-28 from research accessed 2026-09-28): the
+        # reserves-to-GDP framing of the "ample reserves" boundary in Gov. Waller's
+        # 2025-07-10 speech and Cleveland Fed Economic Commentary 2025-05; 9% = warning,
+        # 8% = stress.
+        data_source="FRED:WRESBAL / FRED:GDP",
+        source_document=("Fed H.4.1; BEA NIPA GDP; "
+                         "https://www.federalreserve.gov/newsevents/speech/waller20250710a.htm ; "
+                         "https://www.clevelandfed.org/publications/economic-commentary/2025/"
+                         "ec-202505-qt-ample-reserves-changing-fed-balance-sheet "
+                         "(accessed 2026-09-28)"),
+        last_validated=THRESHOLDS_REVIEWED_2026_09_28,
     ),
     FragilityThreshold(
         metric="on_rrp", name_zh="隔夜逆回购余额",
         threshold_value=50, unit="USD_billion", direction="below",
         mechanism="ON RRP near zero → last liquidity buffer exhausted → funding stress emerges",
         cascade=["repo_spike", "sofr_iorb_spread", "bank_reserves_pressure"],
-        data_source="FRED:RRPONTSYD", source_document="Fed H.4.1",
+        # MONITOR-only (owner decision 2026-09-28): ON RRP has been ~$0.58B since late
+        # 2025, so "< $50B" is permanently crossed and carries no signal. Value is shown;
+        # the 50 is kept for reference only. Source: FRED RRPONTSYD (accessed 2026-09-28).
+        crossable=False,
+        data_source="FRED:RRPONTSYD",
+        source_document=("Fed H.4.1; https://fred.stlouisfed.org/series/RRPONTSYD "
+                         "(accessed 2026-09-28)"),
+        last_validated=THRESHOLDS_REVIEWED_2026_09_28,
     ),
     FragilityThreshold(
         metric="tga", name_zh="财政部TGA账户",
         threshold_value=100, unit="USD_billion", direction="below",
-        mechanism="TGA rapid drawdown → Treasury injecting liquidity → debt ceiling maneuvering → uncertainty spike",
+        # A TGA drawdown ADDS reserves (Treasury spends down its Fed balance); it is the
+        # later rebuild, funded by bill issuance, that drains reserves. A very low TGA
+        # signals debt-ceiling maneuvering and a large rebuild still to come.
+        mechanism="TGA < $100B → debt-ceiling drawdown (the drawdown itself adds reserves) → X-date uncertainty spike; after resolution the TGA rebuild via bill issuance drains reserves → repo volatility",
         cascade=["bill_issuance_surge", "repo_volatility", "debt_ceiling_risk"],
         data_source="FRED:WTREGEN", source_document="Treasury Daily Statement",
     ),
     FragilityThreshold(
-        metric="sofr_iorb_spread", name_zh="SOFR-IORB利差",
-        threshold_value=25, unit="basis_points", direction="above",
-        mechanism="SOFR-IORB spread >25bp → repo market stress → echoes Sep 2019 liquidity crisis",
+        metric="sofr_iorb_spread", name_zh="SOFR-IORB利差(连续3期最小值)",
+        threshold_value=10, unit="basis_points", direction="above",
+        mechanism="SOFR above IORB by >10bp for 3+ consecutive observations → SOFR above the Standing Repo Facility rate → persistent repo market stress (echoes Sep 2019 / Oct 2025)",
         cascade=["repo_freeze", "dealer_balance_sheet", "equity_selloff"],
-        data_source="FRED:SOFR, IORB", source_document="Fed H.4.1",
+        # Input value = the MINIMUM of (SOFR - IORB) in bp over the 3 most recent SOFR
+        # observations (IORB on the same dates), so "> 10bp" means every one of the last
+        # 3 observations exceeded 10bp (persistence rule; owner decision 2026-09-28).
+        # Basis (owner decision 2026-09-28 from research accessed 2026-09-28): a spread
+        # above 10bp puts SOFR above the Standing Repo Facility rate; the Oct-2025 repo
+        # strain peaked at ~14-16bp, which the old 25bp line missed.
+        data_source="FRED:SOFR - FRED:IORB (last 3 observations)",
+        source_document=("Fed H.4.1; https://www.federalreserve.gov/econres/notes/feds-notes/"
+                         "market-based-indicators-on-the-road-to-ample-reserves-20250131.html ; "
+                         "https://www.dallasfed.org/news/speeches/logan/2025/lkl251031 "
+                         "(accessed 2026-09-28)"),
+        last_validated=THRESHOLDS_REVIEWED_2026_09_28,
     ),
 
     # ── Rate / yield thresholds ──
@@ -69,14 +115,25 @@ THRESHOLD_LIBRARY: list[FragilityThreshold] = [
         threshold_value=4.5, unit="percent", direction="above",
         mechanism="10Y >4.5% → political pain threshold breached → policy intervention likely; sustained breach → higher discount rates crush growth equities",
         cascade=["mortgage_rate_spike", "growth_stock_repricing", "em_debt_stress"],
+        # MONITOR-only (owner decision 2026-09-28): no sourced level for 4.5%; value is
+        # shown, never crossed, kept out of the score. 4.5 kept for reference only.
+        crossable=False,
         data_source="FRED:DGS10", source_document="Treasury yield curve",
+        last_validated=THRESHOLDS_REVIEWED_2026_09_28,
     ),
     FragilityThreshold(
         metric="ccc_treasury_spread", name_zh="CCC级信用利差",
-        threshold_value=1000, unit="basis_points", direction="above",
-        mechanism="CCC-Treasury spread >1000bp → deeply distressed credit → default cycle imminent → risk-off cascade",
+        threshold_value=1300, unit="basis_points", direction="above",
+        mechanism="CCC-Treasury spread >1300bp → deeply distressed credit → default cycle imminent → risk-off cascade",
         cascade=["hy_outflows", "bank_lending_freeze", "small_cap_credit_crunch"],
-        data_source="FRED:BAMLH0A3HYC", source_document="ICE BofA High Yield Index",
+        # Raised 1000 -> 1300bp (owner decision 2026-09-28): ~1000bp is roughly CCC's
+        # normal level in 2026. SECONDARY source, medium-low confidence (accessed
+        # 2026-09-28): Lead-Lag Report "The credit-equity divergence".
+        data_source="FRED:BAMLH0A3HYC",
+        source_document=("ICE BofA High Yield Index; "
+                         "https://www.leadlagreport.com/the-credit-equity-divergence-what/ "
+                         "(secondary, medium-low confidence; accessed 2026-09-28)"),
+        last_validated=THRESHOLDS_REVIEWED_2026_09_28,
     ),
 
     # ── Volatility / stress thresholds ──
@@ -89,13 +146,19 @@ THRESHOLD_LIBRARY: list[FragilityThreshold] = [
     ),
     FragilityThreshold(
         metric="hyg_lqd_spread", name_zh="HYG-LQD信用价差",
-        threshold_value=200, unit="basis_points", direction="above",
-        mechanism="HY vs IG spread >200bp → credit differentiation breaking down → risk-off rotation accelerating",
+        threshold_value=450, unit="basis_points", direction="above",
+        mechanism="HY vs IG spread >450bp → credit differentiation breaking down → risk-off rotation accelerating",
         cascade=["etf_redemption_surge", "dealer_inventory_buildup", "corporate_bond_illiquidity"],
-        # Read as ICE BofA US HY OAS minus US Corporate (IG) OAS, in bp. Note: this
-        # differential has rarely been far below ~200bp (it was ~201bp in Sep 2026),
-        # so the 200bp line flags "not tight", not acute stress. Unrevised since 2026-05-18.
-        data_source="FRED:BAMLH0A0HYM2 - BAMLC0A0CM", source_document="ICE BofA OAS data",
+        # Read as ICE BofA US HY OAS minus US Corporate (IG) OAS, in bp.
+        # Raised 200 -> 450bp (owner decision 2026-09-28): 200bp is a tight-market level
+        # (~201bp in Sep 2026) and fired falsely; 450bp ~ the 25-year average (research
+        # accessed 2026-09-28, sources below).
+        data_source="FRED:BAMLH0A0HYM2 - BAMLC0A0CM",
+        source_document=("ICE BofA OAS data; "
+                         "https://investmentgrade.com/investment-grade-bond-statistics-2026/ ; "
+                         "https://recessionpulse.com/indicators/credit-spreads "
+                         "(accessed 2026-09-28)"),
+        last_validated=THRESHOLDS_REVIEWED_2026_09_28,
     ),
 
     # ── Macro / structural thresholds ──
@@ -171,6 +234,9 @@ THRESHOLD_LIBRARY: list[FragilityThreshold] = [
         # (inference, not a cited level): -10% in 7 days = half the old monthly
         # threshold compressed into one week. Caveat: USD-valued, so a broad crypto price
         # fall also moves it; it measures exchange-held value, not coin outflows alone.
+        # MONITOR-only (owner decision 2026-09-28): the -10%/7d level has no source;
+        # value is shown, never crossed, kept out of the score.
+        crossable=False,
         data_source="DefiLlama:/protocols category=CEX change_7d",
         source_document="DefiLlama CEX transparency dashboard",
         last_validated=THRESHOLDS_REVIEWED_2026_09_28,
@@ -204,16 +270,21 @@ THRESHOLD_LIBRARY: list[FragilityThreshold] = [
     ),
     FragilityThreshold(
         metric="bbb_oas", name_zh="BBB级公司债利差",
-        threshold_value=200, unit="basis_points", direction="above",
-        mechanism="BBB OAS >200bp → lowest-IG tier repricing → fallen-angel risk → IG fund outflows",
+        # Two tiers (owner decision 2026-09-28): > 200bp = warning, > 300bp = stress
+        # (event-level, crossed).
+        threshold_value=300, warning_value=200, unit="basis_points", direction="above",
+        mechanism="BBB OAS >200bp (warning) / >300bp (stress) → lowest-IG tier repricing → fallen-angel risk → IG fund outflows",
         cascade=["fallen_angel_downgrades", "ig_outflows", "corporate_refinancing_stress"],
         # FRED BAMLC0A4CBBB is in percent (x100 -> bp). FRED only exposes the last 3
-        # years of ICE data (2023-09..2026-09: median 107bp, max 163bp; 2026-09-24 97bp),
-        # so a long-history percentile cannot be re-verified here. Basis (inference from
-        # recalled history, NOT re-verified): BBB OAS reached ~200bp+ in the 2015-16
-        # energy selloff and the 2022 rate shock, ~400bp+ in March 2020 and ~700bp+ in
-        # 2008; 200bp therefore marks "episode-level" BBB stress.
-        data_source="FRED:BAMLC0A4CBBB", source_document="ICE BofA BBB US Corporate Index OAS",
+        # years of ICE data (2023-09..2026-09: median 107bp, max 163bp; 2026-09-24 97bp).
+        # Basis (research accessed 2026-09-28): FRED BAMLC0A4CBBB history plus a
+        # secondary source (eco3min, BBB IG composition) support 200bp as the warning
+        # level and 300bp as the event-level stress line.
+        data_source="FRED:BAMLC0A4CBBB",
+        source_document=("ICE BofA BBB US Corporate Index OAS; "
+                         "https://fred.stlouisfed.org/series/BAMLC0A4CBBB ; "
+                         "https://eco3min.fr/en/bbb-investment-grade-composition-2/ "
+                         "(secondary; accessed 2026-09-28)"),
         last_validated=THRESHOLDS_REVIEWED_2026_09_28,
     ),
 ]

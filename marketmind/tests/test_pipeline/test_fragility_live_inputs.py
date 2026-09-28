@@ -42,12 +42,26 @@ def test_thresholds_have_real_validation_date_so_staleness_can_fire():
     assert any("STALE" in w for w in ft.validate_thresholds())   # 2026-05-18 is > 90 days ago
 
 
+# Recorded shape of FRED observations (newest first), percent units.
+OBS = {
+    "SOFR": [("2026-09-25", 4.52), ("2026-09-24", 4.45), ("2026-09-23", 4.41),
+             ("2026-09-22", 4.30)],
+    "IORB": [("2026-09-26", 4.30), ("2026-09-25", 4.30), ("2026-09-24", 4.30),
+             ("2026-09-23", 4.30), ("2026-09-22", 4.30)],
+    "GDP": [("2026-04-01", 32_486.066), ("2026-01-01", 31_865.721)],
+}
+
+
 @pytest.mark.asyncio
-async def test_inputs_convert_units_and_fall_back_to_yfinance():
+async def test_inputs_convert_units_and_fall_back_to_yfinance(monkeypatch):
+    async def fred_obs(series_id, limit=5):
+        return OBS.get(series_id, f"FRED {series_id} unavailable (test)")
+
+    monkeypatch.setattr(fi, "_fred_observations", fred_obs)
     fred = {
         "DGS10": {"error": "source_unavailable"},
         "RRPONTSYD": {"value": 45.0}, "WTREGEN": {"value": 850_000.0},
-        "WRESBAL": {"value": 3_100_000.0}, "SOFR": {"value": 4.40}, "IORB": {"value": 4.30},
+        "WRESBAL": {"value": 2_930_193.0, "date": "2026-09-23"},
         "BAMLH0A3HYC": {"value": 9.5},
         # Recorded shape of FRED 2026-09-24 observations (percent units)
         "BAMLH0A0HYM2": {"value": 2.80, "date": "2026-09-24"},
@@ -61,8 +75,12 @@ async def test_inputs_convert_units_and_fall_back_to_yfinance():
     assert v["us10y_yield"] == 4.8 and out.sources["us10y_yield"] == "yfinance:^TNX"
     assert v["on_rrp"] == 45.0
     assert v["tga"] == 850.0                    # M -> B USD
-    assert v["bank_reserves"] == 3.1            # FRED millions -> trillions USD
-    assert v["sofr_iorb_spread"] == pytest.approx(10.0)   # % -> bp
+    # 2,930,193 M USD / (32,486.066 B USD * 1000) * 100 = 9.0199 % of GDP
+    assert v["bank_reserves"] == pytest.approx(9.0199, abs=1e-4)
+    assert "WRESBAL 2026-09-23" in out.sources["bank_reserves"]
+    assert "GDP 2026-04-01" in out.sources["bank_reserves"]
+    # min of the last 3 SOFR obs: 22, 15, 11 bp -> 11 (% -> bp)
+    assert v["sofr_iorb_spread"] == pytest.approx(11.0)
     assert v["ccc_treasury_spread"] == 950.0
     assert v["hyg_lqd_spread"] == pytest.approx(201.0)   # (HY OAS - IG OAS) % -> bp
     assert "hyg_lqd_spread" not in out.unavailable
@@ -96,8 +114,11 @@ async def test_hy_ig_spread_unavailable_when_one_leg_missing_or_dates_differ():
 
 @pytest.mark.asyncio
 async def test_hy_ig_spread_crosses_threshold_in_scanner():
-    report = await scan_fragility({"hyg_lqd_spread": 250.0})
+    report = await scan_fragility({"hyg_lqd_spread": 500.0})
     assert any(a.threshold.metric == "hyg_lqd_spread" and a.crossed for a in report.crossed)
+    # 201bp (Sep 2026, tight market) no longer fires against the 450bp line
+    calm = await scan_fragility({"hyg_lqd_spread": 201.0})
+    assert not calm.crossed and calm.alerts[0].severity == "CLEAR"
 
 
 @pytest.mark.slow

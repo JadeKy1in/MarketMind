@@ -107,8 +107,16 @@ async def scan_fragility(
                                          distance_pct=None, crossed=False, severity="MONITOR"))
             continue
 
+        # distance_pct is always measured against threshold_value (the crossing line),
+        # so "negative = crossed = CRITICAL" holds for every threshold.
         distance_pct = _compute_distance(current_value, t.threshold_value, t.direction)
         severity, crossed = _classify_alert(distance_pct)
+        if not crossed and t.warning_value is not None:
+            # Two-tier threshold: the WARNING/MONITOR/CLEAR bands are measured against the
+            # earlier warning line, and passing it is capped at WARNING (not crossed).
+            w_severity, w_passed = _classify_alert(
+                _compute_distance(current_value, t.warning_value, t.direction))
+            severity = "WARNING" if w_passed else w_severity
 
         alerts.append(FragilityAlert(
             threshold=t,

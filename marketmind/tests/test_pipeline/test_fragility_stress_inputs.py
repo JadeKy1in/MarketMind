@@ -19,6 +19,13 @@ FRED_OBS = {
     "STLFSI4": {"observations": [{"date": "2026-09-18", "value": "-0.9075"}]},
     "BAMLC0A4CBBB": {"observations": [{"date": "2026-09-25", "value": "."},
                                       {"date": "2026-09-24", "value": "0.97"}]},
+    "SOFR": {"observations": [{"date": "2026-09-25", "value": "4.33"},
+                              {"date": "2026-09-24", "value": "4.32"},
+                              {"date": "2026-09-23", "value": "4.35"}]},
+    "IORB": {"observations": [{"date": "2026-09-26", "value": "4.30"},
+                              {"date": "2026-09-25", "value": "4.30"},
+                              {"date": "2026-09-24", "value": "4.30"},
+                              {"date": "2026-09-23", "value": "4.30"}]},
 }
 OFR_CSV = (
     "Date,OFR FSI,Credit,Equity valuation,Safe assets,Funding,Volatility,United States,"
@@ -70,6 +77,7 @@ async def test_new_inputs_computed_with_explicit_units():
     assert v["ofr_fsi"] == -2.663
     assert v["bbb_oas"] == pytest.approx(97.0)          # 0.97 % -> bp, skips "."
     assert v["em_import_cover"] == pytest.approx(9.9008, abs=1e-4)
+    assert v["sofr_iorb_spread"] == pytest.approx(2.0)     # min(3, 2, 5) bp
     # prev = 180/0.98 + 30/1.01 ; (210/prev - 1)*100
     prev = 180 / 0.98 + 30 / 1.01
     assert v["crypto_exchange_reserves"] == pytest.approx((210 / prev - 1) * 100, abs=1e-4)
@@ -89,7 +97,8 @@ async def test_failed_sources_stay_unavailable_never_a_number():
                     _gold_monthly_avg=AsyncMock(return_value="yfinance GC=F unavailable")):
         out = await fi.fetch_fragility_inputs()
     for m in ("margin_debt_gdp", "copper_gold_ratio", "stlfsi", "ofr_fsi", "bbb_oas",
-              "em_import_cover", "crypto_exchange_reserves"):
+              "em_import_cover", "crypto_exchange_reserves", "sofr_iorb_spread",
+              "bank_reserves"):
         assert m not in out.values
         assert out.unavailable[m]
 
@@ -134,12 +143,12 @@ async def test_copper_gold_is_monitor_only_never_crossed():
 
 @pytest.mark.asyncio
 async def test_new_thresholds_cross_in_the_right_direction():
-    report = await scan_fragility({"stlfsi": 1.5, "ofr_fsi": 5.0, "bbb_oas": 250.0,
+    report = await scan_fragility({"stlfsi": 1.5, "ofr_fsi": 5.0, "bbb_oas": 320.0,
                                    "margin_debt_gdp": 2.7, "em_import_cover": 2.5,
                                    "crypto_exchange_reserves": -12.0})
     crossed = {a.threshold.metric for a in report.crossed}
-    assert crossed == {"stlfsi", "ofr_fsi", "bbb_oas", "margin_debt_gdp",
-                       "em_import_cover", "crypto_exchange_reserves"}
+    # crypto_exchange_reserves is MONITOR-only since 2026-09-28: shown, never crossed
+    assert crossed == {"stlfsi", "ofr_fsi", "bbb_oas", "margin_debt_gdp", "em_import_cover"}
     calm = await scan_fragility({"stlfsi": -0.9, "ofr_fsi": -2.7, "bbb_oas": 97.0,
                                  "margin_debt_gdp": 2.29, "em_import_cover": 9.9,
                                  "crypto_exchange_reserves": -1.6})
@@ -151,9 +160,98 @@ def test_new_thresholds_carry_units_and_review_date():
     assert lib["bbb_oas"].unit == "basis_points"
     assert lib["crypto_exchange_reserves"].unit == "percent_7d_change"
     assert lib["copper_gold_ratio"].crossable is False
+    assert lib["crypto_exchange_reserves"].crossable is False
     for m in ("margin_debt_gdp", "copper_gold_ratio", "em_import_cover",
               "crypto_exchange_reserves", "stlfsi", "ofr_fsi", "bbb_oas"):
         assert lib[m].last_validated == ft.THRESHOLDS_REVIEWED_2026_09_28
+
+
+# -- 2026-09-28 threshold revision (owner decision) --
+
+def test_revised_threshold_values_and_sources():
+    lib = {t.metric: t for t in ft.THRESHOLD_LIBRARY}
+    assert lib["hyg_lqd_spread"].threshold_value == 450
+    assert lib["ccc_treasury_spread"].threshold_value == 1300
+    s = lib["sofr_iorb_spread"]
+    assert (s.threshold_value, s.direction, s.unit) == (10, "above", "basis_points")
+    r = lib["bank_reserves"]
+    assert (r.threshold_value, r.warning_value, r.unit, r.direction) == (
+        8.0, 9.0, "percent_of_GDP", "below")
+    assert "WRESBAL" in r.data_source and "WRBWFRBL" not in r.data_source
+    b = lib["bbb_oas"]
+    assert (b.threshold_value, b.warning_value) == (300, 200)
+    for m in ("on_rrp", "us10y_yield", "crypto_exchange_reserves", "copper_gold_ratio"):
+        assert lib[m].crossable is False, m
+    for m in ("hyg_lqd_spread", "on_rrp", "bank_reserves", "sofr_iorb_spread",
+              "ccc_treasury_spread", "bbb_oas"):
+        assert "2026-09-28" in lib[m].source_document and "http" in lib[m].source_document, m
+        assert lib[m].last_validated == ft.THRESHOLDS_REVIEWED_2026_09_28
+    assert "secondary" in lib["ccc_treasury_spread"].source_document
+    # TGA: the rebuild drains liquidity, the drawdown does not
+    assert "rebuild" in lib["tga"].mechanism and "drains" in lib["tga"].mechanism
+
+
+def test_sofr_iorb_needs_three_consecutive_observations_above_10bp():
+    iorb = [("2026-09-25", 4.30), ("2026-09-24", 4.30), ("2026-09-23", 4.30)]
+    persistent = [("2026-09-25", 4.45), ("2026-09-24", 4.44), ("2026-09-23", 4.41)]
+    value, src, why = fi._sofr_iorb_persistent(persistent, iorb)
+    assert value == pytest.approx(11.0) and "2026-09-23..2026-09-25" in src and not why
+    # one day back below 10bp -> the persistent value is that low day
+    blip = [("2026-09-25", 4.46), ("2026-09-24", 4.36), ("2026-09-23", 4.45)]
+    assert fi._sofr_iorb_persistent(blip, iorb)[0] == pytest.approx(6.0)
+    # exactly 10bp is not "> 10bp" (float noise is rounded away)
+    assert fi._sofr_iorb_persistent([(d, 4.40) for d, _ in iorb], iorb)[0] == 10.0
+    # too few observations, or IORB missing on a SOFR date -> unavailable, never a number
+    assert fi._sofr_iorb_persistent(persistent[:2], iorb)[0] is None
+    value, _, why = fi._sofr_iorb_persistent(persistent, iorb[:2])
+    assert value is None and "2026-09-23" in why
+    assert fi._sofr_iorb_persistent("FRED SOFR unavailable (x)", iorb) == (
+        None, "", "FRED SOFR unavailable (x)")
+
+
+@pytest.mark.asyncio
+async def test_sofr_iorb_persistence_crosses_in_scanner():
+    report = await scan_fragility({"sofr_iorb_spread": 11.0})
+    assert [a.threshold.metric for a in report.crossed] == ["sofr_iorb_spread"]
+    at_line = await scan_fragility({"sofr_iorb_spread": 10.0})
+    assert not at_line.crossed and at_line.alerts[0].severity == "WARNING"
+
+
+def test_reserves_to_gdp_ratio_and_failures():
+    gdp = [("2026-04-01", 32_486.066)]
+    value, src, why = fi._reserves_to_gdp(2_930_193.0, "2026-09-23", gdp, "fred down")
+    assert value == pytest.approx(9.0199, abs=1e-4) and "GDP 2026-04-01" in src
+    assert fi._reserves_to_gdp(None, None, gdp, "fred down") == (None, "", "fred down")
+    assert fi._reserves_to_gdp(2_930_193.0, "d", "FRED GDP unavailable (x)", "")[0] is None
+    assert fi._reserves_to_gdp(2_930_193.0, "d", [], "")[0] is None
+
+
+@pytest.mark.asyncio
+async def test_two_tier_thresholds_warning_then_stress():
+    cases = {  # metric: [(value, severity, crossed), ...]
+        "bbb_oas": [(97.0, "CLEAR", False), (195.0, "WARNING", False),
+                    (250.0, "WARNING", False), (320.0, "CRITICAL", True)],
+        "bank_reserves": [(11.0, "CLEAR", False), (9.8, "MONITOR", False),
+                          (9.02, "WARNING", False), (8.5, "WARNING", False),
+                          (7.9, "CRITICAL", True)],
+    }
+    for metric, rows in cases.items():
+        for value, severity, crossed in rows:
+            report = await scan_fragility({metric: value})
+            a = report.alerts[0]
+            assert (a.severity, a.crossed) == (severity, crossed), (metric, value)
+            assert (a.distance_pct < 0) == crossed      # distance is to the stress line
+
+
+@pytest.mark.asyncio
+async def test_monitor_only_metrics_are_shown_but_never_scored():
+    report = await scan_fragility({"on_rrp": 0.58, "us10y_yield": 5.2,
+                                   "crypto_exchange_reserves": -25.0})
+    assert {a.threshold.metric for a in report.alerts} == {
+        "on_rrp", "us10y_yield", "crypto_exchange_reserves"}
+    assert all(a.severity == "MONITOR" and a.distance_pct is None and not a.crossed
+               for a in report.alerts)
+    assert report.overall_fragility_score is None and not report.crossed
 
 
 @pytest.mark.slow

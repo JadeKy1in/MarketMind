@@ -32,6 +32,9 @@ LB_PER_METRIC_TON = 2204.62262
 _WB_MAX_AGE_YEARS = 2
 # Share of CEX TVL that must report a 7-day change for the aggregate to be computed.
 _CEX_MIN_COVERAGE = 0.9
+# SOFR-IORB persistence rule: the value fed is the minimum spread over this many most
+# recent SOFR observations, so "> 10bp" means every one of them exceeded 10bp.
+_SOFR_PERSIST_OBS = 3
 
 # Metrics we deliberately do not feed yet, with the reason shown to the user.
 UNSOURCED: dict[str, str] = {}
@@ -46,10 +49,10 @@ class FragilityInputs:
 
 async def fetch_fragility_inputs() -> FragilityInputs:
     out = FragilityInputs(unavailable=dict(UNSOURCED))
-    fred_keys = ["DGS10", "RRPONTSYD", "WTREGEN", "WRESBAL", "SOFR", "IORB", "BAMLH0A3HYC",
+    fred_keys = ["DGS10", "RRPONTSYD", "WTREGEN", "WRESBAL", "BAMLH0A3HYC",
                  "BAMLH0A0HYM2", "BAMLC0A0CM"]
     (fred_results, yf_results, margin, gdp, copper, stlfsi, bbb, ofr, em_cover, cex,
-     gold_monthly) = await asyncio.gather(
+     gold_monthly, sofr, iorb) = await asyncio.gather(
         asyncio.gather(*(get_fred_series(k) for k in fred_keys)),
         asyncio.gather(*(_yf_last(s) for s in ("^VIX", "^TNX", "DX-Y.NYB"))),
         _fred_observations("BOGZ1FL663067003Q", limit=8),
@@ -61,6 +64,8 @@ async def fetch_fragility_inputs() -> FragilityInputs:
         _worldbank_em_import_cover(),
         _defillama_cex_7d_change(),
         _gold_monthly_avg(),
+        _fred_observations("SOFR", limit=10),
+        _fred_observations("IORB", limit=15),
     )
     fred = {k: _fred_value(r) for k, r in zip(fred_keys, fred_results)}
     fred_dates = {k: r.get("date") if isinstance(r, dict) else None
@@ -83,12 +88,13 @@ async def fetch_fragility_inputs() -> FragilityInputs:
     put("on_rrp", fred["RRPONTSYD"], "FRED:RRPONTSYD", fred_missing)
     put("tga", fred["WTREGEN"] / 1000 if fred["WTREGEN"] is not None else None,
         "FRED:WTREGEN (M->B USD)", fred_missing)
-    # WRESBAL is published in millions of USD (checked 2026-09-28: 2,930,193 = $2.93T);
-    # the threshold is in trillions. It was divided by 1,000 before, showing 2930.
-    put("bank_reserves", fred["WRESBAL"] / 1_000_000 if fred["WRESBAL"] is not None else None,
-        "FRED:WRESBAL (M->T USD)", fred_missing)
-    spread = (fred["SOFR"] - fred["IORB"]) * 100 if None not in (fred["SOFR"], fred["IORB"]) else None
-    put("sofr_iorb_spread", spread, "FRED:SOFR-IORB (bp)", fred_missing)
+    # bank_reserves (percent of nominal GDP): WRESBAL is published in millions of USD
+    # (checked 2026-09-28: 2,930,193 = $2.93T); GDP in billions USD SAAR (latest quarter).
+    # pct = WRESBAL_M / (GDP_B * 1000) * 100.
+    put("bank_reserves", *_reserves_to_gdp(fred["WRESBAL"], fred_dates["WRESBAL"], gdp,
+                                           fred_missing))
+    # sofr_iorb_spread: minimum (SOFR - IORB) in bp over the last 3 SOFR observations.
+    put("sofr_iorb_spread", *_sofr_iorb_persistent(sofr, iorb))
     put("ccc_treasury_spread", fred["BAMLH0A3HYC"] * 100 if fred["BAMLH0A3HYC"] is not None else None,
         "FRED:BAMLH0A3HYC (%->bp)", fred_missing)
     # hyg_lqd_spread: threshold is "HY vs IG spread >200bp" sourced from ICE BofA OAS
@@ -157,6 +163,46 @@ def _same_date_ratio(num, den) -> tuple[float | None, str, str]:
         if d:
             return value / d, date, ""
     return None, "", "margin loans and GDP share no recent quarter"
+
+
+def _reserves_to_gdp(wresbal_m: float | None, wresbal_date, gdp,
+                     fred_missing: str) -> tuple[float | None, str, str]:
+    """Reserve balances as % of nominal GDP (latest GDP quarter), or a reason."""
+    if wresbal_m is None:
+        return None, "", fred_missing
+    if isinstance(gdp, str):
+        return None, "", gdp
+    if not gdp:
+        return None, "", "FRED:GDP no numeric observation"
+    gdp_date, gdp_b = gdp[0]
+    if gdp_b <= 0:
+        return None, "", f"FRED:GDP {gdp_date} non-positive ({gdp_b})"
+    return (wresbal_m / (gdp_b * 1000) * 100,
+            f"FRED:WRESBAL {wresbal_date} / FRED:GDP {gdp_date} "
+            f"(M USD / (B USD SAAR*1000) -> % of GDP)", "")
+
+
+def _sofr_iorb_persistent(sofr, iorb, n: int = _SOFR_PERSIST_OBS) -> tuple[float | None, str, str]:
+    """Minimum SOFR-IORB spread (bp) over the n most recent SOFR observations.
+
+    sofr / iorb: newest-first (date, percent) lists, or an error string. IORB must be
+    observed on each of those SOFR dates, otherwise the metric is unavailable.
+    min > 10bp <=> every one of the last n consecutive observations exceeded 10bp.
+    """
+    for obs in (sofr, iorb):
+        if isinstance(obs, str):
+            return None, "", obs
+    recent = list(sofr or [])[:n]
+    if len(recent) < n:
+        return None, "", f"FRED SOFR has only {len(recent)} recent observations (need {n})"
+    iorb_by_date = dict(iorb or [])
+    missing = [d for d, _ in recent if d not in iorb_by_date]
+    if missing:
+        return None, "", f"FRED IORB has no observation on SOFR date(s) {', '.join(missing)}"
+    spreads = [round((v - iorb_by_date[d]) * 100, 4) for d, v in recent]
+    return (min(spreads),
+            f"FRED:SOFR-IORB min of last {n} obs {recent[-1][0]}..{recent[0][0]} "
+            f"(bp; each: {', '.join(f'{x:g}' for x in spreads)})", "")
 
 
 def _copper_gold(copper, gold_monthly) -> tuple[str, float | None, str, str]:
