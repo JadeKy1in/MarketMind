@@ -331,12 +331,15 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
                                    fragility, tracker)
     await _do_daily_archive(config, l1_result, l2_result, resonance, tracker)
 
-    # Save today's prediction for tomorrow's calibration feedback loop
-    _save_daily_prediction(l1_result, l2_result, l3_result, decision)
+    # Mock runs must not overwrite today's real brief or calibration record
+    # (a mock smoke test on 2026-09-28 replaced that day's real brief).
+    if not mock:
+        # Save today's prediction for tomorrow's calibration feedback loop
+        _save_daily_prediction(l1_result, l2_result, l3_result, decision)
 
-    # Save full reasoning brief for dashboard drill-down
-    _save_decision_brief(l1_result, l2_result, l3_result, red_team, resonance,
-                         decision, fragility=fragility)
+        # Save full reasoning brief for dashboard drill-down
+        _save_decision_brief(l1_result, l2_result, l3_result, red_team, resonance,
+                             decision, fragility=fragility)
 
     # Every card / forced paper trade goes into the unified ledger (mock runs never do)
     if not mock:
