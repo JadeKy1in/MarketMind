@@ -230,3 +230,14 @@ def _offline_shadow_feeds(monkeypatch):
     async def _none(entry_names, today, feeds=None):
         return {}
     monkeypatch.setattr(sf, "gather", _none)
+
+
+@pytest.fixture(autouse=True)
+def _offline_coinbase(monkeypatch):
+    """No test reaches Coinbase Exchange (third crypto price fallback): when a test
+    makes Binance and Bybit fail, Coinbase answers 503 unless the test installs
+    its own client."""
+    import httpx
+    from marketmind.gateway import price_history as ph
+    monkeypatch.setattr(ph, "_coinbase_client", lambda: httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda req: httpx.Response(503, text="offline"))))
