@@ -98,7 +98,7 @@ async def test_stage4_l2_l3_real():
     from marketmind.pipeline.layer1_narrative import analyze_layer1
     from marketmind.pipeline.layer2_fundamental import analyze_layer2
     from marketmind.pipeline.layer3_technical import analyze_layer3
-    from marketmind.config.asset_universe import ASSET_UNIVERSE
+    from marketmind.pipeline.orchestration import CORE_L3_TICKERS
 
     config = MarketMindConfig.from_env()
     items = await fetch_all_sources(config, use_cross_run_cache=False)
@@ -106,7 +106,7 @@ async def test_stage4_l2_l3_real():
     l1 = await analyze_layer1(signals[:5], items[:10])
 
     t0 = time.time()
-    tickers = [a.ticker for a in list(ASSET_UNIVERSE.values())[:5]]
+    tickers = list(CORE_L3_TICKERS[:5])
     l2, l3 = await asyncio.gather(analyze_layer2(l1), analyze_layer3(tickers, {}))
     elapsed = time.time() - t0
 

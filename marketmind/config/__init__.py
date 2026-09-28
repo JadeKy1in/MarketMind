@@ -5,7 +5,6 @@ import time
 from pathlib import Path
 
 from marketmind.config.settings import MarketMindConfig
-from marketmind.config.asset_universe import Asset, ASSET_UNIVERSE, get_asset
 from marketmind.config.source_authority import Source, SourceTier, SOURCES
 
 logger = logging.getLogger("marketmind.config")

@@ -40,8 +40,6 @@ async def run_l2_interactive(ctx: SessionContext, cli_handler) -> bool:
     Returns:
         True if user confirmed (proceed to L3), False if user chose to observe
     """
-    from marketmind.config.asset_universe import ASSET_UNIVERSE
-
     # H: Pass L1 discussion context to L2 (H1: _DEFANG filtered, H2: ≤500 chars)
     l1_context = ""
     if ctx.l1_session.get("discussion_text"):
@@ -201,7 +199,7 @@ async def _run_sector_drilldown(ctx: SessionContext, l2_result: Layer2Result, ch
         )
         content = strip_markdown_fences(resp.get("content", ""))
         result = _json.loads(content)
-        # Post-hoc ticker validation against asset universe (prevents LLM hallucination)
+        # Post-hoc ticker validation against the tradable universe (prevents LLM hallucination)
         _validate_drilldown_tickers(result)
         return result
     except Exception as e:
@@ -210,21 +208,30 @@ async def _run_sector_drilldown(ctx: SessionContext, l2_result: Layer2Result, ch
 
 
 def _validate_drilldown_tickers(result: dict) -> None:
-    """Remove hallucinated tickers from drill-down result. Mutates in-place."""
-    from marketmind.config.asset_universe import ASSET_UNIVERSE
-    valid_tickers = {a.ticker for a in ASSET_UNIVERSE.values()}
+    """Remove hallucinated / non-tradable tickers from a drill-down result, judged by
+    the Robinhood tradable universe (marketmind.universe). Mutates in-place."""
+    from marketmind.pipeline.decision_guard import is_robinhood_tradable
+
+    verdicts: dict[str, bool] = {}
+
+    def valid(t) -> bool:
+        if not isinstance(t, str):
+            return False
+        if t not in verdicts:
+            verdicts[t] = is_robinhood_tradable(t)
+        return verdicts[t]
 
     # Validate strategy_groups
     for group in result.get("strategy_groups", {}).values():
         if "tickers" in group:
-            group["tickers"] = [t for t in group["tickers"] if t in valid_tickers]
-            group["weights"] = {t: w for t, w in group.get("weights", {}).items() if t in valid_tickers}
+            group["tickers"] = [t for t in group["tickers"] if valid(t)]
+            group["weights"] = {t: w for t, w in group.get("weights", {}).items() if valid(t)}
 
     # Validate tool_matrix
     for tool in result.get("tool_matrix", {}).values():
         if "tickers" in tool:
-            tool["tickers"] = [t for t in tool["tickers"] if t in valid_tickers]
-            tool["weights"] = {t: w for t, w in tool.get("weights", {}).items() if t in valid_tickers}
+            tool["tickers"] = [t for t in tool["tickers"] if valid(t)]
+            tool["weights"] = {t: w for t, w in tool.get("weights", {}).items() if valid(t)}
 
 
 async def _confirm_single_phase(ctx: SessionContext, l2_result: Layer2Result, cli_handler) -> bool:

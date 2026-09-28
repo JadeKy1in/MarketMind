@@ -54,8 +54,8 @@ WIKI_MAX_ITEMS = 5
 WIKI_REQUEST_DELAY = 0.1      # seconds between sequential requests (be polite)
 
 # label -> canonical en.wikipedia title. The pageviews API does not follow redirects, so
-# titles must be canonical (all verified 200 on 2026-09-27). Labels are universe tickers
-# (config/asset_universe.py) or macro attention themes.
+# titles must be canonical (all verified 200 on 2026-09-27). Labels are core market
+# tickers (index/commodity ETFs, mega-caps, BTC) or macro attention themes.
 WIKI_ARTICLES: dict[str, str] = {
     "SPY": "S&P_500",
     "QQQ": "Nasdaq-100",

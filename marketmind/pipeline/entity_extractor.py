@@ -176,12 +176,10 @@ def _extract_tickers(headline: str) -> list[str]:
             continue
         if c in ACRONYM_BLACKLIST:
             continue
-        # Whichever-ticker symbols like C, V, W, etc. are valid but rare in news
-        # We keep 3+ char tickers by default; 1-2 char tickers only if in asset_universe
+        # 1-2 letter symbols (C, V, GE ...) are real tickers, but in headlines such
+        # tokens are almost always words/abbreviations (US, AI, IT): only 3+ chars count.
         if len(c) <= 2:
-            from marketmind.config.asset_universe import ASSET_UNIVERSE
-            if c not in ASSET_UNIVERSE:
-                continue
+            continue
         if c not in seen:
             seen.add(c)
             tickers.append(c)

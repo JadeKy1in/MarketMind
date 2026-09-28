@@ -1,13 +1,11 @@
 """Chinese labels for tickers, sectors, and domains (P4 bilingual display).
 
-Primary lookup: TICKER_CN (manual Chinese translations for all Asset Universe tickers).
-Fallback: ASSET_UNIVERSE[ticker].name (English name as label).
+Lookup: TICKER_CN (manual Chinese translations for commonly shown tickers).
 Unknown: ticker symbol only.
 """
-from marketmind.config.asset_universe import ASSET_UNIVERSE
 
 TICKER_CN: dict[str, str] = {
-    # ── Asset Universe — ETFs ──────────────────────────────
+    # ── Core ETFs ──────────────────────────────
     "SPY": "标普500指数ETF",
     "QQQ": "纳斯达克100ETF",
     "IWM": "罗素2000小盘股ETF",
@@ -23,7 +21,7 @@ TICKER_CN: dict[str, str] = {
     "XLK": "科技板块ETF",
     "XLE": "能源板块ETF",
     "XLV": "医疗板块ETF",
-    # ── Asset Universe — Equities ───────────────────────────
+    # ── Mega-cap equities ───────────────────────────
     "AAPL": "苹果",
     "MSFT": "微软",
     "NVDA": "英伟达",
@@ -33,9 +31,9 @@ TICKER_CN: dict[str, str] = {
     "TSLA": "特斯拉",
     "JPM": "摩根大通",
     "XOM": "埃克森美孚",
-    # ── Asset Universe — Crypto ─────────────────────────────
+    # ── Crypto ─────────────────────────────
     "BTC-USD": "比特币",
-    # ── Common L2 candidates beyond Asset Universe ──────────
+    # ── Other common L2 candidates ──────────
     "AMD": "超微半导体(AMD)",
     "INTC": "英特尔",
     "SMH": "半导体ETF",
@@ -79,15 +77,9 @@ SECTOR_CN: dict[str, str] = {
 
 
 def ticker_cn(ticker: str) -> str:
-    """Return ticker with label. Priority: TICKER_CN > ASSET_UNIVERSE > symbol only."""
-    t = ticker.upper()
-    cn = TICKER_CN.get(t, "")
-    if cn:
-        return f"{ticker}({cn})"
-    asset = ASSET_UNIVERSE.get(t)
-    if asset:
-        return f"{ticker}({asset.name})"
-    return ticker
+    """Return ticker with label: TICKER_CN, else the symbol only."""
+    cn = TICKER_CN.get(ticker.upper(), "")
+    return f"{ticker}({cn})" if cn else ticker
 
 
 def domain_cn(domain: str) -> str:
