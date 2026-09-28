@@ -27,6 +27,9 @@ if __name__ == "__main__":
         _log_dir = Path(__file__).resolve().parent.parent / _os.getenv("MARKETMIND_DATA_DIR", "data") / "logs"
         _log_dir.mkdir(parents=True, exist_ok=True)
         sys.stdout = sys.stderr = open(_log_dir / "dashboard.log", "a", encoding="utf-8", buffering=1)
+    # Pick up MARKETMIND_LLM / push keys saved after this logon (docs/LLM_PROVIDER.md)
+    from marketmind.scripts.scheduled_run import load_user_push_env
+    load_user_push_env()
     import uvicorn
     from marketmind.api.routes import app
 
