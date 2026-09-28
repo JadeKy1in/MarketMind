@@ -26,6 +26,7 @@ ALT_LOOKBACK_DAYS = 5
 ALT_MAX_CANDIDATES = 40
 ALT_TOP = 3
 VIEW_LOOKBACK_DAYS = 10
+EARNINGS_NOTE_DAYS = 7
 
 
 @dataclass
@@ -158,14 +159,41 @@ def _evidence_for(ticker: str) -> list[dict]:
             for i in ev["items"] if (i.get("ticker") or "").upper() == ticker]
 
 
+async def finnhub_earnings(tickers: list[str], start: str, days: int) -> dict[str, list[dict]]:
+    from marketmind.shadow_feeds.company_events import earnings_for
+    return await earnings_for(tickers, start, days)
+
+
+async def _earnings_notes(earnings_fn, tickers: list[str], now: datetime) -> dict[str, str]:
+    """ticker -> note for earnings within EARNINGS_NOTE_DAYS; any failure gives no notes."""
+    if earnings_fn is None or not tickers:
+        return {}
+    try:
+        found = await earnings_fn(tickers, now.strftime("%Y-%m-%d"), EARNINGS_NOTE_DAYS)
+    except Exception:
+        logger.warning("holdings earnings lookup failed", exc_info=True)
+        return {}
+    hours = {"bmo": "盘前", "amc": "盘后", "dmh": "盘中"}
+    notes = {}
+    for t, rows in (found or {}).items():
+        when = "、".join(f"{r.get('date')}" + (f" {hours[r['hour']]}" if r.get("hour") in hours else "")
+                        for r in rows if r.get("date"))
+        if when:
+            notes[t.upper()] = f"注意：{EARNINGS_NOTE_DAYS} 天内有财报（{when}，Finnhub 财报日历）"
+    return notes
+
+
 async def inspect_holdings(holdings: list[Holding] | None = None, *,
                            store: LedgerStore | None = None, history_fn=None,
-                           now: datetime | None = None) -> list[HoldingReport]:
+                           now: datetime | None = None, earnings_fn=None) -> list[HoldingReport]:
+    """`earnings_fn(tickers, start, days)` adds an earnings-soon note to the reason
+    (never changes the verdict); None skips the lookup."""
     from marketmind.pipeline.l3_indicators import compute_snapshot, describe
     holdings = load() if holdings is None else holdings
     history_fn = history_fn or _default_history
     now = now or datetime.now(timezone.utc)
     alternatives = await find_alternatives(store, {h.ticker for h in holdings}, history_fn, now)
+    earnings = await _earnings_notes(earnings_fn, [h.ticker for h in holdings], now)
     reports = []
     for h in holdings:
         hist = await history_fn(h.ticker)
@@ -175,6 +203,8 @@ async def inspect_holdings(holdings: list[Holding] | None = None, *,
         ret = price / h.cost_basis - 1 if price else None
         if ret is not None and ret >= 0 and verdict != UNAVAILABLE:
             reason = "盈利中。" + reason
+        if h.ticker.upper() in earnings:
+            reason = f"{reason}。{earnings[h.ticker.upper()]}"
         views, record = _ledger_context(store, h.ticker, now)
         reports.append(HoldingReport(
             ticker=h.ticker, quantity=h.quantity, cost_basis=h.cost_basis, price=price,
@@ -228,7 +258,7 @@ async def run_inspection(store: LedgerStore | None = None) -> tuple[list[Holding
     holdings = load()
     if not holdings:
         return [], None
-    reports = await inspect_holdings(holdings, store=store)
+    reports = await inspect_holdings(holdings, store=store, earnings_fn=finnhub_earnings)
     path = write_report(reports)
     try:
         alert_on(reports)
