@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 import logging
+import re
 
 from marketmind.notification.monitor_decorator import monitor
 from marketmind.notification.alert_schema import ImpactScope
@@ -136,6 +137,18 @@ class DecisionCard:
 
 
 @dataclass
+class WatchCard:
+    """A ticker worth owning later, once code-checkable conditions confirm it
+    (docs/S10_DESIGN.md §3). Price levels must come from L3; checked in code."""
+    ticker: str
+    direction: str                # long | short
+    thesis: str
+    conditions: list[dict]        # [{"type": "close_above", "value": 123.4}, ...]
+    invalidation: list[dict] = field(default_factory=list)
+    expiry_days: int = 20
+
+
+@dataclass
 class NoTradeCard:
     thesis: str                   # why NOT trading is the best action
     supporting_evidence: list[str]
@@ -158,6 +171,7 @@ class PaperTrade:
 class DecisionOutput:
     decision_cards: list[DecisionCard] = field(default_factory=list)
     no_trade_card: NoTradeCard | None = None
+    watch_cards: list[WatchCard] = field(default_factory=list)
     paper_trade: PaperTrade | None = None  # virtual trade when no_trade
     summary: str = ""
     contrarian_challenges: list[dict] = field(default_factory=list)
@@ -363,9 +377,21 @@ OUTPUT FORMAT — use EXACTLY these keys, no others:
  "no_trade_card": {"thesis": "why not trading is best", "supporting_evidence": ["..."],
    "counterfactual": "what would make us trade", "structural_advantages": ["..."],
    "pre_mortem": "...", "no_trade_score": 0},
+ "watch_cards": [{"ticker": "TICKER", "direction": "long", "thesis": "why it is worth owning once confirmed",
+   "conditions": [{"type": "close_above", "value": <a level listed for this ticker>}],
+   "invalidation": [{"type": "close_below", "value": <a level listed for this ticker>}],
+   "expiry_days": 20}],
  "summary": "one paragraph, plain text"}
-Only include a decision card for a ticker you would actually enter today; tickers you
-would wait on belong in the no-trade card, not in decision_cards."""
+Only include a decision card for a ticker you would actually enter today.
+Tickers you like but would wait on go in watch_cards (at most 5), each with the confirmation
+you are waiting for. Condition types allowed, nothing else:
+  close_above / close_below {"value": price} - the price MUST be one of the levels listed
+    for that ticker in the input (support, resistance, entry, stop, target);
+  close_above_ma / close_below_ma {"value": 20|50|200};
+  volume_ratio_at_least {"value": N} (volume vs its 20-day average);
+  after_date {"value": "YYYY-MM-DD"} (e.g. wait for a data release);
+  breakout_20d {} (close beyond the prior 20-day high for long, low for short).
+All conditions of a card must hold together."""
 
 
 CONTRARIAN_PROMPT = """你是独立风控分析师。对以下投资决策方案提出2-3个具体的反对意见。
@@ -476,6 +502,7 @@ async def generate_decision(
     red_team: RedTeamReport,
     resonance: ResonanceResult | None = None,
     fragility=None,
+    discovery_text: str = "",
 ) -> DecisionOutput:
     """Generate final decision cards and no-trade card.
 
@@ -489,7 +516,7 @@ async def generate_decision(
     fragility_score = getattr(fragility, 'overall_fragility_score', None) if fragility else None
     fragility_crossed = len(getattr(fragility, 'crossed', []) or []) if fragility else 0
 
-    if not l3.green_lights:
+    if not l3.green_lights and not _watch_candidates(l3) and not discovery_text:
         paper = _pick_paper_trade(l1, l2, l3, red_team, resonance)
         fragility_note = ""
         if fragility_crossed > 2:
@@ -507,7 +534,7 @@ async def generate_decision(
             paper_trade=paper,
             summary=_t("no_signal_summary"),
         )
-    user_prompt = _build_decision_prompt(l1, l2, l3, red_team, resonance)
+    user_prompt = _build_decision_prompt(l1, l2, l3, red_team, resonance, discovery_text)
     try:
         # P3-2b: use dynamically assembled prompt from SHARP rule registry
         dynamic_prompt = _get_decision_prompt()
@@ -519,6 +546,9 @@ async def generate_decision(
         )
         decision = _parse_decision_response(result["content"])
         decision.raw_response = (result.get("content") or "")[:20000]
+        decision.watch_cards, dropped = validate_watch_cards(decision.watch_cards, l3)
+        if dropped:
+            logger.info("Watch cards dropped: %s", "; ".join(dropped))
         guard = enforce(decision.decision_cards, l3)
         decision.decision_cards = guard.kept
         if guard.notes:
@@ -628,10 +658,31 @@ def _l3_evidence(l3: Layer3BatchResult) -> str:
             f"{missing} without price data")
 
 
+def _watch_candidates(l3: Layer3BatchResult) -> list:
+    return [r for r in (getattr(l3, "results", []) or [])
+            if getattr(r, "data_available", True) and r.light != "green"
+            and (r.recommendation == "wait" or r.light == "yellow")]
+
+
+def _levels(r) -> list[float]:
+    vals = (r.support_zone_low, r.support_zone_high, r.resistance_zone_low, r.resistance_zone_high,
+            r.entry_zone_low, r.entry_zone_high, r.stop_loss, r.target_price)
+    return [float(v) for v in vals if isinstance(v, (int, float)) and v > 0]
+
+
 def _build_decision_prompt(
     l1: Layer1Result, l2: Layer2Result, l3: Layer3BatchResult,
     red_team: RedTeamReport, resonance: ResonanceResult | None = None,
+    discovery_text: str = "",
 ) -> str:
+    watch_lines = "\n".join(
+        f"- {defang_text(r.ticker)} ({r.light}, {r.recommendation}): close {r.close}, "
+        f"support {r.support_zone_low:.2f}-{r.support_zone_high:.2f}, "
+        f"resistance {r.resistance_zone_low:.2f}-{r.resistance_zone_high:.2f}, "
+        f"entry {r.entry_zone_low:.2f}-{r.entry_zone_high:.2f}, stop {r.stop_loss:.2f}, "
+        f"target {r.target_price:.2f}"
+        for r in _watch_candidates(l3)[:12]
+    )
     green_lines = "\n".join(
         f"- {defang_text(r.ticker)}: entry {r.entry_zone_low:.2f}-{r.entry_zone_high:.2f}, "
         f"stop {r.stop_loss:.2f}, target {r.target_price:.2f}, R/R {r.reward_risk_ratio:.2f}, "
@@ -645,7 +696,7 @@ def _build_decision_prompt(
     defanged_tickers = [defang_text(t) for t in l2.ticker_candidates[:10]]
 
     return f"""## Layer 1 Narrative
-Quadrant: {defang_text(l1.matrix_quadrant)} | Sentiment: {defang_text(l1.sentiment_direction)} | Price-in: {l1.price_in_score}
+Quadrant: {defang_text(l1.matrix_quadrant)} | Sentiment: {defang_text(l1.sentiment_direction)}
 
 ## Layer 2 Fundamentals
 Tickers: {', '.join(defanged_tickers)}
@@ -653,10 +704,17 @@ Tickers: {', '.join(defanged_tickers)}
 ## Layer 3 Technical (GREEN lights only, levels computed by code)
 {green_lines if green_lines else 'None — no ticker passed L3'}
 
+## Layer 3 WAIT / YELLOW (watch candidates, levels computed by code)
+{watch_lines if watch_lines else 'None'}
+
+## Cold official data (code-detected anomalies, how much the market has already moved)
+{defang_text(discovery_text) if discovery_text else 'None today'}
+
 ## Red Team Challenges
 {challenges_str if challenges_str else 'No challenges raised'}
 
-Produce decision cards for GREEN-light tickers only. Generate a parallel no-trade card with equal rigor."""
+Produce decision cards for GREEN-light tickers only. Generate a parallel no-trade card with equal rigor.
+Use watch_cards for WAIT tickers or anomaly proxies that are not yet confirmed or not yet priced in."""
 
 
 def _pick(d: dict, *keys: str, default: Any = None) -> Any:
@@ -745,6 +803,18 @@ def _parse_decision_response(content: str) -> DecisionOutput:
             no_trade_score=_num(_pick(ntc_data, "no_trade_score", "no_trade_strength"), 0.0),
         )
     _normalise_size_units(cards)
+    watch = []
+    for d in data.get("watch_cards", []) or []:
+        if not isinstance(d, dict) or not d.get("ticker"):
+            continue
+        watch.append(WatchCard(
+            ticker=str(d["ticker"]).strip().upper(),
+            direction=str(d.get("direction", "long")).lower(),
+            thesis=_text(_pick(d, "thesis", "why", "rationale")),
+            conditions=[c for c in (d.get("conditions") or []) if isinstance(c, dict)],
+            invalidation=[c for c in (d.get("invalidation") or []) if isinstance(c, dict)],
+            expiry_days=int(_num(d.get("expiry_days"), 20)),
+        ))
     summary = data.get("summary", "")
     if not isinstance(summary, str):
         # Flash sometimes returns summary as an object; 2026-09-27 live run crashed on
@@ -753,5 +823,69 @@ def _parse_decision_response(content: str) -> DecisionOutput:
     return DecisionOutput(
         decision_cards=cards,
         no_trade_card=no_trade,
+        watch_cards=watch,
         summary=summary,
     )
+
+
+WATCH_MAX = 5
+WATCH_LEVEL_TOLERANCE = 0.005      # a stated price must be within 0.5% of an L3 level
+_WATCH_TYPES = {"close_above", "close_below", "close_above_ma", "close_below_ma",
+                "volume_ratio_at_least", "after_date", "breakout_20d"}
+
+
+def _check_condition(c: dict, levels: list[float]) -> dict | None:
+    """A validated copy of one condition, or None. Prices snap to the L3 level."""
+    kind = str(c.get("type", "")).strip().lower()
+    if kind not in _WATCH_TYPES:
+        return None
+    value = c.get("value")
+    if kind in ("close_above", "close_below"):
+        try:
+            price = float(value)
+        except (TypeError, ValueError):
+            return None
+        near = [lv for lv in levels if abs(lv - price) <= WATCH_LEVEL_TOLERANCE * lv]
+        if not near:
+            return None
+        return {"type": kind, "value": round(min(near, key=lambda lv: abs(lv - price)), 4)}
+    if kind in ("close_above_ma", "close_below_ma"):
+        return {"type": kind, "value": int(value)} if str(value) in ("20", "50", "200") else None
+    if kind == "volume_ratio_at_least":
+        try:
+            n = float(value)
+        except (TypeError, ValueError):
+            return None
+        return {"type": kind, "value": n} if 1.0 <= n <= 10.0 else None
+    if kind == "after_date":
+        return {"type": kind, "value": str(value)} if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(value)) else None
+    return {"type": kind}
+
+
+def validate_watch_cards(cards: list[WatchCard], l3: Layer3BatchResult) -> tuple[list[WatchCard], list[str]]:
+    """Keep watch cards whose ticker L3 reviewed and whose every condition is
+    code-checkable against L3 levels (SPEC_v3 L3: numbers come from code)."""
+    by_ticker = {r.ticker.upper(): r for r in (getattr(l3, "results", []) or [])
+                 if getattr(r, "data_available", True)}
+    kept, dropped = [], []
+    for card in cards:
+        r = by_ticker.get(card.ticker)
+        if r is None:
+            dropped.append(f"{card.ticker}: not reviewed by L3")
+            continue
+        if card.direction not in ("long", "short"):
+            dropped.append(f"{card.ticker}: direction {card.direction!r}")
+            continue
+        levels = _levels(r)
+        conds = [_check_condition(c, levels) for c in card.conditions]
+        if not conds or any(c is None for c in conds):
+            dropped.append(f"{card.ticker}: condition not code-checkable or not an L3 level")
+            continue
+        card.conditions = conds
+        card.invalidation = [c for c in (_check_condition(c, levels) for c in card.invalidation) if c]
+        card.expiry_days = max(5, min(card.expiry_days, 60))
+        kept.append(card)
+    if len(kept) > WATCH_MAX:
+        dropped.append(f"{len(kept) - WATCH_MAX} over the limit of {WATCH_MAX}")
+        kept = kept[:WATCH_MAX]
+    return kept, dropped

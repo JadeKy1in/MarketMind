@@ -90,9 +90,16 @@ def _forced_entry(pt, l3, snapshot_id: str | None) -> LedgerEntry:
     )
 
 
+DEFAULT_ORIGIN = {"kind": "news"}
+
+
 async def record_main_decision(decision, l3, store: LedgerStore, source: PriceSource,
-                               created_at: str | None = None) -> list[str]:
-    """Record today's cards (or the forced paper trade). Returns the new entry ids."""
+                               created_at: str | None = None,
+                               origins: dict[str, dict] | None = None) -> list[str]:
+    """Record today's cards (or the forced paper trade). Returns the new entry ids.
+
+    `origins` maps ticker -> meta["origin"] (docs/S10_DESIGN.md §4): which cold-data
+    anomaly led to the idea; tickers without one came from the news-driven path."""
     cards = list(getattr(decision, "decision_cards", []) or [])
     paper = getattr(decision, "paper_trade", None)
     if not cards and paper is None:
@@ -111,6 +118,7 @@ async def record_main_decision(decision, l3, store: LedgerStore, source: PriceSo
         return []
     ids = []
     for e in entries:
+        e.meta = {**(e.meta or {}), "origin": (origins or {}).get(e.ticker.upper(), DEFAULT_ORIGIN)}
         try:
             ids.append(store.add(e, created_at=created_at))
         except ValueError as exc:

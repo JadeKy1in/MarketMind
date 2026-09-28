@@ -86,3 +86,14 @@ async def test_card_without_stop_or_invalidation_still_recorded(tmp_path):
     ids = await record_main_decision(
         DecisionOutput(decision_cards=[card(stop_loss=0.0, invalidation="")]), None, store, SRC)
     assert "loses money" in store.get(ids[0]).falsifier
+
+
+@pytest.mark.asyncio
+async def test_cards_carry_their_origin(tmp_path):
+    store = LedgerStore(tmp_path / "l.db")
+    origin = {"kind": "anomaly", "series": ["fred:WRESBAL"], "anomaly_id": "2026-09-28:fred:WRESBAL"}
+    ids = await record_main_decision(DecisionOutput(decision_cards=[card()]), None, store, SRC,
+                                     origins={card().ticker.upper(): origin})
+    assert store.get(ids[0]).meta["origin"] == origin
+    ids = await record_main_decision(DecisionOutput(decision_cards=[card()]), None, store, SRC)
+    assert store.get(ids[0]).meta["origin"] == {"kind": "news"}
