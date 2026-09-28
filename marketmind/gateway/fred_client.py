@@ -92,7 +92,7 @@ _FRED_SERIES: dict[str, tuple[str, str, str, str]] = {
     # ── Liquidity / funding stress (fragility scanner) ──
     "RRPONTSYD":   ("RRPONTSYD",   "Overnight Reverse Repo (ON RRP)",   "daily",  "B USD"),
     "WTREGEN":     ("WTREGEN",     "Treasury General Account (TGA)",    "weekly", "M USD"),
-    "WRESBAL":     ("WRESBAL",     "Reserve Balances with Fed Banks",   "weekly", "B USD"),
+    "WRESBAL":     ("WRESBAL",     "Reserve Balances with Fed Banks",   "weekly", "M USD"),
     "IORB":        ("IORB",        "Interest on Reserve Balances",      "daily",  "%"),
     "BAMLH0A3HYC": ("BAMLH0A3HYC", "ICE BofA CCC & Lower US HY OAS",    "daily",  "%"),
     # ── Legacy (backward compat with macro_data.py) ──

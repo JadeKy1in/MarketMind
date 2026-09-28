@@ -58,7 +58,7 @@ MECHANISM_GLOSSARY: dict[str, dict] = {
         "name_zh": "银行准备金",
         "description": "Bank reserves held at the Fed — the raw material of the financial system. Determines repo market functioning and overall liquidity conditions.",
         "data_source": "FRED: WRBWFRBL",
-        "directional": "准备金连续下降 → 回购利率上行压力; 跌破2.7T → 系统性流动性风险",
+        "directional": "准备金连续下降 → 回购利率上行压力; 准备金/GDP 跌破 9% → 系统性流动性风险",
         "related": ["SOFR", "IORB", "TGA", "ON_RRP"]
     },
     # ── Market mechanisms ──
@@ -190,11 +190,11 @@ MECHANISM_GLOSSARY: dict[str, dict] = {
         "related": ["FX_swap", "cross_currency_basis", "dollar_swap_lines"]
     },
     # ── Key thresholds ──
-    "bank_reserves_2.7T": {
-        "name_zh": "银行准备金2.7万亿警戒线",
-        "description": "The level of US bank reserves (~$2.7T) below which repo rates historically spike above IORB, indicating reserve scarcity and systemic liquidity stress.",
-        "data_source": "FRED: WRBWFRBL",
-        "directional": "跌破2.7万亿 → SOFR飙升 → 回购市场冻结 → 广泛资产下跌",
+    "bank_reserves_9pct_gdp": {
+        "name_zh": "银行准备金占GDP 9%警戒线",
+        "description": "US bank reserves as a share of nominal GDP; below ~9% (Waller 2025; 8% = stress) repo rates tend to rise above IORB, indicating reserve scarcity and systemic liquidity stress.",
+        "data_source": "FRED: WRESBAL / GDP",
+        "directional": "准备金/GDP 跌破9% → SOFR飙升 → 回购市场冻结 → 广泛资产下跌",
         "related": ["SOFR", "IORB", "repo", "ON_RRP"]
     },
     "us10y_4.5pct": {
