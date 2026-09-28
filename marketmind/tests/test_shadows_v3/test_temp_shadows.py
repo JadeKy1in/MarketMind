@@ -176,8 +176,9 @@ async def test_propose_validates_variant_and_capacity(env):
     assert t.ends == "2026-11-23" and trials.prompt_file(t.trial_id).exists()   # 40 trading days
     with pytest.raises(ValueError, match="already has"):
         await trials.propose(PARENT, "beta", "again", call=good, today=TODAY)
-    entries = trials.roster_entries()
+    entries = trials.roster_entries(today=TODAY)
     assert entries[0].shadow_id == f"trial:{t.trial_id}" and "volume confirmation" in entries[0].prompt_text
+    assert trials.roster_entries(today=t.ends) == []        # window over: waits to settle, no new calls
     with pytest.raises(ValueError):
         await trials.propose("nope", "beta", "x", call=good, today=TODAY)
 

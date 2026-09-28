@@ -168,13 +168,16 @@ async def propose(parent_id: str, kind: str, note: str, *, store=None, call=_cal
     return trial
 
 
-def roster_entries(folder: Path | None = None) -> list[RosterEntry]:
+def roster_entries(folder: Path | None = None, today: str | None = None) -> list[RosterEntry]:
+    """Variants that still decide today. After `ends` a trial only waits for its
+    records to settle; its later decisions would not count, so it stops calling the LLM."""
     by_id = roster_mod.by_id()
+    today = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     out = []
     for t in load(folder):
         parent = by_id.get(t.parent_id)
         pf = prompt_file(t.trial_id, folder)
-        if t.status != "running" or parent is None or not pf.exists():
+        if t.status != "running" or t.ends <= today or parent is None or not pf.exists():
             continue
         out.append(RosterEntry(
             shadow_id=f"trial:{t.trial_id}", name=f"trial_{parent.name}_{t.trial_id[:4]}",
