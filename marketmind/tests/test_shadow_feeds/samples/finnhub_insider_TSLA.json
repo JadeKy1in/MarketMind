@@ -1,0 +1,47 @@
+{
+ "data": [
+  {
+   "name": "Taneja Vaibhav",
+   "share": 25972,
+   "change": -2606,
+   "filingDate": "2026-09-09",
+   "transactionDate": "2026-09-08",
+   "transactionCode": "S",
+   "transactionPrice": 360.134,
+   "id": "0001104659-26-106432",
+   "symbol": "TSLA",
+   "source": "sec",
+   "isDerivative": false,
+   "currency": ""
+  },
+  {
+   "name": "Taneja Vaibhav",
+   "share": 52305,
+   "change": -6539,
+   "filingDate": "2026-09-09",
+   "transactionDate": "2026-09-05",
+   "transactionCode": "M",
+   "transactionPrice": 0,
+   "id": "0001104659-26-106432",
+   "symbol": "TSLA",
+   "source": "sec",
+   "isDerivative": true,
+   "currency": ""
+  },
+  {
+   "name": "Taneja Vaibhav",
+   "share": 28578,
+   "change": 6539,
+   "filingDate": "2026-09-09",
+   "transactionDate": "2026-09-05",
+   "transactionCode": "M",
+   "transactionPrice": 0,
+   "id": "0001104659-26-106432",
+   "symbol": "TSLA",
+   "source": "sec",
+   "isDerivative": false,
+   "currency": ""
+  }
+ ],
+ "symbol": "TSLA"
+}

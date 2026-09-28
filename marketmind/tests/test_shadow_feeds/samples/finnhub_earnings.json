@@ -1,0 +1,48 @@
+{
+ "earningsCalendar": [
+  {
+   "symbol": "NKE",
+   "date": "2026-09-28",
+   "hour": "",
+   "quarter": 1,
+   "year": 2027,
+   "epsEstimate": 0.4444,
+   "epsActual": null,
+   "revenueEstimate": 11451807997,
+   "revenueActual": null
+  },
+  {
+   "symbol": "ACZT",
+   "date": "2026-10-12",
+   "hour": "",
+   "quarter": 3,
+   "year": 2026,
+   "epsEstimate": null,
+   "epsActual": null,
+   "revenueEstimate": null,
+   "revenueActual": null
+  },
+  {
+   "symbol": "ALDS",
+   "date": "2026-10-12",
+   "hour": "",
+   "quarter": 4,
+   "year": 2026,
+   "epsEstimate": null,
+   "epsActual": null,
+   "revenueEstimate": null,
+   "revenueActual": null
+  },
+  {
+   "symbol": "BMRA",
+   "date": "2026-10-12",
+   "hour": "",
+   "quarter": 1,
+   "year": 2027,
+   "epsEstimate": null,
+   "epsActual": null,
+   "revenueEstimate": null,
+   "revenueActual": null
+  }
+ ]
+}
