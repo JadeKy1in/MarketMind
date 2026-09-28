@@ -57,6 +57,11 @@ class AgentManifest:
     # e.g. "decision_signal_source", "l1_narrative_input", "red_team_input"
     # Empty = not yet determined, or agent is meta/utility.
 
+    # ── Ledger / promotion (docs/S8_DESIGN.md "Playground 接回") ──
+    domain_benchmark: str = "SPY"
+    domain_universe: list[str] = field(default_factory=list)
+    # same-domain instruments for the random benchmark the promotion ladder compares with
+
     # ── Metadata ──
     version: str = "1.0.0"
     author: str = ""
@@ -86,6 +91,8 @@ def load_manifest(agent_dir: Path) -> AgentManifest | None:
         version=data.get("version", "1.0.0"),
         author=data.get("author", ""),
         tags=data.get("tags", []),
+        domain_benchmark=data.get("domain_benchmark", "SPY"),
+        domain_universe=[str(t).upper() for t in data.get("domain_universe", [])],
     )
 
 

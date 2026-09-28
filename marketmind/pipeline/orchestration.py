@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 _shadow_task: "asyncio.Task | None" = None
 _evidence_task: "asyncio.Task | None" = None
+_playground_task: "asyncio.Task | None" = None
 
 # Only interactive_orchestration still evaluates resonance (legacy path, to be
 # redesigned with alert-driven interaction). The daily pipeline no longer does.
@@ -274,6 +275,10 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
     if config.shadow.shadows_enabled and shadow_count != 0 and not mock:
         _shadow_task = asyncio.create_task(run_v3_shadows(config, news_items, shadow_count))
         print("  [shadows] daily decisions launched in background")
+    # S8 Playground candidates: their calls go into the ledger, in the background.
+    if not mock:
+        global _playground_task
+        _playground_task = asyncio.create_task(run_playground(config, news_items))
     # S5 evidence layer: news claims checked against primary data, in the background.
     if not mock:
         global _evidence_task
@@ -654,7 +659,11 @@ async def promotion_step(config) -> None:
     from marketmind.shadows.v3 import trials
     store = _ledger_store(config)
     try:
-        summary = run_promotion(store, data_dir=Path(config.data_dir))
+        from marketmind.shadows.v3 import roster as _roster
+        candidates = playground_candidates()
+        active = {r.shadow_id for r in _roster.active()} | {c.shadow_id for c in candidates}
+        summary = run_promotion(store, data_dir=Path(config.data_dir),
+                                roster=tuple(_roster.ROSTER) + tuple(candidates), active_ids=active)
         print(f"  [promotion] stages {summary.get('stages')}; advisors {len(summary.get('advisors', []))}")
     except Exception:
         logger.warning("promotion review failed", exc_info=True)
@@ -676,6 +685,38 @@ async def promotion_step(config) -> None:
                 print(f"  [trials] challenger for {ev['shadow_id']} not started: {e}")
     except Exception:
         logger.warning("trial step failed", exc_info=True)
+
+
+async def run_playground(config, news_items: list):
+    """S8: Playground agents -> ledger as promotion candidates (docs/S8_DESIGN.md)."""
+    from marketmind.playground.agent_manifest import discover_agents
+    from marketmind.playground.ledger_bridge import record_run
+    from marketmind.playground.playground_runner import DEFAULT_PLAYGROUND_DIR, run_all_agents
+    try:
+        result = await run_all_agents(news_items=news_items, fetch_playground_sources=True)
+        manifests = {m.agent_id: m for m in discover_agents(DEFAULT_PLAYGROUND_DIR)}
+        summary = await record_run(_ledger_store(config), result, manifests)
+    except Exception:
+        logger.warning("playground run failed", exc_info=True)
+        print("  [playground] failed (see log)")
+        return None
+    n = sum(len(v) for v in summary["recorded"].values())
+    print(f"  [playground] {result.agents_succeeded}/{result.agents_attempted} agents, "
+          f"{n} calls to ledger" + (f"; dropped {len(summary['dropped'])}" if summary["dropped"] else ""))
+    return summary
+
+
+def playground_candidates() -> list:
+    """Playground agents as roster-like entries for the promotion ladder."""
+    from marketmind.playground.agent_manifest import discover_agents
+    from marketmind.playground.playground_runner import DEFAULT_PLAYGROUND_DIR
+    from marketmind.shadows.v3.roster import RosterEntry
+    return [RosterEntry(shadow_id=f"playground:{m.agent_id}", name=f"pg_{m.agent_id}",
+                        display_name=f"{m.display_name}（Playground）", group="playground",
+                        domain=m.description[:60], watchlist=tuple(m.domain_universe),
+                        domain_benchmark=m.domain_benchmark, source_type="playground",
+                        prompt_text="(playground adapter)")
+            for m in discover_agents(DEFAULT_PLAYGROUND_DIR)]
 
 
 async def run_evidence(config, news_items: list):
@@ -814,7 +855,12 @@ async def _run_daily_with_shadows(config, args) -> int:
             pass
         from marketmind.gateway import usage_tracker
         print(f"  [tokens incl. shadows] {usage_tracker.summary_line()}")
-    global _evidence_task
+    global _evidence_task, _playground_task
+    if _playground_task and not _playground_task.done():
+        try:
+            await asyncio.wait_for(_playground_task, timeout=EVIDENCE_WAIT_S)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            print("(Playground timed out)")
     if _evidence_task and not _evidence_task.done():
         try:
             await asyncio.wait_for(_evidence_task, timeout=EVIDENCE_WAIT_S)

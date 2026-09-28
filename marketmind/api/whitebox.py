@@ -180,6 +180,16 @@ def get_promotion_log() -> dict:
                      "score": rec.get("score"), "tier": rec.get("tier"),
                      "first_date": s.get("first_date"),
                      "note": r["notes"] if stage == "blocked" else ""})
+    for sid, rec in recs.items():                      # Playground candidates (S8)
+        if not sid.startswith("playground:"):
+            continue
+        m = rec.get("metrics") or {}
+        rows.append({"shadow_id": sid, "display_name": sid, "stage": STAGE_CN.get(rec.get("stage"), rec.get("stage")),
+                     "stage_code": rec.get("stage"), "active_days": m.get("record_days", 0),
+                     "probation_days": PROBATION_DAYS, "settled": m.get("settled", 0),
+                     "n_eff": m.get("n_eff"), "min_trl": m.get("min_trl"),
+                     "score": rec.get("score"), "tier": rec.get("tier"), "first_date": None,
+                     "note": "Playground 候选"})
     return {"review_implemented": True, "reviewed_on": (state or {}).get("updated_at"),
             "pbo": (state or {}).get("pbo"), "rows": rows, "events": events[:100],
             "thresholds": pconf.thresholds()}

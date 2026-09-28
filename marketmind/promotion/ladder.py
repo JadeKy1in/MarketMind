@@ -69,7 +69,7 @@ def _days_after(calendar: list[str], start: str, end: str) -> list[str]:
 
 def shadow_stats(sid: str, entries: list[LedgerEntry], calendar: list[str], today: str) -> dict:
     """Everything the gates and the composite score need for one shadow."""
-    rows = [e for e in entries if e.source_type == "shadow" and e.source_id == sid
+    rows = [e for e in entries if e.source_type in CANDIDATE_SOURCES and e.source_id == sid
             and e.created_at and _day(e.created_at) <= today]
     settled = [e for e in rows if e.status == "settled" and e.exit_date
                and _day(e.exit_date) <= today and e.net_return is not None]
@@ -176,6 +176,11 @@ def _event(today, kind, sid, frm, to, **detail) -> dict:
             "detail": _clean(detail)}
 
 
+# Promotion candidates share one ladder (SPEC_v3 §8): long-term shadows and
+# Playground agents; source ids are unique across the two ("playground:" prefix).
+CANDIDATE_SOURCES = ("shadow", "playground")
+
+
 def evaluate(entries: list[LedgerEntry], roster_entries: list[RosterEntry], today: str,
              state: dict | None, trial_count: int, *, calendar: list[str] | None = None,
              active_ids: set[str] | None = None) -> tuple[dict, list[dict]]:
@@ -235,7 +240,7 @@ def evaluate(entries: list[LedgerEntry], roster_entries: list[RosterEntry], toda
     if len(ranked) >= 2:
         start = max(s["first_day"] for s in ranked.values())
         common = [d for d in cal if start <= d <= today]
-        cols = [M.daily_series(M.daily_pnl([e for e in entries if e.source_type == "shadow"
+        cols = [M.daily_series(M.daily_pnl([e for e in entries if e.source_type in CANDIDATE_SOURCES
                                             and e.source_id == sid]), common)
                 for sid in sorted(ranked)]
         pbo = M.pbo_cscv(np.column_stack(cols), C.PBO_BLOCKS)

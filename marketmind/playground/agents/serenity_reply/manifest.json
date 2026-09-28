@@ -11,11 +11,46 @@
   ],
   "requires_proprietary_data": false,
   "primary_metric": "direction_accuracy",
-  "secondary_metrics": ["sharpe_ratio", "max_drawdown", "profit_factor"],
+  "secondary_metrics": [
+    "sharpe_ratio",
+    "max_drawdown",
+    "profit_factor"
+  ],
   "min_sample_size": 20,
   "min_observation_days": 60,
   "target_pipeline_node": "decision_signal_source",
   "version": "1.0.0",
   "author": "leslieyeo/serenity-reply (distilled by Nuwa Skill Creation)",
-  "tags": ["semiconductor", "supply-chain", "small-cap", "bottleneck-analysis", "external-analyst-persona"]
+  "tags": [
+    "semiconductor",
+    "supply-chain",
+    "small-cap",
+    "bottleneck-analysis",
+    "external-analyst-persona"
+  ],
+  "domain_benchmark": "SOXX",
+  "domain_universe": [
+    "AXTI",
+    "AMKR",
+    "ACLS",
+    "COHU",
+    "FORM",
+    "ICHR",
+    "KLIC",
+    "MKSI",
+    "ONTO",
+    "PLAB",
+    "UCTT",
+    "VECO",
+    "SMTC",
+    "POWI",
+    "AOSL",
+    "ALGM",
+    "LSCC",
+    "SITM",
+    "CRUS",
+    "DIOD",
+    "MTSI",
+    "NVMI"
+  ]
 }
