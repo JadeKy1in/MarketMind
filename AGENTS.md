@@ -5,7 +5,7 @@
 ## 开工前必读
 
 1. `docs/SPEC_v3.md`：唯一事实来源。第 13 节是施工顺序，§13.1 是开放问题。
-2. 各阶段设计稿：`docs/S2_DESIGN.md` 至 `docs/S6_DESIGN.md`、`docs/S8_DESIGN.md`（后续阶段按同样命名）。自动运行见 `docs/AUTOMATION.md`。
+2. 各阶段设计稿：`docs/S2_DESIGN.md` 至 `docs/S8_DESIGN.md`、`docs/S10_DESIGN.md`（冷门数据发现链：异常扫描、已反映度、观察名单、来源归因；后续阶段按同样命名）。自动运行见 `docs/AUTOMATION.md`。
 3. 本文件的"未完成事项"。
 4. `PROGRESS_v3.md` 只存在于所有人本机、不入库。如果你看不到它，以本文件和 SPEC 为准。
 
