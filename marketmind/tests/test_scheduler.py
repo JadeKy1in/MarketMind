@@ -101,3 +101,22 @@ def test_crypto_shadows_for_weekend():
     from marketmind.pipeline.orchestration import crypto_shadows
     ids = {e.shadow_id for e in crypto_shadows()}
     assert ids == {"expert:crypto:chain_oracle", "expert:crypto:defi_scout"}
+
+
+def test_push_keys_loaded_from_user_environment(monkeypatch):
+    if os.name != "nt":
+        pytest.skip("Windows registry only")
+    import winreg
+
+    class FakeKey:
+        pass
+    monkeypatch.delenv("SERVERCHAN_SENDKEY", raising=False)
+    monkeypatch.setattr(winreg, "OpenKey", lambda *a: FakeKey())
+
+    def query(key, name):
+        if name == "SERVERCHAN_SENDKEY":
+            return ("SCTtest", 1)
+        raise OSError
+    monkeypatch.setattr(winreg, "QueryValueEx", query)
+    sr.load_user_push_env()
+    assert os.environ["SERVERCHAN_SENDKEY"] == "SCTtest"

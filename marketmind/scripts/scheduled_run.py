@@ -106,6 +106,31 @@ def acquire_lock(lock: Path) -> bool:
     return True
 
 
+PUSH_VARS = ("SERVERCHAN_SENDKEY", "PUSHPLUS_TOKEN", "WECOM_WEBHOOK_KEY", "FEISHU_WEBHOOK_TOKEN",
+             "FEISHU_WEBHOOK_SECRET")
+
+
+def load_user_push_env() -> None:
+    """Task Scheduler may start us with an environment captured before the owner
+    saved a push key (setx); read missing ones from the user's registry settings."""
+    if os.name != "nt":
+        return
+    import winreg
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment")
+    except OSError:
+        return
+    for name in PUSH_VARS:
+        if os.environ.get(name):
+            continue
+        try:
+            value = winreg.QueryValueEx(key, name)[0]
+        except OSError:
+            continue
+        if value:
+            os.environ[name] = str(value)
+
+
 def notify_failure(slot: str, key: str, log_path: Path, reason: str) -> list[dict]:
     from marketmind.alerts.notify import send
     from marketmind.notification.log_redaction import redact
@@ -149,6 +174,7 @@ def main(argv: list[str] | None = None) -> int:
                mode=MODES[args.slot], log=str(log_path), attempts=rec.get("attempts", 0) + 1)
     state_path.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
 
+    load_user_push_env()                         # alerts and failure pushes need the keys
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
     cmd = [sys.executable, str(ROOT / "marketmind" / "app.py"), "--mode", MODES[args.slot]]
     try:
