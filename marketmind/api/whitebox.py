@@ -223,7 +223,21 @@ def get_health() -> dict:
         "shadow_run": {"date": run_day, "submitted": submitted, "total": len(run_results)},
         "token_usage": read_token_usage(),
         "alerts": get_alerts(limit=15)["alerts"],
+        "scheduler": read_scheduler(),
     }
+
+
+def read_scheduler(limit: int = 10) -> list[dict]:
+    """Recent automatic runs (marketmind/scripts/scheduled_run.py), newest first."""
+    p = data_dir() / "scheduler" / "state.json"
+    try:
+        runs = json.loads(p.read_text(encoding="utf-8")).get("runs", {})
+    except (OSError, ValueError):
+        return []
+    rows = [{"key": k, **{f: v.get(f) for f in ("mode", "status", "started", "ended",
+                                                  "attempts", "reason")}}
+            for k, v in runs.items()]
+    return sorted(rows, key=lambda r: r["started"] or "", reverse=True)[:limit]
 
 
 # ── evidence layer (S5) ─────────────────────────────────────────────────────

@@ -12,10 +12,12 @@ from marketmind.pipeline.interactive_orchestration import run_interactive
 
 def main():
     parser = argparse.ArgumentParser(description="MarketMind — AI Investment Analysis Workstation")
-    parser.add_argument("--mode", choices=["daily", "interactive", "gui", "shadows", "scenario", "settle", "evidence"], default="gui",
+    parser.add_argument("--mode", choices=["daily", "interactive", "gui", "shadows", "scenario", "settle", "evidence",
+                                           "weekend"], default="gui",
                         help="Run mode: daily (full pipeline), interactive (L1 Socratic dialogue), "
                              "shadows (S3 shadow decisions only), scenario (historical scenario backtest), "
                              "settle (settle due ledger records), evidence (evidence layer only), "
+                             "weekend (settle + crypto shadows only), "
                              "or gui (default: gui)")
     parser.add_argument("--scenario", type=str, default=None, metavar="NAME",
                         help="Scenario name for --mode scenario (e.g., covid2020_crash). "
@@ -64,6 +66,9 @@ def main():
         from marketmind.pipeline.orchestration import settle_ledger
         summary = asyncio.run(settle_ledger(config))
         return 1 if "failed" in summary else 0
+    elif args.mode == "weekend":
+        from marketmind.pipeline.orchestration import run_weekend
+        return asyncio.run(run_weekend(config))
     elif args.mode == "evidence":
         from marketmind.pipeline.orchestration import run_evidence_only
         return asyncio.run(run_evidence_only(config))

@@ -722,6 +722,32 @@ async def inspect_holdings_step(config) -> None:
     print(f"  [holdings] {len(reports)} inspected" + (f"; action: {', '.join(flagged)}" if flagged else ""))
 
 
+def crypto_shadows() -> list:
+    """Shadows whose domain trades on weekends (docs/AUTOMATION.md)."""
+    from marketmind.shadows.v3 import roster
+    return [e for e in roster.active() if ":crypto:" in e.shadow_id]
+
+
+async def run_weekend(config) -> int:
+    """`--mode weekend`: settle the ledger, then only the crypto shadows decide.
+    Every other market is closed; their shadows would decide on Friday's data and
+    fill at Monday's open, which the weekday pre-open run does better."""
+    init_gateway(config.deepseek_api_key, config.deepseek_base_url)
+    from marketmind.gateway import usage_tracker
+    from marketmind.pipeline.scout import fetch_all_sources
+    from marketmind.shadows.v3.runner import default_report_dir, run_shadow_day
+    usage_tracker.reset()
+    summary = await settle_ledger(config)
+    print(f"  [ledger] {summary}")
+    news_items = await fetch_all_sources(config) or []
+    report = await run_shadow_day(_ledger_store(config), news_items, entries=crypto_shadows(),
+                                  report_dir=default_report_dir())
+    print(f"  [shadows] {report.summary()}")
+    print(f"  [tokens] {usage_tracker.summary_line()}")
+    usage_tracker.append_log("weekend")
+    return 0 if "failed" not in summary else 1
+
+
 async def run_evidence_only(config) -> int:
     """`--mode evidence`: collect news, run the evidence layer only."""
     init_gateway(config.deepseek_api_key, config.deepseek_base_url)
