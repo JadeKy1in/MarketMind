@@ -391,7 +391,7 @@ REGISTRY: tuple[Series, ...] = (
     # FRED — credit and stress
     Series("fred:BAMLH0A0HYM2", "ICE BofA US high-yield OAS", "daily", "%",
            "FRED BAMLH0A0HYM2", _fred("BAMLH0A0HYM2"), (("HYG", -1), ("SPY", -1)),
-           ("high yield spread", "high-yield spread", "junk bond spread", "credit spreads", "高收益债利差"), STRESS),
+           ("high yield spread", "high-yield spread", "junk bond spread", "credit spreads", "junk bonds", "high-yield bonds", "高收益债利差"), STRESS),
     Series("fred:BAMLC0A4CBBB", "ICE BofA US BBB corporate OAS", "daily", "%",
            "FRED BAMLC0A4CBBB", _fred("BAMLC0A4CBBB"), (("LQD", -1), ("SPY", -1)),
            ("BBB spread", "investment-grade spread", "investment grade spread", "投资级利差"), STRESS),
@@ -436,15 +436,15 @@ REGISTRY: tuple[Series, ...] = (
            "strong demand -> yields down, prices up (prior)", window=1, lookback_days=3 * 365),
     # MOF JGB
     Series("mof:JGB2Y", "JGB 2-year yield", "daily", "%", "MOF jgbcme CSV", _jgb("2Y"),
-           (("FXY", 1),), ("2-year JGB", "JGB yields", "BOJ rate hike", "日本国债收益率", "日债"),
+           (("FXY", 1),), ("2-year JGB", "JGB yields", "JGB", "JGBs", "Japanese bonds", "BOJ rate hike", "日本国债收益率", "日债"),
            "higher Japanese front-end yields -> yen up (prior)"),
     Series("mof:JGB10Y", "JGB 10-year yield", "daily", "%", "MOF jgbcme CSV", _jgb("10Y"),
            (("FXY", 1), ("EWJ", -1), ("TLT", -1)),
-           ("10-year JGB", "JGB yields", "Japanese government bond", "日本国债收益率", "日债"),
+           ("10-year JGB", "JGB yields", "JGB", "JGBs", "Japanese bonds", "Japanese government bond", "日本国债收益率", "日债"),
            "higher JGB yields -> yen up, carry unwind, global duration down (prior)"),
     Series("mof:JGB30Y", "JGB 30-year yield", "daily", "%", "MOF jgbcme CSV", _jgb("30Y"),
            (("TLT", -1), ("FXY", 1)),
-           ("30-year JGB", "super-long JGB", "Japanese government bond", "超长期国债", "日债"),
+           ("30-year JGB", "super-long JGB", "JGB", "JGBs", "Japanese bonds", "Japanese government bond", "超长期国债", "日债"),
            "higher super-long JGB yields pull global long yields up (prior)"),
     # ECB reference rates (units of currency per EUR)
     Series("ecb:EURUSD", "ECB reference rate EUR/USD", "daily", "USD per EUR", "ECB EXR", _ecb("USD"),
@@ -473,7 +473,7 @@ REGISTRY: tuple[Series, ...] = (
     # OKX
     Series("okx:BTC_FUNDING", "BTC perpetual funding rate, daily mean (OKX)", "daily", "% per period",
            "OKX funding-rate-history BTC-USDT-SWAP", _okx_funding("BTC"), (("BTC-USD", -1),),
-           ("funding rate", "perpetual funding", "资金费率"),
+           ("funding rate", "funding rates", "perpetual funding", "资金费率"),
            "crowded longs paying high funding -> mean reversion down (contrarian prior)"),
     Series("okx:ETH_FUNDING", "ETH perpetual funding rate, daily mean (OKX)", "daily", "% per period",
            "OKX funding-rate-history ETH-USDT-SWAP", _okx_funding("ETH"), (("ETH-USD", -1),),
@@ -486,12 +486,12 @@ REGISTRY: tuple[Series, ...] = (
     # DefiLlama
     Series("defillama:STABLECOIN_SUPPLY", "Stablecoin total supply (USD-pegged)", "daily", "B USD",
            "DefiLlama stablecoincharts/all", _stablecoins, (("BTC-USD", 1), ("ETH-USD", 1)),
-           ("stablecoin supply", "stablecoin market cap", "USDT supply", "稳定币"),
+           ("stablecoin supply", "stablecoin market cap", "USDT supply", "stablecoins", "stablecoin", "稳定币"),
            "more stablecoin dry powder -> crypto up (prior)"),
     # EIA weekly petroleum stocks (thousand barrels)
     Series("eia:WCESTUS1", "US crude oil stocks excl. SPR", "weekly", "k bbl", "EIA API v2 PET.WCESTUS1.W",
            _eia("PET.WCESTUS1.W"), (("USO", -1), ("XLE", -1)),
-           ("crude inventories", "crude stocks", "crude oil inventory", "原油库存"), "more supply on hand -> oil down (prior)"),
+           ("crude inventories", "crude stocks", "crude oil inventory", "crude inventory", "oil inventories", "原油库存"), "more supply on hand -> oil down (prior)"),
     Series("eia:WGTSTUS1", "US total gasoline stocks", "weekly", "k bbl", "EIA API v2 PET.WGTSTUS1.W",
            _eia("PET.WGTSTUS1.W"), (("UGA", -1),),
            ("gasoline inventories", "gasoline stocks", "汽油库存"), "more supply on hand -> gasoline down (prior)"),
