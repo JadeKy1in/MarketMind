@@ -205,14 +205,37 @@ async function loadEvidence(){
 }
 
 // ── holdings (S6) ──
+async function post(url,body){
+  const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json","X-MarketMind":"1"},body:JSON.stringify(body||{})});
+  let d={};try{d=await r.json()}catch(e){}
+  if(!r.ok)throw new Error(d.error||("HTTP "+r.status));
+  return d;
+}
 async function loadHoldings(){
   const d=await j("/api/wb/holdings");
-  if(!d.available){$("#s-holdings").innerHTML=`<div class="card empty">实盘持仓：${esc(d.reason||"无数据")}</div>`;return}
-  $("#s-holdings").innerHTML=`<div class="card"><h2>实盘持仓巡检 ${esc(d.date||"")}</h2>
-  <div class="tw"><table><tr><th>标的</th><th class="num">数量</th><th class="num">成本</th><th class="num">现价</th><th class="num">盈亏</th><th>L3</th><th>结论</th><th>理由</th></tr>
-  ${(d.items||[]).map(h=>`<tr><td>${esc(h.ticker)}</td><td class="num">${num(h.quantity,4)}</td><td class="num">${num(h.cost_basis)}</td><td class="num">${num(h.price)}</td><td class="num">${pct(h.unrealized_return)}</td><td>${h.light?`<span class="chip ${esc(h.light)}">${esc(h.light)}</span>`:NA}</td><td><b>${esc(h.verdict_cn||h.verdict||"")}</b></td><td>${esc(h.reason||"")}${(h.alternatives||[]).length?`<div class="mut">替代：${h.alternatives.map(a=>esc(a.ticker+" R/R "+num(a.reward_risk))).join("，")}</div>`:""}</td></tr>`).join("")||'<tr><td colspan="8" class="empty">没有持仓</td></tr>'}
-  </table></div><div class="mut">${esc(d.note||"")}${d.removed_since_report?`；报告后已删除 ${d.removed_since_report} 个持仓，未显示`:""}</div></div>
+  const rep=d.report||{},byT={};(rep.items||[]).forEach(i=>byT[i.ticker]=i);
+  const rows=(d.holdings||[]).map(h=>{const i=byT[h.ticker]||{};return `<tr><td><b>${esc(h.ticker)}</b><div class="mut">${esc(h.note||"")}</div></td><td class="num">${num(h.quantity,4)}</td><td class="num">${num(h.cost_basis,4)}</td><td>${esc(h.opened)}</td><td class="num">${h.stop==null?"—":num(h.stop)}</td><td class="num">${num(i.price)}</td><td class="num">${pct(i.unrealized_return)}</td><td>${i.light?`<span class="chip ${esc(i.light)}">${esc(i.light)}</span>`:'<span class="mut">未巡检</span>'}</td><td><b>${esc(i.verdict_cn||"")}</b><div class="mut">${esc(i.reason||"")}</div>${(i.alternatives||[]).length?`<div class="mut">替代：${i.alternatives.map(a=>esc(a.ticker+" R/R "+num(a.reward_risk))).join("，")}</div>`:""}</td><td style="white-space:nowrap"><button class="act" data-sell="${esc(h.ticker)}">减仓</button> <button class="act" data-clear="${esc(h.ticker)}" style="background:var(--bad)">清仓</button></td></tr>`}).join("");
+  $("#s-holdings").innerHTML=`<div class="card"><h2>实盘持仓 <span class="mut">${rep.date?"最近巡检 "+esc(rep.date):"尚未巡检"}</span></h2>
+  <div class="tw"><table><tr><th>标的</th><th class="num">数量</th><th class="num">成本</th><th>建仓日</th><th class="num">你的止损</th><th class="num">现价</th><th class="num">盈亏</th><th>L3</th><th>巡检结论</th><th></th></tr>${rows||'<tr><td colspan="10" class="empty">还没有持仓，用下面的表单录入</td></tr>'}</table></div>
+  <div class="filters" style="margin-top:10px"><button class="act" id="hInspect">立即巡检</button><span class="mut" id="hMsg"></span></div>
+  <div class="mut">${esc(d.note||"")}</div></div>
+  <div class="card"><h2>录入 / 加仓</h2>
+   <div class="filters">
+    <input id="hT" placeholder="代码，如 AAPL、BTC-USD" size="14">
+    <input id="hQ" placeholder="数量" size="8" inputmode="decimal">
+    <input id="hC" placeholder="每单位成本（美元）" size="14" inputmode="decimal">
+    <input id="hO" type="date" title="建仓日（可空，默认今天）">
+    <input id="hS" placeholder="止损价（可空）" size="10" inputmode="decimal">
+    <input id="hN" placeholder="备注（可空）" size="16">
+    <button class="act" id="hAdd">保存</button>
+   </div>
+   <div class="mut">同一代码再次录入视为加仓，成本按数量加权平均。每次录入同时在统一账本记一条"所有人实盘"记录。期权不能录入。</div></div>
   ${alertsCard(d.alerts,"持仓警报")}`;
+  const msg=t=>{$("#hMsg").textContent=t};
+  $("#hAdd").onclick=async()=>{try{await post("/api/wb/holdings",{ticker:$("#hT").value.trim(),quantity:$("#hQ").value,cost_basis:$("#hC").value,opened:$("#hO").value,stop:$("#hS").value,note:$("#hN").value});await loadHoldings();$("#hMsg").textContent="已保存"}catch(e){alert("没有保存："+e.message)}};
+  $("#hInspect").onclick=async()=>{$("#hInspect").disabled=true;msg("巡检中（取行情，约十几秒）…");try{await post("/api/wb/holdings/inspect");await loadHoldings();$("#hMsg").textContent="巡检完成"}catch(e){msg("巡检失败："+e.message);$("#hInspect").disabled=false}};
+  document.querySelectorAll("[data-sell]").forEach(b=>b.onclick=async()=>{const t=b.dataset.sell;const q=prompt(`${t} 卖出多少？`);if(!q)return;try{await post(`/api/wb/holdings/${encodeURIComponent(t)}/reduce`,{quantity:q});await loadHoldings()}catch(e){alert("没有改动："+e.message)}});
+  document.querySelectorAll("[data-clear]").forEach(b=>b.onclick=async()=>{const t=b.dataset.clear;if(!confirm(`确定清仓 ${t}？（账本里的历史记录会保留）`))return;try{await post(`/api/wb/holdings/${encodeURIComponent(t)}/reduce`,{quantity:1e18});await loadHoldings()}catch(e){alert("没有改动："+e.message)}});
 }
 
 function alertsCard(list,title){

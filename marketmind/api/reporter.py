@@ -99,12 +99,15 @@ def build_context(question: str) -> dict[str, Any]:
                                               "independent_sources", "entry_id")}
                       for i in ev["items"][:20]]}
     hold = whitebox.get_holdings()
-    if hold.get("available"):
-        ctx["owner_holdings_inspection"] = {
-            "date": hold["date"],
-            "items": [{k: i.get(k) for k in ("ticker", "unrealized_return", "light", "reward_risk",
-                                              "verdict_cn", "reason", "alternatives")}
-                      for i in hold["items"]]}
+    if hold.get("holdings"):
+        rep = hold.get("report") or {}
+        ctx["owner_holdings"] = {
+            "positions": [{k: h.get(k) for k in ("ticker", "quantity", "cost_basis", "opened", "stop")}
+                          for h in hold["holdings"]],
+            "inspection_date": rep.get("date"),
+            "inspection": [{k: i.get(k) for k in ("ticker", "unrealized_return", "light",
+                                                  "reward_risk", "verdict_cn", "reason", "alternatives")}
+                           for i in rep.get("items", [])]}
     big = whitebox.get_big_alerts()
     if big.get("available"):
         rep = big.get("report") or {}

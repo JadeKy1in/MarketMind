@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pathlib import Path
 
@@ -133,6 +133,69 @@ async def wb_big_alerts():
 async def wb_temp_shadows():
     from marketmind.api import whitebox
     return _wb(whitebox.get_temp_shadows)
+
+
+# ── owner holdings entry (docs/S6_DESIGN.md) ────────────────────────────────
+# Writes are accepted only from this machine and only with the X-MarketMind header,
+# which a page on another site cannot send without a CORS preflight this app never
+# approves (no CORS middleware), so a web page cannot submit holdings through the
+# owner's browser.
+
+def _owner_write_denied(request: Request) -> JSONResponse | None:
+    host = request.client.host if request.client else ""
+    if host not in ("127.0.0.1", "::1", "localhost", "testclient"):
+        return JSONResponse({"error": "holdings can only be changed from this computer"}, status_code=403)
+    if request.headers.get("x-marketmind") != "1":
+        return JSONResponse({"error": "missing X-MarketMind header"}, status_code=403)
+    return None
+
+
+def _holdings_ledger():
+    from marketmind.ledger.store import LedgerStore, default_ledger_path
+    return LedgerStore(default_ledger_path())
+
+
+@app.post("/api/wb/holdings")
+async def holdings_add(request: Request):
+    if (denied := _owner_write_denied(request)):
+        return denied
+    from dataclasses import asdict
+    from marketmind.holdings import store as hs
+    try:
+        body = await request.json()
+        h = hs.add(str(body.get("ticker", "")), float(body.get("quantity")), float(body.get("cost_basis")),
+                   opened=body.get("opened") or None,
+                   stop=float(body["stop"]) if body.get("stop") not in (None, "") else None,
+                   note=str(body.get("note") or ""), ledger=_holdings_ledger())
+    except (ValueError, TypeError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return JSONResponse({"holding": asdict(h)})
+
+
+@app.post("/api/wb/holdings/{ticker}/reduce")
+async def holdings_reduce(ticker: str, request: Request):
+    if (denied := _owner_write_denied(request)):
+        return denied
+    from marketmind.holdings import store as hs
+    try:
+        body = await request.json()
+        h = hs.reduce(ticker, float(body.get("quantity")))
+    except (ValueError, TypeError) as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return JSONResponse({"remaining": h.quantity if h else 0})
+
+
+@app.post("/api/wb/holdings/inspect")
+async def holdings_inspect(request: Request):
+    if (denied := _owner_write_denied(request)):
+        return denied
+    from marketmind.holdings.inspect import run_inspection
+    try:
+        reports, path = await run_inspection(_holdings_ledger())
+    except Exception:
+        logger.warning("holdings inspection from dashboard failed", exc_info=True)
+        return JSONResponse({"error": "inspection failed (see server log)"}, status_code=500)
+    return JSONResponse({"inspected": len(reports)})
 
 
 @app.post("/api/reporter")

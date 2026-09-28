@@ -267,18 +267,14 @@ def get_evidence(date: str | None = None) -> dict:
 # ── owner holdings (S6) ─────────────────────────────────────────────────────
 
 def get_holdings() -> dict:
-    day, report = _latest_json(data_dir() / "holdings_reports")
-    if report is None:
-        from marketmind.holdings.store import load
-        n = len(load())
-        reason = ("未录入持仓：python -m marketmind.holdings add <代码> <数量> <成本>" if not n
-                  else f"已录入 {n} 个持仓，尚未巡检：python -m marketmind.holdings inspect")
-        return {"available": False, "reason": reason}
+    from dataclasses import asdict as _asdict
     from marketmind.holdings.store import load
-    current = {h.ticker for h in load()}
-    items = [i for i in report.get("items", []) if i.get("ticker") in current]
-    removed = len(report.get("items", [])) - len(items)
-    return {"available": True, "date": day, "items": items, "removed_since_report": removed,
+    holdings = [_asdict(h) for h in load()]
+    current = {h["ticker"] for h in holdings}
+    day, report = _latest_json(data_dir() / "holdings_reports")
+    items = [i for i in (report or {}).get("items", []) if i.get("ticker") in current]
+    return {"available": True, "holdings": holdings,
+            "report": {"date": day, "items": items} if report else None,
             "alerts": get_alerts(source="holdings", limit=20)["alerts"],
             "note": "结论由代码规则给出（docs/S6_DESIGN.md），系统不下单；持仓只存在本机 data/holdings.json"}
 

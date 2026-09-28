@@ -99,6 +99,24 @@ def add(ticker: str, quantity: float, cost_basis: float, *, opened: str | None =
     return h
 
 
+def reduce(ticker: str, quantity: float, path: Path | None = None) -> Holding | None:
+    """Partial sell: lower the quantity (cost basis unchanged). Selling everything
+    removes the holding and returns None. Ledger mirror records are kept."""
+    t = validate_ticker(ticker)
+    if not math.isfinite(quantity) or quantity <= 0:
+        raise ValueError("quantity must be a positive number")
+    holdings = load(path)
+    h = next((x for x in holdings if x.ticker == t), None)
+    if h is None:
+        raise ValueError(f"no holding {t}")
+    if quantity >= h.quantity - 1e-12:
+        save([x for x in holdings if x.ticker != t], path)
+        return None
+    h.quantity = round(h.quantity - quantity, 10)
+    save(holdings, path)
+    return h
+
+
 def remove(ticker: str, path: Path | None = None) -> bool:
     t = validate_ticker(ticker)
     holdings = load(path)

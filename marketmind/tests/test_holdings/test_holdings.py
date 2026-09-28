@@ -136,11 +136,11 @@ async def test_inspection_end_to_end(env, monkeypatch):
     path = hi.write_report(reports, today="2026-09-28")
     from marketmind.api import whitebox
     d = whitebox.get_holdings()
-    assert d["available"] and d["date"] == "2026-09-28" and len(d["items"]) == 3
-    assert path.exists()
+    assert d["report"]["date"] == "2026-09-28" and len(d["report"]["items"]) == 3
+    assert len(d["holdings"]) == 3 and path.exists()
     hs.remove("WINNER")                      # removed holdings drop out of the page
     d = whitebox.get_holdings()
-    assert len(d["items"]) == 2 and d["removed_since_report"] == 1
+    assert len(d["report"]["items"]) == 2 and len(d["holdings"]) == 2
 
     sent = []
     monkeypatch.setattr("marketmind.notification.alert_manager.emit_alert",
@@ -151,7 +151,36 @@ async def test_inspection_end_to_end(env, monkeypatch):
 def test_dashboard_without_holdings(env):
     from marketmind.api import whitebox
     d = whitebox.get_holdings()
-    assert d["available"] is False and "录入" in d["reason"]
+    assert d["holdings"] == [] and d["report"] is None
+
+
+def test_reduce_partial_and_full(env):
+    store, _ = env
+    hs.add("MSFT", 10, 400, ledger=store)
+    assert hs.reduce("msft", 4).quantity == 6 and hs.load()[0].cost_basis == 400
+    with pytest.raises(ValueError):
+        hs.reduce("MSFT", float("nan"))
+    with pytest.raises(ValueError):
+        hs.reduce("AAPL", 1)
+    assert hs.reduce("MSFT", 100) is None and hs.load() == []
+    assert len(store.list(source_type="owner")) == 1         # mirror record kept
+
+
+def test_dashboard_holdings_endpoints(env):
+    from fastapi.testclient import TestClient
+    from marketmind.api.routes import app
+    c = TestClient(app)
+    hdr = {"X-MarketMind": "1"}
+    assert c.post("/api/wb/holdings", json={"ticker": "AAPL", "quantity": 5, "cost_basis": 200}).status_code == 403
+    r = c.post("/api/wb/holdings", headers=hdr,
+               json={"ticker": "aapl", "quantity": "5", "cost_basis": "200", "stop": "", "opened": ""})
+    assert r.status_code == 200 and r.json()["holding"]["ticker"] == "AAPL"
+    bad = c.post("/api/wb/holdings", headers=hdr, json={"ticker": "SPY 261016P00500000", "quantity": 1, "cost_basis": 1})
+    assert bad.status_code == 400 and "option" in bad.json()["error"]
+    assert c.post("/api/wb/holdings/AAPL/reduce", headers=hdr, json={"quantity": 2}).json()["remaining"] == 3
+    assert c.get("/api/wb/holdings").json()["holdings"][0]["quantity"] == 3
+    assert c.post("/api/wb/holdings/AAPL/reduce", headers=hdr, json={"quantity": 1e18}).json()["remaining"] == 0
+    assert c.get("/api/wb/holdings").json()["holdings"] == []
 
 
 def test_add_rejects_nan_and_bad_dates(env):
