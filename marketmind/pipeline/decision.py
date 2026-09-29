@@ -770,6 +770,39 @@ def _normalise_size_units(cards: list[DecisionCard]) -> None:
             c.position_size_pct = round(c.position_size_pct * 100, 4)
 
 
+# A negated or deferred verdict ("DO NOT ENTER", "不买入", "AVOID LONG", "WAIT") contains a
+# positive word as a substring, so negations are checked first.
+_ACTION_NEGATION_EN = re.compile(
+    r"\b(?:NOT|DON'?T|DONT|DO\s+NOT|AVOID|NO|NEVER|WAIT|SKIP|PASS|HOLD[\s_-]*OFF)\b")
+_ACTION_NEGATION_CN = ("不", "勿", "别", "暂不", "观望", "等待", "回避", "放弃")
+_ACTION_POSITIVE = ("ENTER", "BUY", "LONG", "执行", "买入", "做多")
+
+
+def _action_says_enter(action: str) -> bool:
+    """True only for an un-negated entry verdict (English or Chinese)."""
+    a = action.upper().replace("\u2019", "'")
+    if _ACTION_NEGATION_EN.search(a) or any(w in a for w in _ACTION_NEGATION_CN):
+        return False
+    return any(w in a for w in _ACTION_POSITIVE)
+
+
+def _card_direction(raw: Any, action: str) -> str | None:
+    """long/short from the card's direction field, else from an explicit directional
+    action ("BUY", "LONG", "做多" / "SHORT", "SELL", "做空"); None when neither says.
+    A missing direction is never defaulted: a guessed side is an invented trade."""
+    d = str(raw).strip().lower() if raw is not None else ""
+    if d in ("long", "short"):
+        return d
+    if d:
+        return None                     # stated but unknown ("neutral", "hold") -> drop
+    a = action.upper()
+    is_long = any(w in a for w in ("LONG", "BUY", "买入", "做多"))
+    is_short = any(w in a for w in ("SHORT", "SELL", "卖出", "做空"))
+    if is_long != is_short:
+        return "long" if is_long else "short"
+    return None
+
+
 def _parse_decision_response(content: str) -> DecisionOutput:
     content = strip_markdown_fences(content)
     try:
@@ -788,11 +821,18 @@ def _parse_decision_response(content: str) -> DecisionOutput:
         # Flash often ignores the schema and invents keys (why_cn, action_en, ...);
         # read the common aliases, and honour its own "don't enter" verdicts.
         action = str(_pick(d, "action_en", "action", default="")).upper()
-        if action and not any(w in action for w in ("ENTER", "BUY", "LONG", "执行", "买入")):
+        ticker = str(d.get("ticker", ""))
+        if action and not _action_says_enter(action):
+            logger.info("Decision card %s dropped: action %r is not an entry", ticker, action)
+            continue
+        direction = _card_direction(d.get("direction"), action)
+        if direction is None:
+            logger.warning("Decision card %s dropped: direction %r is missing or unknown",
+                           ticker, d.get("direction"))
             continue
         cards.append(DecisionCard(
-            ticker=str(d.get("ticker", "")),
-            direction=str(d.get("direction", "long")),
+            ticker=ticker,
+            direction=direction,
             position_size_pct=_num(d.get("position_size_pct"), 0.0),
             entry_low=0.0, entry_high=0.0, stop_loss=0.0, target_price=0.0,  # set by guard from L3
             max_hold_days=int(_num(_pick(d, "max_hold_days", "hold_days_max"), 30)),

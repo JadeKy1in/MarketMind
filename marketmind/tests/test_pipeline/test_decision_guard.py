@@ -105,7 +105,7 @@ def test_parse_accepts_flash_aliases_and_respects_its_action():
     from marketmind.pipeline.decision import _parse_decision_response
     raw = json.dumps({
         "decision_cards": [
-            {"ticker": "SLV", "action_en": "ENTER", "position_size_pct": 12, "why_cn": "白银对冲",
+            {"ticker": "SLV", "action_en": "ENTER", "direction": "long", "position_size_pct": 12, "why_cn": "白银对冲",
              "invalidation_cn": "若跌破 54 则错", "red_team_response_cn": "回应"},
             {"ticker": "NVDA", "action_en": "WAIT", "position_size_pct": 8, "why_cn": "等待"},
         ],
@@ -136,9 +136,9 @@ def test_parse_reads_confidence_and_converts_fraction_sizes():
     import json
     from marketmind.pipeline.decision import _parse_decision_response
     raw = json.dumps({"decision_cards": [
-        {"ticker": "COIN", "position_size_pct": 0.06, "confidence": 0.55, "thesis": "t"},
-        {"ticker": "SLV", "position_size_pct": 0.1, "confidence": 60, "thesis": "t"},
-        {"ticker": "GLD", "position_size_pct": 0.05, "confidence": "high", "thesis": "t"},
+        {"ticker": "COIN", "direction": "long", "position_size_pct": 0.06, "confidence": 0.55, "thesis": "t"},
+        {"ticker": "SLV", "direction": "long", "position_size_pct": 0.1, "confidence": 60, "thesis": "t"},
+        {"ticker": "GLD", "direction": "long", "position_size_pct": 0.05, "confidence": "high", "thesis": "t"},
     ]})
     cards = _parse_decision_response(raw).decision_cards
     assert [c.position_size_pct for c in cards] == [6.0, 10.0, 5.0]   # live run 5: fractions
@@ -148,10 +148,10 @@ def test_parse_reads_confidence_and_converts_fraction_sizes():
 def test_parse_keeps_percent_sizes():
     import json
     from marketmind.pipeline.decision import _parse_decision_response
-    raw = json.dumps({"decision_cards": [{"ticker": "A", "position_size_pct": 12},
-                                         {"ticker": "B", "position_size_pct": 0.5}]})
+    raw = json.dumps({"decision_cards": [{"ticker": "A", "direction": "long", "position_size_pct": 12},
+                                         {"ticker": "B", "direction": "long", "position_size_pct": 0.5}]})
     assert [c.position_size_pct for c in _parse_decision_response(raw).decision_cards] == [12, 0.5]
-    one = json.dumps({"decision_cards": [{"ticker": "A", "position_size_pct": 1.0}]})
+    one = json.dumps({"decision_cards": [{"ticker": "A", "direction": "long", "position_size_pct": 1.0}]})
     assert _parse_decision_response(one).decision_cards[0].position_size_pct == 1.0
 
 
@@ -173,3 +173,67 @@ def test_guard_uses_tradable_universe_when_loaded():
     rep = enforce([card("NVDA"), card("ZZZZ"), card("FAKECOIN-USD")], l3)
     assert [c.ticker for c in rep.kept] == ["NVDA"]
     assert sum("not tradable" in n for n in rep.notes) == 2
+
+
+# --- action negations and direction normalisation (red-team 2026-09-29)
+
+def _parse_actions(*actions, direction="long"):
+    import json
+    from marketmind.pipeline.decision import _parse_decision_response
+    raw = json.dumps({"decision_cards": [
+        {"ticker": f"T{i}", "action": a, "direction": direction, "position_size_pct": 5}
+        for i, a in enumerate(actions)]}, ensure_ascii=False)
+    return [c.ticker for c in _parse_decision_response(raw).decision_cards]
+
+
+@pytest.mark.parametrize("action", [
+    "DO NOT ENTER", "DON'T BUY", "DON’T BUY", "DONT ENTER", "NOT A BUY", "AVOID LONG",
+    "NO ENTRY - BUY LATER", "WAIT", "WAIT TO ENTER", "SKIP", "PASS ON BUY", "HOLD OFF ON BUYING",
+    "never buy", "avoid long exposure",
+])
+def test_english_negated_actions_are_not_entries(action):
+    assert _parse_actions(action) == []
+
+
+@pytest.mark.parametrize("action", ["不买入", "暂不执行", "勿买入", "别做多", "观望", "等待买入", "回避"])
+def test_chinese_negated_actions_are_not_entries(action):
+    assert _parse_actions(action) == []
+
+
+@pytest.mark.parametrize("action", ["ENTER", "BUY", "enter long", "LONG", "执行", "买入", "做多"])
+def test_positive_actions_are_entries(action):
+    assert _parse_actions(action) == ["T0"]
+
+
+@pytest.mark.parametrize("raw_dir", ["LONG", " Long ", "long"])
+def test_direction_is_normalised(raw_dir):
+    import json
+    from marketmind.pipeline.decision import _parse_decision_response
+    raw = json.dumps({"decision_cards": [{"ticker": "A", "direction": raw_dir, "position_size_pct": 5}]})
+    assert [c.direction for c in _parse_decision_response(raw).decision_cards] == ["long"]
+
+
+@pytest.mark.parametrize("card", [
+    {"ticker": "A"},                                  # no direction, no action
+    {"ticker": "A", "action": "ENTER"},               # action says nothing about side
+    {"ticker": "A", "direction": "neutral"},
+    {"ticker": "A", "direction": "hold", "action": "BUY"},
+    {"ticker": "A", "direction": ""},
+])
+def test_missing_or_unknown_direction_drops_card(card, caplog):
+    import json
+    import logging
+    from marketmind.pipeline.decision import _parse_decision_response
+    with caplog.at_level(logging.WARNING, logger="marketmind.pipeline.decision"):
+        out = _parse_decision_response(json.dumps({"decision_cards": [card]}))
+    assert out.decision_cards == []
+    assert "direction" in caplog.text
+
+
+def test_direction_read_from_explicit_directional_action():
+    import json
+    from marketmind.pipeline.decision import _parse_decision_response
+    raw = json.dumps({"decision_cards": [{"ticker": "A", "action": "BUY"},
+                                         {"ticker": "B", "action": "买入"}]}, ensure_ascii=False)
+    assert [(c.ticker, c.direction) for c in _parse_decision_response(raw).decision_cards] == [
+        ("A", "long"), ("B", "long")]
