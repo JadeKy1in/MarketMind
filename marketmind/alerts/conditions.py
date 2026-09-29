@@ -1,112 +1,150 @@
-"""Big-move alert conditions (docs/S8_DESIGN.md, SPEC_v3 §10). Pure code, no LLM.
+"""Big-move alert decision (docs/S8_DESIGN.md, SPEC_v3 §10; owner decisions 2026-09-29).
+Pure code, no LLM.
 
-A  advisors agree : >= 3 advisors long the same ticker within 5 days, from >= 2
-                    roster groups, with shorts at most half the longs
-B  evidence       : an evidence-layer divergence record on the same ticker and
-                    direction within 5 days
-C  trend          : L3 three lights green
-Only owner-executable instruments (Robinhood-tradable, no options), long only.
+Trunk: an alert candidate is an owner-executable instrument whose trend state switched
+today - CASH/WATCH/EXIT -> TREND ("entry", long) or TREND -> CASH/WATCH/EXIT ("exit") -
+as reported by the configured trend-signal source (alerts/trend_source.py).
+
+Annotations (never required, never blocking):
+- advisor votes, aggregated by asset group (alerts/asset_groups.py): each voter's latest
+  decision in the group within WINDOW_DAYS with hold >= MIN_VOTE_HOLD_BARS. The alert's
+  direction is long for an entry and short for an exit.
+    no_votes   nobody voted in the group
+    vetoed     strictly more than half of the voters voted against  (flag shown)
+    supported  >= MIN_SUPPORT voters for, from >= MIN_SUPPORT_GROUPS roster groups,
+               and voters against <= MAX_OPPOSE_RATIO x voters for
+    weak       anything else
+- evidence: evidence-layer divergence records in the same group within WINDOW_DAYS; the
+  ones in the alert's direction are a supporting note, the others are listed as against.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-WINDOW_DAYS = 5
-MIN_ADVISORS = 3
-MIN_GROUPS = 2
-MAX_SHORT_RATIO = 0.5
+from marketmind.alerts import config as C
+from marketmind.alerts.asset_groups import asset_group
+from marketmind.alerts.trend_source import TREND, WATCH, TrendReading
+
+ENTRY, EXIT = "entry", "exit"
+VOTER_SOURCES = ("shadow", "playground")
+SUPPORTED, VETOED, WEAK, NO_VOTES = "supported", "vetoed", "weak", "no_votes"
+STATUS_CN = {SUPPORTED: "顾问支持", VETOED: "顾问反对（否决标记）", WEAK: "支持不足",
+             NO_VOTES: "无顾问意见"}
 
 
 @dataclass
 class Candidate:
     ticker: str
-    a_ok: bool = False
-    b_ok: bool = False
-    c_ok: bool | None = None           # None = not evaluated (A and B both false)
-    advisors_long: list[dict] = field(default_factory=list)
-    advisors_short: list[dict] = field(default_factory=list)
-    groups: list[str] = field(default_factory=list)
-    evidence: list[dict] = field(default_factory=list)
-    l3: dict = field(default_factory=dict)
+    kind: str                                   # entry | exit | watch (near miss)
+    group: str
+    trend: dict = field(default_factory=dict)   # the source's state record
+    votes_for: list[dict] = field(default_factory=list)
+    votes_against: list[dict] = field(default_factory=list)
+    status: str = NO_VOTES
+    evidence: list[dict] = field(default_factory=list)          # in the alert's direction
+    evidence_against: list[dict] = field(default_factory=list)
 
     @property
-    def met(self) -> int:
-        return int(self.a_ok) + int(self.b_ok) + int(bool(self.c_ok))
+    def direction(self) -> str:
+        return "short" if self.kind == EXIT else "long"
 
     @property
-    def fired(self) -> bool:
-        return self.a_ok and self.b_ok and bool(self.c_ok)
+    def roster_groups(self) -> list[str]:
+        return sorted({v["group"] for v in self.votes_for})
+
+    @property
+    def key(self) -> str:
+        """Identity of the trend event, for de-duplication across runs."""
+        t = self.trend
+        when = t.get("entry_signal_date") if self.kind == ENTRY else None
+        return f"{self.ticker}:{self.kind}:{when or t.get('as_of')}"
 
 
-def _recent(entries, now: datetime, days: int = WINDOW_DAYS):
+def _recent(entries, now: datetime, days: int = C.WINDOW_DAYS):
     cutoff = (now - timedelta(days=days)).isoformat()
     return [e for e in entries if e.created_at >= cutoff]
 
 
-def advisor_votes(entries, now: datetime, advisors: dict[str, str],
-                  tradable) -> dict[str, dict[str, list[dict]]]:
-    """ticker -> {"long": [...], "short": [...]} of the latest vote per advisor."""
+def group_votes(entries, now: datetime, voters: dict[str, str]) -> dict[str, dict[str, list[dict]]]:
+    """asset group -> {"long": [...], "short": [...]}: each voter's latest qualifying
+    decision in the group (hold >= MIN_VOTE_HOLD_BARS, within WINDOW_DAYS)."""
     latest: dict[tuple[str, str], object] = {}
     for e in _recent(entries, now):
-        if e.source_type != "shadow" or e.source_id not in advisors:
+        if e.source_type not in VOTER_SOURCES or e.source_id not in voters:
             continue
-        key = (e.ticker.upper(), e.source_id)
+        if (e.hold_bars or 0) < C.MIN_VOTE_HOLD_BARS or e.direction not in ("long", "short"):
+            continue
+        key = (asset_group(e.ticker), e.source_id)
         if key not in latest or e.created_at > latest[key].created_at:
             latest[key] = e
-    votes: dict[str, dict[str, list[dict]]] = {}
-    for (ticker, sid), e in latest.items():
-        if not tradable(ticker):
-            continue
-        votes.setdefault(ticker, {"long": [], "short": []})[e.direction].append(
-            {"shadow_id": sid, "group": advisors[sid], "entry_id": e.entry_id,
-             "confidence": e.confidence})
-    return votes
+    out: dict[str, dict[str, list[dict]]] = {}
+    for (group, sid), e in sorted(latest.items()):
+        out.setdefault(group, {"long": [], "short": []})[e.direction].append(
+            {"voter": sid, "group": voters[sid], "ticker": e.ticker.upper(),
+             "entry_id": e.entry_id, "hold_bars": e.hold_bars, "confidence": e.confidence})
+    return out
 
 
-def check_a(v: dict[str, list[dict]]) -> tuple[bool, list[str]]:
-    longs, shorts = v.get("long", []), v.get("short", [])
-    groups = sorted({x["group"] for x in longs})
-    ok = (len(longs) >= MIN_ADVISORS and len(groups) >= MIN_GROUPS
-          and len(shorts) <= MAX_SHORT_RATIO * len(longs))
-    return ok, groups
+def vote_status(votes_for: list[dict], votes_against: list[dict]) -> str:
+    n_for, n_against = len(votes_for), len(votes_against)
+    voting = n_for + n_against
+    if voting == 0:
+        return NO_VOTES
+    if n_against > voting / 2:
+        return VETOED
+    if (n_for >= C.MIN_SUPPORT and len({v["group"] for v in votes_for}) >= C.MIN_SUPPORT_GROUPS
+            and n_against <= C.MAX_OPPOSE_RATIO * n_for):
+        return SUPPORTED
+    return WEAK
 
 
-def evidence_for(entries, now: datetime) -> dict[str, list[dict]]:
-    out: dict[str, list[dict]] = {}
+def group_evidence(entries, now: datetime) -> dict[str, dict[str, list[dict]]]:
+    out: dict[str, dict[str, list[dict]]] = {}
     for e in _recent(entries, now):
-        if e.source_type == "evidence" and e.direction == "long":
-            out.setdefault(e.ticker.upper(), []).append(
-                {"entry_id": e.entry_id, "claim": (e.meta or {}).get("claim", ""),
-                 "type": (e.meta or {}).get("claim_type")})
+        if e.source_type != "evidence" or e.direction not in ("long", "short"):
+            continue
+        out.setdefault(asset_group(e.ticker), {"long": [], "short": []})[e.direction].append(
+            {"entry_id": e.entry_id, "ticker": e.ticker.upper(),
+             "claim": (e.meta or {}).get("claim", ""), "type": (e.meta or {}).get("claim_type")})
     return out
 
 
-def trend_ok(snap) -> tuple[bool, dict]:
-    if snap is None:
-        return False, {"available": False}
-    return snap.light == "green", {
-        "available": True, "light": snap.light, "close": snap.close, "as_of": snap.as_of,
-        "entry_low": snap.entry_low, "entry_high": snap.entry_high, "stop": snap.stop_loss,
-        "target": snap.target_price, "reward_risk": snap.reward_risk_ratio,
-        "recommendation": snap.recommendation}
+def annotate(c: Candidate, votes: dict, evidence: dict) -> Candidate:
+    v = votes.get(c.group, {"long": [], "short": []})
+    ev = evidence.get(c.group, {"long": [], "short": []})
+    against = "long" if c.direction == "short" else "short"
+    c.votes_for, c.votes_against = list(v[c.direction]), list(v[against])
+    c.status = vote_status(c.votes_for, c.votes_against)
+    c.evidence, c.evidence_against = list(ev[c.direction]), list(ev[against])
+    return c
 
 
-async def evaluate(entries, now: datetime, advisors: dict[str, str], tradable,
-                   snapshot_fn) -> list[Candidate]:
-    """All tickers with at least one condition met; C is only computed where A or B holds."""
-    votes = advisor_votes(entries, now, advisors, tradable)
-    evidence = {t: ev for t, ev in evidence_for(entries, now).items() if tradable(t)}
-    out = []
-    for ticker in sorted(set(votes) | set(evidence)):
-        v = votes.get(ticker, {"long": [], "short": []})
-        a_ok, groups = check_a(v)
-        c = Candidate(ticker, a_ok=a_ok, b_ok=bool(evidence.get(ticker)),
-                      advisors_long=v["long"], advisors_short=v["short"], groups=groups,
-                      evidence=evidence.get(ticker, []))
-        if c.a_ok or c.b_ok:
-            c.c_ok, c.l3 = trend_ok(await snapshot_fn(ticker))
-        if c.met >= 1:
-            out.append(c)
-    out.sort(key=lambda c: (-c.met, -len(c.advisors_long), c.ticker))
-    return out
+def evaluate(reading: TrendReading, entries, now: datetime, voters: dict[str, str],
+             tradable, include=lambda t: True) -> tuple[list[Candidate], list[Candidate], list[dict]]:
+    """(alerts, near misses, skipped). Alerts = today's entries / exits of executable
+    instruments passing `include`; near misses = executable WATCH instruments (one
+    breakout away). `skipped` lists changes dropped as not owner-executable."""
+    if not reading.available:
+        return [], [], []
+    votes, evidence = group_votes(entries, now, voters), group_evidence(entries, now)
+    alerts: list[Candidate] = []
+    skipped: list[dict] = []
+    for kind, tickers in ((ENTRY, reading.entries), (EXIT, reading.exits)):
+        for t in sorted(set(tickers)):
+            if not include(t):
+                continue
+            state = reading.states.get(t, {})
+            if not tradable(t):
+                skipped.append({"ticker": t, "kind": kind, "reason": "所有人无法执行"})
+                continue
+            alerts.append(annotate(Candidate(t, kind, asset_group(t), dict(state)), votes, evidence))
+    near = [annotate(Candidate(t, "watch", asset_group(t), dict(s)), votes, evidence)
+            for t, s in sorted(reading.states.items())
+            if s.get("state") == WATCH and include(t) and tradable(t)]
+    alerts.sort(key=lambda c: (c.kind != EXIT, c.status != SUPPORTED, c.ticker))
+    return alerts, near, skipped
+
+
+__all__ = ["Candidate", "ENTRY", "EXIT", "TREND", "WATCH", "evaluate", "group_votes",
+           "group_evidence", "vote_status", "annotate", "STATUS_CN"]

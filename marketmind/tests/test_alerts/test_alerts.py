@@ -1,4 +1,7 @@
-"""Big-move alerts (docs/S8_DESIGN.md): conditions, observation mode, ledger, push."""
+"""Big-move alerts (docs/S8_DESIGN.md, owner decisions 2026-09-29): trend trunk, grouped
+advisor votes and evidence as annotations, observe mode, owner live switch, one batched
+priority push, weekend crypto run."""
+import inspect
 import json
 from datetime import datetime, timezone
 
@@ -6,175 +9,303 @@ import httpx
 import pytest
 
 from marketmind.alerts import conditions as cond
-from marketmind.alerts import notify
-from marketmind.alerts import runner
+from marketmind.alerts import config as C
+from marketmind.alerts import notify, runner
+from marketmind.alerts import trend_source as ts
+from marketmind.alerts.asset_groups import ASSET_GROUPS, asset_group
 from marketmind.gateway.price_history import Bar
 from marketmind.ledger.prices import StaticPriceSource
 from marketmind.ledger.store import LedgerEntry, LedgerStore
-from marketmind.pipeline.l3_indicators import TechnicalSnapshot
 
-NOW = datetime(2026, 9, 28, 12, tzinfo=timezone.utc)
-ADVISORS = {"a1": "fundamental", "a2": "fundamental", "a3": "momentum", "a4": "contrarian",
-            "a5": "fundamental"}
+NOW = datetime(2026, 9, 28, 16, tzinfo=timezone.utc)          # New York date 2026-09-28
+DAY = "2026-09-28"
+VOTERS = {"f1": "fundamental", "f2": "fundamental", "m1": "momentum", "c1": "contrarian",
+          "playground:pg1": "playground"}
 
 
-def _add(store, source_type, source_id, ticker, direction="long", at="2026-09-27T10:00:00+00:00",
-         **meta):
-    return store.add(LedgerEntry(source_type, source_id, ticker, direction, 5, 0.6, 200, "x",
+def _add(store, source_type, source_id, ticker, direction="long", hold=20,
+         at="2026-09-27T10:00:00+00:00", **meta):
+    return store.add(LedgerEntry(source_type, source_id, ticker, direction, hold, 0.6, 200, "x",
                                  meta=meta), created_at=at)
 
 
-def _snap(light="green"):
-    return TechnicalSnapshot(
-        ticker="X", close=100.0, daily_return_pct=0.0, wma200=80.0, weekly_bars=260,
-        above_200wma=True, structure_intact=True, key_resistance=None,
-        resistance_distance_pct=None, near_key_resistance=False, atr14=2.0, support_low=95.0,
-        support_high=96.0, entry_low=98.0, entry_high=100.5, stop_loss=96.0, target_price=110.0,
-        reward_risk_ratio=2.5, light=light, recommendation="enter", as_of="2026-09-25", notes=[])
+def _state(t, state, **kw):
+    return {"ticker": t, "state": state, "as_of": "2026-09-25", "close": 100.0,
+            "stop_level": 90.0, "entry_signal_date": "2026-09-25" if state == "TREND" else None,
+            **kw}
+
+
+def _trend_file(data_dir, day=DAY, lean=True, full_only=None):
+    """lean: QQQ entry, GLD exit, IWM entry (made non-executable in tests), BTC-USD entry,
+    SPY WATCH. full: adds NVDA entry (only visible with the full universe)."""
+    lean_states = {"QQQ": _state("QQQ", "TREND"), "GLD": _state("GLD", "EXIT"),
+                   "IWM": _state("IWM", "TREND"), "BTC-USD": _state("BTC-USD", "TREND"),
+                   "SPY": _state("SPY", "WATCH"), "TLT": _state("TLT", "CASH")}
+    full = dict(lean_states) | {"NVDA": _state("NVDA", "TREND")}
+    doc = {"date": day, "mode": "daily", "full": full,
+           "lean": {"states": lean_states} if lean else None,
+           "changes": {"full": {"entries": ["BTC-USD", "IWM", "NVDA", "QQQ"], "exits": ["GLD"]},
+                       "lean": {"entries": ["BTC-USD", "IWM", "QQQ"], "exits": ["GLD"]}}}
+    folder = data_dir / "trend"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{day}.json").write_text(json.dumps(doc), encoding="utf-8")
 
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
     monkeypatch.setenv("MARKETMIND_DATA_DIR", str(tmp_path))
-    monkeypatch.setattr(runner, "load_advisors", lambda: (runner.OBSERVE, dict(ADVISORS)))
+    monkeypatch.delenv(C.LIVE_ENV, raising=False)
+    monkeypatch.delenv(C.TREND_SOURCE_ENV, raising=False)
+    monkeypatch.setattr(runner, "load_voters", lambda entries=(): (runner.ADVISORS, dict(VOTERS)))
+    _trend_file(tmp_path)
     return LedgerStore(tmp_path / "ledger.db"), tmp_path
 
-
-# ── condition A ─────────────────────────────────────────────────────────────
-
-def test_condition_a_needs_three_advisors_two_groups_few_shorts(env):
-    store, _ = env
-    for sid in ("a1", "a2", "a3"):
-        _add(store, "shadow", sid, "NVDA")
-    for sid in ("a1", "a2", "a5"):                  # one group only
-        _add(store, "shadow", sid, "XLE")
-    for sid in ("a1", "a3", "a4"):
-        _add(store, "shadow", sid, "GLD")
-    _add(store, "shadow", "a2", "GLD", "short")
-    _add(store, "shadow", "a5", "GLD", "short")      # 2 shorts > half of 3 longs
-    _add(store, "shadow", "outsider", "NVDA")        # not an advisor
-    _add(store, "shadow", "a4", "NVDA", at="2026-09-10T10:00:00+00:00")   # outside window
-    votes = cond.advisor_votes(store.list(), NOW, ADVISORS, lambda t: True)
-    assert cond.check_a(votes["NVDA"]) == (True, ["fundamental", "momentum"])
-    assert cond.check_a(votes["XLE"])[0] is False
-    assert cond.check_a(votes["GLD"])[0] is False
-
-
-def test_latest_vote_per_advisor_counts_once(env):
-    store, _ = env
-    _add(store, "shadow", "a1", "NVDA", "short", at="2026-09-25T10:00:00+00:00")
-    _add(store, "shadow", "a1", "NVDA", "long", at="2026-09-27T10:00:00+00:00")
-    votes = cond.advisor_votes(store.list(), NOW, ADVISORS, lambda t: True)
-    assert len(votes["NVDA"]["long"]) == 1 and votes["NVDA"]["short"] == []
-
-
-# ── full evaluation ─────────────────────────────────────────────────────────
 
 def _bars():
     return [Bar(f"2026-08-{d:02d}", 100, 101, 99, 100, 1000) for d in range(1, 29)]
 
 
-async def _run(store, tmp, snap_light="green", tradable=lambda t: t != "600519.SS", **kw):
-    async def snap(t):
-        return _snap(snap_light)
+async def _run(store, tmp, env_vars=None, **kw):
     sent = []
 
-    async def notifier(title, body):
-        sent.append((title, body))
+    async def notifier(title, body, priority=False):
+        sent.append((title, body, priority))
         return [{"channel": "fake", "ok": True, "status": 200}]
-    report = await runner.run_alerts(store, now=NOW, snapshot_fn=snap, tradable=tradable,
-                                     notifier=notifier,
-                                     price_source=StaticPriceSource({"NVDA": _bars()}),
-                                     report_dir=tmp / "alerts", **kw)
+    report = await runner.run_alerts(
+        store, now=NOW, tradable=lambda t: t != "IWM", notifier=notifier,
+        price_source=StaticPriceSource({t: _bars() for t in ("QQQ", "BTC-USD", "NVDA")}),
+        report_dir=tmp / "alerts", env=env_vars or {}, **kw)
     return report, sent
 
 
-@pytest.mark.asyncio
-async def test_fires_only_when_all_three_hold_and_observe_does_not_push(env):
-    store, tmp = env
-    for sid in ("a1", "a2", "a3"):
-        _add(store, "shadow", sid, "NVDA")
-    _add(store, "evidence", "evidence:v1:revenue_growth", "NVDA", claim="营收下滑？数据说增长")
-    for sid in ("a1", "a3", "a4"):
-        _add(store, "shadow", sid, "600519.SS")      # not owner-executable
-    report, sent = await _run(store, tmp)
-    assert [f["ticker"] for f in report["fired"]] == ["NVDA"] and sent == []
-    e = store.get(report["fired"][0]["entry_id"])
-    assert (e.source_type, e.source_id, e.direction, e.hold_bars) == ("alert", "alert:observe", "long", 20)
-    assert e.falsifier_rule == {"type": "close_below", "price": 96.0} and e.snapshot_id
-    assert len(e.meta["advisors_long"]) == 3 and e.meta["evidence"][0]["claim"]
-    saved = json.loads((tmp / "alerts" / "2026-09-28.json").read_text("utf-8"))
-    assert saved["mode"] == "observe" and len(saved["fired"]) == 1
+# ── asset groups (decision 3) ───────────────────────────────────────────────
+
+def test_asset_groups_one_table_with_exact_ticker_fallback():
+    assert asset_group("GC=F") == asset_group("GLD") == asset_group("slv") == "precious_metals"
+    assert asset_group("ES=F") == asset_group("QQQ") == "us_equity_index"
+    assert asset_group("ZN=F") == asset_group("TLT") == "long_rates"
+    assert asset_group("CL=F") == asset_group("XLE") == "energy"
+    assert asset_group("SOL-USD") == asset_group("BTC-USD") == "crypto"
+    assert asset_group("SMH") == asset_group("XLK") == "sector_tech"
+    assert asset_group("NVDA") == "NVDA" and asset_group(" aapl ") == "AAPL"
+    members = [t for g in ASSET_GROUPS.values() for t in g]
+    assert len(members) == len(set(members))
 
 
-@pytest.mark.asyncio
-async def test_near_miss_and_dedupe(env):
-    store, tmp = env
-    for sid in ("a1", "a2", "a3"):
-        _add(store, "shadow", sid, "NVDA")
-    report, _ = await _run(store, tmp)                 # A + C, no evidence
-    assert report["fired"] == [] and report["near_misses"][0]["met"] == 2
-    _add(store, "evidence", "evidence:v1:x", "NVDA", claim="c")
-    first, _ = await _run(store, tmp)
-    assert len(first["fired"]) == 1
-    second, _ = await _run(store, tmp)                 # same day again -> deduped
-    assert second["fired"] == [] and "已警报过" in second["near_misses"][0]["note"]
-    assert len(store.list(source_type="alert")) == 1
+# ── votes: grouped, hold >= 10, playground counts (decisions 3, 4) ──────────
+
+def test_group_votes_aggregate_by_group_and_skip_short_holds(env):
+    store, _ = env
+    _add(store, "shadow", "f1", "GC=F")                     # counts for GLD
+    _add(store, "shadow", "m1", "SLV")
+    _add(store, "playground", "playground:pg1", "GLD", "short")
+    _add(store, "shadow", "c1", "GLD", hold=5)              # holding < 10 days: no vote
+    _add(store, "shadow", "outsider", "GLD")                # not a voter
+    _add(store, "shadow", "f2", "GLD", at="2026-09-10T10:00:00+00:00")   # outside window
+    _add(store, "shadow", "f1", "IAU", "short", at="2026-09-26T10:00:00+00:00")  # older than GC=F
+    v = cond.group_votes(store.list(), NOW, VOTERS)["precious_metals"]
+    assert sorted(x["voter"] for x in v["long"]) == ["f1", "m1"]
+    assert [x["voter"] for x in v["short"]] == ["playground:pg1"]
+    assert {x["ticker"] for x in v["long"]} == {"GC=F", "SLV"}
 
 
-@pytest.mark.asyncio
-async def test_yellow_light_blocks(env):
-    store, tmp = env
-    for sid in ("a1", "a2", "a3"):
-        _add(store, "shadow", sid, "NVDA")
-    _add(store, "evidence", "evidence:v1:x", "NVDA", claim="c")
-    report, _ = await _run(store, tmp, snap_light="yellow")
-    assert report["fired"] == [] and report["near_misses"][0]["c_ok"] is False
+def test_vote_status_rules():
+    f = lambda sid, g: {"voter": sid, "group": g}       # noqa: E731
+    assert cond.vote_status([], []) == cond.NO_VOTES
+    assert cond.vote_status([f("a", "x")], [f("b", "y"), f("c", "z")]) == cond.VETOED
+    assert cond.vote_status([f("a", "x")], [f("b", "y")]) == cond.WEAK     # tie: no veto
+    assert cond.vote_status([f("a", "x"), f("b", "y")], [f("c", "z")]) == cond.SUPPORTED
+    assert cond.vote_status([f("a", "x"), f("b", "x")], []) == cond.WEAK   # one group only
+    assert cond.vote_status([f("a", "x")], []) == cond.WEAK                # one voter
+    assert cond.vote_status([f("a", "x"), f("b", "y"), f("c", "z")],
+                            [f("d", "x"), f("e", "y")]) == cond.WEAK       # 2 > half of 3
 
 
-@pytest.mark.asyncio
-async def test_live_mode_pushes(env, monkeypatch):
-    store, tmp = env
-    monkeypatch.setattr(runner, "load_advisors", lambda: (runner.LIVE, dict(ADVISORS)))
-    for sid in ("a1", "a2", "a3"):
-        _add(store, "shadow", sid, "NVDA")
-    _add(store, "evidence", "evidence:v1:x", "NVDA", claim="c")
-    report, sent = await _run(store, tmp)
-    assert len(sent) == 1 and "NVDA" in sent[0][0] and report["fired"][0]["entry_id"] in sent[0][1]
-    assert report["fired"][0]["notified"][0]["ok"]
-
-
-def test_load_advisors_observe_until_s7_file(tmp_path, monkeypatch):
-    monkeypatch.setenv("MARKETMIND_DATA_DIR", str(tmp_path))
-    mode, adv = runner.load_advisors()
-    assert mode == runner.OBSERVE and len(adv) >= 20
-    (tmp_path / "advisors.json").write_text(json.dumps(
-        {"advisors": ["expert:gold:bullion_broker", "nope"]}), encoding="utf-8")
-    mode, adv = runner.load_advisors()
-    assert mode == runner.OBSERVE and len(adv) >= 20
-
-
-def _write_advisors(tmp_path, ids):
-    (tmp_path / "advisors.json").write_text(json.dumps({"advisors": ids}), encoding="utf-8")
-
-
-def test_live_mode_only_once_advisors_can_meet_condition_a(tmp_path, monkeypatch):
-    """1-2 advisors, or 3 from one group, can never satisfy A: stay in observation."""
+def test_load_voters_counts_playground_advisors(tmp_path, monkeypatch):
     from marketmind.shadows.v3 import roster
     monkeypatch.setenv("MARKETMIND_DATA_DIR", str(tmp_path))
-    by_group: dict[str, list[str]] = {}
-    for r in roster.active():
-        by_group.setdefault(r.group, []).append(r.shadow_id)
-    fund, other = by_group["fundamental"], by_group["momentum"]
-    for ids in ([fund[0]], [fund[0], other[0]], fund[:3], fund[:5]):
-        _write_advisors(tmp_path, ids)
-        mode, adv = runner.load_advisors()
-        assert mode == runner.OBSERVE and len(adv) == len(roster.active()), ids
-    _write_advisors(tmp_path, fund[:2] + other[:1])
-    mode, adv = runner.load_advisors()
-    assert mode == runner.LIVE and sorted(adv) == sorted(fund[:2] + other[:1])
-    assert runner.can_satisfy_a(adv) and not runner.can_satisfy_a({"a": "g", "b": "h"})
+    store = LedgerStore(tmp_path / "ledger.db")
+    _add(store, "playground", "playground:alpha", "SPY")
+    basis, v = runner.load_voters(store.list())             # no advisors.json: stand-ins
+    assert basis == runner.STAND_IN and v["playground:alpha"] == "playground"
+    assert len(v) == len(roster.active()) + 1
+    shadow = roster.active()[0].shadow_id
+    (tmp_path / "advisors.json").write_text(json.dumps(
+        {"advisors": ["playground:beta", shadow, "nope"]}), encoding="utf-8")
+    basis, v = runner.load_voters(store.list())
+    assert basis == runner.ADVISORS
+    assert v == {"playground:beta": "playground", shadow: roster.active()[0].group}
+    (tmp_path / "advisors.json").write_text(json.dumps({"advisors": ["nope"]}), encoding="utf-8")
+    assert runner.load_voters(store.list())[0] == runner.STAND_IN
 
+
+# ── trend source (decision 2) ───────────────────────────────────────────────
+
+def test_daily_source_prefers_lean_then_full(tmp_path):
+    _trend_file(tmp_path)
+    r = ts.DailyStateMachineSource(data_dir=tmp_path).read(DAY)
+    assert r.available and r.universe == "lean" and "NVDA" not in r.entries
+    assert r.entries == ["BTC-USD", "IWM", "QQQ"] and r.exits == ["GLD"]
+    r = ts.DailyStateMachineSource("full", data_dir=tmp_path).read(DAY)
+    assert r.universe == "full" and "NVDA" in r.entries
+    _trend_file(tmp_path, day="2026-09-29", lean=False)
+    r = ts.DailyStateMachineSource(data_dir=tmp_path).read("2026-09-29")
+    assert r.universe == "full" and "NVDA" in r.entries
+    r = ts.DailyStateMachineSource(data_dir=tmp_path).read("2026-09-30")   # no stale fallback
+    assert not r.available and "missing" in r.reason
+
+
+class _Monthly:
+    name = "monthly_test"
+
+    def read(self, day):
+        return ts.TrendReading(self.name, day, True, universe="monthly",
+                               states={"SPY": {"state": "TREND", "as_of": day}}, entries=["SPY"])
+
+
+def make_monthly():
+    return _Monthly()
+
+
+def test_source_is_a_config_switch(monkeypatch):
+    assert C.trend_source_name({}) == "daily_state_machine"
+    assert ts.get_source().name == "daily_state_machine"
+    assert ts.get_source("daily_state_machine:full").universe == "full"
+    monkeypatch.setenv(C.TREND_SOURCE_ENV, f"{__name__}:make_monthly")
+    assert ts.get_source().name == "monthly_test"
+    with pytest.raises(ValueError):
+        ts.get_source("nonsense")
+
+
+@pytest.mark.asyncio
+async def test_plugged_source_feeds_the_trunk(env):
+    store, tmp = env
+    report, _ = await _run(store, tmp, source=_Monthly())
+    assert [f["ticker"] for f in report["fired"]] == ["SPY"]
+    assert report["trend_source"]["source"] == "monthly_test"
+
+
+# ── the run (decisions 1, 2, 7) ─────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_trunk_alerts_with_annotations_in_observe_mode(env):
+    store, tmp = env
+    for sid in ("f1", "m1"):
+        _add(store, "shadow", sid, "ES=F")                  # support QQQ entry via the group
+    _add(store, "evidence", "evidence:v1:x", "SPY", claim="资金流背离")
+    for sid in ("f1", "m1"):
+        _add(store, "shadow", sid, "GC=F")                  # longs oppose the GLD exit
+    report, sent = await _run(store, tmp)
+    assert sent == [] and report["mode"] == runner.OBSERVE and not report["live_switch"]
+    fired = {f["ticker"]: f for f in report["fired"]}
+    assert set(fired) == {"QQQ", "GLD", "BTC-USD"}           # IWM not executable
+    assert report["skipped"] == [{"ticker": "IWM", "kind": "entry", "reason": "所有人无法执行"}]
+    q, g, b = fired["QQQ"], fired["GLD"], fired["BTC-USD"]
+    assert (q["kind"], q["status"], q["a_ok"], q["b_ok"]) == ("entry", "supported", True, True)
+    assert q["evidence"][0]["claim"] == "资金流背离" and q["asset_group"] == "us_equity_index"
+    assert (g["kind"], g["direction"], g["status"], g["veto"]) == ("exit", "short", "vetoed", True)
+    assert g["entry_id"] is None and len(g["advisors_long"]) == 2
+    assert b["status"] == "no_votes"
+    assert [n["ticker"] for n in report["near_misses"]] == ["SPY"]   # WATCH
+    e = store.get(q["entry_id"])
+    assert (e.source_type, e.source_id, e.direction, e.hold_bars) == ("alert", "alert:observe", "long", 20)
+    assert e.falsifier_rule == {"type": "close_below", "price": 90.0} and e.snapshot_id
+    assert e.meta["status"] == "supported" and e.meta["trend_source"] == "daily_state_machine"
+    assert len(store.list(source_type="alert")) == 2           # entries only
+    saved = json.loads((tmp / "alerts" / "2026-09-28.json").read_text("utf-8"))
+    assert saved["trend_source"]["universe"] == "lean" and len(saved["fired"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_veto_is_a_flag_not_a_block(env):
+    store, tmp = env
+    for sid in ("f1", "m1", "c1"):
+        _add(store, "shadow", sid, "NQ=F", "short")
+    report, _ = await _run(store, tmp)
+    q = next(f for f in report["fired"] if f["ticker"] == "QQQ")
+    assert q["status"] == "vetoed" and q["entry_id"]
+
+
+@pytest.mark.asyncio
+async def test_same_trend_event_is_not_alerted_twice(env):
+    store, tmp = env
+    first, _ = await _run(store, tmp)
+    second, _ = await _run(store, tmp)
+    assert len(first["fired"]) == 3 and second["fired"] == []
+    assert {d["ticker"] for d in second["duplicates"]} == {"QQQ", "GLD", "BTC-USD"}
+    assert len(store.list(source_type="alert")) == 2
+
+
+@pytest.mark.asyncio
+async def test_missing_trend_file_gives_no_alerts(env):
+    store, tmp = env
+    (tmp / "trend" / f"{DAY}.json").unlink()
+    report, _ = await _run(store, tmp)
+    assert report["fired"] == [] and not report["trend_source"]["available"]
+
+
+@pytest.mark.asyncio
+async def test_live_only_by_owner_switch_one_batched_priority_message(env, tmp_path):
+    store, tmp = env
+    # full advisor roster does not switch to live on its own
+    report, sent = await _run(store, tmp)
+    assert report["mode"] == runner.OBSERVE and sent == []
+    (tmp / "alerts" / "2026-09-28.json").unlink()            # fresh day: no earlier alerts
+    store2 = LedgerStore(tmp_path / "ledger2.db")
+    report, sent = await _run(store2, tmp, env_vars={C.LIVE_ENV: "1"})
+    assert report["mode"] == runner.LIVE and report["live_switch"]
+    assert len(sent) == 1 and sent[0][2] is True                 # ONE message, priority
+    title, body, _ = sent[0]
+    for t in ("QQQ", "GLD", "BTC-USD"):
+        assert t in title
+    assert "【离场】GLD" in body and "【入场】QQQ" in body and "系统不下单" in body
+    assert body.index("【离场】") < body.index("【入场】")     # exits first
+    q = next(f for f in report["fired"] if f["ticker"] == "QQQ")
+    assert q["entry_id"] in body and q["notified"][0]["ok"]
+    assert store2.get(q["entry_id"]).source_id == "alert:live"
+
+
+def test_live_switch_default_off():
+    assert C.LIVE is False and runner.current_mode({}) == runner.OBSERVE
+    assert runner.current_mode({C.LIVE_ENV: "true"}) == runner.LIVE
+    assert runner.current_mode({C.LIVE_ENV: "0"}) == runner.OBSERVE
+
+
+@pytest.mark.asyncio
+async def test_weekend_crypto_only(env):
+    store, tmp = env
+    report, _ = await _run(store, tmp, crypto_only=True)
+    assert [f["ticker"] for f in report["fired"]] == ["BTC-USD"] and report["crypto_only"]
+    assert report["near_misses"] == [] and report["skipped"] == []
+
+
+def test_orchestration_runs_alerts_after_trend_daily_and_weekend():
+    from marketmind.pipeline import orchestration as orch
+    daily = inspect.getsource(orch._run_daily_with_shadows)
+    assert daily.index("await trend_step(config)") < daily.index("await alerts_step(config)") \
+        < daily.index("await daily_report_step(config)")
+    weekend = inspect.getsource(orch.run_weekend)
+    assert weekend.index("await trend_step(config, crypto_only=True)") \
+        < weekend.index("await alerts_step(config, crypto_only=True)")
+
+
+@pytest.mark.asyncio
+async def test_alerts_step_passes_crypto_flag(monkeypatch, capsys):
+    from marketmind.pipeline import orchestration as orch
+    seen = {}
+
+    async def fake(store, **kw):
+        seen.update(kw)
+        return {"mode": runner.OBSERVE, "fired": [], "near_misses": [],
+                "trend_source": {"available": True}}
+    monkeypatch.setattr(runner, "run_alerts", fake)
+    monkeypatch.setattr(orch, "_ledger_store", lambda config: None)
+    await orch.alerts_step(object(), crypto_only=True)
+    assert seen["crypto_only"] is True and seen["notifier"] is notify.send
+    assert "[alerts] observe: fired none" in capsys.readouterr().out
+
+
+# ── owner responses ─────────────────────────────────────────────────────────
 
 def test_responses(env):
     store, _ = env
@@ -205,6 +336,7 @@ def test_build_requests_formats():
     assert reqs["serverchan"].data == {"title": "标题 换行", "desp": "正文\n\n第二行"}
     assert reqs["pushplus"].json["token"] == "pp" and reqs["pushplus"].json["template"] == "txt"
     assert reqs["wecom"].url.endswith("?key=wk") and reqs["wecom"].json["msgtype"] == "text"
+    assert "mentioned_list" not in reqs["wecom"].json["text"]
     f = reqs["feishu"].json
     assert f["msg_type"] == "text" and f["timestamp"] and f["sign"]
     assert notify.build_requests("t", "b", {}) == {}
@@ -212,18 +344,30 @@ def test_build_requests_formats():
     assert len(long.json["text"]["content"].encode()) <= notify.WECOM_MAX_BYTES
 
 
+def test_priority_mentions_all_on_wecom_only():
+    plain = notify.build_requests("t", "b", ENV)
+    prio = notify.build_requests("t", "b", ENV, priority=True)
+    assert prio["wecom"].json["text"]["mentioned_list"] == ["@all"]
+    assert prio["serverchan"].data == plain["serverchan"].data
+    assert prio["pushplus"].json == plain["pushplus"].json
+    assert prio["feishu"].json["content"] == plain["feishu"].json["content"]
+
+
 @pytest.mark.asyncio
 async def test_send_success_and_failure_without_leaking_keys(caplog):
     replies = {"sctapi.ftqq.com": (200, {"code": 0}), "www.pushplus.plus": (200, {"code": 905}),
                "qyapi.weixin.qq.com": (200, {"errcode": 0}), "open.feishu.cn": (500, {})}
+    bodies = {}
 
     def handler(request):
+        bodies[request.url.host] = request.content
         status, body = replies[request.url.host]
         return httpx.Response(status, json=body)
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        results = await notify.send("t", "b", env=ENV, client=client)
+        results = await notify.send("t", "b", env=ENV, client=client, priority=True)
     assert {r["channel"]: r["ok"] for r in results} == {
         "serverchan": True, "pushplus": False, "wecom": True, "feishu": False}
+    assert b"@all" in bodies["qyapi.weixin.qq.com"]
     assert "SCTkey" not in caplog.text and "wk" not in caplog.text.replace("wecom", "")
 
 
