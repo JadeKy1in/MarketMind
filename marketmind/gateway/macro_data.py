@@ -24,7 +24,6 @@ import logging
 import os
 from datetime import datetime, timezone
 from typing import Any
-from urllib.parse import quote
 
 import httpx
 
@@ -60,29 +59,38 @@ _GSCPI_LABEL = "Global Supply Chain Pressure Index"
 # ---------------------------------------------------------------------------
 _CFTC_SODA_BASE = "https://publicreporting.cftc.gov/resource/6dca-aqww.json"
 
-# Market names for SODA API LIKE filtering
+# Exact CFTC contract market codes (verified live 2026-09-29 on the legacy
+# futures-only dataset 6dca-aqww; latest report 2026-09-22):
+#   13874A = "E-MINI S&P 500 - CHICAGO MERCANTILE EXCHANGE"
+#   067651 = "WTI-PHYSICAL - NEW YORK MERCANTILE EXCHANGE"
+#   088691 = "GOLD - COMMODITY EXCHANGE INC."
+#   023651 = "NAT GAS NYME - NEW YORK MERCANTILE EXCHANGE"
+# A name LIKE filter ('%CRUDE OIL%', '%GOLD%') matched several contracts and
+# LIMIT 1 picked one of them arbitrarily.
 _CFTC_ASSETS: dict[str, dict[str, str]] = {
     "ES": {
-        "market_filter": "S&P 500",
+        "contract_code": "13874A",
         "label": "S&P 500 Futures (E-mini)",
         "cadence": "weekly",
     },
     "CL": {
-        "market_filter": "CRUDE OIL",
-        "label": "Crude Oil Futures (CL)",
+        "contract_code": "067651",
+        "label": "Crude Oil Futures (CL, WTI NYMEX)",
         "cadence": "weekly",
     },
     "GC": {
-        "market_filter": "GOLD",
-        "label": "Gold Futures (GC)",
+        "contract_code": "088691",
+        "label": "Gold Futures (GC, COMEX)",
         "cadence": "weekly",
     },
     "NG": {
-        "market_filter": "NATURAL GAS",
-        "label": "Natural Gas Futures (NG)",
+        "contract_code": "023651",
+        "label": "Natural Gas Futures (NG, NYMEX)",
         "cadence": "weekly",
     },
 }
+_CFTC_FIELDS = ("open_interest_all", "noncomm_positions_long_all", "noncomm_positions_short_all",
+                "comm_positions_long_all", "comm_positions_short_all")
 
 # ---------------------------------------------------------------------------
 # EIA API v2 constants
@@ -180,7 +188,8 @@ async def get_cot_data(asset: str) -> dict:
 
     Returns:
         Dict with keys: asset, commercial_net, speculative_net, date, source,
-        cadence, label, signal.
+        cadence, label, open_interest, speculative_net_pct_oi, positioning
+        (no signal label: no sourced threshold).
         Or {"error": "source_unavailable"} on failure.
     """
     asset = asset.strip().upper()
@@ -361,24 +370,18 @@ async def _fetch_cftc(asset: str) -> dict:
             "detail": f"Unknown asset: '{asset}'. Supported: ES, CL, GC, NG",
         }
 
-    market_filter = asset_info["market_filter"]
-
-    # SODA API SoQL query — filter by market name, latest date, limit 1
-    query = (
-        f"SELECT market_and_exchange_names, report_date_as_yyyy_mm_dd, "
-        f"noncomm_positions_long_all, noncomm_positions_short_all, "
-        f"comm_positions_long_all, comm_positions_short_all "
-        f"WHERE market_and_exchange_names LIKE '%{quote(market_filter)}%' "
-        f"AND report_date_as_yyyy_mm_dd > '2026-01-01' "
-        f"ORDER BY report_date_as_yyyy_mm_dd DESC "
-        f"LIMIT 1"
-    )
-
-    url = f"{_CFTC_SODA_BASE}?$query={query}"
+    code = asset_info["contract_code"]
+    params = {
+        "$select": ("market_and_exchange_names, cftc_contract_market_code, "
+                    "report_date_as_yyyy_mm_dd, " + ", ".join(_CFTC_FIELDS)),
+        "$where": f"cftc_contract_market_code = '{code}'",
+        "$order": "report_date_as_yyyy_mm_dd DESC",
+        "$limit": 1,
+    }
 
     client = httpx.AsyncClient(timeout=httpx.Timeout(15.0))
     try:
-        resp = await client.get(url)
+        resp = await client.get(_CFTC_SODA_BASE, params=params)
         resp.raise_for_status()
         data = resp.json()
 
@@ -386,30 +389,51 @@ async def _fetch_cftc(asset: str) -> dict:
             return {"error": "source_unavailable", "detail": f"No COT data for {asset}"}
 
         row = data[0]
-        noncomm_long = _parse_int(row.get("noncomm_positions_long_all", 0))
-        noncomm_short = _parse_int(row.get("noncomm_positions_short_all", 0))
-        comm_long = _parse_int(row.get("comm_positions_long_all", 0))
-        comm_short = _parse_int(row.get("comm_positions_short_all", 0))
+        if str(row.get("cftc_contract_market_code", "")).strip() != code:
+            return {"error": "source_unavailable",
+                    "detail": f"CFTC returned contract {row.get('cftc_contract_market_code')!r}, "
+                              f"expected {code}"}
+        values = {f: _parse_count(row.get(f)) for f in _CFTC_FIELDS}
+        missing = [f for f, v in values.items() if v is None]
+        if missing:
+            return {"error": "source_unavailable",
+                    "detail": f"CFTC {code} missing {', '.join(missing)}"}
+        oi = values["open_interest_all"]
+        if oi <= 0:
+            return {"error": "source_unavailable", "detail": f"CFTC {code} open interest {oi}"}
 
+        noncomm_long = values["noncomm_positions_long_all"]
+        noncomm_short = values["noncomm_positions_short_all"]
+        comm_long = values["comm_positions_long_all"]
+        comm_short = values["comm_positions_short_all"]
         commercial_net = comm_long - comm_short
         speculative_net = noncomm_long - noncomm_short
+        spec_pct = round(speculative_net / oi * 100, 2)
+        comm_pct = round(commercial_net / oi * 100, 2)
+        date = str(row.get("report_date_as_yyyy_mm_dd", ""))[:10]
 
-        # Simple heuristic signal
-        signal = _cot_signal(asset, speculative_net)
-
+        # No "signal" label: the old fixed 15k/40k contract lines were unsourced and did
+        # not scale with open interest (Law 3). Raw net positions and % of OI only.
         return {
             "asset": asset,
             "label": asset_info["label"],
+            "contract_code": code,
+            "market": row.get("market_and_exchange_names", ""),
             "commercial_net": commercial_net,
             "speculative_net": speculative_net,
+            "open_interest": oi,
+            "speculative_net_pct_oi": spec_pct,
+            "commercial_net_pct_oi": comm_pct,
             "noncomm_long": noncomm_long,
             "noncomm_short": noncomm_short,
             "comm_long": comm_long,
             "comm_short": comm_short,
-            "date": row.get("report_date_as_yyyy_mm_dd", ""),
+            "date": date,
             "source": "cftc",
             "cadence": asset_info["cadence"],
-            "signal": signal,
+            "positioning": (f"Non-commercial net {speculative_net:+,} contracts "
+                            f"({spec_pct:+.2f}% of open interest {oi:,}), report {date}; "
+                            "no sourced threshold, so no signal label"),
         }
     except httpx.HTTPStatusError as e:
         logger.warning("CFTC SODA API error for %s: %s", asset, e)
@@ -419,31 +443,6 @@ async def _fetch_cftc(asset: str) -> dict:
         return {"error": "source_unavailable", "detail": str(e)}
     finally:
         await client.aclose()
-
-
-def _cot_signal(asset: str, speculative_net: int) -> str:
-    """Generate a human-readable signal description from COT positioning.
-
-    Extreme speculative long suggests the trend is crowded (contrarian bearish).
-    Extreme speculative short suggests capitulation (contrarian bullish).
-    These thresholds are fixed heuristics, not backtest-optimized (Law 3).
-    """
-    if speculative_net > 40000:
-        return (
-            f"Speculative net long {speculative_net:,} — elevated positioning, "
-            "contrarian bearish (crowded long)"
-        )
-    elif speculative_net < -40000:
-        return (
-            f"Speculative net short {speculative_net:,} — elevated positioning, "
-            "contrarian bullish (crowded short)"
-        )
-    elif speculative_net > 15000:
-        return f"Speculative moderately net long {speculative_net:,} — no extreme signal"
-    elif speculative_net < -15000:
-        return f"Speculative moderately net short {speculative_net:,} — no extreme signal"
-    else:
-        return f"Speculative positioning near neutral ({speculative_net:,}) — no directional signal"
 
 
 # ===================================================================
@@ -568,6 +567,17 @@ def _finite_or_none(val: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return f if math.isfinite(f) else None
+
+
+def _parse_count(val: Any) -> int | None:
+    """A CFTC position count, or None when missing / unparseable (never 0)."""
+    if val is None or isinstance(val, bool):
+        return None
+    try:
+        f = float(str(val).replace(",", "").strip())
+    except (TypeError, ValueError):
+        return None
+    return int(f) if f == f and abs(f) != float("inf") and f == int(f) else None
 
 
 def _parse_int(val: Any) -> int:
