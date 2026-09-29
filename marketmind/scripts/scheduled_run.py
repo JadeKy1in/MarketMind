@@ -183,6 +183,24 @@ def acquire_lock(lock: Path) -> bool:
     return True
 
 
+# Hosts the run needs anyway (LLM API, market data); reachable = online.
+ONLINE_PROBES = (("api.deepseek.com", 443), ("data.alpaca.markets", 443), ("www.google.com", 443))
+
+
+def online(probes=ONLINE_PROBES, timeout: float = 5.0) -> bool:
+    """True if any probe host accepts a TCP connection. The laptop is often offline when
+    it wakes with the lid closed (owner, 2026-09-29): such a trigger must not use up an
+    attempt; a later trigger, or Task Scheduler's network condition, runs it instead."""
+    import socket
+    for host, port in probes:
+        try:
+            with socket.create_connection((host, port), timeout=timeout):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 _ES_CONTINUOUS, _ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
 
 
@@ -458,6 +476,10 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
     if not ok:
         if run:                                  # an eligible day: show the skip on the dashboard
             record_skip(state_path, key, now, why)
+        return 0
+    if not online():
+        print("offline: no probe host reachable; skipping without using an attempt")
+        record_skip(state_path, key, now, "offline (no network)")
         return 0
     if not acquire_lock(lock):
         print("another scheduled run holds the lock; skipping")

@@ -13,6 +13,9 @@ from marketmind.scripts import scheduled_run as sr
 _REAL_LOAD_USER_PUSH_ENV = sr.load_user_push_env
 
 
+_REAL_ONLINE = sr.online          # the autouse fixture below stubs it
+
+
 @pytest.fixture(autouse=True)
 def _no_real_push(monkeypatch):
     """Never read the owner's push keys or reach a push channel from a test."""
@@ -21,6 +24,7 @@ def _no_real_push(monkeypatch):
     def refuse(title, body):
         raise AssertionError("a test tried to send a real notification")
     monkeypatch.setattr(sr, "_send", refuse)
+    monkeypatch.setattr(sr, "online", lambda *a, **k: True)     # tests never probe the network
 
 
 def utc(y, m, d, h, mi):
@@ -504,3 +508,35 @@ def test_keep_awake_sets_and_restores_execution_state(monkeypatch):
     with sr.keep_awake():
         assert calls == [0x80000001]
     assert calls == [0x80000001, 0x80000000]
+
+
+def test_offline_trigger_skips_without_using_an_attempt(tmp_path, monkeypatch):
+    monkeypatch.setenv("MARKETMIND_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(sr, "ROOT", tmp_path)
+    monkeypatch.setattr(sr, "online", lambda *a, **k: False)
+    monkeypatch.setattr(sr, "datetime", type("D", (sr.datetime,), {
+        "now": classmethod(lambda cls, tz=None: utc(2026, 9, 29, 12, 50))}))
+    ran = []
+    monkeypatch.setattr(sr, "_run_locked", lambda *a: ran.append(a) or 0)
+    assert sr.main(["--slot", "weekday"]) == 0
+    assert ran == []
+    rec = sr.load_state(sr.data_dir() / "scheduler" / "state.json")["runs"]["2026-09-29-weekday"]
+    assert rec.get("attempts", 0) == 0 and rec["skips"][-1]["reason"] == "offline (no network)"
+
+
+def test_online_probe_uses_tcp(monkeypatch):
+    import socket
+    tried = []
+
+    class _Conn:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def fake(addr, timeout):
+        tried.append(addr)
+        if addr[0] == "b":
+            return _Conn()
+        raise OSError("unreachable")
+    monkeypatch.setattr(socket, "create_connection", fake)
+    assert _REAL_ONLINE(probes=(("a", 443), ("b", 443)), timeout=0.1) is True
+    assert _REAL_ONLINE(probes=(("a", 443),), timeout=0.1) is False

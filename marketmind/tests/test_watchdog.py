@@ -18,6 +18,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(sr, "ROOT", tmp_path)
     monkeypatch.setenv("MARKETMIND_DATA_DIR", "data")
     monkeypatch.setattr(sr, "load_user_push_env", lambda: None)
+    monkeypatch.setattr(sr, "online", lambda *a, **k: True)       # never probe the network
     pushed, started = [], []
     monkeypatch.setattr(sr, "_send", lambda title, body: pushed.append(body) or
                         [{"channel": "serverchan", "ok": True, "status": 200}])

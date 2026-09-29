@@ -34,7 +34,9 @@ function LocalTimeOfUtc([int]$h, [int]$m) {
 }
 
 $principal = New-ScheduledTaskPrincipal -UserId $User -LogonType Interactive -RunLevel Limited
-$runSettings = New-ScheduledTaskSettingsSet -WakeToRun -StartWhenAvailable `
+# RunOnlyIfNetworkAvailable: a missed trigger waits for a network instead of starting
+# (and failing) offline, e.g. after a lid-closed wake (owner, 2026-09-29).
+$runSettings = New-ScheduledTaskSettingsSet -WakeToRun -StartWhenAvailable -RunOnlyIfNetworkAvailable `
     -ExecutionTimeLimit (New-TimeSpan -Hours 2) -MultipleInstances IgnoreNew `
     -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 

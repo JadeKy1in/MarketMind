@@ -50,3 +50,12 @@ powershell -ExecutionPolicy Bypass -File marketmind\scripts\uninstall_schedule.p
 - **失败通知**：通过已配置的推送渠道（见 `docs/S8_DESIGN.md`）发送，内容已脱敏；没配渠道时只记录。仪表盘"系统健康"页显示最近的自动运行记录。
 - **漏跑检查（Watchdog）**：检查"窗口已过"（该纽约日期 12:30 之后）的最近一个工作日和最近一个周末日。记录缺失、失败、已放弃重试，或仍标记为运行中但进程已不在，就推送一次"MarketMind: <日期> daily run did not complete: <原因>"（周末为 weekend run），并在该日记录里写 `watchdog_notified`，同一天不再重复提醒。正在运行、已完成、降级完成的不提醒；从未有过运行记录（刚安装）时不检查。它不启动运行，补跑由常规触发负责。
 - **推送排队**：调度器和 Watchdog 的推送如果所有渠道都失败（断网），存进 `data/scheduler/push_queue.json`（原子写入，最多 20 条，超过 3 天的丢弃），下次 `scheduled_run.py` 或 `watchdog.py` 启动时按先后重发，遇到第一条仍失败就停下等下次；`push_queue.lock` 保证同一时间只有一个进程在重发。没配置任何渠道时不排队。注意 Server酱免费版每天 5 条。
+
+
+## 离线与睡眠（2026-09-29 补充）
+
+- 所有人决定：**不开"电池供电时允许定时唤醒"**（耗电快；合盖时一般没网，唤醒也没用）。错过的运行靠补跑：纽约当天结束前（利雅得约次日 07:00，美国冬令时 08:00）电脑醒着并联网就自动补跑；开盘后的补跑，美股虚拟交易按下一个交易日开盘价入场。
+- Daily / Weekend 任务加了 `RunOnlyIfNetworkAvailable`：醒来没网就等网络，不会离线启动。
+- 包装脚本启动前探测网络（DeepSeek、Alpaca、Google 任一 TCP 可连即在线）；离线则记一条跳过"offline (no network)"，不计为失败、不占重试次数。
+- 运行期间调用 `SetThreadExecutionState` 阻止闲置进入现代待机（合盖或手动睡眠仍会睡）。
+- 回退：`uninstall_schedule.ps1` 后用旧版脚本重装。
