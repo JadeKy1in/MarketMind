@@ -169,7 +169,7 @@ def test_reduce_partial_and_full(env):
 def test_dashboard_holdings_endpoints(env):
     from fastapi.testclient import TestClient
     from marketmind.api.routes import app
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://127.0.0.1:8520")
     hdr = {"X-MarketMind": "1"}
     assert c.post("/api/wb/holdings", json={"ticker": "AAPL", "quantity": 5, "cost_basis": 200}).status_code == 403
     r = c.post("/api/wb/holdings", headers=hdr,

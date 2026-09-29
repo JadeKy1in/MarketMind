@@ -46,7 +46,7 @@ class TestChatManager:
 class TestChatEndpoints:
     @pytest.fixture
     def client(self):
-        return TestClient(app)
+        return TestClient(app, base_url="http://127.0.0.1:8520")
 
     def test_chat_empty_message_returns_400(self, client):
         r = client.post("/api/chat", json={"message": "", "session_id": "test"})
@@ -74,7 +74,7 @@ class TestChatIntegration:
 
     @pytest.fixture
     def client(self):
-        return TestClient(app)
+        return TestClient(app, base_url="http://127.0.0.1:8520")
 
     @patch("marketmind.gateway.async_client.chat_pro", new_callable=AsyncMock)
     def test_chat_returns_ai_response(self, mock_chat_pro, client):

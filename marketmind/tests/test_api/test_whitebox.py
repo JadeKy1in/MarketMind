@@ -169,7 +169,7 @@ def test_missing_ledger_is_reported(tmp_path, monkeypatch):
 @pytest.fixture
 def client():
     from marketmind.api.routes import app
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1:8520")
 
 
 def test_routes_serve_whitebox_and_legacy(client, env):

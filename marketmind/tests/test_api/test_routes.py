@@ -15,7 +15,7 @@ from marketmind.api.routes import app
 
 @pytest.fixture(scope="module")
 def client() -> TestClient:
-    return TestClient(app)
+    return TestClient(app, base_url="http://127.0.0.1:8520")
 
 
 def _mock_inject_result():

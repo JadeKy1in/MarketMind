@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-from pathlib import Path
+from starlette.websockets import WebSocketClose
 
 logger = logging.getLogger("marketmind.api.routes")
 
@@ -27,6 +30,70 @@ from marketmind.api.websocket import broadcast_alert, broadcast_stage, ws_endpoi
 from marketmind.notification.alert_manager import get_alert_manager
 
 app = FastAPI(title="MarketMind", version="2.0")
+
+
+# ── local-only guard (DNS rebinding / cross-site requests) ──────────────────
+# The dashboard serves only this computer. A web page can point its own domain at
+# 127.0.0.1 (DNS rebinding) or submit a form cross-site, so every request must name
+# a local Host, and every state-changing request and WebSocket handshake that
+# carries an Origin must come from the dashboard's own origin. Browsers always
+# send Origin on WebSocket handshakes, so a handshake without one is refused; a
+# non-GET request without Origin comes from a local script, not a web page.
+
+_LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def _allowed_hosts() -> set[str]:
+    hosts = set(_LOCAL_HOSTS)
+    bind = os.environ.get("MARKETMIND_HOST", "").strip().lower()
+    if bind and bind not in ("0.0.0.0", "::"):
+        hosts.add(bind)
+    hosts |= {h.strip().lower() for h in os.environ.get("MARKETMIND_ALLOWED_HOSTS", "").split(",")
+              if h.strip()}
+    return hosts
+
+
+def _hostname(hostport: str) -> str:
+    hp = hostport.strip().lower()
+    if hp.startswith("["):
+        return hp[1:hp.index("]")] if "]" in hp else ""
+    return hp.rsplit(":", 1)[0] if hp.count(":") == 1 else hp
+
+
+def _same_origin(origin: str, host_header: str) -> bool:
+    parts = urlsplit(origin)
+    return (parts.scheme in ("http", "https") and parts.netloc.lower() == host_header.strip().lower()
+            and _hostname(parts.netloc) in _allowed_hosts())
+
+
+class LocalOnlyMiddleware:
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in ("http", "websocket"):
+            return await self.app(scope, receive, send)
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
+        host, origin = headers.get("host", ""), headers.get("origin")
+        problem, status = None, 403
+        if _hostname(host) not in _allowed_hosts():
+            problem, status = "invalid host header", 400
+        elif scope["type"] == "websocket":
+            if origin is None or not _same_origin(origin, host):
+                problem = "cross-origin websocket refused"
+        elif scope.get("method", "GET") not in _SAFE_METHODS and origin is not None \
+                and not _same_origin(origin, host):
+            problem = "cross-origin request refused"
+        if problem is None:
+            return await self.app(scope, receive, send)
+        logger.warning("refused %s %s: %s", scope["type"], scope.get("path", ""), problem)
+        if scope["type"] == "websocket":
+            return await WebSocketClose(code=1008)(scope, receive, send)
+        return await JSONResponse({"error": problem}, status_code=status)(scope, receive, send)
+
+
+app.add_middleware(LocalOnlyMiddleware)
 app.websocket("/ws")(ws_endpoint)
 
 _alm = get_alert_manager()
