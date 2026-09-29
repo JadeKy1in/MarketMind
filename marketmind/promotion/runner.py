@@ -19,6 +19,12 @@ Bars for the Monte Carlo "beats random" gate come from `price_source` (default: 
 ledger's HistoryPriceSource, which shares the per-process price cache with settlement
 and the shadow run); they are only loaded when a probation shadow has reached the
 days gate.
+
+Diagnostics (reporting only, no gate reads them; docs/S7_DESIGN.md §三 / §四): for every
+evaluated shadow, state.json["diagnostics"][shadow] = {"factors": promotion/factors.py,
+"paper_live": promotion/paper_live.py} on the same matured trades the ladder uses, and
+state.json["diagnostics_meta"] says which factor source was used. `read_diagnostics`
+is the dashboard's read function. A failure there never fails the promotion run.
 """
 from __future__ import annotations
 
@@ -31,8 +37,11 @@ from pathlib import Path
 
 from marketmind.ledger.store import LedgerEntry, LedgerStore
 from marketmind.promotion import config as C
+from marketmind.promotion import factors as factors_mod
+from marketmind.promotion import paper_live as paper_live_mod
 from marketmind.promotion import retirement
-from marketmind.promotion.ladder import advisors, default_calendar, evaluate, trial_ids
+from marketmind.promotion.ladder import (CANDIDATE_SOURCES, _clean, advisors, default_calendar,
+                                         evaluate, matured, trial_ids)
 from marketmind.promotion.random_mc import source_loader
 from marketmind.shadows.v3 import roster as roster_mod
 from marketmind.shadows.v3.roster import ROSTER
@@ -44,6 +53,44 @@ def trial_count(entries: list[LedgerEntry]) -> int:
     return max(1, len(trial_ids(entries)))
 
 
+def compute_diagnostics(entries: list[LedgerEntry], state: dict, today: str,
+                        calendar: list[str], bars_for, provider) -> tuple[dict, dict]:
+    """({shadow: {"factors", "paper_live"}}, meta) for every evaluated (not blocked or
+    retired) shadow, on its matured settled trades (ladder.matured)."""
+    cal = sorted(d for d in calendar if d and d <= today)
+    by_sid: dict[str, list[LedgerEntry]] = {}
+    for e in entries:
+        if e.source_type in CANDIDATE_SOURCES and e.created_at and e.created_at[:10] <= today:
+            by_sid.setdefault(e.source_id, []).append(e)
+    done_by = {}
+    for sid, rec in sorted(state.get("shadows", {}).items()):
+        if rec.get("stage") not in ("blocked", "retired"):
+            done_by[sid] = matured(by_sid.get(sid, []), cal, today)[0]
+    # one bulk load (the loader caches, misses included): a single fetch budget per run
+    tickers = sorted({e.ticker for done in done_by.values() for e in done})
+    bars = bars_for(tickers) if tickers else {}
+    out = {}
+    for sid, done in done_by.items():
+        record_days = int((state["shadows"][sid].get("metrics") or {}).get("record_days") or 0)
+        out[sid] = _clean({"factors": factors_mod.analyze(done, provider),
+                           "paper_live": paper_live_mod.analyze(done, bars, record_days)})
+    meta = _clean({**provider.meta(), "updated_at": today, "min_obs": factors_mod.MIN_OBS})
+    return out, meta
+
+
+def read_diagnostics(data_dir: str | Path | None = None, shadow_id: str | None = None) -> dict:
+    """Dashboard read: {"updated_at", "meta", "shadows": {shadow: {"factors", "paper_live"}}},
+    or one shadow's {"factors", "paper_live"} ({} when unknown / not yet computed)."""
+    root = Path(data_dir or os.getenv("MARKETMIND_DATA_DIR", "data"))
+    path = root / "promotion" / "state.json"
+    state = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    diag = state.get("diagnostics") or {}
+    if shadow_id is not None:
+        return diag.get(shadow_id) or {}
+    return {"updated_at": state.get("updated_at"), "meta": state.get("diagnostics_meta"),
+            "shadows": diag}
+
+
 def _write_json(path: Path, data) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -53,7 +100,8 @@ def _write_json(path: Path, data) -> None:
 
 def run_promotion(store: LedgerStore, *, today: str | None = None,
                   data_dir: str | Path | None = None, roster=ROSTER,
-                  active_ids: set[str] | None = None, price_source=None) -> dict:
+                  active_ids: set[str] | None = None, price_source=None,
+                  factor_provider=None) -> dict:
     """Evaluate the ladder for `today` (UTC date by default) and persist the results."""
     live = today is None
     today = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -86,6 +134,12 @@ def run_promotion(store: LedgerStore, *, today: str | None = None,
                                    calendar=calendar)
     except Exception:
         log.warning("retirement check failed", exc_info=True)
+    try:
+        provider = factor_provider or factors_mod.FactorProvider(bars_for, root / "factors")
+        new_state["diagnostics"], new_state["diagnostics_meta"] = compute_diagnostics(
+            entries, new_state, today, calendar, bars_for, provider)
+    except Exception:
+        log.warning("promotion diagnostics failed", exc_info=True)
     ret = retirement.summary(root)
     new_state["retirements"] = {"pending": [p["shadow_id"] for p in ret["pending"]],
                                 "retired": [p["shadow_id"] for p in ret["retired"]]}
