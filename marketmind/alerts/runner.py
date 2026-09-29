@@ -41,7 +41,8 @@ def load_voters(entries=()) -> tuple[str, dict[str, str]]:
     advisor yet, every active roster shadow and every Playground agent in the ledger
     stands in (basis "stand_in")."""
     from marketmind.shadows.v3 import roster
-    groups = {r.shadow_id: r.group for r in roster.ROSTER}
+    # successors of retired shadows included (docs/S7_DESIGN.md §一 退役)
+    groups = {r.shadow_id: r.group for r in roster.all_entries()}
 
     def group_of(sid: str) -> str | None:
         return PLAYGROUND_GROUP if sid.startswith(PLAYGROUND_PREFIX) else groups.get(sid)

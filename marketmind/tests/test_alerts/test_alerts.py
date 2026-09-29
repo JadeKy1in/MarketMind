@@ -142,6 +142,21 @@ def test_load_voters_counts_playground_advisors(tmp_path, monkeypatch):
     assert runner.load_voters(store.list())[0] == runner.STAND_IN
 
 
+def test_load_voters_counts_a_successor_advisor(tmp_path, monkeypatch):
+    from marketmind.shadows.v3 import roster
+    monkeypatch.setenv("MARKETMIND_DATA_DIR", str(tmp_path))
+    old = "momentum:weekly:trend_rider"
+    (tmp_path / "promotion").mkdir()
+    (tmp_path / "promotion" / "retirements.json").write_text(json.dumps({"proposals": [
+        {"shadow_id": old, "status": "approved",
+         "successor": {"shadow_id": f"{old}@2", "prompt_file": "successors/x.md"}}]}),
+        encoding="utf-8")
+    (tmp_path / "advisors.json").write_text(json.dumps({"advisors": [f"{old}@2"]}),
+                                            encoding="utf-8")
+    basis, v = runner.load_voters([])
+    assert basis == runner.ADVISORS and v == {f"{old}@2": roster.by_id()[old].group}
+
+
 # ── trend source (decision 2) ───────────────────────────────────────────────
 
 def test_daily_source_prefers_lean_then_full(tmp_path):
