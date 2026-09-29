@@ -312,7 +312,8 @@ def assemble_dynamic_prompt(registry: RuleRegistry,
             "- Layer 3 technical review (green/yellow/red lights) with code-computed levels\n"
             "- Red Team challenges\n\n"
             "Price levels are computed by code and overwrite your output; copy them "
-            "from the Layer 3 section. Position size is capped by code.\n\n"
+            "from the Layer 3 section. Do not size positions: position size is computed "
+            "by code from the stop distance (1% of capital at risk per trade).\n\n"
             "Output JSON with decision_cards, no_trade_card, and summary fields.\n\n"
             "CRITICAL RULES (dynamically assembled by SHARP):\n"
         )

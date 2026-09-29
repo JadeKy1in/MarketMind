@@ -245,6 +245,12 @@ class TestDynamicPromptAssembly:
         prompt = assemble_dynamic_prompt(registry, "Default instructions")
         assert "Default instructions" in prompt
 
+    def test_default_base_text_does_not_ask_the_llm_to_size(self):
+        prompt = assemble_dynamic_prompt(RuleRegistry())
+        assert "Position size is capped by code" not in prompt
+        assert "Do not size positions" in prompt
+        assert "computed by code from the stop distance" in prompt
+
 
 # ── Cross-stage attribution tests ─────────────────────────────────────────
 
