@@ -176,6 +176,8 @@ class DecisionOutput:
     summary: str = ""
     contrarian_challenges: list[dict] = field(default_factory=list)
     raw_response: str = ""  # LLM output as received, for white-box traceability
+    llm: str | None = None             # model that actually answered (docs/S9_DESIGN.md §2)
+    prompt_version: str | None = None  # fingerprint of the decision system prompt
 
 
 def _lang_instruction() -> str:
@@ -546,6 +548,9 @@ async def generate_decision(
         )
         decision = _parse_decision_response(result["content"])
         decision.raw_response = (result.get("content") or "")[:20000]
+        from marketmind.gateway.llm_trace import prompt_version
+        decision.llm = result.get("model") if result.get("content") else None
+        decision.prompt_version = prompt_version(dynamic_prompt)
         decision.watch_cards, dropped = validate_watch_cards(decision.watch_cards, l3)
         if dropped:
             logger.info("Watch cards dropped: %s", "; ".join(dropped))

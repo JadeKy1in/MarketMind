@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 import httpx
 
+from marketmind.gateway import llm_trace
 from marketmind.gateway.token_budget import TokenBudget, Priority
 from marketmind.gateway import usage_tracker
 from marketmind.gateway.circuit_breaker import (
@@ -241,6 +242,7 @@ class DeepSeekGateway:
             "usage": data.get("usage", {}),
             "latency_ms": elapsed_ms,
             "reasoning_content": reasoning_content,
+            "model": data.get("model") or model,
         }
 
 
@@ -340,6 +342,7 @@ async def chat_flash(
         return dict(_MOCK_FLASH_RESPONSE)
     claude = await _try_claude(system_prompt, user_prompt, "flash")
     if claude is not None:
+        llm_trace.note(claude)
         return claude
     gw = await get_gateway()
     budget = await get_budget()
@@ -360,6 +363,7 @@ async def chat_flash(
             gw, FLASH_MODEL, system_prompt, user_prompt,
             temperature, max_tokens, ""  # Flash does not take reasoning_effort
         )
+        llm_trace.note(result)
         return result
     finally:
         budget.settle_flash(estimated, _used_tokens(result, estimated))
@@ -379,6 +383,7 @@ async def chat_pro(
         return dict(_MOCK_PRO_RESPONSE)
     claude = await _try_claude(system_prompt, user_prompt, "pro")
     if claude is not None:
+        llm_trace.note(claude)
         return claude
     gw = await get_gateway()
     budget = await get_budget()
@@ -403,6 +408,7 @@ async def chat_pro(
             gw, model, system_prompt, user_prompt,
             temperature, max_tokens, effort
         )
+        llm_trace.note(result)
         return result
     finally:
         budget.settle_pro(estimated, _used_tokens(result, estimated))
@@ -529,6 +535,7 @@ async def _fallback_call(
         "usage": data.get("usage", {}),
         "latency_ms": elapsed_ms,
         "reasoning_content": msg.get("reasoning_content", ""),
+        "model": data.get("model") or payload.get("model"),
     }
 
 

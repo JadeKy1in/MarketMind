@@ -116,9 +116,12 @@ async def record_main_decision(decision, l3, store: LedgerStore, source: PriceSo
         logger.warning("Ledger: forced paper trade %s has direction %r; not recorded",
                        paper.ticker, paper.direction)
         return []
+    provenance = {k: v for k in ("llm", "prompt_version")
+                  if (v := getattr(decision, k, None))}      # docs/S9_DESIGN.md §2
     ids = []
     for e in entries:
-        e.meta = {**(e.meta or {}), "origin": (origins or {}).get(e.ticker.upper(), DEFAULT_ORIGIN)}
+        e.meta = {**(e.meta or {}), **provenance,
+                  "origin": (origins or {}).get(e.ticker.upper(), DEFAULT_ORIGIN)}
         try:
             ids.append(store.add(e, created_at=created_at))
         except ValueError as exc:

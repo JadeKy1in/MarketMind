@@ -259,6 +259,93 @@ def apply_outcome(e: LedgerEntry, out: Outcome, bars: list[Bar],
     e.settled_at = _now()
 
 
+# Bump when compute_review gains or changes fields: older reviews are then recomputed.
+REVIEW_VERSION = 1
+
+
+def compute_review(e: LedgerEntry, bars: list[Bar], factor: float = 1.0) -> dict | None:
+    """Post-mortem facts of a settled record, from bars alone (docs/S9_DESIGN.md §3).
+
+    `factor` rescales the recorded levels like simulate() does. The fill bar's whole
+    high/low range counts (an approximation for a zone fill inside that bar)."""
+    from marketmind.pipeline.l3_indicators import atr
+    if not (e.entry_date and e.exit_date and e.entry_price):
+        return None
+    dates = [b.date for b in bars]
+    if e.entry_date not in dates or e.exit_date not in dates:
+        return None
+    i0, i1 = dates.index(e.entry_date), dates.index(e.exit_date)
+    window, before = bars[i0:i1 + 1], bars[:i0]
+    long = e.direction == "long"
+    sign = 1.0 if long else -1.0
+    p = e.entry_price
+    hi, lo = max(b.high for b in window), min(b.low for b in window)
+    best, worst = (hi, lo) if long else (lo, hi)
+    stop = e.stop_loss * factor if e.stop_loss is not None else None
+    target = e.target_price * factor if e.target_price is not None else None
+
+    def ret(price: float) -> float:
+        return round(sign * (price / p - 1), 6)
+
+    def reaches(b: Bar, level: float | None, favourable: bool) -> bool:
+        if level is None:
+            return False
+        return (b.high >= level) if long == favourable else (b.low <= level)
+
+    mfe, mae = max(ret(best), 0.0), min(ret(worst), 0.0)
+    stop_distance = None if stop is None else ret(stop)
+    # ATR as a fraction of the last close before entry: comparable across assets
+    atr_pct = (round(atr(before[-15:]) / before[-1].close, 6)
+               if len(before) >= 15 and before[-1].close > 0 else None)
+
+    # After an early exit: did the original plan work out by its own expiry?
+    expiry = i0 + e.hold_bars - 1
+    after_exit = bars[i1 + 1:expiry + 1]
+    post_exit_complete = expiry <= i1 or len(bars) > expiry
+    target_after_exit = any(reaches(b, target, True) for b in after_exit) if target else None
+
+    gross, net, excess = e.gross_return or 0.0, e.net_return, e.excess_market
+    if net is not None and net > 0:
+        error_class = "win" if excess is None or excess > 0 else "beta_carried"
+    elif gross > 0:
+        error_class = "cost_flipped"
+    elif e.exit_reason in ("stop", "falsifier") and target_after_exit:
+        error_class = "right_but_stopped"
+    else:
+        error_class = "thesis_wrong"
+
+    closes = [b.close for b in before]
+    return {
+        "v": REVIEW_VERSION,
+        "direction_correct": gross > 0,
+        "error_class": error_class,
+        "mfe": mfe,
+        "mae": mae,
+        "bars_held": len(window),
+        "touched_target": None if target is None else any(reaches(b, target, True) for b in window),
+        "touched_stop": None if stop is None else any(reaches(b, stop, False) for b in window),
+        "ambiguous_bar": (stop is not None and target is not None
+                          and any(reaches(b, target, True) and reaches(b, stop, False)
+                                  for b in window)),
+        "target_distance": None if target is None else ret(target),
+        "stop_distance": stop_distance,
+        "r_multiple": (round(gross / -stop_distance, 4)
+                       if stop_distance is not None and stop_distance < 0 else None),
+        "atr_pct": atr_pct,
+        "mfe_atr": round(mfe / atr_pct, 4) if atr_pct else None,
+        "mae_atr": round(mae / atr_pct, 4) if atr_pct else None,
+        "target_hit_after_exit": target_after_exit,
+        "post_exit_complete": post_exit_complete,
+        "regime": {
+            "ret_20d": (round(closes[-1] / closes[-21] - 1, 6)
+                        if len(closes) >= 21 and closes[-21] > 0 else None),
+            "above_ma50": (closes[-1] > sum(closes[-50:]) / 50) if len(closes) >= 50 else None,
+            "above_ma200": (closes[-1] > sum(closes[-200:]) / 200) if len(closes) >= 200 else None,
+        },
+        "beat_market": None if excess is None else excess > 0,
+    }
+
+
 def apply_benchmarks(e: LedgerEntry, market_bars: list[Bar] | None,
                      domain_bars: list[Bar] | None) -> None:
     """Fill benchmark returns of a settled record; note whichever is still missing."""
@@ -332,6 +419,7 @@ class SettleReport:
     still_open: int = 0
     pending: int = 0
     benchmarks_backfilled: int = 0
+    reviews_backfilled: int = 0
     unavailable: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -340,6 +428,8 @@ class SettleReport:
                 f"open {self.still_open}, pending {self.pending}")
         if self.benchmarks_backfilled:
             text += f", benchmarks backfilled {self.benchmarks_backfilled}"
+        if self.reviews_backfilled:
+            text += f", reviews backfilled {self.reviews_backfilled}"
         if self.unavailable:
             text += f", no price data: {', '.join(sorted(set(self.unavailable)))}"
         if self.errors:
@@ -386,6 +476,8 @@ async def settle_all(store: LedgerStore, source: PriceSource,
                 if e.domain_benchmark:
                     domain_bars = await bars_for(e.domain_benchmark)
             apply_outcome(e, out, bars, market_bars, domain_bars)
+            if e.status == "settled":
+                e.review = compute_review(e, bars, factor)
             if factor != 1.0:
                 note = f"price levels rescaled x{factor:.4f} (adjusted series changed)"
                 e.settle_note = f"{e.settle_note}; {note}" if e.settle_note else note
@@ -420,9 +512,31 @@ async def settle_all(store: LedgerStore, source: PriceSource,
             domain_bars = await bars_for(e.domain_benchmark) if e.domain_benchmark else None
             apply_benchmarks(e, market_bars, domain_bars)
             if (e.market_return, e.domain_return) != before:
+                if e.review is not None:     # recompute: beat_market / error_class use it
+                    e.review = None
                 store.update(e)
                 report.benchmarks_backfilled += 1
         except Exception:
             logger.error("Ledger: benchmark backfill for %s failed", e.entry_id, exc_info=True)
+
+    # Settled records without current post-mortem facts (settled before they existed,
+    # or computed by an older REVIEW_VERSION): (re)compute them.
+    for e in store.list(status="settled"):
+        if (e.review is not None and e.review.get("v") == REVIEW_VERSION
+                and e.review.get("post_exit_complete", True)):
+            continue
+        try:
+            bars = await bars_for(e.ticker)
+            if not bars:
+                continue
+            snapshot = store.snapshot(e.snapshot_id) if e.snapshot_id else {}
+            review = compute_review(e, bars, adjustment_factor(e, bars, snapshot))
+            if review is not None and review != e.review:
+                e.review = review
+                store.update(e)
+                report.reviews_backfilled += 1
+        except Exception:
+            logger.error("Ledger: review backfill for %s failed", e.entry_id, exc_info=True)
+
     logger.info(report.summary())
     return report

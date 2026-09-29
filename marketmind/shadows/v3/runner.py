@@ -17,7 +17,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from marketmind.gateway import usage_tracker
+from marketmind.gateway import llm_trace, usage_tracker
 from marketmind.gateway.price_history import get_price_histories
 from marketmind.ledger.store import LedgerEntry, LedgerStore
 from marketmind.shadows.v3 import roster as roster_mod
@@ -139,9 +139,13 @@ async def _call_llm(system: str, user: str, stage: str) -> str:
     return result.get("content") or ""
 
 
+def system_prompt(entry) -> str:
+    return roster_mod.load_prompt(entry) + "\n\n" + OUTPUT_INSTRUCTIONS
+
+
 async def decide(ctx: ShadowContext, call=_call_llm) -> tuple[ParseResult, list[str], int]:
     """Ask once, retry once with the validation errors; returns (result, raw replies, attempts)."""
-    system = roster_mod.load_prompt(ctx.entry) + "\n\n" + OUTPUT_INSTRUCTIONS
+    system = system_prompt(ctx.entry)
     user = ctx.render()
     fixed = 1 if ctx.entry.shadow_id == SCALPER_ID else None
     stage = f"shadow:{ctx.entry.name}"
@@ -274,7 +278,8 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
 
     async def one(ctx: ShadowContext) -> ShadowResult:
         async with sem:
-            parsed, raws, attempts = await decide(ctx, call)
+            with llm_trace.trace() as models:
+                parsed, raws, attempts = await decide(ctx, call)
         res = ShadowResult(ctx.entry.shadow_id, "submitted" if parsed.ok else "missed",
                            errors=parsed.errors, warnings=parsed.warnings,
                            attempts=attempts, raw=raws)
@@ -283,7 +288,8 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
                            "; ".join(parsed.errors)[:300])
             return res
         meta = {"model": MODEL, "shadow": ctx.entry.name, "attempts": attempts,
-                "run_date": today}
+                "run_date": today, "llm": llm_trace.label(models),
+                "prompt_version": llm_trace.prompt_version(system_prompt(ctx.entry))}
         if ctx.entry.source_type != "shadow":
             meta["temp"] = ctx.entry.group        # temp_event | trial
         if ctx.entry.shadow_id == SCALPER_ID:

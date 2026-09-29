@@ -69,6 +69,7 @@ class LedgerEntry:
     price_source: str | None = None
     settle_note: str = ""
     settled_at: str | None = None
+    review: dict | None = None         # code-computed post-mortem facts (docs/S9_DESIGN.md §3)
 
     def validate(self) -> None:
         if self.source_type not in SOURCE_TYPES:
@@ -97,7 +98,7 @@ class LedgerEntry:
                 raise ValueError("falsifier_rule needs a numeric price") from None
 
 
-_JSON_FIELDS = {"falsifier_rule", "meta"}
+_JSON_FIELDS = {"falsifier_rule", "meta", "review"}
 _BOOL_FIELDS = {"confidence_is_default", "falsifier_triggered"}
 _COLUMNS = [f.name for f in fields(LedgerEntry)]
 
@@ -129,6 +130,11 @@ class LedgerStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
+            # a ledger created before a column was added gets it (NULL for old rows)
+            existing = {r[1] for r in conn.execute("PRAGMA table_info(ledger)")}
+            for col in _COLUMNS:
+                if col not in existing:
+                    conn.execute(f"ALTER TABLE ledger ADD COLUMN {col}")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path)

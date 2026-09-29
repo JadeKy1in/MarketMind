@@ -310,7 +310,7 @@ class TestFallbackOutputFormat:
 
             # First call: primary (should succeed, CLOSED)
             result_primary = await chat_flash("sys", "user")
-            expected_keys = {"content", "usage", "latency_ms", "reasoning_content"}
+            expected_keys = {"content", "usage", "latency_ms", "reasoning_content", "model"}
             assert set(result_primary.keys()) == expected_keys
 
             # Force circuit OPEN
