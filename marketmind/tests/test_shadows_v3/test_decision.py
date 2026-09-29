@@ -93,3 +93,34 @@ def test_extract_json_bare_list_is_accepted():
 
 def test_output_instructions_forbid_abstaining():
     assert "abstaining is not" in OUTPUT_INSTRUCTIONS and '"decisions"' in OUTPUT_INSTRUCTIONS
+
+
+# --- non-finite numbers: json.loads accepts NaN/Infinity; they must become per-decision
+# errors (so the retry loop can ask again), never an exception that loses the day.
+
+@pytest.mark.parametrize("field", ["hold_days", "confidence", "stop", "target"])
+@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity"])
+def test_non_finite_json_numbers_are_per_decision_errors(field, value):
+    good = json.dumps(_d(ticker="GLD", stop=190, target=220), ensure_ascii=False)
+    bad = json.dumps(_d(), ensure_ascii=False)[:-1] + f', "{field}": {value}}}'
+    res = parse_decisions('{"decisions": [' + bad + ", " + good + "]}", CLOSES)
+    assert [d.ticker for d in res.decisions] == ["GLD"]
+    assert len(res.errors) == 1 and res.errors[0].startswith("decision 1") and field in res.errors[0]
+
+
+@pytest.mark.parametrize("field", ["hold_days", "confidence", "stop", "target"])
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+def test_non_finite_strings_are_per_decision_errors(field, value):
+    res = parse_decisions(_text(_d(**{field: value})), CLOSES)
+    assert not res.decisions and len(res.errors) == 1 and field in res.errors[0]
+
+
+def test_nan_hold_with_fixed_hold_does_not_raise():
+    res = parse_decisions('{"decisions": [' + json.dumps(_d())[:-1] + ', "hold_days": NaN}]}',
+                          CLOSES, fixed_hold=1)
+    assert res.ok and res.decisions[0].hold_days == 1
+
+
+def test_nan_falsifier_rule_price_is_dropped_not_raised():
+    res = parse_decisions(_text(_d(falsifier_rule={"type": "close_below", "price": "nan"})), CLOSES)
+    assert res.ok and res.decisions[0].falsifier_rule is None and res.warnings

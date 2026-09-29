@@ -8,6 +8,7 @@ side) and are reported. Nothing is invented to fill a gap.
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -72,12 +73,20 @@ def extract_json(text: str) -> Any:
 
 
 def _num(v) -> float | None:
-    if v is None or v == "":
+    """A finite float, or None. json.loads accepts NaN/Infinity and float() accepts
+    "nan"/"inf"; neither is a usable price, probability or day count."""
+    if v is None or v == "" or isinstance(v, bool):
         return None
     try:
-        return float(v)
-    except (TypeError, ValueError):
+        f = float(v)
+    except (TypeError, ValueError, OverflowError):
         return None
+    return f if math.isfinite(f) else None
+
+
+def _bad_number(v) -> bool:
+    """True when a value was given but is not a finite number."""
+    return v is not None and v != "" and _num(v) is None
 
 
 def parse_decisions(text: str, closes: dict[str, float], fixed_hold: int | None = None,
@@ -110,66 +119,80 @@ def parse_decisions(text: str, closes: dict[str, float], fixed_hold: int | None 
         if not isinstance(d, dict):
             res.errors.append(f"{tag}: not an object")
             continue
-        ticker = upper.get(str(d.get("ticker", "")).strip().upper().lstrip("$"))
-        if ticker is None:
-            res.errors.append(f"{tag}: ticker {d.get('ticker')!r} is not in today's context")
-            continue
-        direction = str(d.get("direction", "")).strip().lower()
-        if direction not in ("long", "short"):
-            res.errors.append(f"{tag}: direction must be long or short (no abstaining), "
-                              f"got {d.get('direction')!r}")
-            continue
-        if (ticker, direction) in seen:
-            res.errors.append(f"{tag}: duplicate {direction} {ticker}")
-            continue
-        conf = _num(d.get("confidence"))
-        if conf is None or not 0.0 <= conf <= 1.0:
-            res.errors.append(f"{tag}: confidence must be a number in 0-1, "
-                              f"got {d.get('confidence')!r}")
-            continue
-        hold = _num(d.get("hold_days"))
-        if fixed_hold is not None:
-            if hold is not None and int(hold) != fixed_hold:
-                res.warnings.append(f"{tag}: hold_days set to {fixed_hold} for this shadow")
-            hold = fixed_hold
-        if hold is None or int(hold) != hold or not MIN_HOLD <= hold <= MAX_HOLD:
-            res.errors.append(f"{tag}: hold_days must be an integer {MIN_HOLD}-{MAX_HOLD}, "
-                              f"got {d.get('hold_days')!r}")
-            continue
-        falsifier = str(d.get("falsifier") or "").strip()
-        thesis = str(d.get("thesis") or "").strip()
-        if not falsifier:
-            res.errors.append(f"{tag}: falsifier is required")
-            continue
-        if not thesis:
-            res.errors.append(f"{tag}: thesis is required")
-            continue
-
-        close = closes[ticker]
-        long = direction == "long"
-        stop, target = _num(d.get("stop")), _num(d.get("target"))
-        if ticker in no_levels and (stop is not None or target is not None
-                                    or d.get("falsifier_rule")):
-            res.warnings.append(f"{tag}: {ticker} was not in your context, so its price "
-                                f"levels are dropped (text falsifier kept)")
-            stop = target = None
-            d = {**d, "falsifier_rule": None}
-        if stop is not None and not (stop < close if long else stop > close):
-            res.warnings.append(f"{tag}: stop {stop} on the wrong side of close {close}, dropped")
-            stop = None
-        if target is not None and not (target > close if long else target < close):
-            res.warnings.append(f"{tag}: target {target} on the wrong side of close {close}, "
-                                f"dropped")
-            target = None
-        rule = _falsifier_rule(d.get("falsifier_rule"), long, close, tag, res)
-
-        seen.add((ticker, direction))
-        res.decisions.append(Decision(
-            ticker=ticker, direction=direction, hold_days=int(hold), confidence=round(conf, 4),
-            falsifier=falsifier[:500], thesis=thesis[:500], falsifier_rule=rule,
-            stop=stop, target=target,
-        ))
+        try:
+            _parse_one(d, tag, closes, upper, seen, fixed_hold, no_levels, res)
+        except Exception as e:  # noqa: BLE001 - one bad decision must not cost the day
+            res.errors.append(f"{tag}: could not be read ({type(e).__name__}: {e})")
     return res
+
+
+def _parse_one(d: dict, tag: str, closes: dict[str, float], upper: dict[str, str],
+               seen: set[tuple[str, str]], fixed_hold: int | None,
+               no_levels: set[str] | frozenset, res: ParseResult) -> None:
+    """Validate one decision; appends to res.decisions or res.errors."""
+    ticker = upper.get(str(d.get("ticker", "")).strip().upper().lstrip("$"))
+    if ticker is None:
+        res.errors.append(f"{tag}: ticker {d.get('ticker')!r} is not in today's context")
+        return
+    direction = str(d.get("direction", "")).strip().lower()
+    if direction not in ("long", "short"):
+        res.errors.append(f"{tag}: direction must be long or short (no abstaining), "
+                          f"got {d.get('direction')!r}")
+        return
+    if (ticker, direction) in seen:
+        res.errors.append(f"{tag}: duplicate {direction} {ticker}")
+        return
+    conf = _num(d.get("confidence"))
+    if conf is None or not 0.0 <= conf <= 1.0:
+        res.errors.append(f"{tag}: confidence must be a number in 0-1, "
+                          f"got {d.get('confidence')!r}")
+        return
+    for key in ("stop", "target") + (("hold_days",) if fixed_hold is None else ()):
+        if _bad_number(d.get(key)):
+            res.errors.append(f"{tag}: {key} must be a finite number, got {d.get(key)!r}")
+            return
+    hold = _num(d.get("hold_days"))
+    if fixed_hold is not None:
+        if hold is not None and int(hold) != fixed_hold:
+            res.warnings.append(f"{tag}: hold_days set to {fixed_hold} for this shadow")
+        hold = fixed_hold
+    if hold is None or int(hold) != hold or not MIN_HOLD <= hold <= MAX_HOLD:
+        res.errors.append(f"{tag}: hold_days must be an integer {MIN_HOLD}-{MAX_HOLD}, "
+                          f"got {d.get('hold_days')!r}")
+        return
+    falsifier = str(d.get("falsifier") or "").strip()
+    thesis = str(d.get("thesis") or "").strip()
+    if not falsifier:
+        res.errors.append(f"{tag}: falsifier is required")
+        return
+    if not thesis:
+        res.errors.append(f"{tag}: thesis is required")
+        return
+
+    close = closes[ticker]
+    long = direction == "long"
+    stop, target = _num(d.get("stop")), _num(d.get("target"))
+    if ticker in no_levels and (stop is not None or target is not None
+                                or d.get("falsifier_rule")):
+        res.warnings.append(f"{tag}: {ticker} was not in your context, so its price "
+                            f"levels are dropped (text falsifier kept)")
+        stop = target = None
+        d = {**d, "falsifier_rule": None}
+    if stop is not None and not (stop < close if long else stop > close):
+        res.warnings.append(f"{tag}: stop {stop} on the wrong side of close {close}, dropped")
+        stop = None
+    if target is not None and not (target > close if long else target < close):
+        res.warnings.append(f"{tag}: target {target} on the wrong side of close {close}, "
+                            f"dropped")
+        target = None
+    rule = _falsifier_rule(d.get("falsifier_rule"), long, close, tag, res)
+
+    seen.add((ticker, direction))
+    res.decisions.append(Decision(
+        ticker=ticker, direction=direction, hold_days=int(hold), confidence=round(conf, 4),
+        falsifier=falsifier[:500], thesis=thesis[:500], falsifier_rule=rule,
+        stop=stop, target=target,
+    ))
 
 
 def _falsifier_rule(raw, long: bool, close: float, tag: str, res: ParseResult) -> dict | None:
