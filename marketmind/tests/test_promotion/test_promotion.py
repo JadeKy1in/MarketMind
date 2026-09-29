@@ -14,7 +14,8 @@ from marketmind.ledger.prices import StaticPriceSource
 from marketmind.ledger.store import LedgerEntry, LedgerStore
 from marketmind.promotion import config as C
 from marketmind.promotion import metrics as M
-from marketmind.promotion.ladder import composite_scores, evaluate, probation_gates, shadow_stats
+from marketmind.promotion.ladder import (composite_scores, evaluate, matured, probation_gates,
+                                         shadow_stats, trial_ids)
 from marketmind.promotion.random_mc import static_loader
 from marketmind.promotion.runner import run_promotion, trial_count
 from marketmind.shadows.v3.roster import PENDING_PROMPT, ROSTER, RosterEntry
@@ -42,16 +43,42 @@ def test_psr_direct_formula():
     assert expected == pytest.approx(0.8331, abs=1e-3)
 
 
-def test_expected_max_sharpe_and_dsr():
-    # False Strategy Theorem, N = 1000 unit-variance trials: E[max] ~ 3.2552
-    assert M.expected_max_sharpe(1000, 1.0) == pytest.approx(3.2552, abs=2e-3)
-    mc = np.random.default_rng(0).standard_normal((4000, 1000)).max(axis=1).mean()
-    assert M.expected_max_sharpe(1000, 1.0) == pytest.approx(mc, abs=0.05)
-    assert M.expected_max_sharpe(1, 1.0) == 0.0
+def test_dsr_sidak_form():
+    """DSR = PSR(0) ** K with the variance term floored at 1 (fix 2026-09-29)."""
     r = np.random.default_rng(1).normal(0.001, 0.01, 250)
     g3, g4 = M.skew_kurt(r)
-    assert M.dsr(r, 1) == pytest.approx(M.psr(M.sharpe(r), 250, g3, g4))
-    assert M.dsr(r, 100, 0.01) < M.dsr(r, 10, 0.01) < M.dsr(r, 1)
+    sr = M.sharpe(r)
+    z = sr * math.sqrt(249) / math.sqrt(max(1 - g3 * sr + (g4 - 1) / 4 * sr * sr, 1.0))
+    assert M.dsr(r, 1) == pytest.approx(stats.norm.cdf(z))
+    assert M.dsr(r, 30) == pytest.approx(stats.norm.cdf(z) ** 30)
+    assert M.dsr(r, 100) < M.dsr(r, 10) < M.dsr(r, 1)
+    # a positively skewed outlier cannot push the variance term below the normal value
+    x = np.r_[np.zeros(59), 0.5]
+    g3, g4 = M.skew_kurt(x)
+    assert 1 - g3 * M.sharpe(x) < 1
+    assert M.dsr(x, 1) == pytest.approx(stats.norm.cdf(M.sharpe(x) * math.sqrt(59)))
+
+
+def test_dsr_family_wise_size_and_power():
+    """30 candidates with t(5) daily returns: the best zero-skill one passes <= ~5%."""
+    rng = np.random.default_rng(3)
+    hits = 0
+    for _ in range(300):
+        r = 0.01 * rng.standard_t(5, (120, 30)) / math.sqrt(5 / 3)
+        hits += any(M.dsr(r[:, i], 30) >= 0.95 for i in range(30))
+    assert hits / 300 < 0.09
+
+
+def test_effective_trials_clusters_correlated_candidates():
+    rng = np.random.default_rng(4)
+    days = DAYS[:120]
+    base = rng.standard_normal(120)
+    series = {f"c{i}": (days, base + 0.3 * rng.standard_normal(120)) for i in range(4)}
+    series |= {f"u{i}": (days, rng.standard_normal(120)) for i in range(3)}
+    series["short"] = (days[:10], rng.standard_normal(10))          # too little overlap
+    k, clusters = M.effective_trials(series)
+    assert k == 5 and ["c0", "c1", "c2", "c3"] in clusters
+    assert M.effective_trials({}) == (1, []) and M.effective_trials({"a": series["u0"]})[0] == 1
 
 
 def test_moments():
@@ -132,11 +159,26 @@ def test_cusum():
 
 
 def test_stress_test():
+    """Worst-decile market days: the shadow must do at least as well as the market."""
     market = np.array([-0.02] + [0.001] * 9)
-    ok, d = M.stress_test(np.array([-0.03] + [0.0] * 9), market)
+    ok, d = M.stress_test(np.array([-0.02] + [0.0] * 9), market)
     assert ok and d["worst_days"] == 1 and d["market_mean"] == -0.02
-    assert M.stress_test(np.array([-0.05] + [0.0] * 9), market)[0] is False
+    assert M.stress_test(np.array([-0.005] + [0.0] * 9), market)[0] is True
+    assert M.stress_test(np.array([-0.03] + [0.0] * 9), market)[0] is False     # old rule passed
     assert M.stress_test(np.zeros(5), np.full(5, -0.01))[0] is None
+
+
+def test_stress_rejects_zero_skill_beta_one_longs_half_the_time():
+    """Old rule (>= 2 x market mean) passed ~99% of zero-skill beta-1 longs."""
+    rng = np.random.default_rng(6)
+    passed = 0
+    for _ in range(400):
+        mk = 0.01 * rng.standard_normal(120)
+        passed += M.stress_test(mk + 0.004 * rng.standard_normal(120), mk)[0]
+    assert 0.35 < passed / 400 < 0.65
+    hedged = sum(M.stress_test(0.3 * mk + 0.004 * rng.standard_normal(120), mk)[0]
+                 for mk in (0.01 * rng.standard_normal(120) for _ in range(200)))
+    assert hedged / 200 > 0.95
 
 
 def test_daily_pnl_and_calendar():
@@ -179,7 +221,7 @@ def _main(days, net):
     return [_row("main", "main", DAYS[i], DAYS[i + 1], net) for i in range(days)]
 
 
-POOL = ("AAA", "BBB", "CCC", "DDD")
+POOL = ("SPY", "AAA")              # the synthetic shadows trade SPY
 
 
 def _bars(drift=0.0, sd=0.01, seed=11) -> dict[str, list[Bar]]:
@@ -255,9 +297,10 @@ def test_beat_random_is_monte_carlo_not_the_ledger_random_shadow():
     assert st["shadows"]["A"]["probation_gates"]["beat_random"] is True    # ... irrelevant now
     assert mc["status"] == "pass" and mc["valid_draws"] == C.MC_DRAWS
     assert mc["p_value"] == pytest.approx(1 / (C.MC_DRAWS + 1))
-    # pool = watchlist + tickers the ledger's random shadow drew (SPY here, without bars)
-    assert mc["pool"] == len(POOL) + 1 and mc["missing_tickers"] == ["SPY"]
-    assert mc["trades"] == 60
+    # the shadow's own trades moved in time: only its own ticker (SPY) is priced
+    assert mc["method"] == "monte_carlo_time_shift" and mc["tickers"] == 1
+    assert mc["missing_tickers"] == [] and mc["unpriced_trades"] == 0
+    assert mc["trades"] == 60                                     # matured cohorts days 0..59
     # the old ledger comparison is still reported for the dashboard
     assert st["shadows"]["A"]["metrics"]["random_mean_net"] == pytest.approx(0.05)
     st, _ = _run(rows, 60, ids=("A",), bars=TREND_BARS)
@@ -270,7 +313,7 @@ def test_beat_random_fails_closed_and_is_only_run_when_needed():
     assert st["shadows"]["A"]["random_mc"]["status"] == "not_evaluated"
     st, _ = _run(rows, 60, ids=("A",), bars={})                   # no bars at all
     mc = st["shadows"]["A"]["random_mc"]
-    assert mc["status"] == "not_evaluable" and mc["missing_tickers"] == sorted((*POOL, "SPY"))
+    assert mc["status"] == "not_evaluable" and mc["missing_tickers"] == ["SPY"]
     assert st["shadows"]["A"]["stage"] == "probation"
     st, _ = evaluate(rows, _roster("A"), DAYS[60], None, 1, active_ids={"A"})   # no price source
     assert st["shadows"]["A"]["random_mc"]["status"] == "not_evaluable"
@@ -310,9 +353,10 @@ def _to_formal(rows):
 def test_advisor_promotion():
     rows = _world()
     st = _to_formal(rows)
-    st, ev = _run(rows, 79, st)
-    assert st["shadows"]["A"]["stage"] == "formal"                # 19 formal days
     st, ev = _run(rows, 80, st)
+    assert st["shadows"]["A"]["stage"] == "formal"                # 19 matured formal cohorts
+    assert st["shadows"]["A"]["advisor_inputs"]["forward_oos_days"] == 19
+    st, ev = _run(rows, 81, st)
     a = st["shadows"]["A"]
     assert a["stage"] == "advisor", a["advisor_gates"]
     assert a["tier"] == 1 and st["shadows"]["B"]["tier"] is None
@@ -322,7 +366,7 @@ def test_advisor_promotion():
 
 
 @pytest.mark.parametrize("gate,const,value", [
-    ("formal_days", "ADVISOR_MIN_FORMAL_DAYS", 21),
+    ("formal_days", "ADVISOR_MIN_FORMAL_DAYS", 22),
     ("tier", "TIER2_TOP_SHARE", 0.0),
     ("stress", "STRESS_MIN_DAYS", 10_000),
     ("forward_oos", "FORWARD_OOS_DAYS", 21),
@@ -336,7 +380,7 @@ def test_each_advisor_gate_blocks_alone(monkeypatch, gate, const, value):
     monkeypatch.setattr(C, const, value)
     if const == "TIER2_TOP_SHARE":
         monkeypatch.setattr(C, "TIER1_TOP_SHARE", 0.0)
-    st, ev = _run(rows, 80, st)
+    st, ev = _run(rows, 81, st)
     gates = st["shadows"]["A"]["advisor_gates"]
     assert gates[gate] is False
     assert all(v for k, v in gates.items() if k != gate), gates
@@ -347,30 +391,113 @@ def test_stress_gate_fails_on_crash_days():
     rows = _world()
     st = _to_formal(rows)
     # after becoming formal: three market crashes (-8%) on which A loses half its position
-    window = [e for e in rows if e.source_id == "A" and DAYS[60] < e.exit_date <= DAYS[80]]
+    window = [e for e in rows if e.source_id == "A" and DAYS[60] < e.exit_date <= DAYS[81]]
     for e in window[:3]:
         e.market_return, e.net_return, e.pnl_usd = -0.08, -0.5, -0.5 * e.position_usd
-    st, _ = _run(rows, 80, st)
+    st, _ = _run(rows, 81, st)
     assert st["shadows"]["A"]["advisor_gates"]["stress"] is False
 
 
 # ── Monitoring: pause and resume ────────────────────────────────────────
 
 def test_cusum_pause_then_resume_and_same_day_idempotent():
-    rows = _world(a_kw={"crash_from": 82})
+    rows = _world(a_kw={"crash_from": 83})                        # decisions from day 82 lose
     st = _to_formal(rows)
-    st, _ = _run(rows, 80, st)
+    st, _ = _run(rows, 81, st)
     assert st["shadows"]["A"]["stage"] == "advisor"
-    st, ev = _run(rows, 81, st)
+    st, ev = _run(rows, 82, st)                                   # formal period complete
+    cus = st["shadows"]["A"]["cusum"]
     assert st["shadows"]["A"]["stage"] == "advisor" and not ev
-    st, ev = _run(rows, 84, st)
+    assert cus["reference"] == [DAYS[60], DAYS[81]] and cus["ref_days"] == 21
+    assert cus["h"] > 4.4                  # above the known-parameter value for ARL 500
+    # every crash day is a clipped z of -CUSUM_WINSOR: S grows by 3.5 a day
+    crash_days = math.floor(cus["h"] / (C.CUSUM_WINSOR - C.CUSUM_K)) + 1
+    pause_day = 82 + crash_days                   # cohort 81 + n matures one day later
+    for day in range(83, pause_day):
+        st, ev = _run(rows, day, st)
+        assert st["shadows"]["A"]["stage"] == "advisor" and not ev, day
+        assert st["shadows"]["A"]["cusum"] == cus                 # calibrated once
+    st, ev = _run(rows, pause_day, st)
     assert st["shadows"]["A"]["stage"] == "paused"
     assert [e["type"] for e in ev] == ["pause"]
-    again, ev2 = _run(rows, 84, st)
+    assert st["shadows"]["A"]["cusum"] is None                     # recalibrated next time
+    again, ev2 = _run(rows, pause_day, st)
     assert again == st and ev2 == []
-    st, ev = _run(rows, 85, st)
-    assert st["shadows"]["A"]["stage"] == "formal" and st["shadows"]["A"]["formal_since"] == DAYS[85]
+    st, ev = _run(rows, pause_day + 1, st)
+    assert st["shadows"]["A"]["stage"] == "formal"
+    assert st["shadows"]["A"]["formal_since"] == DAYS[pause_day + 1]
     assert [e["type"] for e in ev] == ["resume"]
+
+
+def test_robust_cusum_calibration_and_clip():
+    rng = np.random.default_rng(8)
+    ref = rng.standard_normal(250)
+    h = M.calibrate_cusum_h(ref, seed=1)
+    assert h == M.calibrate_cusum_h(ref, seed=1)                   # deterministic
+    assert 4.0 < h < 8.0                                           # ~4.4 with known parameters
+    assert M.calibrate_cusum_h(ref[:21], seed=1) > h               # short reference -> wider
+    assert M.calibrate_cusum_h([], seed=1) == math.inf
+    c, s = M.robust_center_scale(np.r_[np.zeros(9), 100.0])        # MAD 0 -> sample sd
+    assert c == 0.0 and s == pytest.approx(np.std(np.r_[np.zeros(9), 100.0], ddof=1))
+    assert M.robust_center_scale([1.0, 2.0, 3.0, 1000.0])[1] == pytest.approx(1.4826 * 1.0)
+    # one extreme day counts at most CUSUM_WINSOR standard deviations
+    assert M.cusum_down([-1000.0], 0.0, 1.0, 0.5, 3.4, clip=4.0) is not None
+    assert M.cusum_down([-1000.0], 0.0, 1.0, 0.5, 3.6, clip=4.0) is None
+
+
+# ── Matured decision cohorts (fix 2026-09-29) ───────────────────────────
+
+def _cohort_row(created, exit_=None, net=0.01, hold=5, status="settled"):
+    e = _row("shadow", "M", created, exit_, net, hold=hold)
+    if status != "settled":
+        e.status, e.exit_date, e.net_return, e.pnl_usd = status, None, None, None
+    return e
+
+
+def test_matured_cohorts_wait_for_every_record_of_a_decision_day():
+    rows = [_cohort_row(DAYS[0], DAYS[2]), _cohort_row(DAYS[0], DAYS[5], net=-0.1),
+            _cohort_row(DAYS[1], DAYS[2], net=0.03),             # early target hit ...
+            _cohort_row(DAYS[1], status="open"),                  # ... its sibling still open
+            _cohort_row(DAYS[2], DAYS[3], net=0.03),
+            _cohort_row(DAYS[3], status="void")]
+    done, horizon, stale = matured(rows, DAYS, DAYS[6])
+    assert horizon == DAYS[0] and stale == 0
+    assert sorted(e.net_return for e in done) == [-0.1, 0.01]    # day 1 and 2 not yet
+    # the exit date counts "as of today": a row settled with a later exit is still open
+    assert matured(rows, DAYS, DAYS[4])[1] is None
+    # entry window 5 + longest hold 5 + grace 5 trading days later day 1 is given up on
+    done, horizon, stale = matured(rows, DAYS, DAYS[16])
+    assert horizon == DAYS[3] and stale == 1
+    assert sorted(e.net_return for e in done) == [-0.1, 0.01, 0.03, 0.03]
+    assert matured(rows, DAYS, DAYS[15])[1] == DAYS[0]
+
+
+def test_shadow_stats_use_matured_cohorts_booked_on_the_decision_day():
+    rows = [_cohort_row(DAYS[i], DAYS[i + 2], net=0.01, hold=2) for i in range(10)]
+    rows.append(_cohort_row(DAYS[10], DAYS[11], net=0.05, hold=2))   # early exit, sibling open
+    rows.append(_cohort_row(DAYS[10], status="open", hold=2))
+    s = shadow_stats("M", rows, DAYS[:20], DAYS[11])
+    assert s["horizon"] == DAYS[9] and s["settled"] == 10 and s["record_days"] == 11
+    assert s["mean_net"] == pytest.approx(0.01)                   # the +5% early exit waits
+    assert s["window"] == DAYS[:10]
+    assert list(s["series"]) == pytest.approx([0.001] * 10)       # $10 on each decision day
+
+
+def test_dsr_trials_are_candidates_clustered_by_correlation():
+    rows = _world()
+    for sid in ("temp_event:e1", "missed_path:main"):             # not candidates
+        rows += [_row("temp_shadow", sid, DAYS[i], DAYS[i + 1], 0.0) for i in range(80)]
+    twin = [_row("temp_shadow", "trial:t1", e.created_at[:10], e.exit_date, e.net_return)
+            for e in rows if e.source_id == "A"]                  # a variant that copies A
+    rows += twin + [_row("playground", "playground:p", DAYS[i], DAYS[i + 1], 0.001 * (-1) ** i)
+                    for i in range(80)]
+    assert trial_ids(rows) == ["A", "B", "playground:p", "trial:t1"]
+    assert trial_count(rows) == 4
+    st = _to_formal(rows)
+    st, _ = _run(rows, 70, st, trials=None)
+    info = st["dsr_trials"]
+    assert info["raw"] == 4 and info["effective"] == 3 and info["clusters"] == [["A", "trial:t1"]]
+    assert st["shadows"]["A"]["advisor_inputs"]["trial_count"] == 3
 
 
 # ── Composite score ─────────────────────────────────────────────────────
@@ -435,15 +562,15 @@ def test_run_promotion_files_and_idempotent(tmp_path):
     assert adv == {"updated_at": DAYS[10], "advisors": []}
 
     run_promotion(store, today=DAYS[60], **kw)
-    out = run_promotion(store, today=DAYS[80], **kw)
+    out = run_promotion(store, today=DAYS[81], **kw)
     assert out["advisors"] == ["A"] and out["stages"] == {"advisor": 1, "formal": 1, "blocked": 1}
     assert out["trial_count"] == 2 and out["thresholds"]["PBO_MAX"] == 0.3
     adv = json.loads((tmp_path / "advisors.json").read_text(encoding="utf-8"))
-    assert adv == {"updated_at": DAYS[80], "advisors": ["A"]}
+    assert adv == {"updated_at": DAYS[81], "advisors": ["A"]}
 
     state_before = (tmp_path / "promotion" / "state.json").read_text(encoding="utf-8")
     events_before = (tmp_path / "promotion" / "events.jsonl").read_text(encoding="utf-8")
-    again = run_promotion(store, today=DAYS[80], **kw)
+    again = run_promotion(store, today=DAYS[81], **kw)
     assert again["events"] == []
     assert (tmp_path / "promotion" / "state.json").read_text(encoding="utf-8") == state_before
     assert (tmp_path / "promotion" / "events.jsonl").read_text(encoding="utf-8") == events_before

@@ -2,29 +2,38 @@
 
 The ledger's random-baseline shadow (`random:<sid>`) draws one $100 trade a day, so
 comparing a shadow's mean with it is close to a coin flip. This gate instead builds
-MC_DRAWS random portfolios per shadow, each mirroring the shadow's own settled trades:
+MC_DRAWS random portfolios per shadow by moving the shadow's own trades in time
+(fix 2026-09-29; it replaced uniform ticker draws from the watchlist pool):
 
-- same number of trades, and for trade i the same entry and exit dates (so the same
-  realised holding period);
-- the same long/short ratio: the shadow's direction vector is randomly permuted
-  across its trades in every draw (timing of direction is not given away);
-- the ticker of every trade is drawn uniformly from the shadow's ticker pool: its
-  roster watchlist (what the random-baseline shadow samples from, `sorted(ctx.closes)`)
-  plus every ticker the random-baseline shadow has actually drawn for it (covers the
-  news-driven extras some shadows get);
-- net return = direction * (close(last bar <= exit) / open(first bar >= entry) - 1)
-  - 2 * cost_bps / 10_000, the ledger's own cost rule (`settlement.cost_bps`, asset
-  type from `recorder.classify_ticker` as for the random-baseline records).
+- every trade keeps its ticker, direction and length in bars, so the same asset, cost,
+  holding period and exactly the same long/short mix;
+- each draw shifts ALL trades by one common random offset inside the evaluation
+  window (first entry .. last exit of the evaluated trades), wrapping around at the
+  window end; a ticker with another bar calendar (crypto) moves by the same share of
+  its own window. Overlaps between trades, concentration in one ticker and
+  cross-ticker timing stay those of the shadow; only the entry dates are random;
+- net return = direction * (close(last bar of the moved window) / open(first bar) - 1)
+  - 2 * cost_bps / 10_000, the ledger's own cost rule (`settlement.cost_bps`).
 
-Gate: shadow mean net return >= the MC_QUANTILE quantile of the draw means and
-p = (1 + #draws with mean >= shadow mean) / (1 + valid draws) <= MC_ALPHA
+Why: drawing tickers uniformly from the watchlist compared a concentrated shadow's
+mean with a diversified random mean. A zero-skill shadow that trades high-volatility
+tickers, or one ticker with overlapping holds, has a much wider sampling distribution
+than those random portfolios and "beat" them far more often than the nominal 5%
+(simulated 2026-09-29, docs/S7_DESIGN.md implementation notes). Moving the shadow's
+own trades in time keeps its risk profile exactly, so the test measures the timing of
+its entries and directions, not its appetite for volatility. Ticker selection is
+judged by the domain-ETF and main-pipeline gates.
+
+Gate: shadow mean net return (ledger) >= the MC_QUANTILE quantile of the draw means
+and p = (1 + #draws with mean >= shadow mean) / (1 + valid draws) <= MC_ALPHA
 (White 2000 Reality Check / Davison-Hinkley style Monte Carlo p-value).
 
-Missing data fails closed: pool tickers without any bars are dropped and listed; a
-draw that picks a ticker with a gap in that trade's window is excluded; fewer than
-MC_MIN_VALID valid draws, or more than MC_MAX_POOL_MISSING of the pool without bars,
-make the gate "not_evaluable". The RNG seed is sha256(shadow id + review date), so
-a re-run on the same day with the same ledger gives the same answer.
+Missing data fails closed: a trade whose ticker has no bars, or with a gap at its
+entry / exit (more than MC_MAX_GAP_DAYS calendar days), is unpriced; more than
+MC_MAX_UNPRICED_SHARE of the trades unpriced, an evaluation window shorter than
+MC_MIN_WINDOW_DAYS (too few distinct shifts), or fewer than MC_MIN_VALID finite draws
+make the gate "not_evaluable". The RNG seed is sha256(shadow id + review date), so a
+re-run on the same day gives the same answer.
 """
 from __future__ import annotations
 
@@ -46,7 +55,6 @@ from marketmind.promotion import config as C
 log = logging.getLogger(__name__)
 
 BarsFor = Callable[[list[str]], Mapping[str, "list[Bar] | None"]]
-DRAW_CHUNK = 250                 # draws simulated per numpy batch (bounds memory)
 FETCH_CONCURRENCY = 4            # < price_history's yfinance semaphore (5): never contended
 
 
@@ -65,67 +73,86 @@ def _gap(a: str, b: str) -> int:
     return (date.fromisoformat(b) - date.fromisoformat(a)).days
 
 
-def window_return(bars: list[Bar], dates: list[str], entry: str, exit_: str,
-                  max_gap: int = C.MC_MAX_GAP_DAYS) -> float | None:
-    """Gross long return from the open of the first bar >= entry to the close of the
-    last bar <= exit. None when the window has no bar or its first / last bar lies more
-    than `max_gap` calendar days inside the window (data gap, not yet listed, stale)."""
+def _locate(dates: list[str], entry: str, exit_: str,
+            max_gap: int = C.MC_MAX_GAP_DAYS) -> tuple[int, int] | None:
+    """(index of the first bar >= entry, index of the last bar <= exit), or None when
+    the window has no bar or its first / last bar lies more than `max_gap` calendar
+    days inside the window (data gap, not yet listed, stale)."""
     i0, i1 = bisect_left(dates, entry), bisect_right(dates, exit_) - 1
     if i0 >= len(dates) or i1 < i0:
         return None
     if _gap(entry, dates[i0]) > max_gap or _gap(dates[i1], exit_) > max_gap:
         return None
-    o, c = bars[i0].open, bars[i1].close
+    return i0, i1
+
+
+def window_return(bars: list[Bar], dates: list[str], entry: str, exit_: str,
+                  max_gap: int = C.MC_MAX_GAP_DAYS) -> float | None:
+    """Gross long return from the open of the first bar >= entry to the close of the
+    last bar <= exit; None on a data gap (see `_locate`)."""
+    loc = _locate(dates, entry, exit_, max_gap)
+    if loc is None:
+        return None
+    o, c = bars[loc[0]].open, bars[loc[1]].close
     if not (o > 0 and c > 0):
         return None
     return c / o - 1
 
 
-def mc_baseline(shadow_id: str, trades: list[LedgerEntry], pool: list[str],
+def mc_baseline(shadow_id: str, trades: list[LedgerEntry],
                 bars: Mapping[str, "list[Bar] | None"], today: str,
                 draws: int = C.MC_DRAWS) -> dict:
-    """Run the Monte Carlo gate for one shadow. `trades` are its settled records."""
+    """Run the Monte Carlo gate for one shadow. `trades` are its evaluated settled
+    records (matured decision cohorts); `bars` should hold every ticker they traded."""
     trades = [e for e in trades if e.status == "settled" and e.entry_date and e.exit_date
               and e.net_return is not None]
-    pool = sorted(set(pool))
     seed = seed_for(shadow_id, today)
-    out: dict = {"method": "monte_carlo", "status": "not_evaluable", "draws": draws,
-                 "trades": len(trades), "pool": len(pool), "seed": seed}
+    tickers = sorted({e.ticker for e in trades})
+    out: dict = {"method": "monte_carlo_time_shift", "status": "not_evaluable",
+                 "draws": draws, "trades": len(trades), "tickers": len(tickers), "seed": seed}
     if not trades:
         return {**out, "reason": "no settled trades"}
-    shadow_mean = float(np.mean([e.net_return for e in trades]))
+    lo = min(e.entry_date[:10] for e in trades)
+    hi = max(e.exit_date[:10] for e in trades)
+    window: dict[str, tuple[list[str], np.ndarray, np.ndarray]] = {}
+    for t in tickers:
+        w = sorted((x for x in (bars.get(t) or []) if lo <= x.date <= hi), key=lambda x: x.date)
+        if w:
+            window[t] = ([x.date for x in w], np.array([x.open for x in w], dtype=float),
+                         np.array([x.close for x in w], dtype=float))
+    rows = []                                        # (ticker, start, length, sign, cost, net)
+    for e in trades:
+        loc = (_locate(window[e.ticker][0], e.entry_date[:10], e.exit_date[:10])
+               if e.ticker in window else None)
+        if loc is not None:
+            rows.append((e.ticker, loc[0], loc[1] - loc[0] + 1,
+                         1.0 if e.direction == "long" else -1.0, round_trip_cost(e.ticker),
+                         float(e.net_return)))
+    unpriced = len(trades) - len(rows)
+    out.update(missing_tickers=[t for t in tickers if t not in window], unpriced_trades=unpriced)
+    if not rows or unpriced > C.MC_MAX_UNPRICED_SHARE * len(trades):
+        return {**out, "reason": f"{unpriced}/{len(trades)} trades without usable bars"}
+    ref_days = len({d for dates, _, _ in window.values() for d in dates})
+    out["window_days"] = ref_days
+    if ref_days < C.MC_MIN_WINDOW_DAYS:
+        return {**out, "reason": f"evaluation window {ref_days} < {C.MC_MIN_WINDOW_DAYS} days"}
+    shadow_mean = float(np.mean([r[5] for r in rows]))
     out["shadow_mean"] = shadow_mean
-    usable = [t for t in pool if bars.get(t)]
-    missing = [t for t in pool if not bars.get(t)]
-    out.update(pool_usable=len(usable), missing_tickers=missing)
-    if not usable or len(missing) > C.MC_MAX_POOL_MISSING * len(pool):
-        return {**out, "reason": f"{len(missing)}/{len(pool)} pool tickers without bars"}
 
-    n, k = len(trades), len(usable)
-    gross = np.full((n, k), np.nan)
-    for j, t in enumerate(usable):
-        b = sorted(bars[t], key=lambda x: x.date)
-        dates = [x.date for x in b]
-        for i, e in enumerate(trades):
-            r = window_return(b, dates, e.entry_date[:10], e.exit_date[:10])
-            if r is not None:
-                gross[i, j] = r
-    cost = np.array([round_trip_cost(t) for t in usable])
-    dirs = np.array([1.0 if e.direction == "long" else -1.0 for e in trades])
-    rows = np.arange(n)
-
+    # one common shift per draw: 1 .. ref_days - 1 days, as a share of each ticker's window
     rng = np.random.default_rng(seed)
-    means: list[np.ndarray] = []
-    for start in range(0, draws, DRAW_CHUNK):
-        m = min(DRAW_CHUNK, draws - start)
-        pick = rng.integers(0, k, size=(m, n))
-        sign = rng.permuted(np.tile(dirs, (m, 1)), axis=1)
-        vals = sign * gross[rows, pick] - cost[pick]
-        ok = ~np.isnan(vals).any(axis=1)
-        means.append(vals[ok].mean(axis=1))
-    sims = np.concatenate(means) if means else np.array([])
+    frac = rng.integers(1, ref_days, size=draws) / ref_days
+    total = np.zeros(draws)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        for ticker, start, length, sign, cost, _ in rows:
+            _, o, c = window[ticker]
+            shift = np.floor(frac * o.size + 1e-9).astype(int)
+            s0 = (start + shift) % (o.size - length + 1)
+            gross = np.where(o[s0] > 0, c[s0 + length - 1] / o[s0] - 1, np.nan)
+            total += sign * gross - cost
+    sims = total[np.isfinite(total)] / len(rows)
     valid = int(sims.size)
-    out.update(valid_draws=valid, gap_cells=int(np.isnan(gross).sum()), cells=n * k)
+    out["valid_draws"] = valid
     if valid < C.MC_MIN_VALID:
         return {**out, "reason": f"only {valid} valid draws (< {C.MC_MIN_VALID})"}
     q = float(np.quantile(sims, C.MC_QUANTILE))

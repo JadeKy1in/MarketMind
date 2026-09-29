@@ -5,9 +5,11 @@ Files under `data_dir` (default env MARKETMIND_DATA_DIR or "data"):
 - promotion/events.jsonl promote / pause / resume / challenge, one JSON object per line
 - advisors.json          {"updated_at": ..., "advisors": [shadow ids]} read by the S8 alerts
 
-DSR trial count = number of distinct source_ids with source_type "shadow" or
-"temp_shadow" ever written to the ledger (every long-term shadow, event shadow,
-challenger and beta variant counts as one trial; SPEC §8 "全部历史试验次数"), at least 1.
+DSR trials (fix 2026-09-29): every promotion candidate ever in the ledger (long-term
+shadows, Playground agents, challenger / beta variants; SPEC §8 "全部历史试验次数"),
+reduced to an effective number by clustering on return correlation
+(ladder.trial_ids, metrics.effective_trials). Event shadows and missed_path are not
+candidates and no longer count. `trial_count` below is the raw candidate count.
 
 Bars for the Monte Carlo "beats random" gate come from `price_source` (default: the
 ledger's HistoryPriceSource, which shares the per-process price cache with settlement
@@ -25,17 +27,15 @@ from pathlib import Path
 
 from marketmind.ledger.store import LedgerEntry, LedgerStore
 from marketmind.promotion import config as C
-from marketmind.promotion.ladder import advisors, evaluate
+from marketmind.promotion.ladder import advisors, evaluate, trial_ids
 from marketmind.promotion.random_mc import source_loader
 from marketmind.shadows.v3.roster import ROSTER
 
 log = logging.getLogger(__name__)
 
-TRIAL_SOURCES = ("shadow", "temp_shadow")
-
-
 def trial_count(entries: list[LedgerEntry]) -> int:
-    return max(1, len({e.source_id for e in entries if e.source_type in TRIAL_SOURCES}))
+    """Raw number of promotion candidates ever in the ledger (at least 1)."""
+    return max(1, len(trial_ids(entries)))
 
 
 def _write_json(path: Path, data) -> None:
@@ -61,7 +61,7 @@ def run_promotion(store: LedgerStore, *, today: str | None = None,
 
     entries = store.list()
     trials = trial_count(entries)
-    new_state, events = evaluate(entries, list(roster), today, state, trials,
+    new_state, events = evaluate(entries, list(roster), today, state,
                                  active_ids=active_ids, bars_for=bars_for)
     new_state["trial_count"] = trials
     _write_json(state_path, new_state)
