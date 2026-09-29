@@ -237,17 +237,37 @@ def get_health() -> dict:
     }
 
 
-def read_scheduler(limit: int = 10) -> list[dict]:
-    """Recent automatic runs (marketmind/scripts/scheduled_run.py), newest first."""
+def read_scheduler(limit: int = 10, skip_limit: int = 3) -> list[dict]:
+    """Recent automatic runs (marketmind/scripts/scheduled_run.py), newest first.
+
+    A finished-with-failures run has status "degraded" and lists the failed steps
+    in ``degraded_steps``; ``skips`` holds the last ``skip_limit`` skipped triggers
+    ({"t", "reason"}) of that day, oldest first. A day with only skipped triggers
+    has status None and sorts by its latest skip."""
     p = data_dir() / "scheduler" / "state.json"
     try:
         runs = json.loads(p.read_text(encoding="utf-8")).get("runs", {})
-    except (OSError, ValueError):
+    except (OSError, ValueError, AttributeError):
         return []
-    rows = [{"key": k, **{f: v.get(f) for f in ("mode", "status", "started", "ended",
-                                                  "attempts", "reason")}}
-            for k, v in runs.items()]
-    return sorted(rows, key=lambda r: r["started"] or "", reverse=True)[:limit]
+    if not isinstance(runs, dict):
+        return []
+    rows = []
+    for k, v in runs.items():
+        if not isinstance(v, dict):
+            continue
+        row = {"key": k, **{f: v.get(f) for f in ("mode", "status", "started", "ended",
+                                                    "attempts", "reason")}}
+        steps = v.get("degraded_steps")
+        row["degraded_steps"] = ([str(x) for x in steps if x] if isinstance(steps, list)
+                                 else [])
+        skips = v.get("skips") if isinstance(v.get("skips"), list) else []
+        row["skips"] = [{"t": str(x.get("t") or ""), "reason": str(x.get("reason") or "")}
+                        for x in skips if isinstance(x, dict)][-skip_limit:] if skip_limit > 0 else []
+        rows.append(row)
+
+    def when(r: dict) -> str:
+        return r["started"] or (r["skips"][-1]["t"] if r["skips"] else "") or ""
+    return sorted(rows, key=when, reverse=True)[:limit]
 
 
 # ── evidence layer (S5) ─────────────────────────────────────────────────────
