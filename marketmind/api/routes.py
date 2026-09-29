@@ -214,6 +214,24 @@ async def wb_temp_shadows():
     return _wb(whitebox.get_temp_shadows)
 
 
+@app.get("/api/wb/ecosystem")
+async def wb_ecosystem(date: str = ""):
+    from marketmind.api import whitebox
+    return _wb(whitebox.get_ecosystem, date or None)
+
+
+@app.get("/api/wb/diagnostics")
+async def wb_diagnostics():
+    from marketmind.api import whitebox
+    return _wb(whitebox.get_diagnostics)
+
+
+@app.get("/api/wb/playground")
+async def wb_playground():
+    from marketmind.api import whitebox
+    return _wb(whitebox.get_playground)
+
+
 # ── owner holdings entry (docs/S6_DESIGN.md) ────────────────────────────────
 # Writes are accepted only from this machine and only with the X-MarketMind header,
 # which a page on another site cannot send without a CORS preflight this app never
