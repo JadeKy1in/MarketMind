@@ -529,10 +529,11 @@ def _save_decision_brief(l1_result, l2_result, l3_result, red_team, resonance, d
                 full = asdict(c) if is_dataclass(c) else {}
                 dec_cards.append({
                     **full,
-                    # legacy keys the dashboard reads ("confidence" was always the size %)
+                    # legacy keys the dashboard reads; "confidence" is the card's stated
+                    # probability (None when unstated), never the position size
                     "ticker": getattr(c, 'ticker', ''),
                     "direction": getattr(c, 'direction', ''),
-                    "confidence": getattr(c, 'position_size_pct', 0),
+                    "confidence": getattr(c, 'confidence', None),
                     "thesis": getattr(c, 'thesis', '')[:200],
                 })
             ntc = getattr(decision, 'no_trade_card', None)

@@ -142,7 +142,8 @@ def shadow_stats(sid: str, entries: list[LedgerEntry], calendar: list[str], toda
              and e.source_id == f"random:{sid}"]
     main = [e for e in entries if e.source_type in MAIN_SOURCES]
     excess_dom = [e.excess_domain for e in settled if e.excess_domain is not None]
-    briers = [e.brier for e in settled if e.brier is not None]
+    # forced trades with unstated confidence (stored 0.5) say nothing about calibration
+    briers = [e.brier for e in settled if e.brier is not None and not e.confidence_is_default]
     return {
         "settled_rows": settled,
         "tickers": sorted({e.ticker for e in settled}),
@@ -421,7 +422,8 @@ def evaluate(entries: list[LedgerEntry], roster_entries: list[RosterEntry], toda
             oos_days = [d for d, _ in oos_pairs]
             oos = sum(x for _, x in oos_pairs)
             stress, stress_detail = M.stress_test(s["series"], s["market"], C.STRESS_WORST_SHARE,
-                                                  C.STRESS_MIN_DAYS)
+                                                  C.STRESS_MIN_DAYS, C.STRESS_ALPHA,
+                                                  C.STRESS_MIN_WORST_DAYS)
             dsr = M.dsr(s["series"], n_trials)
             gates = {
                 "formal_days": len(after) >= C.ADVISOR_MIN_FORMAL_DAYS,

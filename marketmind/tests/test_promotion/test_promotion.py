@@ -159,26 +159,60 @@ def test_cusum():
 
 
 def test_stress_test():
-    """Worst-decile market days: the shadow must do at least as well as the market."""
-    market = np.array([-0.02] + [0.001] * 9)
-    ok, d = M.stress_test(np.array([-0.02] + [0.0] * 9), market)
-    assert ok and d["worst_days"] == 1 and d["market_mean"] == -0.02
-    assert M.stress_test(np.array([-0.005] + [0.0] * 9), market)[0] is True
-    assert M.stress_test(np.array([-0.03] + [0.0] * 9), market)[0] is False     # old rule passed
+    """Worst-decile market days: the shadow must do at least as well as the market, and
+    the paired daily differences must be significantly > 0 (one-sided HAC, alpha 0.05)."""
+    rng = np.random.default_rng(3)
+    market = np.r_[-0.02 - 0.005 * rng.random(10), np.full(90, 0.001)]   # worst 10 = first 10
+    noise = np.r_[0.002 * rng.standard_normal(10), np.zeros(90)]
+    ok, d = M.stress_test(market + 0.01 + noise, market)
+    assert ok is True and d["worst_days"] == 10 and d["significance"] == "tested"
+    assert d["p_value"] <= 0.05 and d["mean_rule"] and d["hac_lag"] == M.stress_hac_lag(10)
+    # equal to the market on its worst days is no longer enough
+    ok, d = M.stress_test(market.copy(), market)
+    assert ok is False and d["mean_rule"] is True and d["significance"] == "untestable"
+    # mean slightly above the market but not significant
+    ok, d = M.stress_test(market + 0.0002 + 0.01 * np.r_[rng.standard_normal(10), np.zeros(90)],
+                          market)
+    assert d["p_value"] is not None
+    assert ok is (d["mean_rule"] and d["p_value"] <= 0.05)
+    assert M.stress_test(market - 0.01 + noise, market)[0] is False
+    # fewer than 10 worst-decile days: insufficient, not passed
+    ok, d = M.stress_test(np.zeros(90), np.r_[np.full(9, -0.02), np.full(81, 0.001)])
+    assert ok is None and d["worst_days"] == 9 and d["significance"] == "insufficient"
     assert M.stress_test(np.zeros(5), np.full(5, -0.01))[0] is None
 
 
-def test_stress_rejects_zero_skill_beta_one_longs_half_the_time():
-    """Old rule (>= 2 x market mean) passed ~99% of zero-skill beta-1 longs."""
+def _t4(rng, n):
+    return rng.standard_t(4, n) / math.sqrt(2.0)
+
+
+def test_stress_rejects_zero_skill_beta_one_longs():
+    """Old rule (>= 2 x market mean) passed ~99% of zero-skill beta-1 longs; the mean rule
+    alone passed ~50%; with the significance test ~ alpha (docs/S7_DESIGN.md)."""
     rng = np.random.default_rng(6)
-    passed = 0
+    passed = protected = 0
     for _ in range(400):
-        mk = 0.01 * rng.standard_normal(120)
-        passed += M.stress_test(mk + 0.004 * rng.standard_normal(120), mk)[0]
-    assert 0.35 < passed / 400 < 0.65
-    hedged = sum(M.stress_test(0.3 * mk + 0.004 * rng.standard_normal(120), mk)[0]
+        mk = 0.01 * _t4(rng, 120)
+        s = mk + 0.005 * _t4(rng, 120)
+        passed += bool(M.stress_test(s, mk)[0])
+        put = 0.5 * np.maximum(-mk, 0.0)         # genuine downside protection, fairly priced
+        protected += bool(M.stress_test(s + put - put.mean(), mk)[0])
+    assert passed / 400 < 0.10
+    assert protected / 400 > 0.85
+    hedged = sum(bool(M.stress_test(0.3 * mk + 0.004 * rng.standard_normal(120), mk)[0])
                  for mk in (0.01 * rng.standard_normal(120) for _ in range(200)))
     assert hedged / 200 > 0.95
+
+
+def test_stress_gate_needs_ten_worst_days_by_default(monkeypatch):
+    """With the real constant, 81 market days give 9 worst-decile days: insufficient."""
+    monkeypatch.setattr(C, "STRESS_MIN_WORST_DAYS", 10)
+    rows = _world()
+    st = _to_formal(rows)
+    st, _ = _run(rows, 81, st)
+    a = st["shadows"]["A"]
+    assert a["advisor_gates"]["stress"] is False and a["stage"] == "formal"
+    assert a["advisor_inputs"]["stress"]["significance"] == "insufficient"
 
 
 def test_daily_pnl_and_calendar():
@@ -342,7 +376,27 @@ def test_blocked_roster_shadow_listed():
     assert st["shadows"]["A"]["stage"] == "formal"
 
 
+def test_mean_brier_skips_default_confidence_records():
+    """Forced trades with unstated confidence (confidence_is_default) are not calibration."""
+    rows = _shadow("A", 30, 0.01, 0.01, 1)
+    for e in rows[:10]:
+        e.brier, e.confidence_is_default = 0.9, True
+    s = shadow_stats("A", rows, DAYS[:41], DAYS[40])
+    assert s["mean_brier"] == pytest.approx(0.2)
+    for e in rows:
+        e.confidence_is_default = True
+    assert shadow_stats("A", rows, DAYS[:41], DAYS[40])["mean_brier"] is None
+
+
 # ── Formal -> advisor ───────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _short_stress_window(monkeypatch):
+    """The synthetic worlds reach advisor at ~81 market days (8-9 worst-decile days); the
+    ladder tests lower the worst-day minimum so the other gates can be exercised there.
+    The metric's own tests call `stress_test` with its real defaults."""
+    monkeypatch.setattr(C, "STRESS_MIN_WORST_DAYS", 5)
+
 
 def _to_formal(rows):
     st, _ = _run(rows, 60)

@@ -55,7 +55,8 @@ async def run_decision_interactive(ctx: SessionContext, cli_handler) -> bool:
         print(f"  {'─'*62}")
         for card in decision.decision_cards:
             entry = f"${card.entry_low:.1f}-${card.entry_high:.1f}" if card.entry_low else "N/A"
-            print(f"  {card.ticker:<6} {card.direction:<6} {card.position_size_pct:.0%}     "
+            size = f"{card.position_size_pct:.1f}%"      # already a percent number (10 = 10%)
+            print(f"  {card.ticker:<6} {card.direction:<6} {size:<6} "
                   f"{entry:<14} ${card.stop_loss:<7.1f} ${card.target_price:<7.1f} {card.max_hold_days:<8}")
             if card.thesis:
                 print(f"         论点: {card.thesis[:100]}")
