@@ -392,8 +392,10 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
         decision=decision, mock=mock,
     )
 
-    # Trigger weekly audit if due (every 7 days)
-    await _maybe_run_weekly_audit()
+    # Trigger weekly audit if due (at most once per ISO week; never from a mock run,
+    # whose marker would block the real run of that week)
+    if not mock:
+        await _maybe_run_weekly_audit(Path(config.data_dir))
 
     print(f"  [tokens] {usage_tracker.summary_line()}")
     print("\nMarketMind daily pipeline complete.")
@@ -611,10 +613,31 @@ def _record_pipeline_metrics(flash_results=None, l1_result=None, l2_result=None,
         logger.warning("_record_pipeline_metrics: non-blocking step failed", exc_info=True)
 
 
-async def _maybe_run_weekly_audit() -> None:
-    """Run weekly tactical audit if 7+ days since last audit."""
-    from pathlib import Path
+def _weekly_audit_marker(data_dir: Path, today=None) -> Path:
+    """data/weekly_audit/<ISO year>-W<week>.done"""
+    from datetime import datetime as _dt, timezone as _tz
+    year, week, _ = (today or _dt.now(_tz.utc).date()).isocalendar()
+    return Path(data_dir) / "weekly_audit" / f"{year}-W{week:02d}.done"
+
+
+async def _maybe_run_weekly_audit(data_dir: Path | None = None) -> None:
+    """Run the weekly tactical audit at most once per ISO week.
+
+    A week's marker (data/weekly_audit/<year>-W<week>.done) is written when the
+    audit is attempted, whatever its result: an audit that finds nothing used to
+    leave no trace and re-ran its Flash call every day."""
     from datetime import datetime as _dt, timezone as _tz, timedelta
+
+    marker = _weekly_audit_marker(data_dir) if data_dir is not None else None
+    if marker is not None:
+        if marker.exists():
+            return
+        try:
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text(_dt.now(_tz.utc).isoformat(timespec="seconds"), encoding="utf-8")
+        except OSError:
+            logger.warning("weekly audit marker not written; skipping the audit", exc_info=True)
+            return
 
     audit_dir = Path(__file__).resolve().parent.parent / ".claude" / "metrics"
     audit_path = audit_dir / "weekly_audit_latest.json"

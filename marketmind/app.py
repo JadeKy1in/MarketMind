@@ -8,7 +8,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from marketmind.config.settings import MarketMindConfig
-from marketmind.pipeline.interactive_orchestration import run_interactive
 
 def main():
     parser = argparse.ArgumentParser(description="MarketMind — AI Investment Analysis Workstation")
@@ -55,6 +54,8 @@ def main():
         asyncio.run(_run_playground_if_requested(args, config))
         return ret
     elif args.mode == "interactive":
+        # ~3.9k lines; imported only on this path, never by the scheduled daily run
+        from marketmind.pipeline.interactive_orchestration import run_interactive
         ret = asyncio.run(run_interactive(config, mock=args.mock, verbose=args.verbose,
                                           shadow_count=0 if args.no_shadows else args.shadows))
         asyncio.run(_run_playground_if_requested(args, config))
