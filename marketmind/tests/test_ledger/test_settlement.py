@@ -289,3 +289,33 @@ async def test_missing_benchmark_is_backfilled_later(tmp_path):
     assert report.benchmarks_backfilled == 1 and "backfilled 1" in report.summary()
     assert e.market_return == 0.0 and e.excess_market == net and e.settle_note == ""
     assert e.net_return == net  # outcome itself untouched
+
+
+def test_entry_open_already_past_stop_or_target_is_void():
+    # next_open fill on 09-02 opens below the stop / above the target
+    below = flat(DAYS[:1]) + [bar("2026-09-02", 94, 96, 93, 95)] + flat(DAYS[2:8])
+    out = simulate(entry(stop_loss=95.0, target_price=110.0), below)
+    assert (out.status, out.exit_reason) == ("void", "gap_stop") and out.fill is None
+    above = flat(DAYS[:1]) + [bar("2026-09-02", 111, 112, 109, 110)] + flat(DAYS[2:8])
+    out = simulate(entry(stop_loss=95.0, target_price=110.0), above)
+    assert (out.status, out.exit_reason) == ("void", "gap_target")
+    short = flat(DAYS[:1]) + [bar("2026-09-02", 89, 90, 88, 89)] + flat(DAYS[2:8])
+    out = simulate(entry(direction="short", stop_loss=105.0, target_price=90.0), short)
+    assert (out.status, out.exit_reason) == ("void", "gap_target")
+    # a zone fill at the open below the stop is void too
+    zone = flat(DAYS[:1]) + [bar("2026-09-02", 94, 96, 93, 95)] + flat(DAYS[2:8])
+    out = simulate(entry(entry_rule="zone", entry_low=97.0, entry_high=99.0, stop_loss=95.0,
+                         target_price=110.0), zone)
+    assert (out.status, out.exit_reason) == ("void", "gap_stop")
+
+
+@pytest.mark.asyncio
+async def test_gap_void_is_stored_without_score(tmp_path):
+    store = LedgerStore(tmp_path / "l.db")
+    eid = store.add(entry(stop_loss=95.0, target_price=110.0), created_at=CREATED)
+    bars = flat(DAYS[:1]) + [bar("2026-09-02", 94, 96, 93, 95)] + flat(DAYS[2:8])
+    rep = await settle_all(store, StaticPriceSource({"AAA": bars, "SPY": flat(DAYS[:8])}),
+                           today="2026-09-30")
+    e = store.get(eid)
+    assert rep.voided == 1 and e.status == "void" and e.exit_reason == "gap_stop"
+    assert e.brier is None and e.net_return is None and "already past the stop" in e.settle_note

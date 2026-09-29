@@ -299,6 +299,7 @@ async def test_watch_entries_settle_like_any_ledger_record(env):
     _, ledger = env
     bars = flat_bars()
     set_close(bars, CREATED_IDX + 1, 106.0)
+    set_close(bars, CREATED_IDX + 2, 106.0)   # entry open above the stop (a gap below it is void)
     await _add(env, [main_item()], {"NVDA": bars})
     await _check(env, {"NVDA": bars}, CREATED_IDX + 1)
     rep = await settle_all(ledger, StaticPriceSource({"NVDA": bars, "SPY": flat_bars()}),

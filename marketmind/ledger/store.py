@@ -54,7 +54,7 @@ class LedgerEntry:
     entry_price: float | None = None
     exit_date: str | None = None
     exit_price: float | None = None
-    exit_reason: str | None = None     # stop | target | falsifier | expiry | unfilled
+    exit_reason: str | None = None     # stop | target | falsifier | expiry | unfilled | gap_stop | gap_target
     gross_return: float | None = None
     cost_return: float | None = None
     net_return: float | None = None

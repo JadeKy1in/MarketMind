@@ -6,6 +6,9 @@ Rules (all code, no judgement; see docs/S2_DESIGN.md §4):
                      hold_bars if shorter) that trades into
                      the zone; long fills at min(open, entry_high), short at
                      max(open, entry_low). Never filled inside the window -> void.
+          A fill at the open that is already at/beyond the stop or the target
+          -> void (owner decision 2026-09-29: the card was dead before entry; no
+          one would buy and sell at the same open, so it is not scored).
   Exit    checked bar by bar from the fill bar, in this order:
           gap     an open already beyond the target exits there as target (the order
                   fills at that open), checked before the stop.
@@ -161,6 +164,9 @@ def simulate(e: LedgerEntry, bars: list[Bar]) -> Outcome:
                        exit_reason="unfilled")
 
     long = e.direction == "long"
+    if fill.at_open and (gap := gapped_past(e, fill.price)):
+        return Outcome("void", f"opened at {fill.price:.6g}, already past the {gap} before entry",
+                       exit_reason=f"gap_{gap}")
     last = fill.index + e.hold_bars - 1
     for j in range(fill.index, min(last, len(after) - 1) + 1):
         b = after[j]
@@ -191,6 +197,17 @@ def simulate(e: LedgerEntry, bars: list[Bar]) -> Outcome:
             return Outcome("settled", fill=fill, exit_index=j, exit_price=b.close,
                            exit_reason="expiry")
     return Outcome("open", f"{len(after) - fill.index}/{e.hold_bars} bars held", fill=fill)
+
+
+def gapped_past(e: LedgerEntry, open_price: float) -> str | None:
+    """'stop' / 'target' if the entry open is already at or beyond that level."""
+    long = e.direction == "long"
+    if e.stop_loss is not None and (open_price <= e.stop_loss if long else open_price >= e.stop_loss):
+        return "stop"
+    if e.target_price is not None and (open_price >= e.target_price if long
+                                       else open_price <= e.target_price):
+        return "target"
+    return None
 
 
 def benchmark_return(bars: list[Bar] | None, start: str, end: str) -> float | None:
