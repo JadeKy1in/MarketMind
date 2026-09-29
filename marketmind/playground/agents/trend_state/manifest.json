@@ -1,0 +1,62 @@
+{
+  "agent_id": "trend_state",
+  "display_name": "Trend State Machine (entries)",
+  "description": "Wraps MarketMind's pure-code trend state machine (docs/TREND_DESIGN.md: 12-month excess return > T-bill per Moskowitz-Ooi-Pedersen 2012, close > SMA200 per Faber 2007, 55-day closing-high breakout and 3xATR20 chandelier exit per the turtle rules) on its full universe: each fresh entry signal is a long call held up to 60 bars with the chandelier stop as falsifier. Zero LLM tokens.",
+  "output_character": "occasional long calls on trend entries across US ETFs, commodities, Treasuries, crypto and mega caps; up to 60-bar hold",
+  "public_data_sources": [
+    "public daily price bars via gateway.price_history (complete bars only)",
+    "^IRX 13-week T-bill yield (Yahoo) as the 12-month hurdle"
+  ],
+  "requires_proprietary_data": false,
+  "primary_metric": "net_excess_return_vs_domain_benchmark",
+  "secondary_metrics": [
+    "direction_accuracy",
+    "sharpe_ratio",
+    "max_drawdown",
+    "brier"
+  ],
+  "min_sample_size": 20,
+  "min_observation_days": 60,
+  "target_pipeline_node": "baseline_benchmark",
+  "version": "1.0.0",
+  "author": "MarketMind (pure code, owner decision 2026-09-29)",
+  "tags": [
+    "pure-code",
+    "zero-llm",
+    "baseline",
+    "trend-following",
+    "cross-asset",
+    "event"
+  ],
+  "domain_benchmark": "SPY",
+  "domain_universe": [
+    "SPY",
+    "QQQ",
+    "IWM",
+    "DIA",
+    "XLK",
+    "XLF",
+    "XLE",
+    "XLV",
+    "XLI",
+    "XLY",
+    "XLP",
+    "XLU",
+    "XLB",
+    "SMH",
+    "GLD",
+    "SLV",
+    "USO",
+    "UNG",
+    "TLT",
+    "IEF",
+    "BTC-USD",
+    "ETH-USD",
+    "SOL-USD",
+    "NVDA",
+    "AAPL",
+    "MSFT",
+    "AMZN",
+    "META"
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "agent_id": "tsmom",
+  "display_name": "Time-Series Momentum (MOP 2012)",
+  "description": "Pure-code time-series momentum (Moskowitz, Ooi & Pedersen 2012, 'Time Series Momentum', JFE 104:228-250): monthly, long or short each cross-asset instrument by the sign of its 12-month return in excess of T-bills, confidence from excess return / EWMA (60-day centre of mass) volatility, one-month hold. Zero LLM tokens; a baseline AI shadows must beat.",
+  "output_character": "monthly long/short directional calls on a cross-asset ETF + crypto universe, one-month hold, ATR disaster stop",
+  "public_data_sources": [
+    "public daily price bars via gateway.price_history (complete bars only)",
+    "^IRX 13-week T-bill yield (Yahoo) as the 12-month hurdle"
+  ],
+  "requires_proprietary_data": false,
+  "primary_metric": "net_excess_return_vs_domain_benchmark",
+  "secondary_metrics": [
+    "direction_accuracy",
+    "sharpe_ratio",
+    "max_drawdown",
+    "brier"
+  ],
+  "min_sample_size": 20,
+  "min_observation_days": 60,
+  "target_pipeline_node": "baseline_benchmark",
+  "version": "1.0.0",
+  "author": "MarketMind (pure code, owner decision 2026-09-29)",
+  "tags": [
+    "pure-code",
+    "zero-llm",
+    "baseline",
+    "momentum",
+    "cross-asset",
+    "monthly"
+  ],
+  "domain_benchmark": "SPY",
+  "domain_universe": [
+    "SPY",
+    "QQQ",
+    "IWM",
+    "EFA",
+    "EEM",
+    "TLT",
+    "IEF",
+    "GLD",
+    "DBC",
+    "USO",
+    "BTC-USD",
+    "ETH-USD"
+  ]
+}
