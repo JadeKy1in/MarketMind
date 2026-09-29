@@ -1,7 +1,7 @@
 """Scheduled runs (docs/AUTOMATION.md): New York clock, once per day, retries, lock."""
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -83,6 +83,124 @@ def test_failure_is_recorded_and_notified(tmp_path, monkeypatch):
     assert sr.main(["--slot", "weekend"]) == 1
     run = json.loads((tmp_path / "data" / "scheduler" / "state.json").read_text("utf-8"))["runs"]["2026-10-03-weekend"]
     assert run["status"] == "failed" and "timed out" in run["reason"] and len(sent) == 1
+
+
+def _setup_running(tmp_path, monkeypatch, started, lock_pid, key="2026-09-28-weekday"):
+    monkeypatch.setattr(sr, "ROOT", tmp_path)
+    monkeypatch.setenv("MARKETMIND_DATA_DIR", "data")
+    monkeypatch.setattr(sr, "plan", lambda slot, now: (True, key, "test"))
+    sched = tmp_path / "data" / "scheduler"
+    sr.save_state(sched / "state.json", {"runs": {key: {
+        "status": "running", "attempts": 1, "mode": "daily", "started": started.isoformat(),
+        "log": str(tmp_path / "old.log")}}})
+    if lock_pid is not None:
+        (sched / "run.lock").write_text(json.dumps({"pid": lock_pid, "t": started.timestamp()}),
+                                        encoding="utf-8")
+    calls, sent = [], []
+
+    class Done:
+        returncode = 0
+    monkeypatch.setattr(sr.subprocess, "run", lambda cmd, **kw: calls.append(cmd) or Done())
+    monkeypatch.setattr(sr, "notify_failure", lambda *a: sent.append(a) or [])
+    return sched / "state.json", calls, sent
+
+
+def test_stale_running_with_dead_pid_is_failed_notified_and_retried(tmp_path, monkeypatch):
+    now = datetime.now(timezone.utc)
+    state_path, calls, sent = _setup_running(tmp_path, monkeypatch, now, lock_pid=424242)
+    monkeypatch.setattr(sr, "_pid_alive", lambda pid: pid == os.getpid())
+    assert sr.main(["--slot", "weekday"]) == 0
+    run = json.loads(state_path.read_text("utf-8"))["runs"]["2026-09-28-weekday"]
+    assert len(sent) == 1 and "424242 not running" in sent[0][3]
+    assert len(calls) == 1 and run["status"] == "ok" and run["attempts"] == 2
+
+
+def test_stale_running_with_missing_lock_is_retried(tmp_path, monkeypatch):
+    state_path, calls, sent = _setup_running(tmp_path, monkeypatch, datetime.now(timezone.utc),
+                                             lock_pid=None)
+    assert sr.main(["--slot", "weekday"]) == 0
+    assert len(sent) == 1 and "lock missing" in sent[0][3] and len(calls) == 1
+
+
+def test_running_past_timeout_is_failed_but_attempts_are_bounded(tmp_path, monkeypatch):
+    started = datetime.now(timezone.utc) - timedelta(seconds=sr.TIMEOUT_S["weekday"] + 700)
+    state_path, calls, sent = _setup_running(tmp_path, monkeypatch, started, lock_pid=os.getpid())
+    monkeypatch.setattr(sr, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(sr, "LOCK_STALE_S", 60)             # the old lock has expired too
+    state = sr.load_state(state_path)
+    state["runs"]["2026-09-28-weekday"]["attempts"] = sr.MAX_ATTEMPTS
+    sr.save_state(state_path, state)
+    assert sr.main(["--slot", "weekday"]) == 0
+    run = json.loads(state_path.read_text("utf-8"))["runs"]["2026-09-28-weekday"]
+    assert run["status"] == "failed" and "minutes after start" in run["reason"]
+    assert len(sent) == 1 and calls == []                  # gave up: no third attempt
+    assert run["skips"][-1]["reason"].startswith("gave up")
+
+
+def test_genuinely_running_attempt_is_still_skipped(tmp_path, monkeypatch):
+    state_path, calls, sent = _setup_running(tmp_path, monkeypatch, datetime.now(timezone.utc),
+                                             lock_pid=os.getpid())
+    monkeypatch.setattr(sr, "_pid_alive", lambda pid: True)
+    assert sr.main(["--slot", "weekday"]) == 0
+    run = json.loads(state_path.read_text("utf-8"))["runs"]["2026-09-28-weekday"]
+    assert calls == [] and sent == [] and run["status"] == "running"
+    assert run["skips"][0]["reason"] == "a run is in progress"
+
+
+def test_dry_run_does_not_touch_a_stale_record(tmp_path, monkeypatch):
+    state_path, calls, sent = _setup_running(tmp_path, monkeypatch, datetime.now(timezone.utc),
+                                             lock_pid=None)
+    before = state_path.read_text("utf-8")
+    assert sr.main(["--slot", "weekday", "--dry-run"]) == 0
+    assert state_path.read_text("utf-8") == before and sent == [] and calls == []
+
+
+def test_state_writes_are_atomic_and_keep_a_backup(tmp_path):
+    path = tmp_path / "state.json"
+    sr.save_state(path, {"runs": {"2026-09-28-weekday": {"status": "ok", "attempts": 1}}})
+    assert (tmp_path / "state.json.bak").exists()
+    assert [p.name for p in tmp_path.iterdir() if p.suffix == ".tmp"] == []
+    path.write_text('{"runs": {"2026-09-28-wee', encoding="utf-8")      # truncated
+    assert not sr.should_attempt(sr.load_state(path), "2026-09-28-weekday")[0]
+    path.unlink()
+    assert sr.load_state(path)["runs"]["2026-09-28-weekday"]["status"] == "ok"
+    (tmp_path / "state.json.bak").write_text("[]", encoding="utf-8")
+    assert sr.load_state(path) == {"runs": {}}
+
+
+def test_corrupt_state_does_not_rerun_a_finished_day(tmp_path, monkeypatch):
+    monkeypatch.setattr(sr, "ROOT", tmp_path)
+    monkeypatch.setenv("MARKETMIND_DATA_DIR", "data")
+    monkeypatch.setattr(sr, "plan", lambda slot, now: (True, "2026-09-28-weekday", "test"))
+    calls = []
+
+    class Done:
+        returncode = 0
+    monkeypatch.setattr(sr.subprocess, "run", lambda cmd, **kw: calls.append(cmd) or Done())
+    assert sr.main(["--slot", "weekday"]) == 0 and len(calls) == 1
+    state_path = tmp_path / "data" / "scheduler" / "state.json"
+    state_path.write_bytes(state_path.read_bytes()[:20])
+    assert sr.main(["--slot", "weekday"]) == 0 and len(calls) == 1
+
+
+def test_skips_are_recorded_and_capped(tmp_path, monkeypatch):
+    path = tmp_path / "state.json"
+    now = datetime.now(timezone.utc)
+    for i in range(sr.MAX_SKIPS + 5):
+        sr.record_skip(path, "2026-09-28-weekday", now, f"reason {i}")
+    rec = sr.load_state(path)["runs"]["2026-09-28-weekday"]
+    assert len(rec["skips"]) == sr.MAX_SKIPS and rec["skips"][-1]["reason"] == f"reason {sr.MAX_SKIPS + 4}"
+    assert sr.should_attempt({"runs": {"2026-09-28-weekday": rec}}, "2026-09-28-weekday") == (True, "first attempt")
+
+
+def test_lock_holder_skip_is_recorded(tmp_path, monkeypatch):
+    monkeypatch.setattr(sr, "ROOT", tmp_path)
+    monkeypatch.setenv("MARKETMIND_DATA_DIR", "data")
+    monkeypatch.setattr(sr, "plan", lambda slot, now: (True, "2026-09-28-weekday", "test"))
+    monkeypatch.setattr(sr, "acquire_lock", lambda lock: False)
+    assert sr.main(["--slot", "weekday"]) == 0
+    rec = sr.load_state(tmp_path / "data" / "scheduler" / "state.json")["runs"]["2026-09-28-weekday"]
+    assert "status" not in rec and rec["skips"][0]["reason"] == "another run holds the lock"
 
 
 def test_dashboard_reads_scheduler_state(tmp_path, monkeypatch):

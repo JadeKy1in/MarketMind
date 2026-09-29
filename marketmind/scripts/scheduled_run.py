@@ -10,7 +10,11 @@ clock whether to run and makes sure each slot runs at most once per day:
   releases when started on schedule at 08:45). A late catch-up run still counts:
   every decision fills at the next open after it is made.
 - weekend: Sat-Sun.
-A failed attempt may be retried once by a later trigger. Each run has a hard
+A failed attempt may be retried once by a later trigger. A record still marked
+running whose lock is gone, whose process is dead, or which outlived its timeout
+(a crash, or the machine slept mid-run) is closed as failed and reported, so the
+retry is not blocked. Skipped triggers of an eligible day are recorded, and the
+state file is written atomically with a last-good copy. Each run has a hard
 timeout, its own log file, and a status record the dashboard reads; failures are
 pushed through the configured channels (marketmind/alerts/notify.py).
 """
@@ -20,6 +24,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -58,16 +63,61 @@ def plan(slot: str, now: datetime) -> tuple[bool, str, str]:
     raise ValueError(f"unknown slot {slot}")
 
 
+def _backup_path(path: Path) -> Path:
+    return path.with_name(path.name + ".bak")
+
+
 def load_state(path: Path) -> dict:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {"runs": {}}
+    """The run record; falls back to the last good copy when the main file is
+    missing or unreadable, so a damaged file never causes a second run of a day."""
+    for candidate in (path, _backup_path(path)):
+        try:
+            state = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(state, dict) and isinstance(state.get("runs"), dict):
+            return state
+    return {"runs": {}}
+
+
+def _replace(tmp: Path, target: Path) -> None:
+    # a reader (the dashboard) holding the target open makes os.replace fail on Windows
+    for attempt in range(10):
+        try:
+            os.replace(tmp, target)
+            return
+        except PermissionError:
+            if attempt == 9:
+                raise
+            time.sleep(0.1)
+
+
+def save_state(path: Path, state: dict) -> None:
+    """Atomic write (temp file in the same folder, then os.replace), mirrored to
+    state.json.bak as the last good copy."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(state, ensure_ascii=False, indent=1)
+    for target in (path, _backup_path(path)):
+        tmp = target.with_name(f"{target.name}.{os.getpid()}.tmp")
+        tmp.write_text(text, encoding="utf-8")
+        _replace(tmp, target)
+
+
+MAX_SKIPS = 10
+
+
+def record_skip(path: Path, key: str, now: datetime, reason: str) -> None:
+    """Keep the last few skipped triggers of a day so the dashboard can show them."""
+    state = load_state(path)
+    rec = state["runs"].setdefault(key, {})
+    rec["skips"] = (rec.get("skips", []) + [{"t": now.isoformat(timespec="seconds"),
+                                              "reason": reason}])[-MAX_SKIPS:]
+    save_state(path, state)
 
 
 def should_attempt(state: dict, key: str) -> tuple[bool, str]:
     run = state.get("runs", {}).get(key)
-    if not run:
+    if not run or not run.get("status"):
         return True, "first attempt"
     if run.get("status") == "ok":
         return False, "already succeeded today"
@@ -84,7 +134,7 @@ def _pid_alive(pid: int) -> bool:
     if os.name == "nt":
         out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True,
                              text=True, timeout=30)
-        return str(pid) in out.stdout
+        return re.search(rf"\b{pid}\b", out.stdout) is not None
     try:
         os.kill(pid, 0)
         return True
@@ -92,18 +142,56 @@ def _pid_alive(pid: int) -> bool:
         return False
 
 
+def read_lock(lock: Path) -> dict | None:
+    """The lock's {pid, t}, {} when unreadable, None when there is no lock."""
+    if not lock.exists():
+        return None
+    try:
+        info = json.loads(lock.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return info if isinstance(info, dict) else {}
+
+
+def lock_held(lock: Path) -> bool:
+    """True while a live process holds a lock that is not stale."""
+    info = read_lock(lock)
+    if info is None:
+        return False
+    try:
+        pid, t = int(info.get("pid", 0)), float(info.get("t", 0))
+    except (TypeError, ValueError):
+        return False
+    return time.time() - t < LOCK_STALE_S and _pid_alive(pid)
+
+
 def acquire_lock(lock: Path) -> bool:
-    if lock.exists():
-        try:
-            info = json.loads(lock.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            info = {}
-        fresh = time.time() - info.get("t", 0) < LOCK_STALE_S
-        if fresh and _pid_alive(int(info.get("pid", 0))):
-            return False
+    if lock_held(lock):
+        return False
     lock.parent.mkdir(parents=True, exist_ok=True)
     lock.write_text(json.dumps({"pid": os.getpid(), "t": time.time()}), encoding="utf-8")
     return True
+
+
+def stale_run_reason(rec: dict, lock: Path, now: datetime, timeout_s: int) -> str | None:
+    """Why a record still marked "running" cannot belong to a live attempt
+    (the process crashed, or the machine slept mid-run), or None if it may be live."""
+    info = read_lock(lock)
+    if info is None:
+        return "previous attempt stopped without finishing (run lock missing)"
+    try:
+        pid = int(info.get("pid", 0))
+    except (TypeError, ValueError):
+        pid = 0
+    if not _pid_alive(pid):
+        return f"previous attempt stopped without finishing (process {pid} not running)"
+    try:
+        started = datetime.fromisoformat(rec["started"])
+    except (KeyError, TypeError, ValueError):
+        return "previous attempt has no valid start time"
+    if (now - started).total_seconds() > timeout_s + 600:
+        return f"previous attempt still marked running {int((now - started).total_seconds() // 60)} minutes after start"
+    return None
 
 
 PUSH_VARS = ("SERVERCHAN_SENDKEY", "PUSHPLUS_TOKEN", "WECOM_WEBHOOK_KEY", "FEISHU_WEBHOOK_TOKEN",
@@ -155,6 +243,20 @@ def notify_failure(slot: str, key: str, log_path: Path, reason: str) -> list[dic
         return []
 
 
+def recover_stale_run(slot: str, key: str, state_path: Path, reason: str) -> dict:
+    """Close a "running" record left by a crashed attempt as failed and report it,
+    so a later trigger may retry (still bounded by MAX_ATTEMPTS)."""
+    state = load_state(state_path)
+    rec = state["runs"][key]
+    rec.update(status="failed", reason=reason,
+               ended=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    save_state(state_path, state)
+    log_path = Path(rec.get("log") or data_dir() / "logs" / "scheduled" / f"{key}.log")
+    rec["notified"] = notify_failure(slot, key, log_path, reason)
+    save_state(state_path, state)
+    return state
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--slot", choices=sorted(MODES), required=True)
@@ -165,52 +267,81 @@ def main(argv: list[str] | None = None) -> int:
     run, key, reason = plan(args.slot, now)
     sched = data_dir() / "scheduler"
     state_path = sched / "state.json"
+    lock = sched / "run.lock"
     state = load_state(state_path)
+    if run:
+        prev = state["runs"].get(key, {})
+        stale = (stale_run_reason(prev, lock, now, TIMEOUT_S[args.slot])
+                 if prev.get("status") == "running" else None)
+        if stale:
+            print(f"{key}: {stale}")
+            if args.dry_run:
+                state = {"runs": {**state["runs"], key: {**prev, "status": "failed"}}}
+            else:
+                state = recover_stale_run(args.slot, key, state_path, stale)
     ok, why = should_attempt(state, key) if run else (False, reason)
     print(f"{now.isoformat(timespec='seconds')} {key}: {'run' if ok else 'skip'} ({why})")
-    if not ok or args.dry_run:
+    if args.dry_run:
         return 0
-    lock = sched / "run.lock"
+    if not ok:
+        if run:                                  # an eligible day: show the skip on the dashboard
+            record_skip(state_path, key, now, why)
+        return 0
     if not acquire_lock(lock):
         print("another scheduled run holds the lock; skipping")
+        record_skip(state_path, key, now, "another run holds the lock")
         return 0
+    try:
+        return _run_locked(args.slot, key, now, state_path)
+    finally:                                     # released only after the final state write
+        try:
+            lock.unlink()
+        except OSError:
+            pass
 
+
+def _run_locked(slot: str, key: str, now: datetime, state_path: Path) -> int:
+    state = load_state(state_path)               # re-check: another trigger may have finished
+    ok, why = should_attempt(state, key)
+    if not ok:
+        print(f"{key}: skip ({why})")
+        record_skip(state_path, key, now, why)
+        return 0
     log_dir = data_dir() / "logs" / "scheduled"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{key}.log"
-    rec = state.setdefault("runs", {}).setdefault(key, {"attempts": 0})
+    rec = state["runs"].setdefault(key, {})
     rec.update(status="running", started=now.isoformat(timespec="seconds"),
-               mode=MODES[args.slot], log=str(log_path), attempts=rec.get("attempts", 0) + 1)
-    state_path.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+               mode=MODES[slot], log=str(log_path), attempts=rec.get("attempts", 0) + 1)
+    save_state(state_path, state)
 
     load_user_push_env()                         # alerts and failure pushes need the keys
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
-    cmd = [sys.executable, str(ROOT / "marketmind" / "app.py"), "--mode", MODES[args.slot]]
+    cmd = [sys.executable, str(ROOT / "marketmind" / "app.py"), "--mode", MODES[slot]]
     try:
         with log_path.open("a", encoding="utf-8") as log:
             log.write(f"\n===== {now.isoformat(timespec='seconds')} attempt {rec['attempts']}: "
                       f"{' '.join(cmd[1:])}\n")
             log.flush()
             proc = subprocess.run(cmd, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT,
-                                  timeout=TIMEOUT_S[args.slot])
+                                  timeout=TIMEOUT_S[slot])
         code, failure = proc.returncode, (None if proc.returncode == 0 else f"exit code {proc.returncode}")
     except subprocess.TimeoutExpired:
-        code, failure = -1, f"timed out after {TIMEOUT_S[args.slot] // 60} minutes"
+        code, failure = -1, f"timed out after {TIMEOUT_S[slot] // 60} minutes"
     except Exception as e:
         code, failure = -1, f"{type(e).__name__}: {e}"
-    finally:
-        try:
-            lock.unlink()
-        except OSError:
-            pass
 
     rec.update(status="ok" if failure is None else "failed", exit_code=code, reason=failure,
                ended=datetime.now(timezone.utc).isoformat(timespec="seconds"))
     if failure:
-        rec["notified"] = notify_failure(args.slot, key, log_path, failure)
-    state = load_state(state_path) | {"runs": {**load_state(state_path).get("runs", {}), key: rec}}
-    runs = dict(sorted(state["runs"].items())[-60:])          # keep about two months
-    state_path.write_text(json.dumps({"runs": runs}, ensure_ascii=False, indent=1), encoding="utf-8")
+        rec["notified"] = notify_failure(slot, key, log_path, failure)
+    state = load_state(state_path)               # merge: the other slot may have written meanwhile
+    skips = state["runs"].get(key, {}).get("skips")
+    if skips:
+        rec["skips"] = skips
+    state["runs"][key] = rec
+    state["runs"] = dict(sorted(state["runs"].items())[-60:])     # keep about two months
+    save_state(state_path, state)
     print(f"{key}: {rec['status']}" + (f" ({failure})" if failure else ""))
     return 0 if failure is None else 1
 
