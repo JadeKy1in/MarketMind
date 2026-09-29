@@ -383,6 +383,7 @@ def check_homogenisation(rows: list[LedgerEntry], run_days: list[str]) -> dict:
     by_actor_group: dict[str, Counter] = defaultdict(Counter)
     by_actor_ticker: dict[str, Counter] = defaultdict(Counter)
     by_actor_llm: dict[str, Counter] = defaultdict(Counter)
+    by_actor_news: dict[str, Counter] = defaultdict(Counter)     # meta.news_sources (2026-09-29+)
     for e in rows:
         if day_of(e) in window and is_voter(e):
             by_actor_group[e.source_id][asset_group(e.ticker)] += 1
@@ -390,6 +391,8 @@ def check_homogenisation(rows: list[LedgerEntry], run_days: list[str]) -> dict:
             llm = (e.meta or {}).get("llm")      # meta.model is the tier ("flash"), not the LLM
             if llm:
                 by_actor_llm[e.source_id][str(llm)] += 1
+            for src in (e.meta or {}).get("news_sources") or []:
+                by_actor_news[e.source_id][str(src)] += 1
 
     def share(per_actor: dict[str, Counter], label: str) -> dict:
         dom = Counter(d for d in (_dominant(c) for c in per_actor.values()) if d)
@@ -402,12 +405,19 @@ def check_homogenisation(rows: list[LedgerEntry], run_days: list[str]) -> dict:
 
     sets = [set(c) for c in by_actor_ticker.values()]
     jac = [len(a & b) / len(a | b) for a, b in combinations(sets, 2) if a | b]
+    if by_actor_news:
+        nsets = [set(c) for c in by_actor_news.values()]
+        njac = [len(a & b) / len(a | b) for a, b in combinations(nsets, 2) if a | b]
+        news = {"status": "recorded", **share(by_actor_news, "news source (meta.news_sources)"),
+                "mean_source_jaccard": round(float(np.mean(njac)), 3) if njac else None}
+    else:
+        news = NEWS_NOT_RECORDED
     return {"window_days": len(window),
             "dominant_group": share(by_actor_group, "asset group"),
             "dominant_ticker": share(by_actor_ticker, "ticker"),
             "llm": share(by_actor_llm, "llm (meta.llm)"),
             "mean_ticker_jaccard": round(float(np.mean(jac)), 3) if jac else None,
-            "news_source": NEWS_NOT_RECORDED}
+            "news_source": news}
 
 
 # ── 4. Stagnation / plateau ─────────────────────────────────────────────

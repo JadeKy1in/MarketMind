@@ -227,3 +227,15 @@ def test_group_trend_state():
     assert H.group_trend_state(st, "us_equity_index") == "TREND"
     assert H.group_trend_state(st, "long_rates") is None
     assert H.group_trend_state({"QQQ": "WATCH", "SPY": "CASH"}, "us_equity_index") == "WATCH"
+
+
+def test_homogenisation_reads_news_sources_when_recorded():
+    rows = []
+    for d in days(3):
+        rows += [rec("s0", d, "SPY", meta={"news_sources": ["Bloomberg Markets", "CNBC Top News"]}),
+                 rec("s1", d, "QQQ", meta={"news_sources": ["Bloomberg Markets"]}),
+                 rec("s2", d, "GLD", meta={"news_sources": ["Kitco"]})]
+    news = H.evaluate(rows, days(3)[-1], facts())["homogenisation"]["news_source"]
+    assert news["status"] == "recorded" and news["top"] == "Bloomberg Markets"
+    assert news["share"] == pytest.approx(0.667) and news["flag"]
+    assert news["mean_source_jaccard"] == pytest.approx((0.5 + 0 + 0) / 3, abs=1e-3)
