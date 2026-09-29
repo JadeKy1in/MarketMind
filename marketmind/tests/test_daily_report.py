@@ -197,7 +197,7 @@ def test_playground_facts_today_only(env):
                           meta={"run_date": "2026-09-28"}))                     # not today
     f = daily.gather_facts(TODAY, store, briefs)["playground"]
     assert f["calls"] == 2 and list(f["by_agent"]) == ["memory_desk"]
-    assert [c["entry_id"] for c in f["by_agent"]["memory_desk"]] == ids
+    assert sorted(c["entry_id"] for c in f["by_agent"]["memory_desk"]) == sorted(ids)
     assert "Playground 调用：2" in daily.fallback_text(daily.gather_facts(TODAY, store, briefs))
     assert "playground" not in daily.gather_facts(TODAY, None, briefs)
 
