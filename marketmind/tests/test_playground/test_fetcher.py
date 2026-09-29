@@ -1,6 +1,7 @@
 """Test playground fetcher — WP API + RSS dual channel, three-tier logic."""
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from marketmind.playground.playground_sources import (
@@ -13,6 +14,33 @@ from marketmind.playground.playground_fetcher import (
     _parse_rss_feed, _parse_rss_item, _clean_text,
     flatten_results, _wp_render,
 )
+
+
+_RSS = """<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>
+<item><title>Memory prices climb</title><link>https://www.eetasia.com/1</link>
+<description>DRAM contract prices rose.</description></item>
+<item><title>Foundry outlook</title><link>https://www.eetasia.com/2</link>
+<description>Utilisation recovers.</description></item>
+</channel></rss>"""
+
+
+def _mock_http(monkeypatch, handler) -> list[str]:
+    """Route the fetcher's httpx clients to `handler`; returns the requested URLs."""
+    from marketmind.playground import playground_fetcher as pf
+    seen: list[str] = []
+    real = httpx.AsyncClient
+
+    def record(request):
+        seen.append(str(request.url))
+        return handler(request)
+
+    class _Client(real):
+        def __init__(self, *a, **kw):
+            kw["transport"] = httpx.MockTransport(record)
+            super().__init__(*a, **kw)
+
+    monkeypatch.setattr(pf.httpx, "AsyncClient", _Client)
+    return seen
 
 
 # ── Source registry tests ─────────────────────────────────────────────────
@@ -159,9 +187,16 @@ def test_wp_render_missing():
 # ── Integration tests ─────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_fetch_wp_api_source():
-    """Integration: fetch a real WP API source."""
+async def test_fetch_wp_api_source(monkeypatch):
+    """WP API channel against a mocked WordPress reply (no network)."""
     from marketmind.playground.playground_fetcher import _fetch_source
+    body = "<p>" + "Chiplet packaging capacity is expanding across the supply chain. " * 4 + "</p>"
+    seen = _mock_http(monkeypatch, lambda req: httpx.Response(200, json=[
+        {"title": {"rendered": "TSMC expands CoWoS"}, "link": "https://www.eetimes.com/a",
+         "date": "2026-09-28T08:00:00", "excerpt": {"rendered": "<p>Short</p>"},
+         "content": {"rendered": body}},
+        {"title": {"rendered": ""}, "content": {"rendered": "untitled posts are skipped"}},
+    ]))
 
     source = PlaygroundSource(
         name="EE Times",
@@ -172,20 +207,19 @@ async def test_fetch_wp_api_source():
         reliability=0.88,
     )
     result = await _fetch_source(source)
-    assert result["source_name"] == "EE Times"
-    assert isinstance(result["items"], list)
-    if result["items"]:
-        item = result["items"][0]
-        assert "title" in item
-        assert "url" in item
-        assert "full_content" in item
-        assert len(item["full_content"]) > 100  # WP API returns full article
+    assert seen == ["https://www.eetimes.com/wp-json/wp/v2/posts?per_page=5&_embed"]
+    assert result["source_name"] == "EE Times" and not result.get("error")
+    assert [i["title"] for i in result["items"]] == ["TSMC expands CoWoS"]
+    item = result["items"][0]
+    assert item["url"] == "https://www.eetimes.com/a" and item["summary"] == "Short"
+    assert len(item["full_content"]) > 100  # WP API returns full article
 
 
 @pytest.mark.asyncio
-async def test_fetch_rss_source():
-    """Integration: fetch a real RSS source."""
+async def test_fetch_rss_source(monkeypatch):
+    """RSS channel against a mocked feed (no network)."""
     from marketmind.playground.playground_fetcher import _fetch_source
+    seen = _mock_http(monkeypatch, lambda req: httpx.Response(200, text=_RSS))
 
     source = PlaygroundSource(
         name="EE Times Asia",
@@ -195,12 +229,11 @@ async def test_fetch_rss_source():
         reliability=0.78,
     )
     result = await _fetch_source(source)
-    assert result["source_name"] == "EE Times Asia"
-    assert isinstance(result["items"], list)
-    if result["items"]:
-        item = result["items"][0]
-        assert "title" in item
-        assert "url" in item
+    assert seen == ["https://www.eetasia.com/feed/"]
+    assert result["source_name"] == "EE Times Asia" and not result.get("error")
+    assert [(i["title"], i["url"]) for i in result["items"]] == [
+        ("Memory prices climb", "https://www.eetasia.com/1"),
+        ("Foundry outlook", "https://www.eetasia.com/2")]
 
 
 @pytest.mark.slow  # live RSS fetch; fails offline
@@ -216,22 +249,24 @@ async def test_fetch_core_sources():
 
 
 @pytest.mark.asyncio
-async def test_supplemental_trigger_threshold():
+async def test_supplemental_trigger_threshold(monkeypatch):
     """Supplemental fires when core yield is low, skips when high."""
     from marketmind.playground.playground_fetcher import fetch_supplemental_if_needed
 
     # Core yield 5 (< 15) → should trigger supplemental
+    seen = _mock_http(monkeypatch, lambda req: httpx.Response(200, text=_RSS))
     fake_core = [
         {"items": [{"title": "x"}] * 3},
         {"items": [{"title": "x"}] * 2},
     ]
     supp = await fetch_supplemental_if_needed(["serenity_reply"], fake_core)
-    # Google News should be fetched
-    if supp:
-        names = {r.get("source_name") for r in supp}
-        assert "Google News — Semiconductor" in names
+    # Google News is fetched (mocked)
+    names = {r.get("source_name") for r in supp}
+    assert "Google News — Semiconductor" in names
+    assert any("news.google.com" in u for u in seen)
+    seen.clear()
 
     # Core yield 50 (>= 15) → should skip supplemental
     fake_core_high = [{"items": [{"title": "x"}] * 50}]
     supp_skip = await fetch_supplemental_if_needed(["serenity_reply"], fake_core_high)
-    assert supp_skip == []
+    assert supp_skip == [] and seen == []

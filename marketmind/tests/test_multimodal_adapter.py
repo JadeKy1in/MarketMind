@@ -246,8 +246,11 @@ async def test_extract_text_from_pdf_with_pdfplumber():
 
 
 @pytest.mark.asyncio
-async def test_extract_text_from_pdf_no_methods():
+async def test_extract_text_from_pdf_no_methods(monkeypatch):
     """When no extraction method is available, error observation is returned."""
+    # An empty key falls back to GEMINI_API_KEY; the owner's real key made this
+    # test call Gemini Vision over the network.
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     # Create a temp file so os.path.isfile() passes
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
         tmp.write(b"%PDF-1.4 fake pdf content")

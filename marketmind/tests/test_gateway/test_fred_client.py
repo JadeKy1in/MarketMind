@@ -152,10 +152,22 @@ class TestGetFredBatch:
 
     async def test_batch_ignores_unknown_keys(self):
         _clear_cache()
-        results = await get_fred_batch(["ZZZZZ", "DGS10"])
-        # ZZZZZ is ignored, DGS10 fetched
+        fixture = _load_fixture("fred_dgs10.json")
+        with patch(
+            "marketmind.gateway.fred_client._get_fred_key",
+            return_value="test_key",
+        ), patch.object(
+            httpx.AsyncClient, "get", new_callable=AsyncMock,
+        ) as mock_get:
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = lambda: None
+            mock_resp.json.return_value = fixture
+            mock_get.return_value = mock_resp
+            results = await get_fred_batch(["ZZZZZ", "DGS10"])
+        # ZZZZZ is ignored (never requested), DGS10 fetched
         assert "ZZZZZ" not in results
-        assert "DGS10" in results
+        assert "DGS10" in results and "error" not in results["DGS10"]
+        assert mock_get.await_count == 1
 
     async def test_batch_empty_list(self):
         _clear_cache()

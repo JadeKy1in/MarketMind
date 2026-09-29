@@ -123,7 +123,11 @@ async def test_interactive_full_flow_confirm():
     mock_archivist.init_fts.return_value = None
     mock_archivist.index_document.return_value = None
 
-    with patch("marketmind.pipeline.interactive_orchestration._setup_logging"):  # skip log dir creation
+    no_events = {"has_high_impact": False, "high_impact_events": []}
+    # skip log dir creation; the economic calendar would query FRED over the network
+    with patch("marketmind.pipeline.interactive_orchestration._setup_logging"), \
+            patch("marketmind.pipeline.economic_calendar.check_economic_calendar",
+                  AsyncMock(return_value=no_events)):
         with patch("marketmind.gateway.async_client.init_gateway"):  # skip API key validation
             with patch("marketmind.pipeline.scout.fetch_all_sources",
                        AsyncMock(return_value=[])):
