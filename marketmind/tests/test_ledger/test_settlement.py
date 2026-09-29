@@ -319,3 +319,21 @@ async def test_gap_void_is_stored_without_score(tmp_path):
     e = store.get(eid)
     assert rep.voided == 1 and e.status == "void" and e.exit_reason == "gap_stop"
     assert e.brier is None and e.net_return is None and "already past the stop" in e.settle_note
+
+
+def test_one_bar_record_scores_fill_to_close_only():
+    # the bar touches both stop and target and closes above the falsifier level:
+    # only the open -> close direction counts
+    bars = flat(DAYS[:1]) + [bar("2026-09-02", 100, 112, 94, 103)] + flat(DAYS[2:5])
+    e = entry(hold_bars=1, stop_loss=95.0, target_price=110.0,
+              falsifier_rule={"type": "close_below", "price": 104.0})
+    out = simulate(e, bars)
+    assert (out.status, out.exit_reason) == ("settled", "expiry")
+    assert (out.fill.price, out.exit_price, out.exit_index) == (100, 103, 0)
+
+
+def test_one_bar_record_ignores_the_gap_rule():
+    bars = flat(DAYS[:1]) + [bar("2026-09-02", 90, 91, 88, 89)]
+    out = simulate(entry(hold_bars=1, stop_loss=95.0), bars)
+    assert (out.status, out.exit_price) == ("settled", 89)
+    assert simulate(entry(hold_bars=1), flat(DAYS[:1])).status == "pending"

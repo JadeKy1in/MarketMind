@@ -163,6 +163,13 @@ def simulate(e: LedgerEntry, bars: list[Bar]) -> Outcome:
         return Outcome("void", f"entry zone not reached within {entry_window(e)} bars",
                        exit_reason="unfilled")
 
+    if e.hold_bars <= 1:
+        # A one-bar (intraday) call: a daily bar cannot tell whether the stop or the
+        # target came first, so only the direction from fill to close is scored
+        # (owner decision 2026-09-29); stop, target, falsifier and the gap rule are ignored.
+        return Outcome("settled", "one-bar record: scored on fill-to-close direction only",
+                       fill=fill, exit_index=fill.index, exit_price=after[fill.index].close,
+                       exit_reason="expiry")
     long = e.direction == "long"
     if fill.at_open and (gap := gapped_past(e, fill.price)):
         return Outcome("void", f"opened at {fill.price:.6g}, already past the {gap} before entry",
