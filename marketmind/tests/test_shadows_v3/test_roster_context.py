@@ -125,3 +125,17 @@ def test_failed_fred_fetch_is_stated_not_omitted():
     text = ctx.render()
     assert "## Macro data (FRED" in text
     assert "FRED data unavailable" in text
+
+
+def test_undated_headlines_are_labelled_time_unknown():
+    from marketmind.pipeline.scout import NewsItem
+    from marketmind.shadows.v3.context import news_lines
+    undated = NewsItem(id="1", title="Undated story", url="", source_name="Wire", source_tier=2,
+                       published_at="", summary="")
+    dated = NewsItem(id="2", title="Dated story", url="", source_name="Wire", source_tier=2,
+                     published_at="2026-09-28T09:30:00Z", summary="")
+    lines = news_lines([undated, dated, {"title": "Dict story", "source_name": "W",
+                                         "published_at": "2026-09-28T09:30", "time_unknown": True}])
+    assert lines[0] == "- [Wire] (time unknown) Undated story"
+    assert lines[1] == "- [Wire, 2026-09-28 09:30] Dated story"
+    assert "(time unknown)" in lines[2]

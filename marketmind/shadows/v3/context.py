@@ -140,10 +140,19 @@ def event_lines(entry: RosterEntry) -> list[str]:
 def news_lines(items: list) -> list[str]:
     lines = []
     for item in items:
-        when = _attr(item, "published_at")[:16].replace("T", " ")
         src = _attr(item, "source_name")
-        lines.append(f"- [{src}{', ' + when if when else ''}] {_attr(item, 'title')[:220]}")
+        when = "" if _time_unknown(item) else _attr(item, "published_at")[:16].replace("T", " ")
+        stamp = f"[{src}, {when}]" if when else f"[{src}] (time unknown)"
+        lines.append(f"- {stamp} {_attr(item, 'title')[:220]}")
     return lines
+
+
+def _time_unknown(item) -> bool:
+    """No usable publish time (scout marks it; an empty published_at means the same)."""
+    flag = getattr(item, "time_unknown", None)
+    if flag is None and isinstance(item, dict):
+        flag = item.get("time_unknown")
+    return bool(flag) or not _attr(item, "published_at").strip()
 
 
 def news_tickers(news_items: list, tradable, limit: int = MAX_NEWS_TICKERS) -> list[str]:

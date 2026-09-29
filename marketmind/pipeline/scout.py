@@ -67,6 +67,14 @@ class NewsItem:
     # Seen in a previous run within the 72h window. Kept (down-weighted), not dropped:
     # dropping starved same-day re-runs (391 -> 49 -> 4 articles on 2026-09-27).
     seen_before: bool = False
+    # The source gave no publish time. published_at is then "" (not "now": an undated
+    # item must not look fresh); set automatically for any empty published_at.
+    time_unknown: bool = False
+
+    def __post_init__(self):
+        if not str(self.published_at or "").strip():
+            self.published_at = ""
+            self.time_unknown = True
 
     @classmethod
     def from_entry(cls, entry: dict, source: Source) -> "NewsItem":
@@ -75,7 +83,7 @@ class NewsItem:
         url = entry.get("link", "")
         summary_raw = entry.get("summary", entry.get("description", ""))
         summary = _strip_html(summary_raw)[:500]
-        published = entry.get("published", entry.get("updated", datetime.now(timezone.utc).isoformat()))
+        published = entry.get("published") or entry.get("updated") or ""
         item_id = hashlib.sha256(f"{title}{url}".encode()).hexdigest()[:16]
         try:
             reliability = float(source.reliability)
@@ -224,7 +232,7 @@ async def _fetch_api_source(source: Source, config: MarketMindConfig) -> list[Ne
             title = (art.get("title") or "Untitled").strip()
             link = art.get("url", "")
             desc = (art.get("description") or "").strip()
-            published = art.get("publishedAt", datetime.now(timezone.utc).isoformat())
+            published = art.get("publishedAt") or ""
             item_id = hashlib.sha256(f"{title}{link}".encode()).hexdigest()[:16]
             try:
                 reliability = float(source.reliability)
@@ -350,7 +358,6 @@ async def fetch_source(source: Source, config: MarketMindConfig) -> list[NewsIte
 def _load_manual_data(items: list) -> None:
     """Load user-provided data from data/manual/ (Congress trades, Bluesky posts)."""
     import json as _json, os as _os
-    from datetime import datetime as _dt, timezone as _tz
     manual_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "data", "manual")
     if not _os.path.isdir(manual_dir):
         return
@@ -370,7 +377,7 @@ def _load_manual_data(items: list) -> None:
                     id=hashlib.sha256(f"manual_congress:{rep}:{ticker}:{t.get('transaction_date','')}".encode()).hexdigest()[:16],
                     title=f"[Congress] {rep} ({t.get('type','?').upper()} ${ticker})",
                     url="", source_name="Congress Trades", source_tier=int(SourceTier.BEST_EFFORT),
-                    published_at=t.get("transaction_date", _dt.now(_tz.utc).isoformat()),
+                    published_at=t.get("transaction_date") or "",
                     summary=f"{rep} reported {t.get('type','?')} of ${ticker}. Amount: {t.get('amount','unknown')}. Manual input — STOCK Act disclosure.",
                     source_reliability=0.20, content_type="insider_signal",
                 ))
@@ -392,7 +399,7 @@ def _load_manual_data(items: list) -> None:
                     id=hashlib.sha256(f"manual_bluesky:{text[:80]}".encode()).hexdigest()[:16],
                     title=text[:100] + ("..." if len(text) > 100 else ""),
                     url="", source_name="Bluesky Social", source_tier=int(SourceTier.BEST_EFFORT),
-                    published_at=p.get("timestamp", _dt.now(_tz.utc).isoformat()),
+                    published_at=p.get("timestamp") or "",
                     summary=text, source_reliability=0.20, content_type="social_mention",
                 ))
             logger.info("Loaded %d Bluesky posts from manual file", len(posts[:10]))
