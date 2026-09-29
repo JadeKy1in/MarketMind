@@ -60,6 +60,7 @@ def _card_entry(card, snapshot_id: str | None) -> LedgerEntry:
         stop_loss=card.stop_loss or None, target_price=card.target_price or None,
         snapshot_id=snapshot_id,
         meta={"position_size_pct": card.position_size_pct,
+              "llm_size_pct": getattr(card, "llm_size_pct", None),   # record only, never used
               "reward_risk_ratio": card.reward_risk_ratio,
               "risk_statement": card.risk_statement, "red_team_note": card.red_team_note},
     )

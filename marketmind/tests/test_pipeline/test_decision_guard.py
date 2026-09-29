@@ -40,12 +40,41 @@ def test_non_green_and_short_cards_are_dropped_with_reason():
     assert any("SPY" in n and "long" in n for n in rep.notes)
 
 
-def test_single_position_cap_and_zero_or_invalid_size_dropped():
+def test_size_is_risk_budget_over_stop_distance_and_llm_size_ignored():
+    # entry mid = (98 + 100.5) / 2 = 99.25; stop 90 -> 9.3199% -> 1% / 9.3199% = 10.73%
     l3 = Layer3BatchResult(results=[green("SPY"), green("GLD"), green("USO")])
     rep = enforce([card("SPY", size=80), card("GLD", size=float("nan")), card("USO", size=0)], l3)
     sizes = {c.ticker: c.position_size_pct for c in rep.kept}
-    assert sizes == {"SPY": 25.0}
-    assert sum("size 0" in n for n in rep.notes) == 2
+    assert sizes == {"SPY": 10.73, "GLD": 10.73, "USO": 10.73}
+    for c in rep.kept:
+        assert card_heat_pct(c) == pytest.approx(1.0, abs=0.01)   # RISK_PER_TRADE_PCT
+
+
+def test_risk_sizing_formula_and_constants():
+    from marketmind.pipeline.decision_guard import (
+        MAX_SINGLE_POSITION_PCT, RISK_PER_TRADE_PCT, risk_sized_pct, stop_distance_pct)
+    assert (RISK_PER_TRADE_PCT, MAX_SINGLE_POSITION_PCT) == (1.0, 25.0)
+    assert risk_sized_pct(5.0) == 20.0
+    assert risk_sized_pct(2.0) == 25.0                 # 50% capped
+    assert risk_sized_pct(8.0, max_single_pct=10.0) == 10.0
+    c = card("X", stop=95.0)
+    c.entry_low, c.entry_high = 99.0, 101.0
+    assert stop_distance_pct(c) == pytest.approx(5.0)
+
+
+def test_tight_stop_is_capped_at_single_position_limit():
+    l3 = Layer3BatchResult(results=[green("SPY", stop=99.0)])     # 0.25% stop -> 400% raw
+    rep = enforce([card("SPY", size=3)], l3)
+    assert rep.kept[0].position_size_pct == 25.0
+    assert any("single-position cap" in n for n in rep.notes)
+
+
+@pytest.mark.parametrize("stop", [99.25, 120.0, 0.0, -5.0, float("nan"), float("inf")])
+def test_non_positive_or_non_finite_stop_distance_is_dropped(stop):
+    l3 = Layer3BatchResult(results=[green("SPY", stop=stop)])
+    rep = enforce([card("SPY", size=10)], l3)
+    assert rep.kept == []
+    assert any("SPY" in n and "stop distance" in n for n in rep.notes)
 
 
 def test_foreign_listing_is_dropped_but_crypto_kept():
@@ -56,12 +85,20 @@ def test_foreign_listing_is_dropped_but_crypto_kept():
 
 
 def test_total_heat_is_scaled_to_limit():
-    # each card: 25% size * (99.25-50)/99.25 ~= 12.4% heat -> 3 cards ~37% > 25%
+    # risk sizing puts ~1% heat on each card; with a 2% heat cap three cards are scaled x2/3
     l3 = Layer3BatchResult(results=[green(t, stop=50.0) for t in ("A", "B", "C")])
-    rep = enforce([card(t, size=25) for t in ("A", "B", "C")], l3)
+    rep = enforce([card(t, size=25) for t in ("A", "B", "C")], l3, max_heat_pct=2.0)
     total = sum(card_heat_pct(c) for c in rep.kept)
-    assert total == pytest.approx(25.0, abs=0.05)
+    assert total == pytest.approx(2.0, abs=0.01)
     assert any("heat" in n for n in rep.notes)
+
+
+def test_default_caps_hold_with_six_risk_sized_positions():
+    tickers = [f"T{i}" for i in range(6)]
+    rep = enforce([card(t) for t in tickers], Layer3BatchResult(results=[green(t) for t in tickers]))
+    assert len(rep.kept) == 6
+    assert sum(card_heat_pct(c) for c in rep.kept) == pytest.approx(6.0, abs=0.05)
+    assert not any("heat" in n for n in rep.notes)
 
 
 def test_position_count_limit():
@@ -132,27 +169,38 @@ def test_paper_trade_picks_l3_green_by_ticker():
     assert paper is not None and paper.ticker == "NVDA" and paper.direction == "long"
 
 
-def test_parse_reads_confidence_and_converts_fraction_sizes():
+def test_parse_reads_confidence_and_keeps_llm_size_for_the_record_only():
     import json
     from marketmind.pipeline.decision import _parse_decision_response
     raw = json.dumps({"decision_cards": [
         {"ticker": "COIN", "direction": "long", "position_size_pct": 0.06, "confidence": 0.55, "thesis": "t"},
-        {"ticker": "SLV", "direction": "long", "position_size_pct": 0.1, "confidence": 60, "thesis": "t"},
-        {"ticker": "GLD", "direction": "long", "position_size_pct": 0.05, "confidence": "high", "thesis": "t"},
+        {"ticker": "SLV", "direction": "long", "position_size_pct": 12, "confidence": 60, "thesis": "t"},
+        {"ticker": "GLD", "direction": "long", "position_size_pct": "big", "confidence": "high", "thesis": "t"},
     ]})
     cards = _parse_decision_response(raw).decision_cards
-    assert [c.position_size_pct for c in cards] == [6.0, 10.0, 5.0]   # live run 5: fractions
+    assert [c.position_size_pct for c in cards] == [0.0, 0.0, 0.0]    # set later by the guard
+    assert [c.llm_size_pct for c in cards] == [0.06, 12.0, None]      # as written, no unit guess
     assert [c.confidence for c in cards] == [0.55, 0.6, None]
 
 
-def test_parse_keeps_percent_sizes():
+def test_guard_size_ignores_llm_size():
     import json
     from marketmind.pipeline.decision import _parse_decision_response
-    raw = json.dumps({"decision_cards": [{"ticker": "A", "direction": "long", "position_size_pct": 12},
-                                         {"ticker": "B", "direction": "long", "position_size_pct": 0.5}]})
-    assert [c.position_size_pct for c in _parse_decision_response(raw).decision_cards] == [12, 0.5]
-    one = json.dumps({"decision_cards": [{"ticker": "A", "direction": "long", "position_size_pct": 1.0}]})
-    assert _parse_decision_response(one).decision_cards[0].position_size_pct == 1.0
+    l3 = Layer3BatchResult(results=[green("A"), green("B")])
+    raw = json.dumps({"decision_cards": [{"ticker": "A", "direction": "long", "position_size_pct": 0.5},
+                                         {"ticker": "B", "direction": "long", "position_size_pct": 90}]})
+    kept = enforce(_parse_decision_response(raw).decision_cards, l3).kept
+    assert [(c.position_size_pct, c.llm_size_pct) for c in kept] == [(10.73, 0.5), (10.73, 90.0)]
+
+
+def test_decision_prompts_no_longer_ask_the_llm_for_a_size():
+    from marketmind.pipeline import decision as d
+    d._rule_registry = None
+    for prompt in (d.DECISION_OUTPUT_SCHEMA, d.DECISION_SYSTEM_PROMPT, d._get_decision_prompt()):
+        assert "position_size_pct" not in prompt
+        assert "conviction" not in prompt
+    assert "computed by code from the L3 stop distance" in d.DECISION_OUTPUT_SCHEMA
+    assert "computed by code from the stop distance" in d.DECISION_SYSTEM_PROMPT
 
 
 def test_paper_trade_never_picks_a_directionless_candidate():

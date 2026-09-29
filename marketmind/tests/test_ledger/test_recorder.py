@@ -35,6 +35,16 @@ async def test_cards_recorded_with_zone_entry_and_snapshot(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_llm_size_is_kept_in_meta_but_not_used(tmp_path):
+    store = LedgerStore(tmp_path / "l.db")
+    ids = await record_main_decision(DecisionOutput(decision_cards=[card(llm_size_pct=0.2)]),
+                                     None, store, SRC, created_at=CREATED)
+    e = store.get(ids[0])
+    assert e.position_usd == 1800.0                        # from position_size_pct 6.0
+    assert e.meta["llm_size_pct"] == 0.2 and e.meta["position_size_pct"] == 6.0
+
+
+@pytest.mark.asyncio
 async def test_missing_confidence_and_falsifier_get_explicit_defaults(tmp_path):
     store = LedgerStore(tmp_path / "l.db")
     ids = await record_main_decision(

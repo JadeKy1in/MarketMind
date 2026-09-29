@@ -1,8 +1,9 @@
 """Code-enforced guard on LLM decision cards (SPEC_v3 §5 step 6, law L3).
 
 The LLM writes the thesis, risk statement and red-team note. It does not get to
-set numbers: price levels come from Layer 3, and position size and total heat
-are bounded here. Every change is recorded in the notes, so the dashboard can
+set numbers: price levels come from Layer 3, and position size is computed here
+from the L3 stop distance (fixed risk per trade), then bounded by the single-position,
+position-count and total-heat caps. The LLM's own size is kept only for the record. Every change is recorded in the notes, so the dashboard can
 show what the guard did.
 """
 from __future__ import annotations
@@ -16,6 +17,10 @@ logger = logging.getLogger("marketmind.pipeline.decision_guard")
 MAX_SINGLE_POSITION_PCT = 25.0   # gate23-architecture.md: single-position hard cap
 MAX_TOTAL_HEAT_PCT = 25.0        # design spec §6.3: all stops hit together <= 25% equity
 MAX_POSITIONS = 6                # design spec §6.3: attention constraint
+# Owner decision 2026-09-29: size = risk budget / stop distance. 1% of the paper capital
+# (ledger.recorder.PAPER_CAPITAL_USD) is lost if the L3 stop is hit. Confidence does not
+# enter sizing until it is calibrated (S9).
+RISK_PER_TRADE_PCT = 1.0
 
 # Fallback when the tradable universe (marketmind.universe) cannot be loaded:
 # a foreign-exchange suffix (600900.SS, 0700.HK, 7203.T ...) is never tradable on
@@ -83,17 +88,17 @@ def enforce(cards: list, l3, max_single_pct: float = MAX_SINGLE_POSITION_PCT,
         card.entry_low, card.entry_high = lvl.entry_zone_low, lvl.entry_zone_high
         card.stop_loss, card.target_price = lvl.stop_loss, lvl.target_price
         card.reward_risk_ratio, card.max_hold_days = lvl.reward_risk_ratio, lvl.max_hold_days
-        size = card.position_size_pct
-        if not isinstance(size, (int, float)) or math.isnan(size) or size < 0:
-            report.notes.append(f"{card.ticker}: invalid size {size!r} -> 0")
-            size = 0.0
-        if size > max_single_pct:
-            report.notes.append(f"{card.ticker}: size {size:.1f}% capped to {max_single_pct:.0f}%")
-            size = max_single_pct
-        if size <= 0:
-            report.notes.append(f"dropped {card.ticker}: position size 0 is not a recommendation")
+        stop_pct = stop_distance_pct(card)
+        if stop_pct is None:
+            report.notes.append(f"dropped {card.ticker}: L3 stop distance is not positive and "
+                                f"finite (entry {card.entry_low}-{card.entry_high}, stop "
+                                f"{card.stop_loss}); size cannot be computed")
             continue
-        card.position_size_pct = round(float(size), 2)
+        # stop > 0 bounds stop_pct below 100, so the size is always at least RISK_PER_TRADE_PCT.
+        card.position_size_pct = risk_sized_pct(stop_pct, max_single_pct)
+        capped = " (single-position cap)" if card.position_size_pct >= max_single_pct else ""
+        report.notes.append(f"{card.ticker}: size {card.position_size_pct:.2f}% = "
+                            f"{RISK_PER_TRADE_PCT:g}% risk / {stop_pct:.2f}% stop{capped}")
         report.kept.append(card)
 
     if len(report.kept) > max_positions:
@@ -109,6 +114,25 @@ def enforce(cards: list, l3, max_single_pct: float = MAX_SINGLE_POSITION_PCT,
             c.position_size_pct = round(c.position_size_pct * scale, 2)
         report.notes.append(f"total heat {heat:.1f}% > {max_heat_pct:.0f}%: sizes scaled x{scale:.2f}")
     return report
+
+
+def stop_distance_pct(card) -> float | None:
+    """(entry_mid - stop) / entry_mid * 100, or None when not positive and finite."""
+    try:
+        entry_mid = (float(card.entry_low) + float(card.entry_high)) / 2
+        stop = float(card.stop_loss)
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(entry_mid) and math.isfinite(stop)) or entry_mid <= 0 or stop <= 0:
+        return None
+    pct = (entry_mid - stop) / entry_mid * 100
+    return pct if math.isfinite(pct) and pct > 0 else None
+
+
+def risk_sized_pct(stop_pct: float, max_single_pct: float = MAX_SINGLE_POSITION_PCT,
+                   risk_pct: float = RISK_PER_TRADE_PCT) -> float:
+    """Size % of capital so that a stop-out loses `risk_pct` % of capital, capped."""
+    return round(min(max_single_pct, risk_pct / stop_pct * 100), 2)
 
 
 def card_heat_pct(card) -> float:
