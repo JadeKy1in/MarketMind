@@ -167,13 +167,32 @@ def _yf_sync(ticker: str, years: int) -> PriceHistory | None:
     df = yf.Ticker(yahoo_symbol(ticker)).history(period=f"{years}y", interval="1d", auto_adjust=True)
     if df is None or df.empty:
         return None
-    df = df.dropna(subset=["Close"])
-    daily = [
-        Bar(date=idx.strftime("%Y-%m-%d"), open=float(r["Open"]), high=float(r["High"]),
-            low=float(r["Low"]), close=float(r["Close"]), volume=float(r.get("Volume", 0) or 0))
-        for idx, r in df.iterrows()
-    ]
+    daily = _yf_bars(df)
+    if not daily:
+        return None
     return PriceHistory(ticker=ticker, source="yfinance", daily=daily, weekly=to_weekly(daily))
+
+
+def _yf_bars(df) -> list[Bar]:
+    """yfinance frame -> bars. A row with any non-finite Open/High/Low/Close is dropped
+    (Yahoo sometimes leaves O/H/L NaN on a valid Close, which made ATR/stop/target NaN);
+    a missing or non-finite Volume becomes 0.0."""
+    import math
+    bars: list[Bar] = []
+    for idx, r in df.iterrows():
+        try:
+            o, h, lo, c = (float(r[k]) for k in ("Open", "High", "Low", "Close"))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not all(math.isfinite(x) for x in (o, h, lo, c)):
+            continue
+        try:
+            vol = float(r.get("Volume", 0.0))
+        except (TypeError, ValueError):
+            vol = 0.0
+        bars.append(Bar(date=idx.strftime("%Y-%m-%d"), open=o, high=h, low=lo, close=c,
+                        volume=vol if math.isfinite(vol) else 0.0))
+    return bars
 
 
 # ── Binance (first crypto source) ──────────────────────────────────────────────

@@ -37,6 +37,7 @@ Levels (long setups only; L3 gates buys):
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from marketmind.gateway.price_history import Bar, PriceHistory
@@ -111,10 +112,17 @@ def nearest_swing_high(daily: list[Bar], close: float, a: float) -> float | None
     return min(above) if above else None
 
 
+def _finite_bars(bars: list[Bar]) -> bool:
+    return all(math.isfinite(x) for b in bars for x in (b.open, b.high, b.low, b.close))
+
+
 def compute_snapshot(hist: PriceHistory) -> TechnicalSnapshot | None:
-    """Return None when history is too short to say anything honest."""
+    """Return None when history is too short to say anything honest, or when any
+    input price or computed level is non-finite (NaN/inf = data unavailable, L3)."""
     daily = hist.daily
     if len(daily) < MIN_DAILY_BARS:
+        return None
+    if not _finite_bars(daily) or not _finite_bars(hist.weekly):
         return None
     closes = [b.close for b in daily]
     close = closes[-1]
@@ -165,6 +173,10 @@ def compute_snapshot(hist: PriceHistory) -> TechnicalSnapshot | None:
     swing = nearest_swing_high(daily, close, a)
     target = min(swing, cap) if swing is not None else cap
     rr = (target - close) / risk if risk > 0 else 0.0
+
+    levels = (close, a, support_low, support_high, stop, entry_low, entry_high, target, rr)
+    if not all(math.isfinite(x) for x in levels) or (wma is not None and not math.isfinite(wma)):
+        return None
 
     if light == "green":
         recommendation = "enter" if rr >= 2 else "wait"
