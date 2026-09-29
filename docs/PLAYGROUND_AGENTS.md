@@ -190,6 +190,76 @@
 - `crypto_tsmom` 的 10 个币高度相关，同一周常常全部同向，有效样本远少于记录条数；也有研究认为加密动量并不稳健（参考 21）。
 - Coin Metrics 的 MVRV 按 UTC 日计，最新值是前一天；ETF 资金流按美国交易日计，周末和假日没有数据。
 
+## 9. `minervini_sepa`：趋势模板 + VCP 突破（代码为主）
+
+> 2026-09-29 所有人决定（候选理由见 `docs/PLAYGROUND_CANDIDATES_2026-09-29.md` 第 1 节）。代码：`marketmind/playground/agents/minervini_sepa/`（`rules.py` 规则、`universe.py` 标的池、`adapter.py`、`prompts.py`）；测试：`marketmind/tests/test_playground/test_frameworks.py`。`source_id` = `playground:minervini_sepa`。规则出处：Minervini (2013) 第 5 章（趋势模板）与第 10 章（VCP）[15-18]；参数都是书中或通行的取值，没有在我们的数据上调参。
+
+**标的池（有界）**：`universe.py` 里约 150 只美国大盘股（覆盖 11 个 GICS 行业，按 2026-09 的市值选）+ 11 个行业 SPDR ETF。仓库里没有指数成分股来源，而对 `universe.equities` 的约 1 万个代码逐个取行情每天要上万次请求，所以用固定种子列表。运行时：先用 NASDAQ Trader 目录（`universe.equities`，取不到时原样使用种子列表并注明）去掉已退市的代码，再按拉到的 K 线计算最近 50 根的"收盘 × 成交量"中位数，低于 5000 万美元的剔除。已知偏差：今天的大盘股是过去的赢家（幸存者偏差）；相对强度只在这个池内排名，不是 IBD 的全市场排名。
+
+**趋势模板（8 项，全部由代码判断，在信号那根 K 线上）**：收盘 > SMA150 且 > SMA200；SMA150 > SMA200；SMA200 至少上升一个月（SMA200[t] > SMA200[t−21]）；SMA50 > SMA150 且 > SMA200；收盘 > SMA50；收盘 ≥ 52 周最低 × 1.30（书中为 30%，后来一些转述用 25%，这里取书中的 30%）；收盘 ≥ 52 周最高 × 0.75；相对强度排名 ≥ 70。52 周 = 最近 252 根 K 线的日内最高 / 最低。
+**相对强度**：IBD 的 RS 评级算法不公开。这里用常见的公开近似 [推断：通行做法，没有官方出处]：得分 = 0.4×63 根收益 + 0.2×126 根 + 0.2×189 根 + 0.2×252 根，在池内排成 1–99 的百分位。
+
+**VCP（我们对书中文字描述的精确化）**，对候选突破 K 线 t，只用 t 之前的 K 线：
+| 项目 | 定义 |
+|---|---|
+| 底部起点 | 最近 130 根中最高价所在的 K 线；到 t 至少 15 根（3 周） |
+| 波段高点 | 最高价高于前 3 根、不低于后 3 根（右侧 3 根确认） |
+| 回调 | 从每个波段高点到下一个波段高点之间的最低价；若某段低点不高于上一次回调的低点（更低的高点 + 更低的低点），视为同一次回调仍在继续，并入上一次，从两者中较高的高点起算。所以回调低点逐次抬高 |
+| 形态 | 2–6 次回调，幅度逐次严格变小；第一次 ≤ 35%，最后一次 ≤ 10%；最后一次回调的平均成交量低于第一次，也低于 t 之前 50 根均量（量能枯竭） |
+| 枢轴 | 最后一次回调的高点 |
+| 突破 | t 的收盘首次站上枢轴（t−1 收盘不高于枢轴），且 t 的成交量 ≥ 前 50 根均量 × 1.4（通行说法是"比均量高 40–50%"） |
+
+**判断（全部代码）**：最近 3 根完整 K 线内出现 VCP 突破、突破当天趋势模板 8 项全满足、最新收盘仍在枢轴之上 → 做多。止损 = 最后一次回调的低点，但离突破收盘不超过 8%（Minervini 要求亏损远小于 10%，7–8% 是他和 O'Neil 常用的上限）；写入账本 `falsifier_rule`（`close_below`）。持有 30 根（要求 20–40 根，取中间）。确信度 = 0.5 + 0.2 ×（RS − 70）/ 29，范围 0.50–0.70。每天最多 3 条（RS 高者优先，其次突破量比）。`signal_key` = `标的:枢轴日期`，同一枢轴只记一次。
+
+**可选的 LLM 调用**：只有当天有判断、且新闻标题提到这些公司（公司简称，或 2 个字母以上的大写代码）时，才调用一次 Flash（`chat_with_integrity`，记在 `playground:minervini_sepa` 名下），让它根据标题给每个标的写一句催化剂说明（≤ 160 字符，不许写数字和建议）。标题只取 `title` 和 `source_name`，删掉 `<<<` / `>>>` 后经 `defang_text` 处理，放在 `<<<UNTRUSTED_HEADLINES … UNTRUSTED_HEADLINES>>>` 之间。回复必须是 `{"notes": {...}}` 这个 JSON 对象，不合格就不写说明。说明存在 `meta.signal.catalyst_note`；只有写出了说明，才在 `meta.signal` 记 `llm` / `prompt_version`（bridge 会把它们提到顶层 `meta`）。判断本身、所有数字与仓位都不依赖这次调用（测试检查：LLM 返回垃圾时，判断逐字相同）。每个 UTC 日最多一次（`<data_dir>/playground/minervini_sepa/llm_days.json`）。
+
+**成本**：`adapter.token_estimate()` ≈ 1.1k token / 次（3 个标的 × 3 条最长标题）；只有出现突破且有相关标题的日子才调用。
+
+**2026-09-29 真实数据（只读，临时目录）**：155 个代码全部仍在上市目录中、全部通过流动性门槛；28 个通过趋势模板（如 AAPL、AMD、LLY、NVDA、TSM、XLK），但最近 3 根内没有合格的 VCP 突破 → 当天 0 条判断，不调用 LLM。未通过 VCP 的主要原因：底部不到 15 根（刚创新高）、只有 1 次回调、回调没有逐次变小（例如 NVDA 15.6% → 11.3% → 11.4% …）。
+频率估算（同一套规则逐日回放，2025-10-02 至 2026-09-29，拉到的 2 年日线只够回放最近 12 个月）：共 10 次信号（AMD、GE、GILD、PLTR、VLO、GS、SBUX、PLD、SLB、LLY），约每月 0.8 次，从未达到每天 3 条的上限。这只是次数估算，不是回测（没有计算收益）。
+
+**已知局限**
+- "回调逐次严格变小"很严格：只要中间有一次比上一次略深（NVDA 的 11.3% → 11.4%）就不算。这是对书中描述的直译，没有放宽，以免事后调参。
+- 趋势模板与 VCP 用日线的最高 / 最低价；个别来源只有收盘价的 K 线（`close_only`）会让回调幅度偏小。
+- 账本按次日开盘入场，止损按收盘价触发，而 Minervini 用盘中止损单；跳空低开时实际亏损可能超过 8%。
+- 持有期固定 30 根；原方法是按走势逐步卖出。
+
+## 10. `druckenmiller_liquidity`：流动性面板 + 规则闸门 + 稀疏 LLM
+
+> 2026-09-29 所有人决定。代码：`marketmind/playground/agents/druckenmiller_liquidity/`（`dashboard.py` 面板与闸门、`adapter.py`、`prompts.py`）；测试同上。`source_id` = `playground:druckenmiller_liquidity`。
+
+**框架（用我们自己的话概括，出处为 Druckenmiller 2015 年 1 月在 Lost Tree Club 的讲话，第三方文字稿 [26]）**：推动大类资产大行情的主要是央行流动性，而不是企业盈利；平时少动，等到流动性背景和价格趋势指向同一方向时才下重注；两者不再一致时要尽快认错。这里没有复制讲话原文。
+
+**面板（全部代码，FRED）**：
+| 项目 | 定义 |
+|---|---|
+| 净流动性 | WALCL / 1000 − WTREGEN / 1000 − RRPONTSYD，单位十亿美元。WALCL（美联储总资产）是周三时点值、百万美元；WTREGEN（财政部一般账户 TGA）是截至周三的周平均、百万美元；RRPONTSYD（隔夜逆回购）是日度、十亿美元 [27]。每个 WALCL 周三取同一周的 TGA、当天（否则 5 天内最近一天）的逆回购。周三时点值与周平均混用是这个公式的通行简化，误差相对 13 周变化很小 |
+| 流动性冲量 | 4 周变化 d4、13 周变化 d13（按周度点）。rising：d13 > 净流动性的 0.5% 且 d4 > 0；falling：d13 < −0.5% 且 d4 < 0；否则 mixed。0.5%（目前约 290 亿美元）是先验取值 |
+| 其他 | 2 年、10 年美债收益率及 4 / 13 周变化（百分点）；广义美元指数 DTWEXBGS 及 13 周涨跌幅；高收益债利差 BAMLH0A0HYM2 及 13 周变化 |
+| 趋势 | SPY QQQ TLT GLD BTC-USD 的趋势状态，用 `marketmind.trend.state` 在完整日线上重算（与 `data/trend/<date>.json` 同一套代码），这样也能得到过去各周的状态 |
+
+时点：某日的评估只用该日之前日期的 FRED 观测、该日及之前的 K 线；没有处理 FRED 的事后修订。WALCL 超过 14 天未更新 → 冲量记为不可用，不开闸。
+
+**闸门（代码）**：流动性冲量与该资产自己的趋势必须一致。
+- 做多候选：冲量 rising 且趋势状态为 TREND（五个资产都适用）。
+- 做空候选：只限 TLT——冲量 falling、TLT 为 CASH 或 EXIT、收盘 < SMA200、10 年期收益率 13 周上升 ≥ 0.25 个百分点。理由：利率是这个框架里明确双向操作的地方（讲话中他最大的几次盈利都来自债券头寸，多空都有）；股票、黄金、比特币在流动性收缩时只是回避，不做空。
+- 其余一律回避，并写明原因（例如"流动性下降、趋势 CASH"）。
+- **新鲜度与冷却期**：候选只有在此前 13 个周度评估点（D−7、D−14 … D−91，即冲量的时间窗）都不在闸门里时才算"新"，只有新候选才交给 LLM。这是成本设定：只比较上一周时，2023-01 至 2026-09 的数据上闸门每年约有 8.8 周打开（闸门来回闪烁）；13 周冷却后约 4.4 周 / 年，落在所有人要求的每年 2–6 次内。选这个值时只看了次数，没有看收益。
+
+**LLM 调用**：每个 ISO 周第一次运行时评估（结果存在 `<data_dir>/playground/druckenmiller_liquidity/weeks.json`，同一周后续运行直接返回存档，不再取数、不再调用）；有新候选才调用一次 Flash（`chat_with_integrity`，`caller_agent` = `druckenmiller_liquidity:decision`）。提示词只有代码算出的面板、趋势状态和候选清单，不读 Playground context 里的新闻或其他字段。回复必须是严格 JSON：`{ticker, action: enter_long|enter_short|no_trade, confidence 0-1, hold_days 20-60, thesis}`；ticker 必须是候选之一、action 必须与该候选的闸门方向一致（no_trade 除外）。不合格、没有回复、no_trade 或 confidence < 0.5 → 不出判断，原因写在 `no_calls_reason`。多出来的键只在 `ignored_keys` 留档。FRED 或行情取不到时不存档，下次运行重试。
+
+**判断（代码）**：止损 = 最后完整收盘 ∓ 3×ATR20（沿用 `_quant`），写入 `falsifier_rule`；文字条件另加"净流动性 13 周变化反向"（不自动结算）。确信度 = 0.5 + 0.2 ×（模型 confidence − 0.5）/ 0.5，范围 0.50–0.70，原值记在 `meta.signal.decision`。持有期取模型给的 20–60 天。`signal_key` = `标的:ISO 周`。`meta.signal` 含完整面板、该资产趋势、闸门与新候选、模型决定、`llm`、`prompt_version`（`druckenmiller_liquidity/v1`）与 `prompt_fingerprint`（bridge 提到顶层 `meta.llm` / `meta.prompt_version`）。
+
+**成本**：`adapter.token_estimate()` ≈ 1.2k token / 次（五个资产都是新候选的最长情形）；按约 4 次 / 年计，一年约 5k token。
+
+**2026-09-29 真实数据（只读，临时目录）**：净流动性约 5.77 万亿美元（资产 6.75 万亿、TGA 0.98 万亿、逆回购 5 亿，数据周 2026-09-23），13 周 −423 亿（−0.73%）、4 周 −93 亿 → falling；10 年期 5.24%（13 周 +0.86 个百分点）、2 年期 4.92%（+0.82）；美元 13 周 −0.46%；高收益利差 3.02%（+0.22）。趋势：QQQ TREND、SPY WATCH、TLT / GLD / BTC CASH。闸门里只有 TLT 做空，但它在 2026-09-01 已作为新候选出现过，处于 13 周冷却期 → 当天不调用 LLM、0 条判断。过去约 3.7 年的新候选周（估算，用今天的 T-bill 门槛）：17 周，包括 TLT 做空 6 次、SPY / QQQ / GLD / BTC 做多若干次。
+
+**已知局限**
+- 净流动性公式是市场通行的经验指标，本身没有经过同行评审的预测力证据；这里检验的是"流动性 + 趋势 + LLM 判断"这一组合，由晋升阶梯裁决。
+- 每年约 4 条记录，满足晋升阶梯的 ≥20 次结算要五年左右；它主要是一个低频的框架样本。
+- 只做五个资产；TLT 做空要承担票息（账本结算未计入持有成本）。
+- 冷却期意味着闸门在 13 周内第二次打开时不会再问（即使上次模型选了 no_trade）。
+
 ## References（访问日期 2026-09-29）
 
 1. Moskowitz, T. J., Ooi, Y. H., Pedersen, L. H. (2012). *Time Series Momentum*. Journal of Financial Economics 104(2), 228-250. https://w4.stern.nyu.edu/facdir/lpederse/papers/TimeSeriesMomentum.pdf
@@ -218,3 +288,11 @@
 19. Liu, Y., Tsyvinski, A. (2021). *Risks and Returns of Cryptocurrency*. Review of Financial Studies 34(6), 2689-2727。https://academic.oup.com/rfs/article-abstract/34/6/2689/5912024 ；工作论文 NBER w24877：https://www.nber.org/papers/w24877 。"1–4 周时间序列动量"来自检索摘要，未读全文。
 20. Robinhood Support, *Coin availability*。https://robinhood.com/us/en/support/articles/coin-availability/
 21. *Cryptocurrency momentum has (not) its moments*, Financial Markets and Portfolio Management (2025)。https://link.springer.com/article/10.1007/s11408-025-00474-9 （只看了标题，未读正文）
+22. Minervini, M. (2013). *Trade Like a Stock Market Wizard: How to Achieve Super Performance in Stocks in Any Market*. McGraw-Hill.（趋势模板、VCP、止损上限；章节号凭记忆填写，未在线核对）
+23. Deepvue, *Minervini Trend Template* 筛选说明（核对了：SMA150 / SMA200 条件、SMA200 至少上升一个月、距 52 周高点 25% 以内、RS ≥ 70）。https://deepvue.com/screener/minervini-trend-template/
+24. 趋势模板第 6、7 条原文转述（"至少高于 52 周低点 30%""距 52 周高点 25% 以内"），见第三方整理稿与讨论：https://pdfcoffee.com/the-trend-template-mark-minervini-pdf-free.html ; https://scan.stockcharts.com/discussion/1378/minervini-scan
+25. VCP 的第三方说明（回调逐次变小、通常 2–4 次、量能枯竭、突破量比均量高 40–50%、止损在最后一次收缩的低点之下）：https://traderlion.com/technical-analysis/volatility-contraction-pattern/ ; https://tradingmomentum.substack.com/p/the-volatility-contraction-pattern-b57
+26. Druckenmiller, S. (2015-01). Lost Tree Club 讲话，第三方文字稿：https://www.danielscrivner.com/stanley-druckenmiller-rare-lost-tree-club-lecture/
+27. FRED 序列说明：WALCL（Wednesday Level，百万美元，周度）https://fred.stlouisfed.org/series/WALCL ; WTREGEN（Week Average，截至周三，百万美元）https://fred.stlouisfed.org/series/WTREGEN ; RRPONTSYD（十亿美元，日度，单位取自 `gateway/fred_client.py` 目录，未在线核对）。
+
+参考 16–20 于 2026-09-29 访问；17、18 是第三方整理，不是作者原文。IBD RS 近似公式没有官方出处，是通行做法 [推断]。

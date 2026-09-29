@@ -1,0 +1,40 @@
+{
+  "agent_id": "druckenmiller_liquidity",
+  "display_name": "Druckenmiller Liquidity Framework",
+  "description": "Liquidity framework after Stanley Druckenmiller's 2015 Lost Tree Club talk (central-bank liquidity, not earnings, moves the big markets; act only when liquidity and trend agree). Code builds a weekly FRED dashboard (net liquidity = WALCL - WTREGEN - RRPONTSYD with 4/13-week change, 2y/10y yields, broad dollar, HY spread) and the trend states of SPY/QQQ/TLT/GLD/BTC; a rule gate keeps only assets whose trend agrees with the liquidity impulse (TLT may also be short when liquidity falls and yields rise). Only newly gated candidates go to one Flash call a week (strict JSON, hold 20-60 days); expected a few calls a year. Stop 3 x ATR20 by code.",
+  "output_character": "rare long (or TLT short) calls on SPY/QQQ/TLT/GLD/BTC when liquidity impulse and trend agree; 20-60 day hold; ATR disaster stop by code",
+  "public_data_sources": [
+    "FRED: WALCL, WTREGEN, RRPONTSYD, DGS2, DGS10, DTWEXBGS, BAMLH0A0HYM2",
+    "public daily price bars via gateway.price_history (complete bars only)",
+    "^IRX 13-week T-bill yield as the trend module's 12-month hurdle"
+  ],
+  "requires_proprietary_data": false,
+  "primary_metric": "net_excess_return_vs_domain_benchmark",
+  "secondary_metrics": [
+    "direction_accuracy",
+    "brier",
+    "sharpe_ratio",
+    "max_drawdown"
+  ],
+  "min_sample_size": 20,
+  "min_observation_days": 60,
+  "target_pipeline_node": "decision_signal_source",
+  "version": "1.0.0",
+  "author": "MarketMind (owner decision 2026-09-29)",
+  "tags": [
+    "investor-framework",
+    "llm",
+    "macro",
+    "liquidity",
+    "weekly",
+    "sparse"
+  ],
+  "domain_benchmark": "SPY",
+  "domain_universe": [
+    "SPY",
+    "QQQ",
+    "TLT",
+    "GLD",
+    "BTC-USD"
+  ]
+}
