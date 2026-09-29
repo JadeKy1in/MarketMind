@@ -123,6 +123,34 @@
 
 **已知局限**：条件模板共 24 个（方向 × 6 个标签、标的 × 方向），存在多重检验；样本外验证是主要防线，门槛 0.10 与 5 / 2 / 3 的计数是先验设定、未在数据上调参 [推断]。交易日按工作日计（不计交易所假日）。每天约 1–3 笔、持有 5 根，最快也要约一个多月才可能出现第一条 active 教训。
 
+## 7. `ml_gbm`：经典机器学习 agent（梯度提升树，纯代码）
+
+> 2026-09-29 所有人决定。代码：`marketmind/playground/agents/ml_gbm/`（`features.py` 特征与标签、`model.py` 训练与缓存、`adapter.py` 每日判断、`backtest.py` 样本外验证）；测试：`marketmind/tests/test_playground/test_ml_gbm.py`（合成数据，离线）。`source_id` = `playground:ml_gbm`。样本外结果见 `docs/ML_GBM_BACKTEST_2026-09-29.md`。只用已声明的依赖（scikit-learn、numpy；缓存用 sklearn 自带依赖 joblib），零 LLM。
+
+**思路**：Gu、Kelly、Xiu（参考 12）的结论是树模型和神经网络能利用预测变量之间的非线性交互，在收益预测上优于线性模型。这里用同类模型（sklearn `HistGradientBoostingClassifier`）在一组流动性好、所有人可直接交易的标的上预测短期方向。它是一个"经典 ML 能否跑赢简单基准"的检验，不预设它有效。
+
+| 项目 | 规定 |
+|---|---|
+| 标的 | 11 个行业 SPDR ETF + SPY QQQ IWM GLD TLT BTC-USD ETH-USD（18 个） |
+| 数据 | `gateway.price_history`，只用完整日线（`complete_bars`），取 10 年；`^VIX` 取不到时该特征记为缺失（模型原生支持缺失值） |
+| 特征（19 个） | 自身：5/20/60/120/252 根收益，20/60 根年化波动，相对 SMA50/SMA200 的距离，相对 55 根最高价的距离，ATR20/收盘，20 根对数成交量 z 分数，往返成本；截面：20/60/120/252 根收益在当日全体标的中的百分位；市场：SPY 20 根收益、VIX 收盘。某日的行只用该日及以前的 K 线；其他标的与 SPY / VIX 取"该日或之前最近一根"（超过 7 天视为缺失）。测试检查：把所有序列截断到某日后重算，该日的特征逐位相同 |
+| 标签 | 未来 10 根 K 线（收盘到收盘）收益 > 账本往返成本（`2 × ledger.settlement.cost_bps`：ETF 0.10%，BTC/ETH 2.00%）。选"扣成本后的绝对收益"而不是"相对 SPY 的超额"，因为账本对这笔判断的结算就是扣成本后的净收益 |
+| 模型 | 固定超参数，事先设定、未在数据上调：学习率 0.05，150 轮，深度 ≤ 3，≤ 8 个叶子，每叶 ≥ 200 样本，L2 = 1.0，64 个分箱，不用早停，`random_state` 固定（结果可复现，测试检查） |
+| 防泄漏 | 用于日期 T 的模型只用：行日期 ≤ SPY 日历上 T 往前 15 根（清除 = 标签期 10 根，再加禁入期 5 根），且标签结束日 ≤ T 往前 5 根的样本（参考 13 的 purging / embargo）。测试检查训练窗口的最后一行和最晚标签结束日 |
+| 校准 | 训练样本按日期分两段：前 80% 训练树（只用标签在校准段开始前已结束的行），后 20% 拟合 Platt 缩放。给出的是 Platt 校准后的概率 |
+| 重训与缓存 | 每个 ISO 周最多重训一次（扩展窗口）；模型连同训练截止日、特征列表、版本号存到 `<data_dir>/playground/ml_gbm/model.joblib`（另有可读的 `model_meta.json`）。版本、特征列表或所在周不一致时重训 |
+| 每日判断 | 在有新鲜完整 K 线的标的中，取校准概率 ≥ 0.55 的最高 2 个做多；持有 10 根；止损 = 信号收盘 − 3×ATR20（沿用 `_quant`，写入 `falsifier_rule`）；确信度 = 校准概率截到 0.50–0.70；`signal_key` = `标的:ISO 周`，每个标的每周最多记一次 |
+| 白箱事实 | `meta.signal`：原始与校准概率、阈值、排名、止损与 ATR、模型的训练截止日 / 标签截止日 / 训练行数 / 训练期正例率，以及置换重要性前 5 的特征（校准段上 AUC 的平均下降）和该标的当天的特征值，全部是数字 |
+
+**样本外结果（2018-10 至 2026-09，402 次每周重训）**：AUC 0.513，命中率 52.8%（正例率 55.4%），Brier 0.254，比"训练期正例率"这一常数预测还差（技能分 −0.025）。只看 ETF 时 AUC 0.492；汇总 AUC 略高于 0.5，主要来自模型区分了加密与 ETF 的正例率（最重要的特征是往返成本，即资产类别）。线上规则的 top-2 策略扣成本后年化 1.7%、最大回撤 −61%，同期全体等权年化 15.6%。**结论：没有证据表明这个模型有预测力。** 它照常接入，作为"经典 ML"这一类方法的基准，由晋升阶梯在实盘记录上判定；不会因为回测结果去调参数（那会把样本外变成样本内）。
+
+**已知局限**
+- 回测不含止损、按收盘价成交；账本按次日开盘入场，两者不完全一致。
+- 训练样本的标签期相互重叠（相邻日的 10 根窗口共享 9 根），有效样本远少于行数；没有按唯一性加权（参考 13 第 4 章）[推断：对固定超参数、不做模型选择的做法影响有限]。
+- 加密货币的"根"是 UTC 日（10 根 = 10 天），ETF 是交易日（10 根 ≈ 14 天）；`ret_252` 对加密约是 8 个月。
+- 因为长期正例率约 55%，0.55 的阈值选择性不强：回测中约 60% 的预测在 0.55 以上，线上几乎每天都会有 1–2 笔。
+- 各标的的持有期（10 根）重叠，每周每个标的最多一条，评估时要注意相关性。
+
 ## References（访问日期 2026-09-29）
 
 1. Moskowitz, T. J., Ooi, Y. H., Pedersen, L. H. (2012). *Time Series Momentum*. Journal of Financial Economics 104(2), 228-250. https://w4.stern.nyu.edu/facdir/lpederse/papers/TimeSeriesMomentum.pdf
@@ -138,4 +166,8 @@
 10. Yu, Y. et al. (2023). *FinMem: A Performance-Enhanced LLM Trading Agent with Layered Memory and Character Design*. https://arxiv.org/html/2311.13743
 11. Zhao, A. et al. (2023). *ExpeL: LLM Agents Are Experiential Learners*. https://arxiv.org/abs/2308.10144
 
-期刊卷期页码为作者凭记忆填写，未在线核对；参考 1、5 的链接与趋势设计文档所引用的一致。参考 9 的出处也是凭记忆填写，未在线核对；参考 10、11 的链接与 `docs/S9_DESIGN.md` [R1] 相同，标题与作者未在线核对。
+12. Gu, S., Kelly, B., Xiu, D. (2020). *Empirical Asset Pricing via Machine Learning*. Review of Financial Studies 33(5), 2223-2273. doi:10.1093/rfs/hhaa009. https://academic.oup.com/rfs/article/33/5/2223/5758276
+13. López de Prado, M. (2018). *Advances in Financial Machine Learning*. Wiley. 第 7 章 Cross-Validation in Finance（purging、embargo），第 4 章 Sample Weights（标签重叠与唯一性）。目录：https://toc.library.ethz.ch/objects/pdf03/e01_978-1-119-48208-6_01.pdf
+14. scikit-learn 1.8 `HistGradientBoostingClassifier` 与 `permutation_importance` 文档。https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.HistGradientBoostingClassifier.html
+
+期刊卷期页码为作者凭记忆填写，未在线核对；参考 1、5 的链接与趋势设计文档所引用的一致。参考 9 的出处也是凭记忆填写，未在线核对；参考 10、11 的链接与 `docs/S9_DESIGN.md` [R1] 相同，标题与作者未在线核对。参考 12 的卷期页码与 DOI、参考 13 的第 4、7 章标题已于 2026-09-29 在线核对（出版社页面与 ETH 图书馆目录）。
