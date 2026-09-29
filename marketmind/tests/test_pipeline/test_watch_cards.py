@@ -39,6 +39,21 @@ def test_parser_reads_watch_cards():
     assert c.conditions == [{"type": "close_above", "value": 95}]
 
 
+def test_parser_drops_watch_card_without_a_side(caplog):
+    cond = [{"type": "close_above", "value": 95}]
+    with caplog.at_level("WARNING", logger="marketmind.pipeline.decision"):
+        out = _parse_decision_response(json.dumps({
+            "decision_cards": [], "summary": "s",
+            "watch_cards": [{"ticker": "xle", "thesis": "no side", "conditions": cond},
+                            {"ticker": "tlt", "direction": None, "conditions": cond},
+                            {"ticker": "gld", "direction": "neutral", "conditions": cond},
+                            {"ticker": "spy", "direction": " Short ", "conditions": cond}]}))
+    assert [(c.ticker, c.direction) for c in out.watch_cards] == [("SPY", "short")]
+    assert "XLE dropped: direction missing" in caplog.text
+    assert "TLT dropped: direction missing" in caplog.text
+    assert "GLD dropped: direction 'neutral'" in caplog.text
+
+
 def test_price_condition_snaps_to_l3_level():
     kept, dropped = validate_watch_cards([watch()], Layer3BatchResult(results=[waiting()]))
     assert dropped == [] and kept[0].conditions == [{"type": "close_above", "value": 95.0}]
