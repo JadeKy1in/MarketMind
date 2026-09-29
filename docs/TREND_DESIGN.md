@@ -148,6 +148,8 @@
 
 大行情捕获、来回震荡次数只报告、不作为通过条件（月度规则天然吃不到 6 个月以内的短行情，事先说明）。M1、M2 分别判定；两者都通过时，建议优先考虑入场次数更少的一个，并看稳健性表里相邻参数是否大多也通过。
 
+**结果**（2026-09-29，见 `docs/TREND_BACKTEST_MONTHLY_2026-09-29.md`；以上规则未因结果修改）：M1、M2 都**未通过**。两者入场次数达标（每年 4.7 / 3.2 次）、前后两半都为正，但在场时间（69% / 70%）超过 60%，组合最大回撤（-71% / -65%）远超等权持有（-74%）的一半，M2 的 CAGR 也低于等权持有 3 个点以上；12 组相邻参数全部未通过。按规则不采用、不接入。
+
 ## References（访问日期 2026-09-29）
 
 1. Moskowitz, T. J., Ooi, Y. H., Pedersen, L. H. (2012). *Time Series Momentum*. Journal of Financial Economics 104, 228–250. https://w4.stern.nyu.edu/facdir/lpederse/papers/TimeSeriesMomentum.pdf — 摘要："We find persistence in returns for one to 12 months that partially reverses over longer horizons"；正文："the past 12-month excess return of each instrument is a positive predictor of its future return"。
