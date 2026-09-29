@@ -12,7 +12,9 @@ THRESHOLDS_RESEARCHED_ON = "2026-05-18T00:00:00+00:00"
 # entry's source_document): HY-IG 200->450bp; CCC 1000->1300bp; SOFR-IORB 25bp ->
 # 10bp persisting 3 observations; bank reserves $2.7T -> reserves/GDP 9% warning / 8%
 # stress; BBB OAS 200bp warning + 300bp stress; ON RRP, US 10Y and CEX reserves ->
-# MONITOR-only (shown, never crossed, not scored).
+# MONITOR-only (shown, never crossed, not scored). 2026-09-29 (red-team fix): TGA
+# (<$100B), VIX (>35) and dollar index (>110) had no cited source either -> MONITOR-only
+# under the same policy.
 THRESHOLDS_REVIEWED_2026_09_28 = "2026-09-28T00:00:00+00:00"
 
 
@@ -88,6 +90,11 @@ THRESHOLD_LIBRARY: list[FragilityThreshold] = [
         # signals debt-ceiling maneuvering and a large rebuild still to come.
         mechanism="TGA < $100B → debt-ceiling drawdown (the drawdown itself adds reserves) → X-date uncertainty spike; after resolution the TGA rebuild via bill issuance drains reserves → repo volatility",
         cascade=["bill_issuance_surge", "repo_volatility", "debt_ceiling_risk"],
+        # MONITOR-only (red-team fix 2026-09-29): the $100B level has no cited source, so
+        # under the 2026-09-28 policy (unsourced -> monitor only, as for us10y / on_rrp /
+        # CEX reserves) the value is shown, never crossed, kept out of the score. $100B
+        # kept for reference only.
+        crossable=False,
         data_source="FRED:WTREGEN", source_document="Treasury Daily Statement",
     ),
     FragilityThreshold(
@@ -142,6 +149,11 @@ THRESHOLD_LIBRARY: list[FragilityThreshold] = [
         threshold_value=35, unit="index", direction="above",
         mechanism="VIX >35 → systemic fear pricing → vol-targeting funds delever → forced selling accelerates drawdown",
         cascade=["vol_fund_delever", "option_hedging_surge", "liquidity_evaporation"],
+        # MONITOR-only (red-team fix 2026-09-29): the 35 level has no cited source, so
+        # under the 2026-09-28 policy (unsourced -> monitor only, as for us10y / on_rrp /
+        # CEX reserves) the value is shown, never crossed, kept out of the score. 35
+        # kept for reference only.
+        crossable=False,
         data_source="CBOE:VIX", source_document="CBOE VIX methodology",
     ),
     FragilityThreshold(
@@ -184,6 +196,11 @@ THRESHOLD_LIBRARY: list[FragilityThreshold] = [
         threshold_value=110, unit="index", direction="above",
         mechanism="DXY rapid rise >110 → global dollar shortage → EM FX crisis → cross-border lending freeze",
         cascade=["em_fx_devaluation", "dollar_debt_crisis", "commodity_price_collapse"],
+        # MONITOR-only (red-team fix 2026-09-29): the 110 level has no cited source, so
+        # under the 2026-09-28 policy (unsourced -> monitor only, as for us10y / on_rrp /
+        # CEX reserves) the value is shown, never crossed, kept out of the score. 110
+        # kept for reference only.
+        crossable=False,
         data_source="ICE:DXY", source_document="ICE Dollar Index",
     ),
     FragilityThreshold(
