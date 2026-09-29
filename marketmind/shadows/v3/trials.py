@@ -2,14 +2,16 @@
 
 A trial runs a rewritten methodology for a long-term shadow side by side with
 the original for TRIAL_BARS trading days (source_id trial:<id>). When every
-record has settled, both sides' daily P&L (booked on the exit date, / $10,000
-notional, as in the promotion ladder) is differenced day by day and tested
-one-sided with a HAC (Newey-West) t-test, i.e. a Diebold-Mariano test, with
-fixed-b p-values and a bandwidth of half the sample: lag = max(parent's median
-hold - 1, pairs // 2 - 1) (owner decision 2026-09-28; see hac_bandwidth). Trials decided in the same review form one family:
-Holm-adjusted p <= ALPHA passes. Wilcoxon is reported only as a robustness
-statistic. A passing trial only becomes "passed"; the owner must approve it
-before the prompt file changes (SPEC L1).
+record has settled, both sides' daily market-excess P&L per dollar of gross
+exposure (booked on the exit date; fix 2026-09-29, see daily_differences) is
+differenced day by day and tested one-sided with a HAC (Newey-West) t-test, i.e. a
+Diebold-Mariano test, with fixed-b p-values and a bandwidth of half the sample:
+lag = max(parent's median hold - 1, pairs // 2 - 1) (owner decision 2026-09-28; see
+hac_bandwidth). Holm family (fix 2026-09-29): every trial whose window overlaps the
+judged trial's window; Holm-adjusted p <= ALPHA passes. A parent gets at most one
+new trial per REPROPOSE_GAP_DAYS trading days. Wilcoxon is reported only as a
+robustness statistic. A passing trial only becomes "passed"; the owner must approve
+it before the prompt file changes (SPEC L1).
 
 CLI: python -m marketmind.shadows.v3.trials {list,propose,approve,reject}
 """
@@ -45,6 +47,9 @@ TRIAL_BARS_MAX = 120
 MIN_PAIRS = 30                   # exit-date days in the paired P&L series (was 5)
 ALPHA = 0.05                     # one-sided, family-wise via Holm (was p < 0.10 per trial)
 SETTLE_GRACE_DAYS = 60           # give up waiting for open records after this
+# Fix 2026-09-29: re-proposing after every failure made each parent a long series of
+# one-trial Holm families. At most one new trial per parent in this many trading days.
+REPROPOSE_GAP_DAYS = 60
 
 SYSTEM_PROMPT = """你负责改写一个虚拟基金经理（影子）的方法论，用于对比试验。
 要求：
@@ -96,6 +101,13 @@ def add_trading_days(start: str, n: int) -> str:
         if d.weekday() < 5:
             n -= 1
     return d.isoformat()
+
+
+def trading_days_between(start: str, end: str) -> int:
+    """Weekdays after `start` up to and including `end` (add_trading_days' calendar)."""
+    import numpy as np
+    return int(np.busday_count(date.fromisoformat(start) + timedelta(days=1),
+                               date.fromisoformat(end) + timedelta(days=1)))
 
 
 def headings(text: str) -> list[str]:
@@ -164,6 +176,11 @@ async def propose(parent_id: str, kind: str, note: str, *, store=None, call=_cal
         raise ValueError(f"{MAX_RUNNING} trials already running")
     if any(t.parent_id == parent_id for t in running):
         raise ValueError(f"{parent_id} already has a running trial")
+    recent = [t for t in trials if t.parent_id == parent_id
+              and trading_days_between(t.started, today) < REPROPOSE_GAP_DAYS]
+    if recent:
+        raise ValueError(f"{parent_id} had a trial started on {recent[-1].started}; "
+                         f"at most one per {REPROPOSE_GAP_DAYS} trading days")
     parent = roster_mod.by_id().get(parent_id)
     if parent is None or parent not in roster_mod.active():
         raise ValueError(f"{parent_id} is not an active long-term shadow")
@@ -222,15 +239,20 @@ def _run_date(e) -> str:
 
 
 def daily_differences(store, t: Trial) -> dict:
-    """Paired daily P&L of a trial, aligned by exit (settlement) date.
+    """Paired daily returns of a trial, aligned by exit (settlement) date.
 
     Rows = parent and variant records whose decision (run) date lies in
-    [started, ends). Each side's settled P&L is booked on its exit date / notional
-    (promotion ladder convention); the series runs over the trading calendar (exit
-    dates of all settled ledger rows, plus both sides' own) from the first to the last
-    exit of either side, days without exits count 0. Returns diffs (variant - parent),
-    the HAC lag, and whether every record has settled."""
-    from marketmind.promotion import config as PC
+    [started, ends). Each settled record contributes its market-excess P&L,
+    pnl_usd - direction * position_usd * market_return (the same capital held in the
+    market benchmark over the same dates; pnl_usd when the benchmark is missing),
+    booked on its exit date. Each side's series is divided by that side's average
+    daily gross exposure over the paired days, sum(position_usd * hold_bars) / days,
+    so it is a return per dollar deployed (fix 2026-09-29: raw P&L differences
+    rewarded a variant for trading bigger or longer the market, e.g. a 5x-size copy
+    of a positive-beta parent "won" in a rising market). The series runs over the
+    trading calendar (exit dates of all settled ledger rows, plus both sides' own) from
+    the first to the last exit of either side, days without exits count 0. Returns
+    diffs (variant - parent), the HAC lag, and whether every record has settled."""
     from marketmind.promotion.metrics import trading_calendar
 
     def rows(source_type, source_id):
@@ -239,26 +261,38 @@ def daily_differences(store, t: Trial) -> dict:
     parent, variant = rows("shadow", t.parent_id), rows("temp_shadow", f"trial:{t.trial_id}")
     done = all(e.status in ("settled", "void") for e in parent + variant)
 
-    def pnl(es):
+    def excess(es):
         out: dict[str, float] = {}
+        gross, no_market = 0.0, 0
         for e in es:
             if e.status == "settled" and e.exit_date and e.pnl_usd is not None:
                 d = e.exit_date[:10]
-                out[d] = out.get(d, 0.0) + e.pnl_usd / PC.NOTIONAL_USD
-        return out
-    p, v = pnl(parent), pnl(variant)
+                sign = 1.0 if e.direction == "long" else -1.0
+                if e.market_return is None:
+                    no_market += 1
+                    x = e.pnl_usd
+                else:
+                    x = e.pnl_usd - sign * e.position_usd * e.market_return
+                out[d] = out.get(d, 0.0) + x
+                gross += e.position_usd * max(1, e.hold_bars)
+        return out, gross, no_market
+    (p, p_gross, p_nm), (v, v_gross, v_nm) = excess(parent), excess(variant)
     exits = set(p) | set(v)
     holds = sorted(e.hold_bars for e in (parent or variant))
     typical = holds[len(holds) // 2] if holds else 1
     out = {"diffs": [], "days": [], "done": done, "lag": max(1, typical - 1),
-           "parent_hold": typical, "parent_rows": len(parent), "variant_rows": len(variant)}
+           "parent_hold": typical, "parent_rows": len(parent), "variant_rows": len(variant),
+           "without_market": p_nm + v_nm}
     if not exits:
         return out
     lo, hi = min(exits), max(exits)
     cal = sorted({d for d in trading_calendar(store.list(status="settled")) if lo <= d <= hi}
                  | exits)
-    out["days"] = cal
-    out["diffs"] = [v.get(d, 0.0) - p.get(d, 0.0) for d in cal]
+    n = len(cal)
+    p_exp, v_exp = p_gross / n, v_gross / n               # average daily gross exposure
+    out.update(days=cal, parent_exposure=p_exp, variant_exposure=v_exp)
+    out["diffs"] = [(v.get(d, 0.0) / v_exp if v_exp else 0.0)
+                    - (p.get(d, 0.0) / p_exp if p_exp else 0.0) for d in cal]
     return out
 
 
@@ -275,11 +309,40 @@ def _wilcoxon_p(diffs: list[float]) -> float | None:
         return None
 
 
+def _overlaps(a: Trial, b: Trial) -> bool:
+    return a.started < b.ends and b.started < a.ends
+
+
+def holm_family(t: Trial, trials: list[Trial], p_now: dict[str, float],
+                untested: frozenset[str] = frozenset()) -> dict[str, float]:
+    """The Holm family of trial `t` (fix 2026-09-29): every trial whose window
+    [started, ends) overlaps t's, i.e. that was active at the same time. Known p-values:
+    trials tested in this review (`p_now`) and earlier verdicts; trials still running
+    enter with p = 1 (not yet known, so t is judged as if they will not reject).
+    Trials judged without a test (insufficient data, no variation; `untested` for
+    those judged in this review) are not members.
+    With p = 1 for the unknown ones the adjusted p is never below the one Holm would
+    give with every p known, so an early verdict cannot become too lenient later."""
+    fam: dict[str, float] = {}
+    for u in trials:
+        if not _overlaps(t, u):
+            continue
+        if u.trial_id in untested:
+            continue
+        if u.trial_id in p_now:
+            fam[u.trial_id] = p_now[u.trial_id]
+        elif u.status == "running":
+            fam[u.trial_id] = 1.0
+        elif (u.result or {}).get("p_value") is not None and u.status != "insufficient":
+            fam[u.trial_id] = float(u.result["p_value"])
+    return fam
+
+
 def evaluate(store, *, today: str | None = None, folder: Path | None = None) -> list[Trial]:
     """Judge running trials whose window has ended; returns the trials decided now.
 
-    Every trial ready in this call (window over and all records settled, or the
-    settlement grace period passed) belongs to one Holm family."""
+    A trial is ready when its window is over and all records have settled, or the
+    settlement grace period has passed. Its Holm family is `holm_family`."""
     from marketmind.promotion.metrics import hac_t_test, holm_adjust
     today = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     trials = load(folder)
@@ -296,6 +359,8 @@ def evaluate(store, *, today: str | None = None, folder: Path | None = None) -> 
         ready.append((t, {
             "test": "hac_t", "aligned_by": "exit_date", "alpha": ALPHA,
             "pairs": len(diffs), "mean_diff": (sum(diffs) / len(diffs)) if diffs else None,
+            "measure": "market_excess_per_gross_dollar",
+            "without_market": paired.get("without_market", 0),
             "lag": hac["lag"], "parent_hold": paired["parent_hold"],
             "t_stat": hac["t"], "se": hac["se"], "p_value": hac["p_value"],
             "inference": hac.get("inference"), "p_value_student": hac.get("p_value_student"),
@@ -305,9 +370,13 @@ def evaluate(store, *, today: str | None = None, folder: Path | None = None) -> 
             "settled_all": paired["done"],
         }))
     tested = [(t, r) for t, r in ready if r["pairs"] >= MIN_PAIRS and r["p_value"] is not None]
-    adjusted = holm_adjust([r["p_value"] for _, r in tested])
-    for (t, r), p_holm in zip(tested, adjusted):
-        r["p_holm"], r["holm_family"] = p_holm, len(tested)
+    p_now = {t.trial_id: r["p_value"] for t, r in tested}
+    untested = frozenset(t.trial_id for t, _ in ready) - set(p_now)
+    for t, r in tested:
+        fam = holm_family(t, trials, p_now, untested)
+        ids = sorted(fam)
+        r["p_holm"] = holm_adjust([fam[i] for i in ids])[ids.index(t.trial_id)]
+        r["holm_family"], r["holm_members"] = len(ids), ids
     decided = []
     for t, r in ready:
         if r["pairs"] < MIN_PAIRS:

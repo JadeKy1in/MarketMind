@@ -151,7 +151,29 @@ def test_load_advisors_observe_until_s7_file(tmp_path, monkeypatch):
     (tmp_path / "advisors.json").write_text(json.dumps(
         {"advisors": ["expert:gold:bullion_broker", "nope"]}), encoding="utf-8")
     mode, adv = runner.load_advisors()
-    assert mode == runner.LIVE and list(adv) == ["expert:gold:bullion_broker"]
+    assert mode == runner.OBSERVE and len(adv) >= 20
+
+
+def _write_advisors(tmp_path, ids):
+    (tmp_path / "advisors.json").write_text(json.dumps({"advisors": ids}), encoding="utf-8")
+
+
+def test_live_mode_only_once_advisors_can_meet_condition_a(tmp_path, monkeypatch):
+    """1-2 advisors, or 3 from one group, can never satisfy A: stay in observation."""
+    from marketmind.shadows.v3 import roster
+    monkeypatch.setenv("MARKETMIND_DATA_DIR", str(tmp_path))
+    by_group: dict[str, list[str]] = {}
+    for r in roster.active():
+        by_group.setdefault(r.group, []).append(r.shadow_id)
+    fund, other = by_group["fundamental"], by_group["momentum"]
+    for ids in ([fund[0]], [fund[0], other[0]], fund[:3], fund[:5]):
+        _write_advisors(tmp_path, ids)
+        mode, adv = runner.load_advisors()
+        assert mode == runner.OBSERVE and len(adv) == len(roster.active()), ids
+    _write_advisors(tmp_path, fund[:2] + other[:1])
+    mode, adv = runner.load_advisors()
+    assert mode == runner.LIVE and sorted(adv) == sorted(fund[:2] + other[:1])
+    assert runner.can_satisfy_a(adv) and not runner.can_satisfy_a({"a": "g", "b": "h"})
 
 
 def test_responses(env):

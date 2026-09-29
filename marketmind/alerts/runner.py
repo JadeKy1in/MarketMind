@@ -8,7 +8,7 @@ from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from marketmind.alerts.conditions import Candidate, evaluate
+from marketmind.alerts.conditions import MIN_ADVISORS, MIN_GROUPS, Candidate, evaluate
 from marketmind.ledger.store import LedgerEntry, LedgerStore
 
 logger = logging.getLogger("marketmind.alerts.runner")
@@ -24,9 +24,19 @@ def alerts_dir() -> Path:
     return Path(os.getenv("MARKETMIND_DATA_DIR", "data")) / "alerts"
 
 
+def can_satisfy_a(advisors: dict[str, str]) -> bool:
+    """Whether these advisors could ever meet condition A (>= MIN_ADVISORS from
+    >= MIN_GROUPS roster groups)."""
+    return len(advisors) >= MIN_ADVISORS and len(set(advisors.values())) >= MIN_GROUPS
+
+
 def load_advisors() -> tuple[str, dict[str, str]]:
-    """(mode, shadow_id -> group). S7 writes data/advisors.json; until then every
-    active roster shadow stands in and alerts are observation-only."""
+    """(mode, shadow_id -> group). S7 writes data/advisors.json. Live mode (only
+    advisors vote, alerts are pushed) starts once the advisors can satisfy condition A
+    on their own; until then every active roster shadow stands in and alerts stay
+    observation-only (fix 2026-09-29: switching to live with 1-2 advisors, or with
+    advisors from a single group, silenced every alert until a third cross-group
+    advisor appeared)."""
     from marketmind.shadows.v3 import roster
     groups = {r.shadow_id: r.group for r in roster.ROSTER}
     path = Path(os.getenv("MARKETMIND_DATA_DIR", "data")) / "advisors.json"
@@ -37,8 +47,11 @@ def load_advisors() -> tuple[str, dict[str, str]]:
             logger.warning("advisors.json unreadable; using observation mode")
             ids = []
         chosen = {i: groups[i] for i in ids if i in groups}
-        if chosen:
+        if can_satisfy_a(chosen):
             return LIVE, chosen
+        if chosen:
+            logger.info("%d advisor(s) in %d group(s) cannot meet condition A yet; "
+                        "staying in observation mode", len(chosen), len(set(chosen.values())))
     return OBSERVE, {r.shadow_id: r.group for r in roster.active()}
 
 

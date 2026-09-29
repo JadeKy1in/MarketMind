@@ -7,6 +7,7 @@ kurtosis, 3 for a normal distribution, as in Bailey & Lopez de Prado.
 from __future__ import annotations
 
 import math
+from bisect import bisect_left
 from itertools import combinations
 
 import numpy as np
@@ -14,9 +15,6 @@ from scipy import stats
 
 from marketmind.ledger.store import LedgerEntry
 from marketmind.promotion import config as C
-
-EULER_GAMMA = 0.5772156649015329
-
 
 # ── Ledger -> daily series ──────────────────────────────────────────────
 
@@ -52,6 +50,45 @@ def daily_market(entries: list[LedgerEntry], notional: float = C.NOTIONAL_USD) -
             continue
         d = _day(e.exit_date)
         out[d] = out.get(d, 0.0) + e.position_usd * e.market_return / notional
+    return out
+
+
+def _cohort_day(e: LedgerEntry, calendar: list[str]) -> str | None:
+    """The calendar day a record's decision is booked on: first calendar day >= its
+    decision (creation) date; None after the calendar ends."""
+    d = _day(e.created_at)
+    i = bisect_left(calendar, d) if d else len(calendar)
+    return calendar[i] if i < len(calendar) else None
+
+
+def cohort_pnl(entries: list[LedgerEntry], calendar: list[str],
+               notional: float = C.NOTIONAL_USD) -> dict[str, float]:
+    """Settled rows booked on their DECISION day: {day: sum(pnl_usd) / notional}.
+
+    Used by the promotion ladder on matured decision cohorts only (fix 2026-09-29):
+    every record decided on a day is included once all of them have settled, so the
+    series cannot favour records that exited early (targets) over those still open."""
+    out: dict[str, float] = {}
+    for e in entries:
+        if e.status != "settled" or e.pnl_usd is None:
+            continue
+        d = _cohort_day(e, calendar)
+        if d is not None:
+            out[d] = out.get(d, 0.0) + e.pnl_usd / notional
+    return out
+
+
+def cohort_market(entries: list[LedgerEntry], calendar: list[str],
+                  notional: float = C.NOTIONAL_USD) -> dict[str, float]:
+    """Market benchmark on the same capital, booked like `cohort_pnl`:
+    {decision day: sum(position_usd * market_return) / notional}."""
+    out: dict[str, float] = {}
+    for e in entries:
+        if e.status != "settled" or e.market_return is None:
+            continue
+        d = _cohort_day(e, calendar)
+        if d is not None:
+            out[d] = out.get(d, 0.0) + e.position_usd * e.market_return / notional
     return out
 
 
@@ -116,40 +153,70 @@ def psr(sr: float, n: float, g3: float, g4: float, sr_benchmark: float = 0.0) ->
     return float(stats.norm.cdf((sr - sr_benchmark) * math.sqrt(n - 1) / denom))
 
 
-def expected_max_sharpe(n_trials: int, sr_variance: float) -> float:
-    """Expected maximum Sharpe among N unskilled trials (Bailey & Lopez de Prado 2014,
-    "The Deflated Sharpe Ratio", J. of Portfolio Management 40(5)):
+def dsr(r, n_trials: int) -> float:
+    """Deflated Sharpe Ratio, Sidak form (fix 2026-09-29):
 
-        SR0 = sqrt(V[SR]) * ((1-gamma) * Phi^-1(1 - 1/N) + gamma * Phi^-1(1 - 1/(N e)))
+        DSR = PSR(SR* = 0) ^ K,   variance term floored at its normal-returns value 1
 
-    gamma = Euler-Mascheroni constant. 0 for a single trial."""
-    if n_trials <= 1 or sr_variance <= 0:
-        return 0.0
-    n = float(n_trials)
-    return math.sqrt(sr_variance) * ((1 - EULER_GAMMA) * stats.norm.ppf(1 - 1 / n)
-                                     + EULER_GAMMA * stats.norm.ppf(1 - 1 / (n * math.e)))
+    i.e. the probability that the best of K independent zero-skill trials would not
+    reach this Sharpe; DSR >= 0.95 caps the family-wise false-pass rate at 5% across
+    K trials (Sidak 1967; Lopez de Prado 2020, Machine Learning for Asset Managers
+    §8, which derives the DSR's multiple-testing correction from this FWER). K is the
+    effective number of trials (`effective_trials`).
 
-
-def sharpe_estimator_variance(r) -> float:
-    """Asymptotic variance of the Sharpe estimator (Mertens 2002):
-    [1 - g3*SR + (g4-1)/4 * SR^2] / (n - 1)."""
+    Why not the Bailey & Lopez de Prado (2014) benchmark SR0 = sqrt(V[SR]) * E[max]:
+    with V the raw cross-sectional variance it adds the expected maximum AND the
+    candidate's own sampling noise, so a shadow with an annual Sharpe of 2.5 among 30
+    passed 0.2-1% of the time after 80-250 days; with V net of sampling noise SR0 is ~0
+    when nobody has skill and 50% of 30 zero-skill shadows' best passed. The floor on
+    1 - g3*SR + (g4-1)/4*SR^2 stops sample skewness, which rises with the same outliers
+    that lift SR, from inflating PSR in small fat-tailed samples (FWER 7-15% -> 4-5%).
+    Simulated 2026-09-29 (docs/S7_DESIGN.md implementation notes)."""
     r = np.asarray(r, dtype=float)
     if r.size < 2:
         return 0.0
     g3, g4 = skew_kurt(r)
-    return _sr_var_term(sharpe(r), g3, g4) / (r.size - 1)
+    sr = sharpe(r)
+    z = sr * math.sqrt(r.size - 1) / math.sqrt(max(_sr_var_term(sr, g3, g4), 1.0))
+    return float(stats.norm.cdf(z)) ** max(1, int(n_trials))
 
 
-def dsr(r, n_trials: int, sr_variance: float | None = None) -> float:
-    """Deflated Sharpe Ratio (Bailey & Lopez de Prado 2014): PSR with the benchmark set
-    to the expected maximum Sharpe of `n_trials` trials. `sr_variance` is the variance
-    of Sharpe across trials; when None, the series' own estimator variance is used."""
-    r = np.asarray(r, dtype=float)
-    if r.size < 2:
-        return 0.0
-    var = sharpe_estimator_variance(r) if sr_variance is None else sr_variance
-    g3, g4 = skew_kurt(r)
-    return psr(sharpe(r), r.size, g3, g4, expected_max_sharpe(n_trials, var))
+def effective_trials(series: dict[str, tuple[list[str], np.ndarray]],
+                     corr_threshold: float = C.DSR_CLUSTER_CORR,
+                     min_overlap: int = C.DSR_MIN_OVERLAP_DAYS) -> tuple[int, list[list[str]]]:
+    """Effective number of independent trials (Lopez de Prado & Lewis 2019, "Detection
+    of false investment strategies using unsupervised learning methods", Quant. Finance
+    19(9)): candidates whose daily returns are correlated are one trial.
+
+    Pairwise Pearson correlation over the days both series cover (pairs with fewer than
+    `min_overlap` common days, or a constant series, count as uncorrelated), average-
+    linkage hierarchical clustering on the distance 1 - rho, cut at 1 - corr_threshold.
+    Returns (number of clusters, clusters as sorted id lists). 1 for no candidates."""
+    ids = sorted(series)
+    if len(ids) <= 1:
+        return 1, [ids] if ids else []
+    maps = [dict(zip(series[i][0], np.asarray(series[i][1], dtype=float))) for i in ids]
+    n = len(ids)
+    dist = np.ones((n, n))
+    np.fill_diagonal(dist, 0.0)
+    for a in range(n):
+        for b in range(a + 1, n):
+            common = sorted(maps[a].keys() & maps[b].keys())
+            if len(common) < min_overlap:
+                continue
+            x = np.array([maps[a][d] for d in common])
+            y = np.array([maps[b][d] for d in common])
+            if x.std() == 0 or y.std() == 0:
+                continue
+            dist[a, b] = dist[b, a] = 1.0 - float(np.corrcoef(x, y)[0, 1])
+    from scipy.cluster.hierarchy import fcluster, linkage
+    from scipy.spatial.distance import squareform
+    labels = fcluster(linkage(squareform(np.clip(dist, 0.0, 2.0), checks=False), "average"),
+                      t=1.0 - corr_threshold, criterion="distance")
+    clusters: dict[int, list[str]] = {}
+    for sid, lab in zip(ids, labels):
+        clusters.setdefault(int(lab), []).append(sid)
+    return len(clusters), sorted(clusters.values())
 
 
 # ── Composite-score components ─────────────────────────────────────────
@@ -255,29 +322,134 @@ def pbo_cscv(matrix, n_blocks: int = C.PBO_BLOCKS) -> float | None:
     return float(np.mean(np.log(w / (1 - w)) <= 0))
 
 
-def cusum_down(r, mean: float, sd: float, k: float = C.CUSUM_K,
-               h: float = C.CUSUM_H) -> int | None:
+def cusum_down(r, mean: float, sd: float, k: float = C.CUSUM_K, h: float = 5.0,
+               clip: float | None = None) -> int | None:
     """One-sided lower tabular CUSUM for a downward mean shift (Page 1954):
 
         z_t = (x_t - mean) / sd,   S_t = max(0, S_{t-1} - z_t - k),   alarm when S_t > h
 
-    k and h in standard deviations. Returns the index of the first alarm, else None."""
+    k and h in standard deviations; `clip` winsorises z_t at +/- clip. The ladder
+    passes a robust (median, MAD) center / scale and a bootstrap-calibrated h
+    (`calibrate_cusum_h`). Returns the index of the first alarm, else None."""
     if sd <= 0:
         return None
+    z = (np.asarray(r, dtype=float) - mean) / sd
+    if clip is not None:
+        z = np.clip(z, -clip, clip)
     s = 0.0
-    for i, x in enumerate(np.asarray(r, dtype=float)):
-        s = max(0.0, s - (x - mean) / sd - k)
+    for i, x in enumerate(z):
+        s = max(0.0, s - x - k)
         if s > h:
             return i
     return None
 
 
+def robust_center_scale(x) -> tuple[float, float]:
+    """(median, 1.4826 * MAD): a normal-consistent location / scale that a few fat-tail
+    days cannot move. Falls back to the sample sd when more than half the values tie
+    (MAD 0); (median, 0) when the series is constant."""
+    x = np.asarray(x, dtype=float)
+    if x.size == 0:
+        return 0.0, 0.0
+    med = float(np.median(x))
+    scale = 1.4826 * float(np.median(np.abs(x - med)))
+    if scale <= 0 and x.size >= 2:
+        scale = float(x.std(ddof=1))
+    return med, scale
+
+
+def robust_z(x, center: float, scale: float, clip: float = C.CUSUM_WINSOR) -> np.ndarray:
+    """Standardise with (center, scale) and winsorise at +/- clip."""
+    return np.clip((np.asarray(x, dtype=float) - center) / scale, -clip, clip)
+
+
+def _circular_blocks(x: np.ndarray, rows: int, length: int, block: int,
+                     rng: np.random.Generator) -> np.ndarray:
+    """`rows` circular moving-block resamples of x, each `length` long."""
+    n = x.size
+    n_blocks = -(-length // block)
+    starts = rng.integers(0, n, size=(rows, n_blocks))
+    idx = (starts[:, :, None] + np.arange(block)[None, None, :]).reshape(rows, -1) % n
+    return x[idx[:, :length]]
+
+
+def _cusum_h_bootstrap(x0: np.ndarray, k: float, arl0: float, block: int,
+                       rng: np.random.Generator, paths: int, horizon: int, clip: float) -> float:
+    """Smallest h whose bootstrap in-control false-alarm probabilities stay within the
+    geometric-equivalent bounds P(alarm within t days) <= 1 - exp(-t / arl0), t in
+    CUSUM_CHECK_DAYS. Every path re-estimates the median / MAD center and scale from
+    its own resample of x0 before standardising in-control data drawn from x0."""
+    n = x0.size
+    center0, scale0 = robust_center_scale(x0)
+    est = _circular_blocks(x0, paths, n, block, rng)
+    center = np.median(est, axis=1)
+    scale = 1.4826 * np.median(np.abs(est - center[:, None]), axis=1)
+    sd = est.std(axis=1, ddof=1) if n >= 2 else np.zeros(paths)
+    scale = np.where(scale > 0, scale, np.where(sd > 0, sd, scale0 if scale0 > 0 else 1.0))
+    z = np.clip((_circular_blocks(x0, paths, horizon, block, rng) - center[:, None])
+                / scale[:, None], -clip, clip)
+    s = np.zeros(paths)
+    run_max = np.empty((paths, horizon))
+    peak = np.zeros(paths)
+    for t in range(horizon):                 # S_t does not depend on h: one pass for all h
+        s = np.maximum(0.0, s - z[:, t] - k)
+        peak = np.maximum(peak, s)
+        run_max[:, t] = peak
+    checks = [t for t in C.CUSUM_CHECK_DAYS if t <= horizon] or [horizon]
+
+    def in_control(h: float) -> bool:
+        return all(float(np.mean(run_max[:, t - 1] > h)) <= 1.0 - math.exp(-t / arl0)
+                   for t in checks)
+
+    lo, hi = 0.0, float(run_max[:, -1].max()) + 1e-9
+    if in_control(lo):
+        return lo
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        lo, hi = (lo, mid) if in_control(mid) else (mid, hi)
+    return hi
+
+
+def calibrate_cusum_h(ref, k: float = C.CUSUM_K, arl0: float = C.CUSUM_ARL0,
+                      block: int = 1, seed: int = 0, paths: int = C.CUSUM_BOOT_PATHS,
+                      horizon: int = C.CUSUM_BOOT_HORIZON, clip: float = C.CUSUM_WINSOR,
+                      resamples: int = C.CUSUM_GK_RESAMPLES,
+                      quantile: float = C.CUSUM_GK_QUANTILE) -> float:
+    """Alarm threshold h of the robust lower CUSUM for an in-control ARL >= arl0, from
+    the raw reference returns `ref`, with guaranteed conditional performance under
+    estimated parameters (Gandy & Kvaloy 2013, "Guaranteed conditional performance of
+    control charts via bootstrap methods", Scand. J. Statist. 40(4)):
+
+    - `resamples` circular block resamples of the reference stand in for "other
+      reference periods the shadow could have had"; for each, `_cusum_h_bootstrap`
+      finds the h that keeps the false-alarm probability within the geometric-
+      equivalent ARL bound when the chart is built from such a reference;
+    - h = the `quantile` (90%) of those thresholds, so the target holds with ~90%
+      probability despite the short, noisy reference.
+
+    Blocks of `block` days keep the autocorrelation of overlapping holds (the ladder
+    uses min(mean hold, round(n ** (1/3))), the Hall, Horowitz & Jing 1995 rate: long
+    blocks from a short reference understate the estimation error). Simulated
+    2026-09-29 (docs/S7_DESIGN.md implementation notes). Deterministic for a given
+    seed; inf when the reference is empty."""
+    x0 = np.asarray(ref, dtype=float)
+    if x0.size == 0:
+        return math.inf
+    block = max(1, min(int(block), x0.size))
+    rng = np.random.default_rng(seed)
+    outer = _circular_blocks(x0, max(1, resamples), x0.size, block, rng)
+    hs = [_cusum_h_bootstrap(row, k, arl0, block, rng, paths, horizon, clip) for row in outer]
+    return float(np.quantile(hs, quantile))
+
+
 def stress_test(shadow_r, market_r, worst_share: float = C.STRESS_WORST_SHARE,
-                multiple: float = C.STRESS_MULTIPLE,
                 min_days: int = C.STRESS_MIN_DAYS) -> tuple[bool | None, dict]:
     """On the worst `worst_share` market-benchmark days (days with market exposure only),
-    the shadow's mean daily return must be >= multiple * min(market mean, 0).
-    Returns (passed, or None with fewer than `min_days` market days; details)."""
+    the shadow's mean daily return must be >= the market benchmark's mean on those days:
+    it beats holding the market with the same capital when the market is worst
+    (fix 2026-09-29; the old bar, >= 2 x the market mean, let 99% of zero-skill beta-1
+    longs through). Returns (passed, or None with fewer than `min_days` market days;
+    details)."""
     s, mk = np.asarray(shadow_r, dtype=float), np.asarray(market_r, dtype=float)
     idx = np.flatnonzero(mk != 0)
     if idx.size < min_days:
@@ -285,7 +457,7 @@ def stress_test(shadow_r, market_r, worst_share: float = C.STRESS_WORST_SHARE,
     n_worst = max(1, math.ceil(worst_share * idx.size))
     worst = idx[np.argsort(mk[idx], kind="stable")[:n_worst]]
     s_mean, m_mean = float(s[worst].mean()), float(mk[worst].mean())
-    return bool(s_mean >= multiple * min(m_mean, 0.0)), {
+    return bool(s_mean >= m_mean), {
         "market_days": int(idx.size), "worst_days": int(n_worst),
         "shadow_mean": s_mean, "market_mean": m_mean}
 
