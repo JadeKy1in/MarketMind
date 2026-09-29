@@ -6,9 +6,12 @@ Rules (all code, no judgement; see docs/S2_DESIGN.md §4):
                      hold_bars if shorter) that trades into
                      the zone; long fills at min(open, entry_high), short at
                      max(open, entry_low). Never filled inside the window -> void.
-          A fill at the open that is already at/beyond the stop or the target
-          -> void (owner decision 2026-09-29: the card was dead before entry; no
-          one would buy and sell at the same open, so it is not scored).
+          A fill at the open that is already at/beyond the target -> void
+          (gap_target; owner decision 2026-09-29: the card was dead before entry).
+          A fill at the open already at/beyond the stop is a loss, not void (owner
+          decision 2026-09-29, second revision: voiding it biased scores upward by
+          ~0.24%/trade): exit "stop" at that open, measured against the stop level,
+          entry_price = stop, exit_price = open, gross = direction * (open / stop - 1).
   Exit    checked bar by bar from the fill bar, in this order:
           gap     an open already beyond the target exits there as target (the order
                   fills at that open), checked before the stop.
@@ -18,18 +21,26 @@ Rules (all code, no judgement; see docs/S2_DESIGN.md §4):
                   intrabar order is unknown). Stop and target on the same bar -> stop.
           falsifier rule  close_below / close_above -> exit at that close.
           expiry  close of the hold_bars-th bar counting the fill bar.
+  Crypto  (24/7, UTC-day bars) counts calendar days: the fill bar must be the first
+          expected UTC day and the holding window must have a bar for every day up to
+          the exit; a missing day leaves the record unsettled ("data gap <date>").
   Returns net = direction * (exit / entry - 1) - 2 * cost_bps / 10_000.
   Benchmarks  buy-and-hold over the same dates: open on the entry date to close on
-          the exit date. Market benchmark: BTC-USD for crypto, SPY otherwise.
-          Excess = net - benchmark for both directions ("did this beat simply
-          holding the benchmark").
+          the exit date, each aligned to the nearest benchmark bar within
+          BENCHMARK_ALIGN_DAYS (entry on/after, exit on/before; e.g. a US-ETF domain
+          benchmark on a foreign record whose date is a US holiday). Market benchmark:
+          BTC-USD for crypto, SPY otherwise. The benchmark leg takes the record's
+          direction: excess = net - sign * benchmark (sign +1 long, -1 short).
   Brier   (confidence - outcome)^2, outcome = 1 if net > 0 else 0.
   Adjusted prices  sources return split/dividend-adjusted series, so a later corporate
           action rescales past bars. Price levels (zone, stop, target, falsifier) are
           multiplied by close(snapshot date in the current series) / snapshot price
           before simulating; returns are then in the current series (total return).
+          Only a snapshot from the same data source is compared (two sources differ
+          by a few bp without any corporate action).
   Benchmark backfill  a settled record whose benchmark data was missing is retried
-          on later runs; only the benchmark fields change.
+          on later runs; only the benchmark fields change. Still missing
+          BENCHMARK_GIVE_UP_DAYS after the exit -> "benchmark not comparable", final.
   Missing data leaves the record unsettled with a note; nothing is estimated.
   Only complete bars are used (price_history.complete_bars: each market's own
   session close; UTC days for crypto/FX), because a data source returns the
@@ -38,14 +49,15 @@ Rules (all code, no judgement; see docs/S2_DESIGN.md §4):
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from marketmind.gateway.price_history import Bar, complete_bars
 from marketmind.markets import CASH, market_for
 from marketmind.ledger.prices import PriceSource, source_of
-from marketmind.ledger.store import LedgerEntry, LedgerStore
+from marketmind.ledger.store import UNSETTLED, LedgerEntry, LedgerStore
 
 logger = logging.getLogger("marketmind.ledger.settlement")
 
@@ -101,6 +113,7 @@ class Outcome:
     exit_index: int | None = None
     exit_price: float | None = None
     exit_reason: str | None = None
+    entry_price: float | None = None  # overrides fill.price (gap through the stop)
 
 
 def _find_fill(e: LedgerEntry, bars: list[Bar]) -> Fill | None | str:
@@ -118,8 +131,8 @@ def _find_fill(e: LedgerEntry, bars: list[Bar]) -> Fill | None | str:
     return "void" if len(bars) >= window else None
 
 
-def bars_after_creation(e: LedgerEntry, bars: list[Bar]) -> list[Bar]:
-    """Bars the record could first trade on.
+def first_bar_date(e: LedgerEntry) -> str | None:
+    """Earliest bar date the record could trade on (None without a creation time).
 
     Crypto and FX bars are UTC days, so the first usable bar is the next UTC date.
     Exchange bars are local sessions (marketmind.markets): a record created before
@@ -128,15 +141,46 @@ def bars_after_creation(e: LedgerEntry, bars: list[Bar]) -> list[Bar]:
     """
     ts = _parse_ts(e.created_at)
     if ts is None:
-        return list(bars)
+        return None
     m = market_for(e.ticker)
     if is_crypto(e) or m.utc_days:
-        first = (ts.astimezone(timezone.utc).date() + timedelta(days=1)).isoformat()
-    else:
-        local = ts.astimezone(ZoneInfo(m.tz))
-        before_open = local.time() < m.open
-        first = (local.date() if before_open else local.date() + timedelta(days=1)).isoformat()
-    return [b for b in bars if b.date >= first]
+        return (ts.astimezone(timezone.utc).date() + timedelta(days=1)).isoformat()
+    local = ts.astimezone(ZoneInfo(m.tz))
+    before_open = local.time() < m.open
+    return (local.date() if before_open else local.date() + timedelta(days=1)).isoformat()
+
+
+def bars_after_creation(e: LedgerEntry, bars: list[Bar]) -> list[Bar]:
+    """Bars the record could first trade on (see first_bar_date)."""
+    first = first_bar_date(e)
+    return list(bars) if first is None else [b for b in bars if b.date >= first]
+
+
+def target_session(e: LedgerEntry) -> str | None:
+    """The session a record is a decision for: its first bar date, moved past the
+    weekend for everything but crypto (no exchange holiday calendar is known, so a
+    holiday is not skipped). Submissions are deduplicated on this (docs/S2_DESIGN.md §4)."""
+    first = first_bar_date(e)
+    if first is None or is_crypto(e):
+        return first
+    day = date.fromisoformat(first)
+    while day.weekday() >= 5:
+        day += timedelta(days=1)
+    return day.isoformat()
+
+
+def calendar_run(e: LedgerEntry, after: list[Bar]) -> tuple[list[Bar], str | None]:
+    """Crypto: the bars of consecutive calendar days from the first expected day,
+    and the first missing day when a later bar shows it is a gap (else None)."""
+    first = first_bar_date(e)
+    if first is None:
+        return after, None
+    day = date.fromisoformat(first)
+    for i, b in enumerate(after):
+        if b.date != day.isoformat():
+            return after[:i], day.isoformat()
+        day += timedelta(days=1)
+    return after, None
 
 
 def _parse_ts(value: str | None) -> datetime | None:
@@ -155,6 +199,17 @@ def is_crypto(e: LedgerEntry) -> bool:
 
 def simulate(e: LedgerEntry, bars: list[Bar]) -> Outcome:
     after = bars_after_creation(e, bars)
+    gap = None
+    if is_crypto(e):
+        # 24/7 market: bar index == calendar day only without holes (never estimated)
+        after, gap = calendar_run(e, after)
+    out = _simulate(e, after)
+    if gap and out.status in UNSETTLED:
+        out.note = f"data gap {gap}"
+    return out
+
+
+def _simulate(e: LedgerEntry, after: list[Bar]) -> Outcome:
     fill = _find_fill(e, after)
     if fill is None:
         return Outcome("pending", "waiting for the first bar after creation"
@@ -172,6 +227,11 @@ def simulate(e: LedgerEntry, bars: list[Bar]) -> Outcome:
                        exit_reason="expiry")
     long = e.direction == "long"
     if fill.at_open and (gap := gapped_past(e, fill.price)):
+        if gap == "stop":
+            # a real loss the plan would have suffered: the gap beyond the stop
+            return Outcome("settled", "gapped through the stop at the open", fill=fill,
+                           exit_index=fill.index, exit_price=fill.price, exit_reason="stop",
+                           entry_price=e.stop_loss)
         return Outcome("void", f"opened at {fill.price:.6g}, already past the {gap} before entry",
                        exit_reason=f"gap_{gap}")
     last = fill.index + e.hold_bars - 1
@@ -217,24 +277,48 @@ def gapped_past(e: LedgerEntry, open_price: float) -> str | None:
     return None
 
 
+# A benchmark bar may be this many calendar days off the record's entry / exit date
+# (the benchmark's market was closed that day, e.g. a US-ETF domain benchmark on a
+# foreign record). Still missing this long after the exit -> not comparable, final.
+BENCHMARK_ALIGN_DAYS = 3
+BENCHMARK_GIVE_UP_DAYS = 10
+BENCH_MISSING = "benchmark data unavailable"
+BENCH_NOT_COMPARABLE = "benchmark not comparable"
+
+
+def _shift(day: str, days: int) -> str:
+    return (date.fromisoformat(day) + timedelta(days=days)).isoformat()
+
+
 def benchmark_return(bars: list[Bar] | None, start: str, end: str) -> float | None:
+    """Open of the first bar on/after `start` to close of the last bar on/before `end`,
+    each at most BENCHMARK_ALIGN_DAYS away. A shifted date must be an interior gap
+    (bars exist on its other side), so a stale or short series is never passed off
+    as the real return."""
     if not bars:
         return None
-    window = [b for b in bars if start <= b.date <= end]
-    # A stale or gappy series must not pass off a partial window as the real return.
-    if not window or window[0].date != start or window[-1].date != end or window[0].open <= 0:
+    first = next((b for b in bars if b.date >= start), None)
+    last = next((b for b in reversed(bars) if b.date <= end), None)
+    if first is None or last is None or first.date > last.date or first.open <= 0:
         return None
-    return window[-1].close / window[0].open - 1
+    if first.date != start and (first.date > _shift(start, BENCHMARK_ALIGN_DAYS)
+                                or bars[0].date >= start):
+        return None
+    if last.date != end and (last.date < _shift(end, -BENCHMARK_ALIGN_DAYS)
+                             or bars[-1].date <= end):
+        return None
+    return last.close / first.open - 1
 
 
 def apply_outcome(e: LedgerEntry, out: Outcome, bars: list[Bar],
-                  market_bars: list[Bar] | None, domain_bars: list[Bar] | None) -> None:
+                  market_bars: list[Bar] | None, domain_bars: list[Bar] | None,
+                  today: str | None = None) -> None:
     after = bars_after_creation(e, bars)
     e.status = out.status
     e.settle_note = out.note
     if out.fill is not None:
         e.entry_date = after[out.fill.index].date
-        e.entry_price = round(out.fill.price, 6)
+        e.entry_price = round(out.fill.price if out.entry_price is None else out.entry_price, 6)
     if out.status == "void":
         e.exit_reason = out.exit_reason
         e.settled_at = _now()
@@ -252,7 +336,7 @@ def apply_outcome(e: LedgerEntry, out: Outcome, bars: list[Bar],
     e.cost_return = round(2 * cost_bps(e.asset_type, e.ticker) / 10_000, 6)
     e.net_return = round(e.gross_return - e.cost_return, 6)
     e.pnl_usd = round(e.position_usd * e.net_return, 2)
-    apply_benchmarks(e, market_bars, domain_bars)
+    apply_benchmarks(e, market_bars, domain_bars, today)
     outcome = 1.0 if e.net_return > 0 else 0.0
     e.brier = round((e.confidence - outcome) ** 2, 6)
     e.falsifier_triggered = e.exit_reason in ("stop", "falsifier")
@@ -266,8 +350,11 @@ REVIEW_VERSION = 1
 def compute_review(e: LedgerEntry, bars: list[Bar], factor: float = 1.0) -> dict | None:
     """Post-mortem facts of a settled record, from bars alone (docs/S9_DESIGN.md §3).
 
-    `factor` rescales the recorded levels like simulate() does. The fill bar's whole
-    high/low range counts (an approximation for a zone fill inside that bar)."""
+    `factor` (adjustment_factor for the current series) rescales the recorded levels
+    like simulate() does; the entry price was taken from the series at settlement
+    (settle_factor), so it is moved by factor / settle_factor into the current series.
+    The fill bar's whole high/low range counts (an approximation for a zone fill
+    inside that bar)."""
     from marketmind.pipeline.l3_indicators import atr
     if not (e.entry_date and e.exit_date and e.entry_price):
         return None
@@ -278,7 +365,7 @@ def compute_review(e: LedgerEntry, bars: list[Bar], factor: float = 1.0) -> dict
     window, before = bars[i0:i1 + 1], bars[:i0]
     long = e.direction == "long"
     sign = 1.0 if long else -1.0
-    p = e.entry_price
+    p = e.entry_price * factor / settle_factor(e)
     hi, lo = max(b.high for b in window), min(b.low for b in window)
     best, worst = (hi, lo) if long else (lo, hi)
     stop = e.stop_loss * factor if e.stop_loss is not None else None
@@ -347,48 +434,112 @@ def compute_review(e: LedgerEntry, bars: list[Bar], factor: float = 1.0) -> dict
 
 
 def apply_benchmarks(e: LedgerEntry, market_bars: list[Bar] | None,
-                     domain_bars: list[Bar] | None) -> None:
-    """Fill benchmark returns of a settled record; note whichever is still missing."""
+                     domain_bars: list[Bar] | None, today: str | None = None) -> None:
+    """Fill benchmark returns of a settled record; note whichever is still missing.
+
+    The benchmark leg takes the record's direction (a short is compared with
+    shorting the benchmark). Only the benchmark segment of settle_note changes."""
+    sign = 1.0 if e.direction == "long" else -1.0
     e.market_benchmark = market_benchmark(e)
     mret = (0.0 if e.market_benchmark == CASH
             else benchmark_return(market_bars, e.entry_date, e.exit_date))
     e.market_return = None if mret is None else round(mret, 6)
-    e.excess_market = None if mret is None else round(e.net_return - mret, 6)
+    e.excess_market = None if mret is None else round(e.net_return - sign * mret, 6)
     if e.domain_benchmark:
         dret = benchmark_return(domain_bars, e.entry_date, e.exit_date)
         e.domain_return = None if dret is None else round(dret, 6)
-        e.excess_domain = None if dret is None else round(e.net_return - dret, 6)
-    missing = [n for n, r in ((e.market_benchmark, mret),) if r is None]
+        e.excess_domain = None if dret is None else round(e.net_return - sign * dret, 6)
+    missing = []                     # (ticker, its bars) of each benchmark still missing
+    if mret is None:
+        missing.append((e.market_benchmark, market_bars))
     if e.domain_benchmark and e.domain_return is None:
-        missing.append(e.domain_benchmark)
-    if missing:
-        e.settle_note = "benchmark data unavailable: " + ", ".join(missing)
-    elif e.settle_note.startswith("benchmark data unavailable"):
-        e.settle_note = ""
+        missing.append((e.domain_benchmark, domain_bars))
+    today = today or datetime.now(timezone.utc).date().isoformat()
+    give_up = today >= _shift(e.exit_date, BENCHMARK_GIVE_UP_DAYS)
+    # final only when the series was there but has no bar near the dates; a failed
+    # fetch is retried whatever the age
+    final = list(dict.fromkeys(t for t, b in missing if give_up and b))
+    retry = list(dict.fromkeys(t for t, _ in missing if t not in final))
+    notes = [n for n in (e.settle_note or "").split("; ")
+             if n and not n.startswith((BENCH_MISSING, BENCH_NOT_COMPARABLE))]
+    if final:
+        notes.insert(0, f"{BENCH_NOT_COMPARABLE}: " + ", ".join(final))
+    if retry:
+        notes.insert(0, f"{BENCH_MISSING}: " + ", ".join(retry))
+    e.settle_note = "; ".join(notes)
+
+
+def _not_comparable(e: LedgerEntry) -> set[str]:
+    for part in (e.settle_note or "").split("; "):
+        if part.startswith(BENCH_NOT_COMPARABLE + ": "):
+            return set(part[len(BENCH_NOT_COMPARABLE) + 2:].split(", "))
+    return set()
 
 
 def needs_benchmark(e: LedgerEntry) -> bool:
-    return e.status == "settled" and (
-        e.market_return is None or (bool(e.domain_benchmark) and e.domain_return is None))
+    """Settled with a benchmark still to retry (not one marked not comparable)."""
+    if e.status != "settled":
+        return False
+    final = _not_comparable(e)
+    return ((e.market_return is None and market_benchmark(e) not in final)
+            or (bool(e.domain_benchmark) and e.domain_return is None
+                and e.domain_benchmark not in final))
 
 
-def adjustment_factor(e: LedgerEntry, bars: list[Bar], snapshot: dict[str, dict]) -> float:
-    """close(snapshot date) in the current series / snapshot price; 1.0 if not comparable."""
+# Below this, a snapshot / series difference is rounding, not a corporate action.
+ADJUSTMENT_NOOP = 5e-4
+
+
+def price_adjustment(e: LedgerEntry, bars: list[Bar], snapshot: dict[str, dict],
+                     series_source: str | None = None) -> tuple[float, str]:
+    """(close(snapshot date) in the current series / snapshot price, settle_note text).
+
+    1.0 if not comparable. With `series_source`, only a snapshot taken from that same
+    source is compared: two providers differ by a few bp without any corporate action."""
     snap = snapshot.get(e.ticker) or {}
     price, day = snap.get("price"), snap.get("price_date")
     if not price or price <= 0 or not day:
-        return 1.0
+        return 1.0, ""
     bar = next((b for b in bars if b.date == day), None)
     if bar is None or bar.close <= 0:
-        return 1.0
+        return 1.0, ""
     factor = bar.close / price
-    if abs(factor - 1.0) < 1e-4:
-        return 1.0
+    if abs(factor - 1.0) < ADJUSTMENT_NOOP:
+        return 1.0, ""
+    snap_source = snap.get("source")
+    if series_source is not None and snap_source != series_source:
+        if not 0.9 <= factor <= 1.1:
+            logger.warning("Ledger: %s snapshot (%s) and series (%s) differ x%.4f; not rescaled",
+                           e.ticker, snap_source, series_source, factor)
+        return 1.0, (f"snapshot source {snap_source or 'unknown'}, "
+                     f"settlement source {series_source} (not rescaled)")
     if not 0.01 <= factor <= 100:
         logger.warning("Ledger: implausible adjustment factor %.4f for %s, ignored",
                        factor, e.ticker)
+        return 1.0, ""
+    return factor, f"price levels rescaled x{factor:.4f} (adjusted series changed)"
+
+
+def adjustment_factor(e: LedgerEntry, bars: list[Bar], snapshot: dict[str, dict],
+                      series_source: str | None = None) -> float:
+    """close(snapshot date) in the current series / snapshot price; 1.0 if not comparable."""
+    return price_adjustment(e, bars, snapshot, series_source)[0]
+
+
+_RESCALED = re.compile(r"price levels rescaled x([0-9.]+)")
+
+
+def settle_factor(e: LedgerEntry) -> float:
+    """Adjustment factor in force when the record was settled (its entry/exit prices
+    are in that series): meta.price_factor, else the settle_note of older records."""
+    value = (e.meta or {}).get("price_factor")
+    if value is None and (m := _RESCALED.search(e.settle_note or "")):
+        value = m.group(1)
+    try:
+        factor = float(value) if value is not None else 1.0
+    except (TypeError, ValueError):
         return 1.0
-    return factor
+    return 1.0 if factor <= 0 or abs(factor - 1.0) < ADJUSTMENT_NOOP else factor
 
 
 def rescaled(e: LedgerEntry, factor: float) -> LedgerEntry:
@@ -420,6 +571,7 @@ class SettleReport:
     pending: int = 0
     benchmarks_backfilled: int = 0
     reviews_backfilled: int = 0
+    changed_meanwhile: list[str] = field(default_factory=list)
     unavailable: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -430,6 +582,8 @@ class SettleReport:
             text += f", benchmarks backfilled {self.benchmarks_backfilled}"
         if self.reviews_backfilled:
             text += f", reviews backfilled {self.reviews_backfilled}"
+        if self.changed_meanwhile:
+            text += f", changed by another process (not overwritten): {len(self.changed_meanwhile)}"
         if self.unavailable:
             text += f", no price data: {', '.join(sorted(set(self.unavailable)))}"
         if self.errors:
@@ -446,6 +600,16 @@ async def settle_all(store: LedgerStore, source: PriceSource,
     report = SettleReport()
     cache: dict[str, list[Bar] | None] = {}
     fixed_today = today
+    day = today or datetime.now(timezone.utc).date().isoformat()
+
+    def write(e: LedgerEntry, expected: tuple[str, ...]) -> bool:
+        # conditional: a record another process changed meanwhile (e.g. voided) wins
+        if store.update_if_status(e, expected):
+            return True
+        logger.warning("Ledger: %s (%s) changed while settling; not overwritten",
+                       e.entry_id, e.ticker)
+        report.changed_meanwhile.append(e.entry_id)
+        return False
 
     async def bars_for(ticker: str) -> list[Bar] | None:
         if ticker not in cache:
@@ -464,10 +628,10 @@ async def settle_all(store: LedgerStore, source: PriceSource,
             if not bars:
                 e.settle_note = "price data unavailable (not estimated)"
                 report.unavailable.append(e.ticker)
-                store.update(e)
+                write(e, UNSETTLED)
                 continue
             snapshot = store.snapshot(e.snapshot_id) if e.snapshot_id else {}
-            factor = adjustment_factor(e, bars, snapshot)
+            factor, adj_note = price_adjustment(e, bars, snapshot, source_of(source, e.ticker))
             out = simulate(rescaled(e, factor), bars)
             market_bars = domain_bars = None
             if out.status == "settled":
@@ -475,14 +639,18 @@ async def settle_all(store: LedgerStore, source: PriceSource,
                 market_bars = None if mb == CASH else await bars_for(mb)
                 if e.domain_benchmark:
                     domain_bars = await bars_for(e.domain_benchmark)
-            apply_outcome(e, out, bars, market_bars, domain_bars)
+            apply_outcome(e, out, bars, market_bars, domain_bars, day)
             if e.status == "settled":
+                meta = {k: v for k, v in (e.meta or {}).items() if k != "price_factor"}
+                if factor != 1.0:          # entry/exit prices are in this series
+                    meta["price_factor"] = round(factor, 6)
+                e.meta = meta
                 e.review = compute_review(e, bars, factor)
-            if factor != 1.0:
-                note = f"price levels rescaled x{factor:.4f} (adjusted series changed)"
-                e.settle_note = f"{e.settle_note}; {note}" if e.settle_note else note
+            if adj_note:
+                e.settle_note = f"{e.settle_note}; {adj_note}" if e.settle_note else adj_note
             e.price_source = source_of(source, e.ticker)
-            store.update(e)
+            if not write(e, UNSETTLED):
+                continue
         except Exception as exc:
             # One malformed record must not block settlement of all the others.
             logger.error("Ledger: settling %s (%s) failed", e.entry_id, e.ticker, exc_info=True)
@@ -490,7 +658,7 @@ async def settle_all(store: LedgerStore, source: PriceSource,
             fresh = store.get(e.entry_id)
             if fresh is not None:
                 fresh.settle_note = f"settlement error: {type(exc).__name__}: {exc}"[:500]
-                store.update(fresh)
+                store.update_if_status(fresh, UNSETTLED)
             continue
         if e.status == "settled":
             report.settled += 1
@@ -510,12 +678,15 @@ async def settle_all(store: LedgerStore, source: PriceSource,
             mb = market_benchmark(e)
             market_bars = None if mb == CASH else await bars_for(mb)
             domain_bars = await bars_for(e.domain_benchmark) if e.domain_benchmark else None
-            apply_benchmarks(e, market_bars, domain_bars)
+            note_before = e.settle_note
+            apply_benchmarks(e, market_bars, domain_bars, day)
             if (e.market_return, e.domain_return) != before:
                 if e.review is not None:     # recompute: beat_market / error_class use it
                     e.review = None
-                store.update(e)
-                report.benchmarks_backfilled += 1
+                if write(e, ("settled",)):
+                    report.benchmarks_backfilled += 1
+            elif e.settle_note != note_before:          # e.g. now "not comparable"
+                write(e, ("settled",))
         except Exception:
             logger.error("Ledger: benchmark backfill for %s failed", e.entry_id, exc_info=True)
 
@@ -530,11 +701,12 @@ async def settle_all(store: LedgerStore, source: PriceSource,
             if not bars:
                 continue
             snapshot = store.snapshot(e.snapshot_id) if e.snapshot_id else {}
-            review = compute_review(e, bars, adjustment_factor(e, bars, snapshot))
+            factor = adjustment_factor(e, bars, snapshot, source_of(source, e.ticker))
+            review = compute_review(e, bars, factor)
             if review is not None and review != e.review:
                 e.review = review
-                store.update(e)
-                report.reviews_backfilled += 1
+                if write(e, ("settled",)):
+                    report.reviews_backfilled += 1
         except Exception:
             logger.error("Ledger: review backfill for %s failed", e.entry_id, exc_info=True)
 

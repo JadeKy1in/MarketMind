@@ -136,10 +136,11 @@ async def test_rerun_same_day_skips_and_consensus_feeds_fade_master(tmp_path, pr
         return reply(good("SPY"))
 
     ids = entries("momentum:weekly:trend_rider", "contrarian:consensus:fade_master")
+    day1 = "2026-09-27T22:00:00Z"            # Sunday evening: records for Monday's session
     await runner.run_shadow_day(store, [], today="2026-09-27", entries=ids, call=call,
-                                fred_fetch=no_fred)
+                                fred_fetch=no_fred, created_at=day1)
     again = await runner.run_shadow_day(store, [], today="2026-09-27", entries=ids, call=call,
-                                        fred_fetch=no_fred)
+                                        fred_fetch=no_fred, created_at=day1)
     assert {r.status for r in again.results} == {"skipped"}
 
     seen = {}
@@ -148,7 +149,8 @@ async def test_rerun_same_day_skips_and_consensus_feeds_fade_master(tmp_path, pr
         seen[stage] = user
         return reply(good("SPY"))
 
-    await runner.run_shadow_day(store, [], today=TODAY, entries=ids, call=spy, fred_fetch=no_fred)
+    await runner.run_shadow_day(store, [], today=TODAY, entries=ids, call=spy, fred_fetch=no_fred,
+                                created_at="2026-09-28T22:00:00Z")   # Tuesday's session
     assert "SPY: 1 shadows, 100% long" in seen["shadow:fade_master"]
     assert "consensus" not in seen["shadow:trend_rider"].lower()
 
@@ -246,3 +248,47 @@ async def test_off_context_ticker_without_data_is_dropped(tmp_path, monkeypatch)
     r = report.results[0]
     assert r.status == "submitted" and len(r.entry_ids) == 1
     assert any("NODATA.T" in e for e in r.errors)
+
+
+@pytest.mark.asyncio
+async def test_rerun_across_utc_midnight_for_the_same_session_is_skipped(tmp_path, prices):
+    # Friday 22:00 UTC and Saturday 10:00 UTC both decide for Monday's US session
+    store = LedgerStore(tmp_path / "l.db")
+    calls = []
+
+    async def call(system, user, stage):
+        calls.append(stage)
+        return reply(good("GLD"))
+
+    ids = entries("expert:gold:bullion_broker")
+    await runner.run_shadow_day(store, [], today="2026-09-25", entries=ids, call=call,
+                                fred_fetch=no_fred, created_at="2026-09-25T22:00:00Z")
+    again = await runner.run_shadow_day(store, [], today="2026-09-26", entries=ids, call=call,
+                                        fred_fetch=no_fred, created_at="2026-09-26T10:00:00Z")
+    assert again.results[0].status == "skipped" and len(calls) == 1
+    later = await runner.run_shadow_day(store, [], today="2026-09-28", entries=ids, call=call,
+                                        fred_fetch=no_fred, created_at="2026-09-28T22:00:00Z")
+    assert later.results[0].status == "submitted"            # Tuesday is a new session
+
+
+@pytest.mark.asyncio
+async def test_duplicate_found_at_insert_writes_neither_calls_nor_benchmark(tmp_path, prices,
+                                                                           monkeypatch):
+    # another process recorded the session after this run's pre-check
+    store = LedgerStore(tmp_path / "l.db")
+
+    async def call(system, user, stage):
+        return reply(good("GLD"), good("GDX"))
+
+    ids = entries("expert:gold:bullion_broker")
+    first = await runner.run_shadow_day(store, [], today=TODAY, entries=ids, call=call,
+                                        fred_fetch=no_fred, created_at="2026-09-28T22:00:00Z")
+    assert first.results[0].status == "submitted" and first.results[0].benchmark_id
+    before = len(store.list())
+    monkeypatch.setattr(runner, "_already_recorded", lambda *a: set())
+    dup = await runner.run_shadow_day(store, [], today=TODAY, entries=ids, call=call,
+                                      fred_fetch=no_fred, created_at="2026-09-28T23:00:00Z")
+    r = dup.results[0]
+    assert r.status == "duplicate" and not r.entry_ids and r.benchmark_id is None
+    assert "2026-09-29" in r.errors[0] and len(store.list()) == before
+    assert "1 duplicate submissions not recorded" in dup.summary()

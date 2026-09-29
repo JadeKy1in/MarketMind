@@ -12,6 +12,7 @@ import logging
 import random
 from datetime import datetime, timezone
 
+from marketmind.gateway.price_history import complete_bars
 from marketmind.ledger.store import LedgerEntry, LedgerStore
 
 logger = logging.getLogger("marketmind.playground.ledger_bridge")
@@ -93,8 +94,11 @@ async def record_run(store: LedgerStore, result, manifests: dict, *, today: str 
         quotes = {}
         for t in wanted:
             h = histories.get(t)
-            if h is not None and h.daily:
-                quotes[t] = (h.daily[-1].close, h.daily[-1].date, h.source)
+            # the running session is a partial bar; settlement compares the snapshot
+            # with the completed bar of that date (adjustment factor)
+            daily = complete_bars(t, h.daily) if h is not None and h.daily else []
+            if daily:
+                quotes[t] = (daily[-1].close, daily[-1].date, h.source)
         snapshot_id = store.save_snapshot(quotes) if quotes else None
         domain_bench = getattr(manifest, "domain_benchmark", None) or "SPY"
         ids = []
