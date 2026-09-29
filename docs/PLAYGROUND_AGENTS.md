@@ -151,6 +151,45 @@
 - 因为长期正例率约 55%，0.55 的阈值选择性不强：回测中约 60% 的预测在 0.55 以上，线上几乎每天都会有 1–2 笔。
 - 各标的的持有期（10 根）重叠，每周每个标的最多一条，评估时要注意相关性。
 
+## 8. 加密数据源与两个纯代码加密 agent
+
+> 2026-09-29 所有人决定（候选清单见 `docs/PLAYGROUND_CANDIDATES_2026-09-29.md`）。代码：`marketmind/gateway/crypto_signals.py`（数据）、`marketmind/shadow_feeds/crypto_onchain.py`（影子数据段）、`marketmind/playground/agents/onchain_valuation/`、`agents/crypto_tsmom/`；测试：`test_gateway/test_crypto_signals.py`、`test_shadow_feeds/test_crypto_onchain.py`、`test_playground/test_crypto_agents.py`（全部离线）。零 LLM、无新依赖。
+
+**数据源**（均无需密钥，2026-09-29 从所有人本机实测可达）
+
+| 数据 | 端点与字段 | 说明 |
+|---|---|---|
+| Coin Metrics 社区版 [15] | `community-api.coinmetrics.io/v4/timeseries/asset-metrics`，`CapMVRVCur`、`CapMrktCurUSD`，日频全历史（BTC 自 2010-07-18，ETH 自 2015-08-08） | 实价市值 `CapRealUSD`、`CapMVRVFF`、`NVTAdj` 在社区版返回 403，所以实价市值由代码按 市值 ÷ MVRV 推出（MVRV 的定义，非估算）。限速按文档 10 次 / 6 秒：请求间隔 0.6 秒，遇 429 按 `Retry-After` 等待后只重试一次 |
+| alternative.me 加密恐惧贪婪 [16] | `api.alternative.me/fng/?limit=0`，每 UTC 日一个值，自 2018-02-01 | 数据中的分类边界：极度恐惧 ≤ 25，极度贪婪 ≥ 76 |
+| 美国现货 BTC ETF 资金流（TFTC）[17] | `www.tftc.io/bitcoin-etf-flows/data.json`，每交易日 `netFlowUsd`，自 2024-01-11 | CC BY 4.0：凡展示这些数字处都带 "TFTC — tftc.io/bitcoin-etf-flows (CC BY 4.0)" |
+
+每个序列每个 UTC 日最多抓一次，缓存在 `<数据目录>/crypto_signals/<名称>.json`。当天抓取失败时退回上一份缓存，并标记为 `stale-cache` 与其抓取日期；没有缓存则抛出 `CryptoDataUnavailable`。不插值、不补数。
+
+**影子数据段 `crypto_onchain`**（服务 `chain_oracle`、`defi_scout` 及其临时变体）：BTC / ETH 的 MVRV 值、在自身历史中的百分位（截至当天的扩展窗口）、MVRV Z 与实价市值；恐惧贪婪当天值及 7 天前对比；ETF 最近 5 个交易日净流入合计与逐日数字。每行都带日期；任何一部分失败只输出一行 "unavailable"，全部失败才报错。
+
+**`onchain_valuation`**（`playground:onchain_valuation`，BTC-USD / ETH-USD，只做多或空仓）
+- 证据：Grobys、Näsman、Sandretto（2026）[18] 在 2013-12 至 2025-04 的 BTC 上检验：MVRV Z < −0.2 入场、Z ≥ 5 / 6 / 7 离场的多 / 空仓规则跑赢买入持有（Z 规则夏普 1.28，买入持有 0.45）。但样本只有 3 个完整周期、每个规则 3 笔交易，**证据偏弱**。
+- 事先设定的规则（未在账本数据上调参）：
+  - BTC：MVRV Z =（市值 − 实价市值）÷ 截至当天全部市值的标准差（无前视）；取论文中间方案：Z < −0.2 入场，Z ≥ 6 离场。
+  - ETH：论文的 Z 区间没有在 ETH 上检验过（2016–2026 年 ETH 的 Z 从未达到 6，离场永远不会触发），所以用自定区间：MVRV 在自身历史中的百分位 ≤ 10 入场、≥ 90 离场（历史满一年后才计算）。
+  - 按论文的状态机回放历史，得到当前区间：`deep_value`（今天落在入场区）、`overheated`（离场区）、`in_cycle`（已入场未离场）、`out_of_cycle`（离场后尚未再入场）。
+  - 恐惧贪婪作反向过滤：`deep_value` 时做多，持有 60 根，确信度 0.60（极度恐惧时 0.65），遇极度贪婪则否决；`in_cycle` 时只在极度恐惧时做多（周期内的恐慌买点），持有 20 根，确信度 0.55；其余情况空仓。
+- 止损、频率：信号收盘 − 3×ATR20（沿用 `_quant`，写入 `falsifier_rule`）；`signal_key` = `标的:ISO 周`；本 agent 在该币还有未结算记录时不再开仓，避免 60 根的持仓层层叠加（读自己的账本记录，与 `memory_desk` 相同）。
+- 缺数据或过期（MVRV 超过 3 天、恐惧贪婪超过 2 天、K 线超过 7 天）、MVRV 历史不足 4 年 → 标记为 unavailable，不做判断。
+- `meta.signal`：MVRV、百分位、Z、实价市值、区间定义、状态机入场 / 离场日期、区间、恐惧贪婪（日期 / 值 / 分类）、收盘、止损、ATR、持有期。
+
+**`crypto_tsmom`**（`playground:crypto_tsmom`，只做多或空仓）
+- 证据：Liu & Tsyvinski（2021）[19] 发现加密货币在 1–4 周期限上有很强的时间序列动量。
+- 规则（按论文的期限事先设定，组合方式是我们的选择）：r_k = 最近 k 根完整 UTC 日线收益，k = 7 / 14 / 21 / 28；s_k = r_k ÷（EWMA 年化波动 × √(k/365)），波动沿用 `_quant`（质心 60 天）；强度 = 四个 s_k 的平均。强度 > 0 做多，否则空仓。确信度 = 0.5 + 0.15 × min(1, 强度 / 2)。持有 7 根，止损为信号收盘 − 3×ATR20，`signal_key` = `标的:ISO 周`。
+- 标的：BTC ETH SOL XRP DOGE ADA LINK LTC BCH AVAX。条件：Robinhood 支持交易（官方"Coin availability"页面 [20]，2026-09-29 查阅），且 `gateway.price_history` 在本机取得完整日线（2026-09-29 实测：均来自 Binance，各 729 根）。
+- 至少需要 181 根 K 线（完整的 EWMA 窗口）。
+
+**已知局限**
+- MVRV 规则的依据只有约 3 个 BTC 周期；ETH 区间是自定的，按扩展窗口回放，2017-07 以来一直处在 `in_cycle`，所以 ETH 实际上只会在 `deep_value` 或"周期内极度恐惧"时出信号。两个区间都很少触发，可能要很久才攒够晋升阶梯要求的 20 次结算。
+- 恐惧贪婪指数的编制方法由 alternative.me 决定，可能变动；它作为反向指标的效果没有同行评审证据 [推断]。
+- `crypto_tsmom` 的 10 个币高度相关，同一周常常全部同向，有效样本远少于记录条数；也有研究认为加密动量并不稳健（参考 21）。
+- Coin Metrics 的 MVRV 按 UTC 日计，最新值是前一天；ETF 资金流按美国交易日计，周末和假日没有数据。
+
 ## References（访问日期 2026-09-29）
 
 1. Moskowitz, T. J., Ooi, Y. H., Pedersen, L. H. (2012). *Time Series Momentum*. Journal of Financial Economics 104(2), 228-250. https://w4.stern.nyu.edu/facdir/lpederse/papers/TimeSeriesMomentum.pdf
@@ -171,3 +210,11 @@
 14. scikit-learn 1.8 `HistGradientBoostingClassifier` 与 `permutation_importance` 文档。https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.HistGradientBoostingClassifier.html
 
 期刊卷期页码为作者凭记忆填写，未在线核对；参考 1、5 的链接与趋势设计文档所引用的一致。参考 9 的出处也是凭记忆填写，未在线核对；参考 10、11 的链接与 `docs/S9_DESIGN.md` [R1] 相同，标题与作者未在线核对。参考 12 的卷期页码与 DOI、参考 13 的第 4、7 章标题已于 2026-09-29 在线核对（出版社页面与 ETH 图书馆目录）。
+
+15. Coin Metrics Community API v4（`timeseries/asset-metrics`；社区版限速 10 次 / 6 秒）。https://docs.coinmetrics.io/api/v4 ；https://gitbook-docs.coinmetrics.io/packages/coin-metrics-community-data 。可用指标（`CapMVRVCur`、`CapMrktCurUSD`、`PriceUSD`、`SplyCur`）与 403 指标于 2026-09-29 实测。
+16. alternative.me Crypto Fear & Greed Index 及其 API。https://alternative.me/crypto/fear-and-greed-index/ ；https://api.alternative.me/fng/
+17. TFTC, *US Spot Bitcoin ETF Daily Flows*（CC BY 4.0；数据注明来自 SoSoValue、Farside Investors、mempool.space）。https://www.tftc.io/bitcoin-etf-flows ；https://www.tftc.io/bitcoin-etf-flows/data.json
+18. Grobys, K., Näsman, S., Sandretto, D. (2026). *Using on-chain data to predict Bitcoin cycles*. Research in International Business and Finance 89, 103486. doi:10.1016/j.ribaf.2026.103486。https://www.sciencedirect.com/science/article/pii/S0275531926002138 ；开放获取全文：https://osuva.uwasa.fi/server/api/core/bitstreams/6575b90c-6140-44e7-a798-011a1793d134/content 。区间（−0.2；5 / 6 / 7）与样本期取自全文 §3.2 与摘要；书目信息经 Crossref 核对。
+19. Liu, Y., Tsyvinski, A. (2021). *Risks and Returns of Cryptocurrency*. Review of Financial Studies 34(6), 2689-2727。https://academic.oup.com/rfs/article-abstract/34/6/2689/5912024 ；工作论文 NBER w24877：https://www.nber.org/papers/w24877 。"1–4 周时间序列动量"来自检索摘要，未读全文。
+20. Robinhood Support, *Coin availability*。https://robinhood.com/us/en/support/articles/coin-availability/
+21. *Cryptocurrency momentum has (not) its moments*, Financial Markets and Portfolio Management (2025)。https://link.springer.com/article/10.1007/s11408-025-00474-9 （只看了标题，未读正文）
