@@ -45,6 +45,9 @@ CEX_PAYLOAD = [
 ]
 
 
+NOW = datetime(2026, 9, 28, 12, tzinfo=timezone.utc)
+
+
 async def _fred_obs_from_payload(series_id, limit=5):
     return fi._parse_fred_observations(FRED_OBS[series_id])
 
@@ -67,7 +70,7 @@ def _patch_all(**overrides):
 @pytest.mark.asyncio
 async def test_new_inputs_computed_with_explicit_units():
     with _patch_all():
-        out = await fi.fetch_fragility_inputs()
+        out = await fi.fetch_fragility_inputs(now=NOW)
     v = out.values
     # 742,321 M USD / (32,486.066 B USD * 1000) * 100 = 2.285 % of GDP
     assert v["margin_debt_gdp"] == pytest.approx(2.285, abs=1e-3)
@@ -95,7 +98,7 @@ async def test_failed_sources_stay_unavailable_never_a_number():
     with _patch_all(_fred_observations=fred_fail, _ofr_fsi_latest=fail,
                     _worldbank_em_import_cover=fail, _defillama_cex_7d_change=fail,
                     _gold_monthly_avg=AsyncMock(return_value="yfinance GC=F unavailable")):
-        out = await fi.fetch_fragility_inputs()
+        out = await fi.fetch_fragility_inputs(now=NOW)
     for m in ("margin_debt_gdp", "copper_gold_ratio", "stlfsi", "ofr_fsi", "bbb_oas",
               "em_import_cover", "crypto_exchange_reserves", "sofr_iorb_spread",
               "bank_reserves"):
@@ -106,7 +109,7 @@ async def test_failed_sources_stay_unavailable_never_a_number():
 @pytest.mark.asyncio
 async def test_copper_gold_needs_gold_for_the_same_month():
     with _patch_all(_gold_monthly_avg=AsyncMock(return_value={"2026-08": 4468.87})):
-        out = await fi.fetch_fragility_inputs()
+        out = await fi.fetch_fragility_inputs(now=NOW)
     assert "copper_gold_ratio" not in out.values
     assert "2026-07" in out.unavailable["copper_gold_ratio"]
 
@@ -123,8 +126,8 @@ def test_parsers_reject_bad_payloads():
     assert fi._parse_ofr_fsi("a,b\n1,2\n")[0] is None
     assert fi._parse_worldbank([{"message": "error"}])[0] is None
     old = [{}, [{"date": "2019", "value": 7.0}]]
-    value, _, why = fi._parse_worldbank(old, now=datetime(2026, 9, 28, tzinfo=timezone.utc))
-    assert value is None and "too old" in why
+    value, _, why, date = fi._parse_worldbank(old, now=datetime(2026, 9, 28, tzinfo=timezone.utc))
+    assert value is None and "stale" in why and "2019" in why and date == "2019"
     # CEX coverage below 90% of TVL -> unavailable
     thin = [{"category": "CEX", "tvl": 100.0, "change_7d": 1.0},
             {"category": "CEX", "tvl": 900.0, "change_7d": None}]
@@ -257,7 +260,7 @@ async def test_monitor_only_metrics_are_shown_but_never_scored():
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_live_new_inputs_are_plausible():
-    out = await fi.fetch_fragility_inputs()
+    out = await fi.fetch_fragility_inputs(now=NOW)
     v = out.values
     assert 0.5 < v["margin_debt_gdp"] < 5
     assert 0.5 < v["copper_gold_ratio"] < 10

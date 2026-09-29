@@ -401,3 +401,62 @@ async def test_warning_severity_near_threshold(monkeypatch):
         assert len(report.warnings) == 1
     finally:
         monkeypatch.setattr(ft, "THRESHOLD_LIBRARY", original_library)
+
+
+# ── Red-team fixes 2026-09-29: NaN, coverage, MONITOR counts, unsourced lines ──
+
+@pytest.mark.asyncio
+async def test_nan_value_is_unavailable_not_clear(monkeypatch):
+    from marketmind.config import fragility_thresholds as ft
+    monkeypatch.setattr(ft, "THRESHOLD_LIBRARY", [
+        _make_threshold(metric="bank_reserves", threshold_value=2.7, direction="below"),
+        _make_threshold(metric="vix", threshold_value=35, direction="above"),
+    ])
+    report = await scan_fragility({"bank_reserves": float("nan"), "vix": float("inf")})
+    assert report.alerts == [] and report.overall_fragility_score is None
+    assert "non-finite" in report.unavailable["bank_reserves"]
+    assert "non-finite" in report.unavailable["vix"]
+
+
+@pytest.mark.asyncio
+async def test_score_needs_half_of_scored_thresholds(monkeypatch):
+    from marketmind.config import fragility_thresholds as ft
+    monkeypatch.setattr(ft, "THRESHOLD_LIBRARY", [
+        _make_threshold(metric=m, threshold_value=10, direction="above")
+        for m in ("a", "b", "c", "d", "e")
+    ])
+    two = await scan_fragility({"a": 1.0, "b": 1.0})
+    assert two.overall_fragility_score is None
+    assert (two.coverage_evaluated, two.coverage_total) == (2, 5)
+    assert "insufficient coverage" in two.summary and "2/5" in two.summary
+    three = await scan_fragility({"a": 1.0, "b": 1.0, "c": 20.0})
+    assert three.overall_fragility_score == pytest.approx(1 / 3, abs=1e-4)
+    assert "coverage 3/5" in three.summary
+
+
+@pytest.mark.asyncio
+async def test_summary_counts_monitor_instead_of_calling_it_clear(monkeypatch):
+    from marketmind.config import fragility_thresholds as ft
+    watch = _make_threshold(metric="watch", threshold_value=10, direction="above")
+    watch.crossable = False
+    monkeypatch.setattr(ft, "THRESHOLD_LIBRARY", [
+        _make_threshold(metric="near", threshold_value=10, direction="above"),   # 10% away
+        _make_threshold(metric="far", threshold_value=10, direction="above"),
+        watch,
+    ])
+    report = await scan_fragility({"near": 9.0, "far": 1.0, "watch": 50.0})
+    assert "2 MONITOR (1 monitor-only)" in report.summary
+    assert "1 CLEAR" in report.summary and "all" not in report.summary
+
+
+def test_unsourced_tga_vix_dollar_lines_are_monitor_only():
+    lib = {t.metric: t for t in THRESHOLD_LIBRARY}
+    for m in ("tga", "vix", "dollar_index"):
+        assert lib[m].crossable is False, m
+
+
+@pytest.mark.asyncio
+async def test_extreme_vix_is_shown_but_never_crossed():
+    report = await scan_fragility({"vix": 80.0, "dollar_index": 130.0, "tga": 20.0})
+    assert not report.crossed
+    assert {a.severity for a in report.alerts} == {"MONITOR"}

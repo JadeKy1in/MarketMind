@@ -3,6 +3,7 @@
 Zero LLM calls. Pure computation. UTC timestamps throughout.
 """
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -23,14 +24,22 @@ class FragilityReport:
     alerts: list[FragilityAlert]
     crossed: list[FragilityAlert]
     warnings: list[FragilityAlert]
-    # 0 (stable) to 1 (extreme fragility); None = not evaluated (scan failed or no
-    # threshold had data) so readers cannot mistake it for "no fragility".
+    # 0 (stable) to 1 (extreme fragility); None = not evaluated (scan failed, or fewer
+    # than half of the scored thresholds had data) so readers cannot mistake it for
+    # "no fragility".
     overall_fragility_score: float | None
     staleness_warnings: list[str]
     summary: str
     generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     # metric -> reason it could not be evaluated (no source / fetch failed)
     unavailable: dict[str, str] = field(default_factory=dict)
+    # Coverage of the score: scored (crossable, active) thresholds evaluated / total.
+    coverage_evaluated: int = 0
+    coverage_total: int = 0
+
+
+# The score needs at least this share of the scored thresholds to have data.
+MIN_SCORE_COVERAGE = 0.5
 
 
 def _compute_distance(current: float, threshold: float, direction: str) -> float:
@@ -100,6 +109,14 @@ async def scan_fragility(
         if current_value is None:
             missing.setdefault(t.metric, "no data supplied")
             continue
+        try:
+            finite = math.isfinite(current_value)
+        except TypeError:
+            finite = False
+        if not finite:
+            # NaN compares False against every line, which used to read as CLEAR.
+            missing[t.metric] = f"non-finite value ({current_value!r})"
+            continue
 
         if not t.crossable:
             # MONITOR-only threshold: show the value, never cross, keep out of the score.
@@ -130,21 +147,27 @@ async def scan_fragility(
     warnings_list = [a for a in alerts if a.severity == "WARNING"]
 
     scored = [a for a in alerts if a.threshold.crossable]
-    score = _compute_fragility_score(scored) if scored else None
+    coverage_total = sum(1 for t in ft_config.THRESHOLD_LIBRARY if t.is_active and t.crossable)
+    coverage_evaluated = len(scored)
+    enough = bool(scored) and coverage_evaluated >= MIN_SCORE_COVERAGE * coverage_total
+    score = _compute_fragility_score(scored) if enough else None
 
     crossed_count = len(crossed)
     warning_count = len(warnings_list)
+    monitor_only = sum(1 for a in alerts if not a.threshold.crossable)
     monitor_count = sum(1 for a in alerts if a.severity == "MONITOR")
-    total_count = len(alerts)
+    clear_count = sum(1 for a in alerts if a.severity == "CLEAR")
+    coverage = f"coverage {coverage_evaluated}/{coverage_total} scored thresholds"
+    counts = (f"{crossed_count} CRITICAL, {warning_count} WARNING, {monitor_count} MONITOR"
+              f" ({monitor_only} monitor-only), {clear_count} CLEAR")
 
-    if score is None:
-        summary = "Fragility not evaluated: no threshold had data"
-    elif crossed_count == 0 and warning_count == 0:
-        summary = f"Fragility score {score:.2f}: all {total_count} monitored thresholds clear"
-    elif crossed_count == 0:
-        summary = f"Fragility score {score:.2f}: {warning_count} WARNING, {monitor_count} MONITOR out of {total_count} thresholds"
+    if not alerts:
+        summary = f"Fragility not evaluated: no threshold had data ({coverage})"
+    elif score is None:
+        summary = (f"Fragility score not evaluated: insufficient coverage ({coverage}, "
+                   f"need at least half); {counts}")
     else:
-        summary = f"Fragility score {score:.2f}: {crossed_count} CRITICAL, {warning_count} WARNING, {monitor_count} MONITOR out of {total_count} thresholds"
+        summary = f"Fragility score {score:.2f} ({coverage}): {counts}"
     if missing:
         summary += f" ({len(missing)} thresholds not evaluated: {', '.join(sorted(missing))})"
 
@@ -156,6 +179,8 @@ async def scan_fragility(
         staleness_warnings=staleness_warnings,
         summary=summary,
         unavailable=missing,
+        coverage_evaluated=coverage_evaluated,
+        coverage_total=coverage_total,
     )
 
 

@@ -13,7 +13,6 @@ from marketmind.gateway.macro_data import (
     _cache,
     _cache_locks,
     _clear_cache,
-    _cot_signal,
     _parse_float,
     _parse_int,
 )
@@ -177,23 +176,25 @@ class TestCFTCES:
             assert result["date"] == "2026-05-12"
             assert result["source"] == "cftc"
             assert result["cadence"] == "weekly"
-            assert "signal" in result
+            assert result["contract_code"] == "13874A"
             assert "error" not in result
 
-    async def test_cot_signal_contrarian_bearish(self):
-        """Extreme speculative long should yield contrarian bearish signal."""
-        signal = _cot_signal("ES", 50000)
-        assert "contrarian bearish" in signal.lower()
-
-    async def test_cot_signal_contrarian_bullish(self):
-        """Extreme speculative short should yield contrarian bullish signal."""
-        signal = _cot_signal("CL", -50000)
-        assert "contrarian bullish" in signal.lower()
-
-    async def test_cot_signal_neutral(self):
-        """Moderate positioning should yield neutral signal."""
-        signal = _cot_signal("GC", 5000)
-        assert "no directional signal" in signal
+    async def test_es_reports_share_of_open_interest_without_signal_label(self):
+        _clear_cache()
+        with patch.object(httpx.AsyncClient, "get", new_callable=AsyncMock) as mock_get:
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = lambda: None
+            mock_resp.json.return_value = _load_fixture("cftc_es.json")
+            mock_get.return_value = mock_resp
+            result = await get_cot_data("ES")
+            params = mock_get.call_args.kwargs["params"]
+        assert params["$where"] == "cftc_contract_market_code = '13874A'"
+        assert "LIKE" not in str(params)
+        assert result["open_interest"] == 2_000_000
+        assert result["speculative_net_pct_oi"] == 2.0      # 40,000 / 2,000,000
+        assert result["commercial_net_pct_oi"] == -2.5
+        assert "signal" not in result
+        assert "no signal label" in result["positioning"]
 
 
 # ---------------------------------------------------------------------------
@@ -404,3 +405,105 @@ class TestHelpers:
     def test_parse_int_invalid(self):
         assert _parse_int(None) == 0
         assert _parse_int("abc") == 0
+
+
+# ---------------------------------------------------------------------------
+# 9. EIA series filter and missing values (red-team fix 2026-09-29)
+# ---------------------------------------------------------------------------
+
+
+def _eia_payload(series, value="206046", units="MBBL", period="2026-09-18"):
+    return {"response": {"data": [{"period": period, "series": series, "value": value,
+                                   "units": units}]}}
+
+
+async def _eia_call(product, payload):
+    _clear_cache()
+    with patch("marketmind.gateway.macro_data._get_eia_key", return_value="test_key"), \
+         patch.object(httpx.AsyncClient, "get", new_callable=AsyncMock) as mock_get:
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = lambda: None
+        mock_resp.json.return_value = payload
+        mock_get.return_value = mock_resp
+        result = await get_eia_inventory(product)
+        return result, mock_get.call_args
+
+
+@pytest.mark.asyncio
+class TestEIASeries:
+
+    @pytest.mark.parametrize("product, series", [
+        ("crude", "WCESTUS1"), ("gasoline", "WGTSTUS1"), ("distillate", "WDISTUS1"),
+    ])
+    async def test_each_product_requests_its_own_series(self, product, series):
+        result, call = await _eia_call(product, _eia_payload(series))
+        assert call.kwargs["params"]["facets[series][]"] == series
+        assert "api_key=" not in str(call.args)          # key sent in params, not the URL
+        assert result["series"] == series and result["units"] == "MBBL"
+        assert result["inventory_mbbl"] == 206046.0 and result["date"] == "2026-09-18"
+
+    async def test_wrong_series_is_unavailable(self):
+        result, _ = await _eia_call("gasoline", _eia_payload("WCESTUS1"))
+        assert result["error"] == "source_unavailable" and "WCESTUS1" in result["detail"]
+
+    async def test_wrong_units_is_unavailable(self):
+        result, _ = await _eia_call("crude", _eia_payload("WCESTUS1", units="MBBL/D"))
+        assert result["error"] == "source_unavailable"
+
+    @pytest.mark.parametrize("value", [None, "", "NA", "nan"])
+    async def test_missing_value_is_unavailable_never_zero(self, value):
+        result, _ = await _eia_call("crude", _eia_payload("WCESTUS1", value=value))
+        assert result["error"] == "source_unavailable"
+        assert "inventory_mbbl" not in result
+
+
+# ---------------------------------------------------------------------------
+# 10. CFTC exact contract codes and missing fields (red-team fix 2026-09-29)
+# ---------------------------------------------------------------------------
+
+
+async def _cot_call(asset, rows):
+    _clear_cache()
+    with patch.object(httpx.AsyncClient, "get", new_callable=AsyncMock) as mock_get:
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = lambda: None
+        mock_resp.json.return_value = rows
+        mock_get.return_value = mock_resp
+        return await get_cot_data(asset), mock_get.call_args
+
+
+def _cot_row(code, **over):
+    row = {"cftc_contract_market_code": code, "report_date_as_yyyy_mm_dd": "2026-09-22T00:00:00.000",
+           "market_and_exchange_names": "X", "open_interest_all": "412800",
+           "noncomm_positions_long_all": "253982", "noncomm_positions_short_all": "28129",
+           "comm_positions_long_all": "57458", "comm_positions_short_all": "320361"}
+    row.update(over)
+    return row
+
+
+@pytest.mark.asyncio
+class TestCFTCContracts:
+
+    @pytest.mark.parametrize("asset, code", [
+        ("ES", "13874A"), ("CL", "067651"), ("GC", "088691"), ("NG", "023651"),
+    ])
+    async def test_each_asset_queries_its_exact_contract_code(self, asset, code):
+        result, call = await _cot_call(asset, [_cot_row(code)])
+        assert call.kwargs["params"]["$where"] == f"cftc_contract_market_code = '{code}'"
+        assert result["contract_code"] == code and result["date"] == "2026-09-22"
+
+    async def test_gold_percent_of_oi_matches_recorded_report(self):
+        # Recorded 2026-09-22 COMEX gold (088691): net 225,853 of OI 412,800 = 54.71%
+        result, _ = await _cot_call("GC", [_cot_row("088691")])
+        assert result["speculative_net"] == 225_853
+        assert result["speculative_net_pct_oi"] == 54.71
+
+    async def test_other_contract_in_response_is_unavailable(self):
+        result, _ = await _cot_call("CL", [_cot_row("067411")])
+        assert result["error"] == "source_unavailable"
+
+    @pytest.mark.parametrize("field", ["open_interest_all", "noncomm_positions_short_all",
+                                       "comm_positions_long_all"])
+    async def test_missing_field_is_unavailable_never_zero(self, field):
+        result, _ = await _cot_call("GC", [_cot_row("088691", **{field: None})])
+        assert result["error"] == "source_unavailable" and field in result["detail"]

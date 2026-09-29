@@ -21,7 +21,7 @@ class Market:
     close: time
     cost_bps: float         # one-way cost estimate
     benchmark: str          # market benchmark ticker, or CASH
-    asset_class: str        # equity | crypto | future | fx | index
+    asset_class: str        # equity | crypto | future | fx | index | unknown
     utc_days: bool = False  # bars are UTC calendar days (crypto, FX)
 
 
@@ -33,6 +33,10 @@ FUTURE = Market("FUTURE", "America/New_York", time(9, 30), time(17, 0), 2.0, "DB
 RATES_FUTURE = Market("RATES_FUTURE", "America/New_York", time(9, 30), time(17, 0), 2.0,
                       CASH, "future")
 INDEX = Market("INDEX", "America/New_York", time(9, 30), time(16, 0), 0.0, CASH, "index")
+# A suffix we have no session/benchmark data for. Not settleable and not shadow-tradable
+# (it used to fall back to US hours, costs and SPY). UTC-day bars: today's bar is only
+# treated as complete after the UTC day ends, which is conservative for any exchange.
+UNKNOWN = Market("UNKNOWN", "UTC", time(0, 0), time(23, 59), 10.0, CASH, "unknown", True)
 
 _SUFFIX: dict[str, Market] = {
     "HK": Market("HK", "Asia/Hong_Kong", time(9, 30), time(16, 0), 10.0, "2800.HK", "equity"),
@@ -54,7 +58,56 @@ _SUFFIX: dict[str, Market] = {
     "TO": Market("CA", "America/Toronto", time(9, 30), time(16, 0), 10.0, "^GSPTSE", "equity"),
     "SA": Market("BR", "America/Sao_Paulo", time(10, 0), time(17, 0), 10.0, "^BVSP", "equity"),
     "MX": Market("MX", "America/Mexico_City", time(8, 30), time(15, 0), 10.0, "^MXX", "equity"),
+    # Added 2026-09-29 (red-team fix: these fell back to US). Benchmarks checked live on
+    # Yahoo 2026-09-29 (>= 1 year of daily bars each); cost = the existing non-US default.
+    "SI": Market("SG", "Asia/Singapore", time(9, 0), time(17, 0), 10.0, "^STI", "equity"),
+    "KQ": Market("KR", "Asia/Seoul", time(9, 0), time(15, 30), 10.0, "^KQ11", "equity"),
+    "ST": Market("SE", "Europe/Stockholm", time(9, 0), time(17, 30), 10.0, "^OMX", "equity"),
+    "OL": Market("NO", "Europe/Oslo", time(9, 0), time(16, 20), 10.0, "OSEBX.OL", "equity"),
+    "F": Market("DE", "Europe/Berlin", time(8, 0), time(22, 0), 10.0, "^GDAXI", "equity"),
+    "JK": Market("ID", "Asia/Jakarta", time(9, 0), time(16, 0), 10.0, "^JKSE", "equity"),
+    "BO": Market("IN", "Asia/Kolkata", time(9, 15), time(15, 30), 10.0, "^BSESN", "equity"),
+    "HE": Market("FI", "Europe/Helsinki", time(10, 0), time(18, 30), 10.0, "^OMXH25", "equity"),
+    "BR": Market("BE", "Europe/Brussels", time(9, 0), time(17, 30), 10.0, "^BFX", "equity"),
+    "VI": Market("AT", "Europe/Vienna", time(9, 0), time(17, 30), 10.0, "^ATX", "equity"),
+    "IR": Market("IE", "Europe/Dublin", time(8, 0), time(16, 30), 10.0, "^ISEQ", "equity"),
+    "KL": Market("MY", "Asia/Kuala_Lumpur", time(9, 0), time(17, 0), 10.0, "^KLSE", "equity"),
+    "NZ": Market("NZ", "Pacific/Auckland", time(10, 0), time(16, 45), 10.0, "^NZ50", "equity"),
+    "IS": Market("TR", "Europe/Istanbul", time(10, 0), time(18, 0), 10.0, "XU100.IS", "equity"),
+    # Not added (checked 2026-09-29): .SR (Tadawul) - ^TASI.SR has no Yahoo history
+    # (1 bar in 1y), so there is no benchmark series; it maps to UNKNOWN like any other
+    # unlisted suffix until a benchmark is sourced.
+    # ICE US Dollar Index (DX-Y.NYB): an index, not tradable; bars dated by the New York
+    # trade date, which ends with the 17:00 ET futures settlement break.
+    "NYB": Market("INDEX", "America/New_York", time(9, 30), time(17, 0), 0.0, CASH, "index"),
 }
+
+# US share classes written with a dot ("BRK.B"); Yahoo form is "BRK-B".
+_US_CLASS_SUFFIXES = {"A", "B", "C"}
+
+
+def _index_market(m: Market) -> Market:
+    """Index priced in an exchange's own session (not tradable, no benchmark)."""
+    return Market("INDEX", m.tz, m.open, m.close, 0.0, CASH, "index")
+
+
+# Indices keep the timezone and session of their home exchange (e.g. ^MXX closes in
+# Mexico City, not New York). Built from the suffix markets' own benchmarks, plus the
+# main indices that are not a benchmark here. Unlisted ^ symbols keep INDEX (New York).
+_INDEX: dict[str, Market] = {
+    m.benchmark: _index_market(m)
+    for m in _SUFFIX.values() if m.benchmark.startswith("^")
+}
+_INDEX.update({
+    "^N225": _index_market(_SUFFIX["T"]),
+    "^HSI": _index_market(_SUFFIX["HK"]),
+    "^HSCE": _index_market(_SUFFIX["HK"]),
+    "^STOXX50E": _index_market(_SUFFIX["DE"]),
+    # Tadawul (no .SR market entry: see above); Sunday-Thursday 10:00-15:00 Riyadh
+    "^TASI.SR": Market("INDEX", "Asia/Riyadh", time(10, 0), time(15, 0), 0.0, CASH, "index"),
+    # Cboe computes VIX until 16:15 ET
+    "^VIX": Market("INDEX", "America/New_York", time(9, 30), time(16, 15), 0.0, CASH, "index"),
+})
 
 _RATES_ROOTS = {"ZN", "ZB", "ZF", "ZT", "UB", "TN", "SR3", "ZQ"}
 
@@ -62,6 +115,10 @@ _RATES_ROOTS = {"ZN", "ZB", "ZF", "ZT", "UB", "TN", "SR3", "ZQ"}
 def market_for(ticker: str) -> Market:
     t = (ticker or "").strip().upper()
     if t.startswith("^"):
+        if t in _INDEX:
+            return _INDEX[t]
+        if "." in t and (suffix := t.rsplit(".", 1)[1]) in _SUFFIX:
+            return _index_market(_SUFFIX[suffix])
         return INDEX
     if t.endswith("-USD"):
         return CRYPTO
@@ -73,13 +130,22 @@ def market_for(ticker: str) -> Market:
         suffix = t.rsplit(".", 1)[1]
         if suffix in _SUFFIX:
             return _SUFFIX[suffix]
+        if suffix in _US_CLASS_SUFFIXES:
+            return US
+        return UNKNOWN
     return US
 
 
 def is_shadow_tradable(ticker: str) -> bool:
-    """Shadows may trade anything with a real market except a bare index (docs/S3_DESIGN §7)."""
+    """Shadows may trade anything with a real market except a bare index (docs/S3_DESIGN §7)
+    or an exchange suffix we have no market data for (UNKNOWN: not settleable)."""
     t = (ticker or "").strip().upper()
-    return bool(t) and market_for(t).asset_class != "index"
+    return bool(t) and market_for(t).asset_class not in ("index", "unknown")
+
+
+def is_settleable(ticker: str) -> bool:
+    """False for a ticker whose exchange suffix is unknown (no session/benchmark data)."""
+    return market_for(ticker).code != UNKNOWN.code
 
 
 def yahoo_symbol(ticker: str) -> str:

@@ -167,13 +167,32 @@ def _yf_sync(ticker: str, years: int) -> PriceHistory | None:
     df = yf.Ticker(yahoo_symbol(ticker)).history(period=f"{years}y", interval="1d", auto_adjust=True)
     if df is None or df.empty:
         return None
-    df = df.dropna(subset=["Close"])
-    daily = [
-        Bar(date=idx.strftime("%Y-%m-%d"), open=float(r["Open"]), high=float(r["High"]),
-            low=float(r["Low"]), close=float(r["Close"]), volume=float(r.get("Volume", 0) or 0))
-        for idx, r in df.iterrows()
-    ]
+    daily = _yf_bars(df)
+    if not daily:
+        return None
     return PriceHistory(ticker=ticker, source="yfinance", daily=daily, weekly=to_weekly(daily))
+
+
+def _yf_bars(df) -> list[Bar]:
+    """yfinance frame -> bars. A row with any non-finite Open/High/Low/Close is dropped
+    (Yahoo sometimes leaves O/H/L NaN on a valid Close, which made ATR/stop/target NaN);
+    a missing or non-finite Volume becomes 0.0."""
+    import math
+    bars: list[Bar] = []
+    for idx, r in df.iterrows():
+        try:
+            o, h, lo, c = (float(r[k]) for k in ("Open", "High", "Low", "Close"))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not all(math.isfinite(x) for x in (o, h, lo, c)):
+            continue
+        try:
+            vol = float(r.get("Volume", 0.0))
+        except (TypeError, ValueError):
+            vol = 0.0
+        bars.append(Bar(date=idx.strftime("%Y-%m-%d"), open=o, high=h, low=lo, close=c,
+                        volume=vol if math.isfinite(vol) else 0.0))
+    return bars
 
 
 # ── Binance (first crypto source) ──────────────────────────────────────────────
@@ -541,16 +560,22 @@ def missing_utc_day(daily: list[Bar], lookback: int = 30) -> str | None:
     return None
 
 
+# A US session bar counts as complete only this long after the 16:00 ET close.
+US_CLOSE_SETTLE_MINUTES = 30
+
+
 def complete_bars(ticker: str, daily: list[Bar], now=None) -> list[Bar]:
     """Drop the running session's partial bar.
 
     Crypto and FX bars are UTC days: only dates before today (UTC) are complete.
     Exchange-traded bars are local sessions: today's bar is complete only after
-    that exchange's close in its own timezone (marketmind.markets).
+    that exchange's close in its own timezone (marketmind.markets). US equity bars
+    need US_CLOSE_SETTLE_MINUTES more: Alpaca's request ends 20 minutes in the past,
+    so a run at 16:00-16:20 New York could record a bar without the closing auction.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime, timedelta, timezone
     from zoneinfo import ZoneInfo
-    from marketmind.markets import market_for
+    from marketmind.markets import US, market_for
     now = now or datetime.now(timezone.utc)
     m = market_for(ticker)
     if m.utc_days:
@@ -558,7 +583,10 @@ def complete_bars(ticker: str, daily: list[Bar], now=None) -> list[Bar]:
         return [b for b in daily if b.date < cutoff]
     local = now.astimezone(ZoneInfo(m.tz))
     today = local.date().isoformat()
-    closed = local.time() >= m.close
+    close_at = datetime.combine(local.date(), m.close)
+    if m is US:
+        close_at += timedelta(minutes=US_CLOSE_SETTLE_MINUTES)
+    closed = local.replace(tzinfo=None) >= close_at
     return [b for b in daily if b.date < today or (b.date == today and closed)]
 
 

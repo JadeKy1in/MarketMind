@@ -145,3 +145,27 @@ def test_describe_states_why_green_is_wait():
     y = replace(s, light="yellow", entry_low=snap.close + 1, entry_high=snap.close + 2)
     assert recommendation_reason(y) == "reason: yellow light (close outside entry zone)"
     assert recommendation_reason(replace(s, recommendation="enter")) == ""
+
+
+# ── Non-finite inputs (red-team fix 2026-09-29) ─────────────────────────────
+
+@pytest.mark.parametrize("field", ["open", "high", "low", "close"])
+def test_nan_price_in_history_returns_none(field):
+    hist = make_history(uptrend())
+    setattr(hist.daily[-3], field, float("nan"))
+    assert compute_snapshot(hist) is None
+
+
+def test_infinite_price_returns_none():
+    hist = make_history(uptrend())
+    hist.daily[-1].high = float("inf")
+    assert compute_snapshot(hist) is None
+
+
+def test_finite_history_still_produces_finite_levels():
+    import math
+    snap = compute_snapshot(make_history(uptrend()))
+    assert snap is not None
+    for x in (snap.atr14, snap.stop_loss, snap.target_price, snap.entry_low,
+              snap.entry_high, snap.reward_risk_ratio):
+        assert math.isfinite(x)

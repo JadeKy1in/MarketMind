@@ -209,3 +209,59 @@ async def test_twelvedata_is_last_after_other_fallbacks(monkeypatch):
     assert hist.source == "twelvedata"
     assert order == ["yahoo", "tencent", "eastmoney", "twelvedata"]
     ph.clear_cache()
+
+
+# ── Unknown suffixes and index timezones (red-team fix 2026-09-29) ──────────
+
+@pytest.mark.parametrize("ticker, code, tz, bench", [
+    ("D05.SI", "SG", "Asia/Singapore", "^STI"),
+    ("247540.KQ", "KR", "Asia/Seoul", "^KQ11"),
+    ("VOLV-B.ST", "SE", "Europe/Stockholm", "^OMX"),
+    ("EQNR.OL", "NO", "Europe/Oslo", "OSEBX.OL"),
+    ("BMW.F", "DE", "Europe/Berlin", "^GDAXI"),
+    ("BBCA.JK", "ID", "Asia/Jakarta", "^JKSE"),
+])
+def test_added_exchange_suffixes(ticker, code, tz, bench):
+    m = market_for(ticker)
+    assert (m.code, m.tz, m.benchmark, m.asset_class) == (code, tz, bench, "equity")
+    assert m.cost_bps == market_for("SAP.DE").cost_bps          # existing non-US default
+    assert is_shadow_tradable(ticker)
+
+
+@pytest.mark.parametrize("ticker", ["2222.SR", "XYZ.QQ", "ABC.NE"])
+def test_unknown_suffix_is_not_us_and_not_settleable(ticker):
+    from marketmind.markets import UNKNOWN, is_settleable
+    m = market_for(ticker)
+    assert m is UNKNOWN and m.benchmark == CASH and m.code != "US"
+    assert not is_shadow_tradable(ticker) and not is_settleable(ticker)
+    assert is_settleable("AAPL") and is_settleable("0700.HK")
+
+
+def test_dotted_us_share_class_stays_us():
+    assert market_for("BRK.B").code == "US" and market_for("BF.A").code == "US"
+
+
+@pytest.mark.parametrize("ticker, tz", [
+    ("^MXX", "America/Mexico_City"), ("^N225", "Asia/Tokyo"), ("^GDAXI", "Europe/Berlin"),
+    ("^HSI", "Asia/Hong_Kong"), ("^TASI.SR", "Asia/Riyadh"), ("^GSPC", "America/New_York"),
+])
+def test_indices_use_their_home_exchange_timezone(ticker, tz):
+    m = market_for(ticker)
+    assert (m.code, m.tz, m.benchmark, m.asset_class) == ("INDEX", tz, CASH, "index")
+    assert not is_shadow_tradable(ticker)
+
+
+def test_index_bar_completes_at_its_home_close():
+    d = _bars("2026-09-24", "2026-09-25")
+    # 15:30 Mexico City (21:30 UTC): ^MXX closed at 15:00 local; a New York index would
+    # also be closed, so check 14:00 local (20:00 UTC) - still open in Mexico City.
+    assert len(complete_bars("^MXX", d, datetime(2026, 9, 25, 20, 0, tzinfo=timezone.utc))) == 1
+    assert len(complete_bars("^MXX", d, datetime(2026, 9, 25, 21, 30, tzinfo=timezone.utc))) == 2
+    # ^N225 closes 15:30 Tokyo = 06:30 UTC, long before New York opens
+    assert len(complete_bars("^N225", d, datetime(2026, 9, 25, 7, 0, tzinfo=timezone.utc))) == 2
+
+
+def test_dollar_index_is_a_new_york_index_until_1700():
+    m = market_for("DX-Y.NYB")
+    assert m.asset_class == "index" and m.tz == "America/New_York" and m.close.hour == 17
+    assert not is_shadow_tradable("DX-Y.NYB")

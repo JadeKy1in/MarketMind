@@ -8,11 +8,13 @@ never produces a number.
 from __future__ import annotations
 
 import asyncio
+import calendar
 import csv
 import io
 import logging
+import math
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date as _date, datetime, timezone
 
 import httpx
 
@@ -39,6 +41,55 @@ _SOFR_PERSIST_OBS = 3
 # Metrics we deliberately do not feed yet, with the reason shown to the user.
 UNSOURCED: dict[str, str] = {}
 
+# Maximum observation age by publication cadence, in calendar days (red-team fix
+# 2026-09-29: inputs had no age limit). Age is measured from the END of the observation
+# period, because FRED dates monthly/quarterly series by the period start (a quarter
+# published ~10 weeks after it ends would otherwise look 5+ months old). Annual data
+# keeps its own rule (_WB_MAX_AGE_YEARS). Older values are unavailable: "stale (<date>)".
+MAX_AGE_DAYS: dict[str, int] = {"daily": 7, "weekly": 21, "monthly": 75, "quarterly": 200}
+CADENCE: dict[str, str] = {
+    "us10y_yield": "daily", "on_rrp": "daily", "tga": "weekly", "bank_reserves": "weekly",
+    "sofr_iorb_spread": "daily", "ccc_treasury_spread": "daily", "hyg_lqd_spread": "daily",
+    "vix": "daily", "dollar_index": "daily", "margin_debt_gdp": "quarterly",
+    "copper_gold_ratio": "monthly", "stlfsi": "weekly", "ofr_fsi": "daily", "bbb_oas": "daily",
+    "em_import_cover": "annual", "crypto_exchange_reserves": "daily",
+}
+
+
+def _period_end(obs_date: str, cadence: str) -> _date:
+    """Last calendar day of the period an observation date stands for."""
+    if len(obs_date) == 4:
+        return _date(int(obs_date), 12, 31)
+    if len(obs_date) == 7:
+        y, m = int(obs_date[:4]), int(obs_date[5:7])
+        return _date(y, m, calendar.monthrange(y, m)[1])
+    d = _date.fromisoformat(obs_date[:10])
+    if cadence in ("monthly", "quarterly"):
+        m = d.month + (2 if cadence == "quarterly" else 0)
+        y, m = d.year + (m - 1) // 12, (m - 1) % 12 + 1
+        return _date(y, m, calendar.monthrange(y, m)[1])
+    return d
+
+
+def stale_reason(obs_date: str | None, cadence: str, now: datetime) -> str | None:
+    """None when obs_date is within its cadence's maximum age, else the reason."""
+    if not obs_date:
+        return "no observation date"
+    limit = MAX_AGE_DAYS.get(cadence)
+    try:
+        end = _period_end(str(obs_date), cadence)
+    except (TypeError, ValueError):
+        return f"unparseable observation date ({obs_date!r})"
+    if limit is None:
+        return None
+    age = (now.astimezone(timezone.utc).date() - end).days
+    return f"stale ({obs_date})" if age > limit else None
+
+
+def _first_date(obs) -> str | None:
+    """Date of the newest (date, value) observation, or None for an error string / empty."""
+    return obs[0][0] if isinstance(obs, list) and obs else None
+
 
 @dataclass
 class FragilityInputs:
@@ -47,7 +98,8 @@ class FragilityInputs:
     unavailable: dict[str, str] = field(default_factory=dict)
 
 
-async def fetch_fragility_inputs() -> FragilityInputs:
+async def fetch_fragility_inputs(now: datetime | None = None) -> FragilityInputs:
+    now = now or datetime.now(timezone.utc)
     out = FragilityInputs(unavailable=dict(UNSOURCED))
     fred_keys = ["DGS10", "RRPONTSYD", "WTREGEN", "WRESBAL", "BAMLH0A3HYC",
                  "BAMLH0A0HYM2", "BAMLC0A0CM"]
@@ -70,33 +122,50 @@ async def fetch_fragility_inputs() -> FragilityInputs:
     fred = {k: _fred_value(r) for k, r in zip(fred_keys, fred_results)}
     fred_dates = {k: r.get("date") if isinstance(r, dict) else None
                   for k, r in zip(fred_keys, fred_results)}
-    vix, tnx, dxy = yf_results
+    (vix, vix_date), (tnx, tnx_date), (dxy, dxy_date) = (
+        r if isinstance(r, tuple) else (None, None) for r in yf_results)
 
-    def put(metric: str, value: float | None, source: str, missing_reason: str) -> None:
+    def put(metric: str, value: float | None, source: str, missing_reason: str,
+            as_of: str | None = None, *also: tuple[str | None, str]) -> None:
+        """Record a value only when it is finite, dated and fresh; otherwise say why not.
+        `also`: extra (date, cadence) inputs that must be fresh too (e.g. GDP)."""
+        why = None
         if value is None:
-            out.unavailable[metric] = missing_reason or "no value"
+            why = missing_reason or "no value"
+        elif not math.isfinite(value):
+            why = f"non-finite value ({value})"
         else:
-            out.values[metric] = round(value, 4)
-            out.sources[metric] = source
-            out.unavailable.pop(metric, None)
+            why = stale_reason(as_of, CADENCE.get(metric, "daily"), now)
+            for d, cadence in also:
+                why = why or stale_reason(d, cadence, now)
+        if why:
+            out.unavailable[metric] = why
+            out.values.pop(metric, None)
+            out.sources.pop(metric, None)
+            return
+        out.values[metric] = round(value, 4)
+        out.sources[metric] = source if str(as_of) in source else f"{source} {as_of}"
+        out.unavailable.pop(metric, None)
 
     fred_missing = "FRED unavailable (FRED_KEY/FRED_API_KEY not set or unreachable)"
     if fred["DGS10"] is not None:
-        put("us10y_yield", fred["DGS10"], "FRED:DGS10", "")
+        put("us10y_yield", fred["DGS10"], "FRED:DGS10", "", fred_dates["DGS10"])
     else:
-        put("us10y_yield", tnx, "yfinance:^TNX", "neither FRED nor yfinance returned 10Y yield")
-    put("on_rrp", fred["RRPONTSYD"], "FRED:RRPONTSYD", fred_missing)
+        put("us10y_yield", tnx, "yfinance:^TNX (last complete bar)",
+            "neither FRED nor yfinance returned 10Y yield", tnx_date)
+    put("on_rrp", fred["RRPONTSYD"], "FRED:RRPONTSYD", fred_missing, fred_dates["RRPONTSYD"])
     put("tga", fred["WTREGEN"] / 1000 if fred["WTREGEN"] is not None else None,
-        "FRED:WTREGEN (M->B USD)", fred_missing)
+        "FRED:WTREGEN (M->B USD)", fred_missing, fred_dates["WTREGEN"])
     # bank_reserves (percent of nominal GDP): WRESBAL is published in millions of USD
     # (checked 2026-09-28: 2,930,193 = $2.93T); GDP in billions USD SAAR (latest quarter).
     # pct = WRESBAL_M / (GDP_B * 1000) * 100.
     put("bank_reserves", *_reserves_to_gdp(fred["WRESBAL"], fred_dates["WRESBAL"], gdp,
-                                           fred_missing))
+                                           fred_missing),
+        fred_dates["WRESBAL"], (_first_date(gdp), "quarterly"))
     # sofr_iorb_spread: minimum (SOFR - IORB) in bp over the last 3 SOFR observations.
-    put("sofr_iorb_spread", *_sofr_iorb_persistent(sofr, iorb))
+    put("sofr_iorb_spread", *_sofr_iorb_persistent(sofr, iorb), _first_date(sofr))
     put("ccc_treasury_spread", fred["BAMLH0A3HYC"] * 100 if fred["BAMLH0A3HYC"] is not None else None,
-        "FRED:BAMLH0A3HYC (%->bp)", fred_missing)
+        "FRED:BAMLH0A3HYC (%->bp)", fred_missing, fred_dates["BAMLH0A3HYC"])
     # hyg_lqd_spread: threshold is "HY vs IG spread >200bp" sourced from ICE BofA OAS
     # data, so we read it as HY OAS minus IG OAS, in basis points. FRED publishes both
     # indices' OAS in percent (e.g. 2.80 and 0.79), so the difference is x100 -> bp.
@@ -109,27 +178,33 @@ async def fetch_fragility_inputs() -> FragilityInputs:
         else:
             hy_ig_missing = (f"HY/IG OAS dates differ ({fred_dates['BAMLH0A0HYM2']} vs "
                              f"{fred_dates['BAMLC0A0CM']})")
-    put("hyg_lqd_spread", hy_ig, "FRED:BAMLH0A0HYM2-BAMLC0A0CM (%->bp)", hy_ig_missing)
-    put("vix", vix, "yfinance:^VIX", "yfinance ^VIX unavailable")
-    put("dollar_index", dxy, "yfinance:DX-Y.NYB", "yfinance DX-Y.NYB unavailable")
+    put("hyg_lqd_spread", hy_ig, "FRED:BAMLH0A0HYM2-BAMLC0A0CM (%->bp)", hy_ig_missing,
+        fred_dates["BAMLH0A0HYM2"])
+    # yfinance values are the last COMPLETE daily bar (price_history.complete_bars),
+    # never the running session's partial value.
+    put("vix", vix, "yfinance:^VIX (last complete bar)", "yfinance ^VIX unavailable", vix_date)
+    put("dollar_index", dxy, "yfinance:DX-Y.NYB (last complete bar)",
+        "yfinance DX-Y.NYB unavailable", dxy_date)
 
     # margin_debt_gdp (percent of GDP): Z.1 broker-dealer margin loans & other receivables
     # (millions USD, quarter-end level) / nominal GDP (billions USD, SAAR) for the SAME
     # quarter. pct = margin_M / (GDP_B * 1000) * 100. 2026Q2: 742,321 / 32,486,066 = 2.29%.
     value, date, why = _same_date_ratio(margin, gdp)
     put("margin_debt_gdp", None if value is None else value / 1000 * 100,
-        f"FRED:BOGZ1FL663067003Q/GDP ({date}; M USD / (B USD*1000) -> % of GDP)", why)
+        f"FRED:BOGZ1FL663067003Q/GDP ({date}; M USD / (B USD*1000) -> % of GDP)", why,
+        date or None)
 
     # copper_gold_ratio: copper USD/lb divided by gold USD/troy oz, x1000 (market
     # convention; ~1.5 in 2026). Copper = FRED PCOPPUSDM monthly average (USD/metric ton,
     # /2204.62262 -> USD/lb); gold = yfinance GC=F daily closes averaged over the SAME month.
-    put(*_copper_gold(copper, gold_monthly))
+    put(*_copper_gold(copper, gold_monthly), _first_date(copper))
 
     # Financial-stress indices (0 = average stress by construction).
-    put("stlfsi", *_latest_or_reason(stlfsi, "FRED:STLFSI4 (index, 0=avg)"))
+    put("stlfsi", *_latest_or_reason(stlfsi, "FRED:STLFSI4 (index, 0=avg)"), _first_date(stlfsi))
     put("ofr_fsi", *ofr)
     bbb_val, bbb_src, bbb_why = _latest_or_reason(bbb, "FRED:BAMLC0A4CBBB (%->bp)")
-    put("bbb_oas", None if bbb_val is None else bbb_val * 100, bbb_src, bbb_why)
+    put("bbb_oas", None if bbb_val is None else bbb_val * 100, bbb_src, bbb_why,
+        _first_date(bbb))
 
     put("em_import_cover", *em_cover)
     put("crypto_exchange_reserves", *cex)
@@ -257,13 +332,13 @@ async def _ofr_fsi_latest() -> tuple[float | None, str, str]:
             return _parse_ofr_fsi(resp.text)
     except Exception as exc:
         logger.warning("OFR FSI fetch failed: %s", exc)
-        return None, "", f"OFR FSI CSV unavailable ({type(exc).__name__})"
+        return None, "", f"OFR FSI CSV unavailable ({type(exc).__name__})", None
 
 
-def _parse_ofr_fsi(text: str) -> tuple[float | None, str, str]:
+def _parse_ofr_fsi(text: str) -> tuple[float | None, str, str, str | None]:
     reader = csv.DictReader(io.StringIO(text))
     if not reader.fieldnames or "OFR FSI" not in reader.fieldnames or "Date" not in reader.fieldnames:
-        return None, "", "OFR FSI CSV missing Date/OFR FSI columns"
+        return None, "", "OFR FSI CSV missing Date/OFR FSI columns", None
     latest = None
     for row in reader:
         try:
@@ -271,8 +346,8 @@ def _parse_ofr_fsi(text: str) -> tuple[float | None, str, str]:
         except (TypeError, ValueError):
             continue
     if latest is None:
-        return None, "", "OFR FSI CSV had no numeric rows"
-    return latest[1], f"OFR:FSI {latest[0]} (index, 0=avg)", ""
+        return None, "", "OFR FSI CSV had no numeric rows", None
+    return latest[1], f"OFR:FSI {latest[0]} (index, 0=avg)", "", latest[0]
 
 
 async def _worldbank_em_import_cover() -> tuple[float | None, str, str]:
@@ -283,22 +358,23 @@ async def _worldbank_em_import_cover() -> tuple[float | None, str, str]:
             return _parse_worldbank(resp.json())
     except Exception as exc:
         logger.warning("World Bank FI.RES.TOTL.MO fetch failed: %s", exc)
-        return None, "", f"World Bank API unavailable ({type(exc).__name__})"
+        return None, "", f"World Bank API unavailable ({type(exc).__name__})", None
 
 
-def _parse_worldbank(payload, now: datetime | None = None) -> tuple[float | None, str, str]:
+def _parse_worldbank(payload, now: datetime | None = None
+                     ) -> tuple[float | None, str, str, str | None]:
     if not isinstance(payload, list) or len(payload) < 2 or not isinstance(payload[1], list):
-        return None, "", "World Bank response had no data rows"
+        return None, "", "World Bank response had no data rows", None
     year = (now or datetime.now(timezone.utc)).year
     for row in payload[1]:  # newest year first
         value, date = row.get("value"), str(row.get("date", ""))
         if value is None or not date.isdigit():
             continue
         if year - int(date) > _WB_MAX_AGE_YEARS:
-            return None, "", f"World Bank LMY import cover too old (latest {date})"
+            return None, "", f"stale (World Bank LMY import cover latest {date})", date
         return (float(value),
-                f"WorldBank:FI.RES.TOTL.MO LMY {date} (months of imports)", "")
-    return None, "", "World Bank LMY import cover has no numeric value"
+                f"WorldBank:FI.RES.TOTL.MO LMY {date} (months of imports)", "", date)
+    return None, "", "World Bank LMY import cover has no numeric value", None
 
 
 async def _defillama_cex_7d_change() -> tuple[float | None, str, str]:
@@ -309,21 +385,23 @@ async def _defillama_cex_7d_change() -> tuple[float | None, str, str]:
             return _parse_cex_change(resp.json())
     except Exception as exc:
         logger.warning("DefiLlama protocols fetch failed: %s", exc)
-        return None, "", f"DefiLlama /protocols unavailable ({type(exc).__name__})"
+        return None, "", f"DefiLlama /protocols unavailable ({type(exc).__name__})", None
 
 
-def _parse_cex_change(protocols) -> tuple[float | None, str, str]:
+def _parse_cex_change(protocols, now: datetime | None = None
+                      ) -> tuple[float | None, str, str, str | None]:
     """Aggregate 7-day % change of USD TVL over DefiLlama category "CEX".
 
     prev_i = tvl_i / (1 + change_7d_i/100); change = sum(tvl)/sum(prev) - 1, in percent.
     """
+    fetched = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).date().isoformat()
     if not isinstance(protocols, list):
-        return None, "", "DefiLlama /protocols returned no list"
+        return None, "", "DefiLlama /protocols returned no list", None
     cex = [p for p in protocols if isinstance(p, dict) and p.get("category") == "CEX"
            and isinstance(p.get("tvl"), (int, float)) and p["tvl"] > 0]
     total = sum(p["tvl"] for p in cex)
     if not total:
-        return None, "", "DefiLlama has no CEX TVL"
+        return None, "", "DefiLlama has no CEX TVL", None
     cur = prev = 0.0
     for p in cex:
         ch = p.get("change_7d")
@@ -332,9 +410,10 @@ def _parse_cex_change(protocols) -> tuple[float | None, str, str]:
             prev += p["tvl"] / (1 + ch / 100)
     if cur / total < _CEX_MIN_COVERAGE or prev <= 0:
         return None, "", (f"DefiLlama CEX 7d change covers only {cur / total:.0%} of "
-                          f"${total / 1e9:.0f}B TVL")
+                          f"${total / 1e9:.0f}B TVL", None)
     return ((cur / prev - 1) * 100,
-            f"DefiLlama:CEX TVL 7d change (USD, {len(cex)} CEX, ${total / 1e9:.0f}B)", "")
+            f"DefiLlama:CEX TVL 7d change (USD, {len(cex)} CEX, ${total / 1e9:.0f}B) "
+            f"snapshot {fetched}", "", fetched)
 
 
 async def _gold_monthly_avg():
@@ -355,14 +434,24 @@ async def _gold_monthly_avg():
         return f"yfinance GC=F unavailable ({type(exc).__name__})"
 
 
-async def _yf_last(symbol: str) -> float | None:
+async def _yf_last(symbol: str) -> tuple[float, str] | None:
+    """(close, date) of the last COMPLETE daily bar, or None.
+
+    price_history.complete_bars drops today's bar until the symbol's own market has
+    closed (^VIX 16:15 ET, DX-Y.NYB 17:00 ET, ...), so a partial intraday value is
+    never fed; rows with any NaN OHLC are dropped first.
+    """
     try:
         import yfinance as yf
+        from marketmind.gateway.price_history import _yf_bars, complete_bars
         df = await asyncio.wait_for(
-            asyncio.to_thread(lambda: yf.Ticker(symbol).history(period="5d")), timeout=30)
+            asyncio.to_thread(lambda: yf.Ticker(symbol).history(period="10d")), timeout=30)
         if df is None or df.empty:
             return None
-        return float(df["Close"].dropna().iloc[-1])
+        bars = complete_bars(symbol, _yf_bars(df))
+        if not bars:
+            return None
+        return bars[-1].close, bars[-1].date
     except Exception as exc:
         logger.warning("yfinance last close failed for %s: %s", symbol, exc)
         return None
