@@ -211,8 +211,6 @@ SOURCES: list[Source] = [
     # Social sentiment captures positioning/crowding — structurally independent from news flow.
     # ApeWisdom: 0.15 — anonymous, unverifiable, prone to manipulation. ApeWisdom is a hobby
     #   project with no SLA, no versioned API, and no per-account data for manipulation detection.
-    # Bluesky: 0.20 — identified accounts, smaller sample, demographic selection bias (users who
-    #   migrated from X due to content moderation concerns). AT Protocol is open and free.
     # Truth Social (Trump): 0.15 — single-person source, ~90% noise ratio, dependent on
     #   third-party RSS aggregator (trumpstruth.org by Defending Democracy Together).
     #   BUT: when it fires on investment-relevant content, it is a LEADING indicator of
@@ -220,9 +218,6 @@ SOURCES: list[Source] = [
     # Reddit WSB: Reddit's own RSS feed — free, no auth, returns 200
     Source("Reddit WSB", SourceTier.BEST_EFFORT,
            "https://www.reddit.com/r/wallstreetbets/.rss", "rss", 0.15, 1.0),
-    # Bluesky: requires BLUESKY_USERNAME + BLUESKY_APP_PASSWORD in .env
-    Source("Bluesky Social", SourceTier.BEST_EFFORT,
-           "https://bsky.social/xrpc/com.atproto.repo.searchPosts?q={QUERY}", "api", 0.20, 1.0),
     Source("Truth Social (Trump)", SourceTier.BEST_EFFORT,
            "https://trumpstruth.org/feed", "rss", 0.15, 1.0),
     # Google daily trending searches (US, 10 items): mass-attention signal, not a news source.

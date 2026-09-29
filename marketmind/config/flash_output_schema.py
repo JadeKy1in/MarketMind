@@ -102,7 +102,6 @@ TOOL_ALLOWLIST: dict[str, list[str]] = {
     ],
     "sentiment": [
         "reddit_rss",
-        "bluesky_api",
         "twitter_api",
     ],
     "technical": [
