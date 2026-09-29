@@ -17,7 +17,7 @@ from marketmind.gateway.price_history import PriceHistory, completed_history
 from marketmind.markets import market_for
 from marketmind.pipeline.defang import defang_text
 from marketmind.pipeline.l3_indicators import TechnicalSnapshot, compute_snapshot
-from marketmind.shadows.v3.roster import RosterEntry
+from marketmind.shadows.v3.roster import RosterEntry, lineage_id
 
 logger = logging.getLogger("marketmind.shadows.v3.context")
 
@@ -191,10 +191,11 @@ def fred_lines(series: dict[str, dict]) -> list[str]:
 
 
 def consensus_lines(rows: list[tuple[str, str, str]], exclude: str = FADE_MASTER_ID) -> list[str]:
-    """rows: (source_id, ticker, direction) of yesterday's shadow records -> direction share."""
+    """rows: (source_id, ticker, direction) of yesterday's shadow records -> direction share.
+    Records of the excluded shadow's whole lineage (its successors "x@n") are left out."""
     by_ticker: dict[str, Counter] = {}
     for source_id, ticker, direction in rows:
-        if source_id == exclude:
+        if lineage_id(source_id) == lineage_id(exclude):
             continue
         by_ticker.setdefault(ticker, Counter())[direction] += 1
     lines = []
@@ -276,7 +277,8 @@ def build_context(entry: RosterEntry, histories: dict[str, PriceHistory | None],
         entry=entry, views=views, headlines=headlines,
         # A failed FRED fetch is stated, not silently dropped (the section would vanish).
         fred=[FRED_UNAVAILABLE_LINE] if fred_failed else fred_lines(fred or {}),
-        consensus=consensus_lines(consensus_rows or []) if entry.shadow_id == FADE_MASTER_ID else [],
+        consensus=(consensus_lines(consensus_rows or [])
+                   if lineage_id(entry.shadow_id) == FADE_MASTER_ID else []),
         short_interest=list(short_interest or []), options=list(options or []),
         feeds=dict(feeds or {}), event=event_lines(entry),
         today=today or datetime.now(timezone.utc).strftime("%Y-%m-%d"),

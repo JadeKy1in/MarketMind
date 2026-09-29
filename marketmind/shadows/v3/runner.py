@@ -39,6 +39,12 @@ CALL_TIMEOUT_S = 300
 SCALPER_ID = "momentum:intraday:scalper"
 
 
+def _lineage(entry) -> str:
+    """Shadow-specific inputs are keyed by the original roster id, so a successor
+    ("x@2", docs/S7_DESIGN.md §一 退役) gets its predecessor's inputs."""
+    return roster_mod.lineage_id(entry.shadow_id)
+
+
 @dataclass
 class ShadowResult:
     shadow_id: str
@@ -160,7 +166,7 @@ async def decide(ctx: ShadowContext, call=_call_llm) -> tuple[ParseResult, list[
     """Ask once, retry once with the validation errors; returns (result, raw replies, attempts)."""
     system = system_prompt(ctx.entry)
     user = ctx.render()
-    fixed = 1 if ctx.entry.shadow_id == SCALPER_ID else None
+    fixed = 1 if _lineage(ctx.entry) == SCALPER_ID else None
     stage = f"shadow:{ctx.entry.name}"
     raws: list[str] = []
     result = ParseResult()
@@ -193,13 +199,13 @@ async def _derivatives_lines(todo: list, histories: dict, today: str, fetch=None
         from marketmind.gateway import nasdaq_derivs as fetch
     out: dict[str, dict] = {}
     for e in todo:
-        if e.shadow_id == SQUEEZE_WATCH_ID:
+        if _lineage(e) == SQUEEZE_WATCH_ID:
             stocks = [t for t in e.watchlist if t != e.domain_benchmark]
             got = await asyncio.gather(*(fetch.get_short_interest(t) for t in stocks))
             out[e.shadow_id] = {"short_interest": [
                 g.line() if g else f"- {t}: short interest unavailable"
                 for t, g in zip(stocks, got)]}
-        elif e.shadow_id == OPTIONS_READER_ID:
+        elif _lineage(e) == OPTIONS_READER_ID:
             day = _date.fromisoformat(today)
             spots = {t: ticker_view(t, histories.get(t)).snap for t in e.watchlist}
             tickers = [t for t, snap in spots.items() if snap is not None]
@@ -254,7 +260,7 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
 
     extra = {NEWS_HOUND_ID: news_tickers(news_items, _tradable),
              BEAR_TRACKER_ID: red_flag_tickers(news_items, _tradable)}
-    tickers = sorted({t for e in todo for t in (*e.watchlist, *extra.get(e.shadow_id, []))})
+    tickers = sorted({t for e in todo for t in (*e.watchlist, *extra.get(_lineage(e), []))})
     histories = await get_price_histories(tickers)
     if fred_fetch is None:
         from marketmind.gateway.fred_client import get_fred_for_shadow as fred_fetch
@@ -273,13 +279,13 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
     for e in todo:
         fred_failed = False
         try:
-            fred = await fred_fetch(e.shadow_id)
+            fred = await fred_fetch(_lineage(e))
         except Exception as exc:
             logger.warning("FRED for %s failed: %s", e.shadow_id, exc)
             fred, fred_failed = {}, True
         contexts.append(build_context(e, histories, news_items, fred=fred, fred_failed=fred_failed,
-                                      consensus_rows=consensus if e.shadow_id == FADE_MASTER_ID else None,
-                                      extra_tickers=extra.get(e.shadow_id), today=today,
+                                      consensus_rows=consensus if _lineage(e) == FADE_MASTER_ID else None,
+                                      extra_tickers=extra.get(_lineage(e)), today=today,
                                       feeds=feeds.get(e.name), **derivs.get(e.shadow_id, {})))
 
     quotes = {}
@@ -308,7 +314,7 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
                 "prompt_version": llm_trace.prompt_version(system_prompt(ctx.entry))}
         if ctx.entry.source_type != "shadow":
             meta["temp"] = ctx.entry.group        # temp_event | trial
-        if ctx.entry.shadow_id == SCALPER_ID:
+        if _lineage(ctx.entry) == SCALPER_ID:
             meta["intraday_approx"] = True
         records = []
         for d in parsed.decisions:

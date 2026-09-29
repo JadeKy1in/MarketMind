@@ -92,6 +92,17 @@ def test_only_fade_master_sees_consensus():
     assert "67% long" in fade.render() and "67% long" not in other.render()
 
 
+def test_fade_master_successor_sees_consensus_without_its_lineage():
+    from dataclasses import replace
+    rows = [("momentum:weekly:trend_rider", "SPY", "long"),
+            ("contrarian:consensus:fade_master", "SPY", "short"),
+            ("contrarian:consensus:fade_master@2", "SPY", "short")]
+    assert consensus_lines(rows) == ["- SPY: 1 shadows, 100% long / 0% short"]
+    fade = roster.by_id()["contrarian:consensus:fade_master"]
+    succ = replace(fade, shadow_id=fade.shadow_id + "@2", successor_of=fade.shadow_id)
+    assert "100% long" in build_context(succ, {}, [], consensus_rows=rows).render()
+
+
 def test_news_filter_word_start_and_news_tickers():
     items = [news("Bank lending slows"), news("Embankment repairs"), news("Oil falls")]
     assert [i.title for i in filter_news(items, ("bank",))] == ["Bank lending slows"]
