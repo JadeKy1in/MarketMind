@@ -16,7 +16,11 @@ running whose lock is gone, whose process is dead, or which outlived its timeout
 retry is not blocked. Skipped triggers of an eligible day are recorded, and the
 state file is written atomically with a last-good copy. Each run has a hard
 timeout, its own log file, and a status record the dashboard reads; failures are
-pushed through the configured channels (marketmind/alerts/notify.py).
+pushed through the configured channels (marketmind/alerts/notify.py). Exit code 3
+from app.py means "finished, some steps failed": status "degraded", done for the
+day (no retry), steps taken from the last "[degraded]" log line, one short push.
+Pushes that fail (offline) wait in data/scheduler/push_queue.json for the next
+invocation of this script or of watchdog.py.
 """
 from __future__ import annotations
 
@@ -122,6 +126,8 @@ def should_attempt(state: dict, key: str) -> tuple[bool, str]:
         return True, "first attempt"
     if run.get("status") == "ok":
         return False, "already succeeded today"
+    if run.get("status") == "degraded":
+        return False, "already finished today (degraded)"
     if run.get("status") == "running":
         return False, "a run is in progress"
     if run.get("attempts", 0) >= MAX_ATTEMPTS:
@@ -345,6 +351,35 @@ def notify_failure(slot: str, key: str, log_path: Path, reason: str) -> list[dic
     return push("MarketMind 自动运行失败", body[:1800])
 
 
+EXIT_DEGRADED = 3
+DEGRADED_PREFIX = "[degraded]"
+
+
+def degraded_detail(log_path: Path, start: int = 0) -> str:
+    """Text after the last "[degraded]" line this attempt wrote (from byte `start`)."""
+    try:
+        with log_path.open("rb") as f:
+            f.seek(start)
+            lines = f.read().decode("utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    for line in reversed(lines):
+        line = line.strip()
+        if line.startswith(DEGRADED_PREFIX):
+            return line[len(DEGRADED_PREFIX):].strip(" :")[:500]
+    return ""
+
+
+def split_steps(detail: str) -> list[str]:
+    return [s.strip() for s in re.split(r"[,;，；]", detail) if s.strip()]
+
+
+def notify_degraded(slot: str, key: str, log_path: Path, detail: str) -> list[dict]:
+    from marketmind.notification.log_redaction import redact
+    body = f"{key}（{slot}）已完成，但部分步骤失败：{redact(detail) or '未列出'}\n日志：{log_path}"
+    return push("MarketMind 自动运行部分失败", body[:600])
+
+
 def recover_stale_run(slot: str, key: str, state_path: Path, reason: str) -> dict:
     """Close a "running" record left by a crashed attempt as failed and report it,
     so a later trigger may retry (still bounded by MAX_ATTEMPTS)."""
@@ -415,7 +450,10 @@ def _run_locked(slot: str, key: str, now: datetime, state_path: Path) -> int:
     log_dir = data_dir() / "logs" / "scheduled"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{key}.log"
+    log_start = log_path.stat().st_size if log_path.exists() else 0
     rec = state["runs"].setdefault(key, {})
+    for stale in ("degraded", "degraded_steps"):
+        rec.pop(stale, None)
     rec.update(status="running", started=now.isoformat(timespec="seconds"),
                mode=MODES[slot], log=str(log_path), attempts=rec.get("attempts", 0) + 1)
     save_state(state_path, state)
@@ -435,9 +473,17 @@ def _run_locked(slot: str, key: str, now: datetime, state_path: Path) -> int:
     except Exception as e:
         code, failure = -1, f"{type(e).__name__}: {e}"
 
-    rec.update(status="ok" if failure is None else "failed", exit_code=code, reason=failure,
+    status = "ok" if failure is None else "failed"
+    if code == EXIT_DEGRADED:                    # finished, some steps failed: done for the day
+        status, failure = "degraded", None
+        detail = degraded_detail(log_path, log_start)
+        rec.update(degraded=detail, degraded_steps=split_steps(detail))
+    rec.update(status=status, exit_code=code, reason=failure,
                ended=datetime.now(timezone.utc).isoformat(timespec="seconds"))
-    if failure:
+    if status == "degraded":
+        rec["reason"] = f"degraded: {rec['degraded'] or 'steps not listed'}"   # shown on the dashboard
+        rec["notified"] = notify_degraded(slot, key, log_path, rec["degraded"])
+    elif failure:
         rec["notified"] = notify_failure(slot, key, log_path, failure)
     state = load_state(state_path)               # merge: the other slot may have written meanwhile
     skips = state["runs"].get(key, {}).get("skips")
@@ -446,7 +492,7 @@ def _run_locked(slot: str, key: str, now: datetime, state_path: Path) -> int:
     state["runs"][key] = rec
     state["runs"] = dict(sorted(state["runs"].items())[-60:])     # keep about two months
     save_state(state_path, state)
-    print(f"{key}: {rec['status']}" + (f" ({failure})" if failure else ""))
+    print(f"{key}: {rec['status']}" + (f" ({rec['reason']})" if rec.get("reason") else ""))
     return 0 if failure is None else 1
 
 

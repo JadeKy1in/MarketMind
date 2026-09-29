@@ -332,3 +332,58 @@ def test_scheduled_run_retries_the_queue_first(tmp_path, monkeypatch):
     monkeypatch.setattr(sr, "plan", lambda slot, now: (False, "2026-10-03-weekday", "weekend in New York"))
     assert sr.main(["--slot", "weekday"]) == 0 and sent == ["queued"]
     assert sr.main(["--slot", "weekday", "--dry-run"]) == 0 and sent == ["queued"]
+
+
+# ── degraded exit code ─────────────────────────────────────────────────
+
+def _degraded_env(tmp_path, monkeypatch, key="2026-09-28-weekday", lines=(), code=3):
+    monkeypatch.setattr(sr, "ROOT", tmp_path)
+    monkeypatch.setenv("MARKETMIND_DATA_DIR", "data")
+    monkeypatch.setattr(sr, "plan", lambda slot, now: (True, key, "test"))
+    calls, pushed = [], []
+
+    class Done:
+        returncode = code
+
+    def fake_run(cmd, stdout=None, **kw):
+        calls.append(cmd)
+        for line in lines:
+            stdout.write(line + "\n")
+        return Done()
+    monkeypatch.setattr(sr.subprocess, "run", fake_run)
+    monkeypatch.setattr(sr, "push", lambda title, body: pushed.append((title, body)) or [])
+    return tmp_path / "data" / "scheduler" / "state.json", calls, pushed
+
+
+def test_exit_code_3_is_degraded_done_for_the_day(tmp_path, monkeypatch):
+    state_path, calls, pushed = _degraded_env(tmp_path, monkeypatch, lines=[
+        "[degraded] old line", "step output", "[degraded] news, evidence; alerts", "done"])
+    assert sr.main(["--slot", "weekday"]) == 0
+    run = sr.load_state(state_path)["runs"]["2026-09-28-weekday"]
+    assert run["status"] == "degraded" and run["exit_code"] == 3
+    assert run["degraded_steps"] == ["news", "evidence", "alerts"]
+    assert run["reason"] == "degraded: news, evidence; alerts"
+    assert len(pushed) == 1 and "news, evidence; alerts" in pushed[0][1]
+    assert sr.main(["--slot", "weekday"]) == 0 and len(calls) == 1       # no retry
+    assert sr.load_state(state_path)["runs"]["2026-09-28-weekday"]["skips"][-1]["reason"] \
+        == "already finished today (degraded)"
+
+
+def test_degraded_line_is_read_from_this_attempt_only(tmp_path, monkeypatch):
+    state_path, calls, pushed = _degraded_env(tmp_path, monkeypatch, lines=["no marker"])
+    log = tmp_path / "data" / "logs" / "scheduled" / "2026-09-28-weekday.log"
+    log.parent.mkdir(parents=True)
+    log.write_text("[degraded] from an earlier attempt\n", encoding="utf-8")
+    assert sr.main(["--slot", "weekday"]) == 0
+    run = sr.load_state(state_path)["runs"]["2026-09-28-weekday"]
+    assert run["status"] == "degraded" and run["degraded_steps"] == []
+    assert len(pushed) == 1
+
+
+def test_other_nonzero_exit_is_still_a_failure(tmp_path, monkeypatch):
+    state_path, calls, pushed = _degraded_env(tmp_path, monkeypatch, code=2,
+                                              lines=["[degraded] news"])
+    monkeypatch.setattr(sr, "notify_failure", lambda *a: pushed.append(a) or [])
+    assert sr.main(["--slot", "weekday"]) == 1
+    run = sr.load_state(state_path)["runs"]["2026-09-28-weekday"]
+    assert run["status"] == "failed" and "degraded_steps" not in run and len(pushed) == 1
