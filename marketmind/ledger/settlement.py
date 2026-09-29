@@ -6,9 +6,12 @@ Rules (all code, no judgement; see docs/S2_DESIGN.md §4):
                      hold_bars if shorter) that trades into
                      the zone; long fills at min(open, entry_high), short at
                      max(open, entry_low). Never filled inside the window -> void.
-          A fill at the open that is already at/beyond the stop or the target
-          -> void (owner decision 2026-09-29: the card was dead before entry; no
-          one would buy and sell at the same open, so it is not scored).
+          A fill at the open that is already at/beyond the target -> void
+          (gap_target; owner decision 2026-09-29: the card was dead before entry).
+          A fill at the open already at/beyond the stop is a loss, not void (owner
+          decision 2026-09-29, second revision: voiding it biased scores upward by
+          ~0.24%/trade): exit "stop" at that open, measured against the stop level,
+          entry_price = stop, exit_price = open, gross = direction * (open / stop - 1).
   Exit    checked bar by bar from the fill bar, in this order:
           gap     an open already beyond the target exits there as target (the order
                   fills at that open), checked before the stop.
@@ -110,6 +113,7 @@ class Outcome:
     exit_index: int | None = None
     exit_price: float | None = None
     exit_reason: str | None = None
+    entry_price: float | None = None  # overrides fill.price (gap through the stop)
 
 
 def _find_fill(e: LedgerEntry, bars: list[Bar]) -> Fill | None | str:
@@ -223,6 +227,11 @@ def _simulate(e: LedgerEntry, after: list[Bar]) -> Outcome:
                        exit_reason="expiry")
     long = e.direction == "long"
     if fill.at_open and (gap := gapped_past(e, fill.price)):
+        if gap == "stop":
+            # a real loss the plan would have suffered: the gap beyond the stop
+            return Outcome("settled", "gapped through the stop at the open", fill=fill,
+                           exit_index=fill.index, exit_price=fill.price, exit_reason="stop",
+                           entry_price=e.stop_loss)
         return Outcome("void", f"opened at {fill.price:.6g}, already past the {gap} before entry",
                        exit_reason=f"gap_{gap}")
     last = fill.index + e.hold_bars - 1
@@ -309,7 +318,7 @@ def apply_outcome(e: LedgerEntry, out: Outcome, bars: list[Bar],
     e.settle_note = out.note
     if out.fill is not None:
         e.entry_date = after[out.fill.index].date
-        e.entry_price = round(out.fill.price, 6)
+        e.entry_price = round(out.fill.price if out.entry_price is None else out.entry_price, 6)
     if out.status == "void":
         e.exit_reason = out.exit_reason
         e.settled_at = _now()

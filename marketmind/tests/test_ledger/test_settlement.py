@@ -291,34 +291,61 @@ async def test_missing_benchmark_is_backfilled_later(tmp_path):
     assert e.net_return == net  # outcome itself untouched
 
 
-def test_entry_open_already_past_stop_or_target_is_void():
-    # next_open fill on 09-02 opens below the stop / above the target
+def test_entry_open_past_target_is_void_but_past_stop_is_a_stop_loss():
+    # next_open fill on 09-02 opens below the stop: stopped at that open, measured
+    # against the stop level (owner decision 2026-09-29, second revision)
     below = flat(DAYS[:1]) + [bar("2026-09-02", 94, 96, 93, 95)] + flat(DAYS[2:8])
     out = simulate(entry(stop_loss=95.0, target_price=110.0), below)
-    assert (out.status, out.exit_reason) == ("void", "gap_stop") and out.fill is None
+    assert (out.status, out.exit_reason, out.exit_index) == ("settled", "stop", 0)
+    assert (out.entry_price, out.fill.price, out.exit_price) == (95.0, 94, 94)
     above = flat(DAYS[:1]) + [bar("2026-09-02", 111, 112, 109, 110)] + flat(DAYS[2:8])
     out = simulate(entry(stop_loss=95.0, target_price=110.0), above)
-    assert (out.status, out.exit_reason) == ("void", "gap_target")
+    assert (out.status, out.exit_reason) == ("void", "gap_target") and out.fill is None
     short = flat(DAYS[:1]) + [bar("2026-09-02", 89, 90, 88, 89)] + flat(DAYS[2:8])
     out = simulate(entry(direction="short", stop_loss=105.0, target_price=90.0), short)
     assert (out.status, out.exit_reason) == ("void", "gap_target")
-    # a zone fill at the open below the stop is void too
+    short_stop = flat(DAYS[:1]) + [bar("2026-09-02", 110, 111, 108, 109)] + flat(DAYS[2:8])
+    out = simulate(entry(direction="short", stop_loss=105.0, target_price=90.0), short_stop)
+    assert (out.status, out.exit_reason, out.entry_price, out.exit_price) == (
+        "settled", "stop", 105.0, 110)
+    # a zone fill at the open below the stop is stopped the same way
     zone = flat(DAYS[:1]) + [bar("2026-09-02", 94, 96, 93, 95)] + flat(DAYS[2:8])
     out = simulate(entry(entry_rule="zone", entry_low=97.0, entry_high=99.0, stop_loss=95.0,
                          target_price=110.0), zone)
-    assert (out.status, out.exit_reason) == ("void", "gap_stop")
+    assert (out.status, out.exit_reason, out.entry_price) == ("settled", "stop", 95.0)
 
 
 @pytest.mark.asyncio
-async def test_gap_void_is_stored_without_score(tmp_path):
+async def test_gap_through_the_stop_is_scored_as_a_loss(tmp_path):
     store = LedgerStore(tmp_path / "l.db")
-    eid = store.add(entry(stop_loss=95.0, target_price=110.0), created_at=CREATED)
-    bars = flat(DAYS[:1]) + [bar("2026-09-02", 94, 96, 93, 95)] + flat(DAYS[2:8])
-    rep = await settle_all(store, StaticPriceSource({"AAA": bars, "SPY": flat(DAYS[:8])}),
-                           today="2026-09-30")
-    e = store.get(eid)
-    assert rep.voided == 1 and e.status == "void" and e.exit_reason == "gap_stop"
-    assert e.brier is None and e.net_return is None and "already past the stop" in e.settle_note
+    long_id = store.add(entry(stop_loss=95.0, target_price=110.0), created_at=CREATED)
+    short_id = store.add(entry(ticker="BBB", direction="short", stop_loss=105.0,
+                               target_price=90.0), created_at=CREATED)
+    exact_id = store.add(entry(ticker="CCC", stop_loss=95.0), created_at=CREATED)
+    bars = flat(DAYS[:1]) + [bar("2026-09-02", 90, 96, 89, 95)] + flat(DAYS[2:8])
+    bbb = flat(DAYS[:1]) + [bar("2026-09-02", 110, 111, 108, 109)] + flat(DAYS[2:8])
+    ccc = flat(DAYS[:1]) + [bar("2026-09-02", 95, 96, 94, 95)] + flat(DAYS[2:8])
+    rep = await settle_all(store, StaticPriceSource({"AAA": bars, "BBB": bbb, "CCC": ccc,
+                                                     "SPY": flat(DAYS[:8])}), today="2026-09-30")
+    assert rep.settled == 3 and rep.voided == 0
+    e = store.get(long_id)
+    assert (e.status, e.exit_reason, e.entry_date, e.exit_date) == (
+        "settled", "stop", "2026-09-02", "2026-09-02")
+    assert (e.entry_price, e.exit_price) == (95.0, 90.0)
+    assert e.gross_return == pytest.approx(90 / 95 - 1, abs=1e-6) and e.net_return < e.gross_return < 0
+    assert e.brier == pytest.approx(0.49) and e.falsifier_triggered is True
+    assert e.settle_note == "gapped through the stop at the open"
+    s = store.get(short_id)
+    assert s.gross_return == pytest.approx(-(110 / 105 - 1), abs=1e-6) and s.net_return < 0
+    c = store.get(exact_id)                # open exactly at the stop: costs make it a loss
+    assert c.gross_return == 0.0 and c.net_return < 0 and c.brier == pytest.approx(0.49)
+
+
+def test_one_bar_record_still_ignores_a_gap_through_the_stop():
+    bars = flat(DAYS[:1]) + [bar("2026-09-02", 90, 96, 89, 95)]
+    out = simulate(entry(hold_bars=1, stop_loss=95.0), bars)
+    assert (out.status, out.exit_reason, out.entry_price) == ("settled", "expiry", None)
+    assert (out.fill.price, out.exit_price) == (90, 95)
 
 
 def test_one_bar_record_scores_fill_to_close_only():
