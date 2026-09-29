@@ -80,6 +80,14 @@ def mock_pro_response():
 #     via filter_query_parameters. The cassette NEVER contains real API keys.
 
 
+def _drop_request_body(request):
+    """Request bodies can carry credentials (e.g. Bluesky createSession sent the app
+    password in its JSON body, recorded 2026-05 and scrubbed 2026-09-29). Matching
+    never uses the body, so it is not recorded at all."""
+    request.body = None
+    return request
+
+
 @pytest.fixture
 def vcr_news():
     """Record/replay news HTTP calls via VCR.py.
@@ -122,6 +130,7 @@ def vcr_news():
             decode_compressed_response=True,
             filter_headers=['authorization', 'cookie'],
             filter_query_parameters=['apiKey', 'apikey', 'key'],  # CRITICAL: strip API keys from URLs
+            before_record_request=_drop_request_body,
             match_on=['method', 'scheme', 'host', 'port', 'path', 'query'],
         ) as cassette:
             yield cassette
@@ -168,6 +177,7 @@ def vcr_news_offline():
             record_mode='none',  # fail if cassette doesn't exist
             filter_headers=['authorization', 'cookie'],
             filter_query_parameters=['apiKey', 'apikey', 'key'],
+            before_record_request=_drop_request_body,
             match_on=['method', 'scheme', 'host', 'port', 'path', 'query'],
         ) as cassette:
             yield cassette

@@ -9298,7 +9298,7 @@ interactions:
       code: 200
       message: OK
 - request:
-    body: '{"identifier":"jadekylin.bsky.social","password":"hmlq-oayn-zos2-kdwg"}'
+    body: '{"identifier":"jadekylin.bsky.social","password":"REDACTED"}'
     headers:
       Accept:
       - '*/*'
@@ -9374,7 +9374,7 @@ interactions:
       Accept-Encoding:
       - gzip, deflate, zstd
       Authorization:
-      - Bearer eyJ0eXAiOiJhdCtqd3QiLCJhbGciOiJFUzI1NksifQ.eyJzY29wZSI6ImNvbS5hdHByb3RvLmFwcFBhc3MiLCJzdWIiOiJkaWQ6cGxjOm03ZHl0dHFicGJoZnB3c3NtZzJkdWZtYSIsImlhdCI6MTc3OTY5NzUxNiwiZXhwIjoxNzc5NzA0NzE2LCJhdWQiOiJkaWQ6d2ViOmJyaXR0bGVnaWxsLnVzLXdlc3QuaG9zdC5ic2t5Lm5ldHdvcmsifQ.tGFIH8CfgITQ6b9oUchuVRBVZQ3zJGw4EjPcL_Hfh_VMFU29jbv2-yfYNiRCp9e5GAcxXA_0jm7onLMd8zX7Kw
+      - Bearer REDACTED
       Connection:
       - keep-alive
       Host:
@@ -10227,7 +10227,7 @@ interactions:
       Accept-Encoding:
       - gzip, deflate, zstd
       Authorization:
-      - Bearer eyJ0eXAiOiJhdCtqd3QiLCJhbGciOiJFUzI1NksifQ.eyJzY29wZSI6ImNvbS5hdHByb3RvLmFwcFBhc3MiLCJzdWIiOiJkaWQ6cGxjOm03ZHl0dHFicGJoZnB3c3NtZzJkdWZtYSIsImlhdCI6MTc3OTY5NzUxNiwiZXhwIjoxNzc5NzA0NzE2LCJhdWQiOiJkaWQ6d2ViOmJyaXR0bGVnaWxsLnVzLXdlc3QuaG9zdC5ic2t5Lm5ldHdvcmsifQ.tGFIH8CfgITQ6b9oUchuVRBVZQ3zJGw4EjPcL_Hfh_VMFU29jbv2-yfYNiRCp9e5GAcxXA_0jm7onLMd8zX7Kw
+      - Bearer REDACTED
       Connection:
       - keep-alive
       Host:
