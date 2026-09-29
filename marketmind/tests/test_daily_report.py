@@ -101,3 +101,32 @@ def test_gather_facts_includes_discovery_and_watchlist(env):
     assert f["discovery"]["unavailable"] == ["eia:WCESTUS1"]
     assert f["watchlist"]["watching"] == 0 and f["watchlist"]["new"] == []
     assert "冷门数据异常：1" in daily.fallback_text(f)
+
+
+@pytest.mark.asyncio
+async def test_trend_section_in_prompt_and_facts(env):
+    store, briefs, tmp = env
+    assert "趋势状态" not in daily.gather_facts(TODAY, store, briefs)     # no trend file yet
+    (tmp / "trend").mkdir()
+    (tmp / "trend" / f"{TODAY}.json").write_text(json.dumps({
+        "date": TODAY, "mode": "daily",
+        "full": {"SPY": {"state": "TREND", "stop_level": 640.5, "close": 670.0,
+                         "entry_signal_date": TODAY, "as_of": TODAY},
+                 "TLT": {"state": "CASH"}},
+        "lean": {"strongest_sector": "XLK", "states": {}},
+        "changes": {"full": {"entries": ["SPY"], "exits": ["QQQ"]},
+                    "lean": {"entries": [], "exits": []}}}), encoding="utf-8")
+    seen = {}
+
+    async def call(system, user):
+        seen.update(system=system, user=user)
+        return "## 今日要闻\n- x"
+    await daily.build_report(TODAY, store=store, call=call, brief_dir=briefs)
+    section = next(line for line in seen["system"].splitlines() if "## 趋势状态" in line)
+    assert "TREND" in section and "止损" in section and "不是警报" in section
+    assert seen["system"].index("## 观察名单") < seen["system"].index("## 趋势状态")
+    f = daily.gather_facts(TODAY, store, briefs)["趋势状态"]
+    assert f["entries_today"] == ["SPY"] and f["exits_today"] == ["QQQ"]
+    assert f["trend"] == [{"ticker": "SPY", "stop_level": 640.5, "close": 670.0,
+                           "entry_signal_date": TODAY, "as_of": TODAY}]
+    assert "640.5" in seen["user"]
