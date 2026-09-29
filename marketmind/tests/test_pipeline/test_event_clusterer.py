@@ -175,6 +175,22 @@ class TestEntityOverlapPreGroup:
         groups = _entity_overlap_pre_group([])
         assert groups == []
 
+    def test_central_bank_overlap_same_group(self):
+        entities = [
+            ExtractedEntities(central_banks=["ECB"]),
+            ExtractedEntities(central_banks=["ECB"]),
+            ExtractedEntities(central_banks=["Fed"]),
+        ]
+        groups = sorted(_entity_overlap_pre_group(entities), key=len)
+        assert groups == [[2], [0, 1]]
+
+    def test_keywords_alone_do_not_group(self):
+        entities = [
+            ExtractedEntities(keywords=["inflation"]),
+            ExtractedEntities(keywords=["inflation"]),
+        ]
+        assert len(_entity_overlap_pre_group(entities)) == 2
+
     def test_currency_overlap(self):
         entities = [
             ExtractedEntities(currencies=["EUR"]),
@@ -331,13 +347,28 @@ class TestClusterEventsAsync:
         assert all(c.title == "Euro policy divergence" for c in result.clusters)
         assert fake_flash.await_count >= result.clusters_formed
 
-    @pytest.mark.xfail(reason="clustering currently leaves each ECB headline in its own "
-                              "cluster (red-team 2026-09-29); remove when grouping works",
-                       strict=False)
     @pytest.mark.asyncio
     async def test_ecb_headlines_share_a_cluster(self):
+        # "ECB" and "European Central Bank" paraphrases share the central-bank
+        # entity; they must land in one cluster (red-team 2026-09-29).
         result = await cluster_events(ECB_HEADLINES, _make_entities(ECB_HEADLINES))
-        assert any(len(set(c.headlines) & set(ECB_HEADLINES)) >= 2 for c in result.clusters)
+        assert result.clusters_formed == 1
+        assert set(result.clusters[0].headlines) == set(ECB_HEADLINES)
+        assert result.noise_count == 0
+
+    @pytest.mark.asyncio
+    async def test_unrelated_headlines_stay_apart(self):
+        headlines = ECB_HEADLINES + FED_HEADLINES + UNRELATED_HEADLINES
+        result = await cluster_events(headlines, _make_entities(headlines))
+        for c in result.clusters:
+            members = set(c.headlines)
+            groups_hit = [g for g in (ECB_HEADLINES, FED_HEADLINES) if members & set(g)]
+            assert len(groups_hit) <= 1, c.headlines
+            if members & set(UNRELATED_HEADLINES):
+                assert len(members) == 1, c.headlines
+        ecb = [c for c in result.clusters if set(c.headlines) & set(ECB_HEADLINES)]
+        fed = [c for c in result.clusters if set(c.headlines) & set(FED_HEADLINES)]
+        assert len(ecb) == 1 and len(fed) == 1
 
     @pytest.mark.asyncio
     async def test_cluster_has_title_fallback(self):

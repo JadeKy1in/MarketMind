@@ -259,8 +259,13 @@ def _parse_layer1_response(content: str) -> Layer1Result:
     # Always preserve raw analysis text
     if "raw_analysis" not in data:
         data["raw_analysis"] = content
+    # A JSON reply without a grade is "unknown", not "E" (an invented no-event
+    # grade that the daily skip gate acts on); same rule as the regex fallback.
+    grade = data.get("event_grade")
+    if not isinstance(grade, str) or not grade.strip():
+        grade = "unknown"
     return Layer1Result(
-        event_grade=data.get("event_grade", "E"),
+        event_grade=grade,
         surprise_level=data.get("surprise_level", "low"),
         market_size=data.get("market_size", "small"),
         matrix_quadrant=data.get("matrix_quadrant", "observe_skip"),

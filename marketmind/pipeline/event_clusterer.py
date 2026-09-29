@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 
 from marketmind.pipeline.entity_extractor import ExtractedEntities
@@ -83,13 +84,82 @@ def _deduplicate_near_duplicates(
     )
 
 
+# Entity fields that link two headlines to the same event group (Tier 1) and
+# that are injected as canonical tokens into the Tier 2 similarity text.
+# ``keywords`` is deliberately excluded: generic terms like "inflation" would
+# chain unrelated stories together.
+_GROUPING_FIELDS = ("tickers", "countries", "sectors", "currencies", "indices", "central_banks")
+_ENTITY_TOKEN_FIELDS = ("tickers", "countries", "currencies", "indices", "central_banks")
+# Specific actors: two headlines naming the same ticker or central bank are
+# treated as the same story in Tier 2 even when their wording differs (short
+# paraphrased headlines rarely reach the TF-IDF threshold on their own).
+# Broad fields (sector, country, currency) only pre-group; they never link.
+_LINKING_FIELDS = ("tickers", "central_banks")
+_TIER2_THRESHOLD = 0.3
+
+
+def _entity_linked_similarity(
+    pairwise_sim: list[list[float]],
+    group_entities: list[ExtractedEntities],
+    threshold: float = _TIER2_THRESHOLD,
+) -> list[list[float]]:
+    """Raise similarity to ``threshold`` for pairs sharing a specific actor."""
+    actors = []
+    for e in group_entities:
+        a: set[str] = set()
+        for fld in _LINKING_FIELDS:
+            a.update(f"{fld}:{v}" for v in (getattr(e, fld, None) or []))
+        actors.append(a)
+    sim = [list(row) for row in pairwise_sim]
+    n = len(sim)
+    for i in range(n):
+        for j in range(i + 1, n):
+            if actors[i] & actors[j] and sim[i][j] < threshold:
+                sim[i][j] = sim[j][i] = threshold
+    return sim
+
+
+def _grouping_terms(e: ExtractedEntities) -> set[str]:
+    terms: set[str] = set()
+    for fld in _GROUPING_FIELDS:
+        values = getattr(e, fld, None) or []
+        terms.update(f"{fld}:{v}" for v in values)
+    return terms
+
+
+def _normalise_token(tok: str) -> str:
+    """Crude deterministic singularisation so "rates"/"rate" match."""
+    if len(tok) > 3 and tok.endswith("s") and not tok.endswith(("ss", "us", "is")):
+        return tok[:-1]
+    return tok
+
+
+def _similarity_text(headline: str, e: ExtractedEntities | None) -> str:
+    """Normalised headline text for Tier 2 TF-IDF.
+
+    Tokens are lower-cased and singularised, and each named entity is appended
+    as a canonical token (e.g. "European Central Bank" and "ECB" both yield
+    ``entcentralbanksecb``) so paraphrased headlines about the same actor share
+    vocabulary.
+    """
+    tokens = [_normalise_token(t) for t in _tokenize(headline)]
+    if e is not None:
+        for fld in _ENTITY_TOKEN_FIELDS:
+            for v in getattr(e, fld, None) or []:
+                canon = re.sub(r"[^a-z0-9]", "", f"ent{fld}{v}".lower())
+                if canon:
+                    tokens.append(canon)
+    return " ".join(tokens)
+
+
 def _entity_overlap_pre_group(
     entities: list[ExtractedEntities],
 ) -> list[list[int]]:
     """Group headline indices by entity overlap (Tier 1 output).
 
     Two headlines share a group if they share at least one ticker, country,
-    sector, or currency. Headlines with no overlap become singletons.
+    sector, currency, index or central bank. Headlines with no overlap become
+    singletons.
     """
     n = len(entities)
     if n == 0:
@@ -108,21 +178,10 @@ def _entity_overlap_pre_group(
         if rx != ry:
             parent[rx] = ry
 
+    terms = [_grouping_terms(e) for e in entities]
     for i in range(n):
-        ei = entities[i]
-        i_terms: set[str] = set()
-        i_terms.update(ei.tickers)
-        i_terms.update(ei.countries)
-        i_terms.update(ei.sectors)
-        i_terms.update(ei.currencies)
         for j in range(i + 1, n):
-            ej = entities[j]
-            j_terms: set[str] = set()
-            j_terms.update(ej.tickers)
-            j_terms.update(ej.countries)
-            j_terms.update(ej.sectors)
-            j_terms.update(ej.currencies)
-            if i_terms & j_terms:
+            if terms[i] & terms[j]:
                 union(i, j)
 
     groups: dict[int, list[int]] = {}
@@ -214,7 +273,8 @@ async def cluster_events(
 
     Tier 0: Near-duplicate dedup (cosine > 0.95) — RT-14
     Tier 1: Entity overlap pre-grouping
-    Tier 2: Within-group TF-IDF cosine similarity clustering
+    Tier 2: Within-group TF-IDF cosine similarity clustering on normalised
+            text; pairs naming the same ticker/central bank are linked
     Tier 3: Flash LLM topic synthesis + cross-cluster detection
 
     Args:
@@ -282,7 +342,10 @@ async def cluster_events(
             noise_indices.extend(group_indices)
             continue
 
-        group_headlines = [deduped_headlines[i] for i in group_indices]
+        group_headlines = [
+            _similarity_text(deduped_headlines[i], deduped_entities[i])
+            for i in group_indices
+        ]
         group_size = len(group_headlines)
 
         if group_size <= 2:
@@ -296,14 +359,19 @@ async def cluster_events(
 
         try:
             matrix = clustering_engine.fit_transform(group_headlines)
-            pairwise_sim = clustering_engine.compute_pairwise_similarity(matrix)
+            pairwise_sim = _entity_linked_similarity(
+                clustering_engine.compute_pairwise_similarity(matrix),
+                [deduped_entities[i] for i in group_indices],
+            )
 
             # RT-11: min_cluster_size = max(3, floor(group_size / 10))
             min_cluster_size = max(3, group_size // 10)
             if min_cluster_size > group_size:
                 min_cluster_size = max(2, group_size // 2)
 
-            labels = _threshold_clustering(pairwise_sim, threshold=0.3, min_size=min_cluster_size)
+            labels = _threshold_clustering(
+                pairwise_sim, threshold=_TIER2_THRESHOLD, min_size=min_cluster_size,
+            )
 
             # Build clusters from labels
             label_to_indices: dict[int, list[int]] = {}

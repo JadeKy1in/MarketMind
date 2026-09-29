@@ -3,6 +3,7 @@ import json
 import os
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -226,6 +227,43 @@ def test_dashboard_reads_scheduler_state(tmp_path, monkeypatch):
                                "reason": "exit code 1"}}}), encoding="utf-8")
     rows = whitebox.read_scheduler()
     assert [r["key"] for r in rows] == ["2026-09-28-weekday", "2026-09-27-weekend"]
+
+
+def test_dashboard_shows_degraded_steps_and_recent_skips(tmp_path, monkeypatch):
+    from marketmind.api import whitebox
+    monkeypatch.setenv("MARKETMIND_DATA_DIR", str(tmp_path))
+    (tmp_path / "scheduler").mkdir()
+    skips = [{"t": f"2026-09-28T13:0{i}:00+00:00", "reason": f"skip {i}"} for i in range(5)]
+    (tmp_path / "scheduler" / "state.json").write_text(json.dumps({"runs": {
+        "2026-09-28-weekday": {"mode": "daily", "status": "degraded",
+                               "started": "2026-09-28T12:45:00+00:00",
+                               "degraded": "evidence, report", "degraded_steps": ["evidence", "report"],
+                               "reason": "degraded: evidence, report", "skips": skips},
+        "2026-09-29-weekday": {"skips": [{"t": "2026-09-29T08:00:00+00:00",
+                                          "reason": "another run holds the lock"}]},
+        "2026-09-27-weekend": {"mode": "weekend", "status": "ok",
+                               "started": "2026-09-27T09:00:00+00:00"},
+        "junk": "not a record"}}), encoding="utf-8")
+    rows = whitebox.read_scheduler()
+    assert [r["key"] for r in rows] == ["2026-09-29-weekday", "2026-09-28-weekday",
+                                        "2026-09-27-weekend"]
+    skip_only, degraded, ok = rows
+    assert skip_only["status"] is None
+    assert skip_only["skips"] == [{"t": "2026-09-29T08:00:00+00:00",
+                                   "reason": "another run holds the lock"}]
+    assert degraded["status"] == "degraded"
+    assert degraded["degraded_steps"] == ["evidence", "report"]
+    assert [s["reason"] for s in degraded["skips"]] == ["skip 2", "skip 3", "skip 4"]
+    assert ok["degraded_steps"] == [] and ok["skips"] == []
+    assert whitebox.read_scheduler(skip_limit=0)[1]["skips"] == []
+
+
+def test_dashboard_scheduler_section_renders_degraded_and_skips():
+    html = (Path(__file__).resolve().parents[1] / "whitebox.html").read_text(encoding="utf-8")
+    section = html[html.index("自动运行（任务计划程序）"):]
+    section = section[:section.index("</table>")]
+    assert 'st==="degraded"?"yellow"' in section
+    assert "degraded_steps" in section and "r.skips" in section
 
 
 def test_crypto_shadows_for_weekend():

@@ -46,7 +46,7 @@ def test_parse_layer1_response_clean():
 
 def test_parse_layer1_response_defaults_on_empty():
     result = _parse_layer1_response("{}")
-    assert result.event_grade == "E"
+    assert result.event_grade == "unknown"  # never an invented "E"
     assert result.sentiment_direction == "neutral"
 
 
@@ -90,6 +90,22 @@ def test_regex_fallback_grade_is_unknown_when_not_stated():
     from marketmind.pipeline.layer1_narrative import _parse_layer1_response
     result = _parse_layer1_response("Markets were quiet; nothing notable happened today.")
     assert result.event_grade == "unknown"
+
+
+@pytest.mark.parametrize("payload", [
+    {"matrix_quadrant": "arbitrage"},
+    {"event_grade": None, "matrix_quadrant": "arbitrage"},
+    {"event_grade": "", "matrix_quadrant": "arbitrage"},
+])
+def test_json_reply_without_grade_is_unknown(payload):
+    result = _parse_layer1_response(json.dumps(payload))
+    assert result.event_grade == "unknown"
+    assert result.matrix_quadrant == "arbitrage"
+
+
+def test_json_reply_keeps_a_stated_grade():
+    result = _parse_layer1_response(json.dumps({"event_grade": "C"}))
+    assert result.event_grade == "C"
 
 
 def test_regex_fallback_keeps_a_stated_grade():

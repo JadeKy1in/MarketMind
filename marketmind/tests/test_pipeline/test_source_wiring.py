@@ -21,3 +21,12 @@ def test_data_fetchers_are_coroutines():
     import inspect
     for feed_type, fn in DATA_FETCHERS.items():
         assert inspect.iscoroutinefunction(fn), feed_type
+
+
+def test_bluesky_source_is_removed():
+    # Abandoned 2026-09-29: never had credentials; no source, fetcher or schema entry.
+    import importlib.util
+    from marketmind.config.flash_output_schema import TOOL_ALLOWLIST
+    assert not [s.name for s in SOURCES if "bluesky" in s.name.lower() or "bsky" in s.url]
+    assert importlib.util.find_spec("marketmind.pipeline.social_sources") is None
+    assert not [v for vs in TOOL_ALLOWLIST.values() for v in vs if "bluesky" in v]

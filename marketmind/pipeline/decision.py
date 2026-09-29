@@ -832,9 +832,17 @@ def _parse_decision_response(content: str) -> DecisionOutput:
     for d in data.get("watch_cards", []) or []:
         if not isinstance(d, dict) or not d.get("ticker"):
             continue
+        ticker = str(d["ticker"]).strip().upper()
+        raw_dir = d.get("direction")
+        direction = str(raw_dir).strip().lower() if raw_dir is not None else ""
+        if direction not in ("long", "short"):
+            # Never invent a side (was defaulted to "long").
+            logger.warning("Watch card %s dropped: direction %s", ticker,
+                           repr(raw_dir) if direction else "missing")
+            continue
         watch.append(WatchCard(
-            ticker=str(d["ticker"]).strip().upper(),
-            direction=str(d.get("direction", "long")).lower(),
+            ticker=ticker,
+            direction=direction,
             thesis=_text(_pick(d, "thesis", "why", "rationale")),
             conditions=[c for c in (d.get("conditions") or []) if isinstance(c, dict)],
             invalidation=[c for c in (d.get("invalidation") or []) if isinstance(c, dict)],
