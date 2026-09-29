@@ -2,6 +2,8 @@
 
     probation -> formal -> advisor -> (CUSUM alarm) paused -> formal (no tenure)
     blocked: roster shadow that is not live (status != active or no prompt)
+    retired: retired with the owner's approval (promotion/retirement.py); no longer
+             evaluated or ranked, its ledger history still counts as a DSR trial
 
 `evaluate` is pure: it takes ledger rows and the previous state and returns the
 new state plus the events of this run. Re-running on the same day with the same
@@ -287,24 +289,31 @@ def _event(today, kind, sid, frm, to, **detail) -> dict:
 CANDIDATE_SOURCES = ("shadow", "playground")
 
 
+def default_calendar(entries: list[LedgerEntry], today: str) -> list[str]:
+    """Exit dates of settled rows (<= today) plus every candidate's decision days."""
+    return sorted(set(M.trading_calendar(entries, until=today))
+                  | {_day(e.created_at) for e in entries
+                     if e.source_type in CANDIDATE_SOURCES and e.created_at})
+
+
 def evaluate(entries: list[LedgerEntry], roster_entries: list[RosterEntry], today: str,
              state: dict | None, trial_count: int | None = None, *,
              calendar: list[str] | None = None, active_ids: set[str] | None = None,
-             bars_for: BarsFor | None = None) -> tuple[dict, list[dict]]:
+             bars_for: BarsFor | None = None,
+             retired_ids: set[str] | None = None) -> tuple[dict, list[dict]]:
     """Run one day of the ladder. Returns (new_state, events).
 
     `active_ids` defaults to roster shadows with status active and a prompt file.
     `trial_count` overrides the DSR's effective number of trials (default: computed
     from the ledger, metrics.effective_trials over `trial_ids`).
     `bars_for(tickers) -> {ticker: bars}` feeds the Monte Carlo "beats random" gate;
-    without it that gate is not evaluable and fails closed."""
+    without it that gate is not evaluable and fails closed.
+    `retired_ids`: owner-approved retirements; they take stage "retired" and are skipped."""
     state = dict(state or {})
     prev = state.get("shadows", {})
     period = dict(state.get("period") or {"start": None, "index": 0})
     if calendar is None:
-        calendar = sorted(set(M.trading_calendar(entries, until=today))
-                          | {_day(e.created_at) for e in entries
-                             if e.source_type in CANDIDATE_SOURCES and e.created_at})
+        calendar = default_calendar(entries, today)
     cal = sorted(d for d in calendar if d and d <= today)
     if active_ids is None:
         active_ids = {r.shadow_id for r in roster_entries
@@ -313,8 +322,16 @@ def evaluate(entries: list[LedgerEntry], roster_entries: list[RosterEntry], toda
     recs: dict[str, dict] = {}
     stats: dict[str, dict] = {}
 
+    retired_ids = retired_ids or set()
     for r in roster_entries:
         rec = {**_new_record(today), **prev.get(r.shadow_id, {})}
+        if r.shadow_id in retired_ids:
+            if rec["stage"] != "retired":
+                rec.update(retired_from=rec["stage"], stage="retired", since=today,
+                           advisor_since=None)
+            rec["score"], rec["tier"], rec["bottom_streak"] = None, None, 0
+            recs[r.shadow_id] = rec
+            continue
         if r.shadow_id not in active_ids:
             if rec["stage"] != "blocked":
                 rec["resume_stage"] = rec["stage"]
@@ -456,6 +473,8 @@ def evaluate(entries: list[LedgerEntry], roster_entries: list[RosterEntry], toda
         period["start"] = today
         low = bottom({sid: c["score"] for sid, c in comp.items()})
         for sid, rec in recs.items():
+            if rec["stage"] == "retired":
+                continue
             rec["bottom_streak"] = rec.get("bottom_streak", 0) + 1 if sid in low else 0
             if rec["bottom_streak"] >= C.BOTTOM_PERIODS_FOR_CHALLENGE:
                 events.append(_event(today, "challenge", sid, rec["stage"], rec["stage"],

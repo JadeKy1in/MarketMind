@@ -73,7 +73,15 @@ EVALUATION_PERIOD_DAYS = 20
 BOTTOM_SHARE = 0.20
 BOTTOM_PERIODS_FOR_CHALLENGE = 3
 
-STAGES = ("probation", "formal", "advisor", "paused", "blocked")
+# ── Retirement -> successor (owner decision 2026-09-29, promotion/retirement.py) ──
+# Proposed (owner approval required, L1) when the latest RETIRE_FAILED_CHALLENGERS
+# decided challenger trials of a shadow all ended "failed" ("insufficient" is not a
+# failure and breaks the run) AND its mean excess return vs the domain ETF over the
+# latest evaluation window (EVALUATION_PERIOD_DAYS matured decision days) is <= 0.
+RETIRE_FAILED_CHALLENGERS = 2
+SUCCESSOR_SECTIONS = 8           # the successor methodology keeps the 8-section template
+
+STAGES = ("probation", "formal", "advisor", "paused", "blocked", "retired")
 
 
 def thresholds() -> dict:

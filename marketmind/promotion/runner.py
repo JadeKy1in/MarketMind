@@ -4,6 +4,10 @@ Files under `data_dir` (default env MARKETMIND_DATA_DIR or "data"):
 - promotion/state.json   each shadow's stage, gates, metrics, latest evaluation
 - promotion/events.jsonl promote / pause / resume / challenge, one JSON object per line
 - advisors.json          {"updated_at": ..., "advisors": [shadow ids]} read by the S8 alerts
+- promotion/retirements.json  retirement proposals (promotion/retirement.py); approved
+                         ones retire a shadow (stage "retired") and add its successor
+                         to the evaluated roster. state.json["retirements"] mirrors
+                         the pending / retired lists for the dashboard.
 
 DSR trials (fix 2026-09-29): every promotion candidate ever in the ledger (long-term
 shadows, Playground agents, challenger / beta variants; SPEC §8 "全部历史试验次数"),
@@ -27,8 +31,10 @@ from pathlib import Path
 
 from marketmind.ledger.store import LedgerEntry, LedgerStore
 from marketmind.promotion import config as C
-from marketmind.promotion.ladder import advisors, evaluate, trial_ids
+from marketmind.promotion import retirement
+from marketmind.promotion.ladder import advisors, default_calendar, evaluate, trial_ids
 from marketmind.promotion.random_mc import source_loader
+from marketmind.shadows.v3 import roster as roster_mod
 from marketmind.shadows.v3.roster import ROSTER
 
 log = logging.getLogger(__name__)
@@ -61,9 +67,28 @@ def run_promotion(store: LedgerStore, *, today: str | None = None,
 
     entries = store.list()
     trials = trial_count(entries)
-    new_state, events = evaluate(entries, list(roster), today, state,
-                                 active_ids=active_ids, bars_for=bars_for)
+    # retirement overrides (promotion/retirement.py): successors join the evaluated
+    # roster; approved retirements take stage "retired"
+    roster = list(roster)
+    known = {r.shadow_id for r in roster}
+    roster += [r for r in roster_mod.successor_entries(root) if r.shadow_id not in known]
+    retired = roster_mod.retired_ids(root)
+    if active_ids is not None:
+        active_ids = set(active_ids) - retired
+    calendar = default_calendar(entries, today)
+    new_state, events = evaluate(entries, roster, today, state, calendar=calendar,
+                                 active_ids=active_ids, bars_for=bars_for, retired_ids=retired)
     new_state["trial_count"] = trials
+    try:
+        from marketmind.shadows.v3 import trials as trials_mod
+        events += retirement.check(entries, roster, new_state, today,
+                                   trials=trials_mod.load(root / "trials"), data_dir=root,
+                                   calendar=calendar)
+    except Exception:
+        log.warning("retirement check failed", exc_info=True)
+    ret = retirement.summary(root)
+    new_state["retirements"] = {"pending": [p["shadow_id"] for p in ret["pending"]],
+                                "retired": [p["shadow_id"] for p in ret["retired"]]}
     _write_json(state_path, new_state)
 
     if events:
@@ -84,5 +109,6 @@ def run_promotion(store: LedgerStore, *, today: str | None = None,
         "advisors": names,
         "events": events,
         "trial_count": trials,
+        "retirements": ret,
         "thresholds": C.thresholds(),
     }

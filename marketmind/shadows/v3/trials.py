@@ -13,6 +13,10 @@ new trial per REPROPOSE_GAP_DAYS trading days. Wilcoxon is reported only as a
 robustness statistic. A passing trial only becomes "passed"; the owner must approve
 it before the prompt file changes (SPEC L1).
 
+The rewrite prompt also carries code-computed review facts of the parent and of the
+best same-group shadow (review_sections; owner decision 2026-09-29). A running trial
+stops deciding once its parent is retired (promotion/retirement.py).
+
 CLI: python -m marketmind.shadows.v3.trials {list,propose,approve,reject}
 """
 from __future__ import annotations
@@ -137,6 +141,40 @@ def _parent_summary(store, parent_id: str) -> str:
             f"mean Brier {s.mean_brier}, min-position share {s.min_position_share}")
 
 
+def _promotion_state(folder: Path | None) -> dict:
+    """data/promotion/state.json next to the trials folder ({} when absent / unreadable)."""
+    p = (folder or base_dir()).parent / "promotion" / "state.json"
+    try:
+        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except (OSError, ValueError):
+        logger.warning("promotion state unreadable; no reference shadow for the trial prompt")
+        return {}
+
+
+def review_sections(store, parent: RosterEntry, folder: Path | None = None) -> str:
+    """Inheritance inputs (owner decision 2026-09-29): code-computed review facts of the
+    parent's settled records, and the same facts of the best same-group shadow by
+    composite score as a clearly labelled reference (its statistics, never its text).
+    Each facts section is capped at review_facts.MAX_CHARS."""
+    from marketmind.promotion.retirement import best_peer
+    from marketmind.promotion.review_facts import format_facts, review_facts
+    if store is None:
+        return ""
+    shadows = store.list(source_type="shadow")
+
+    def facts(sid: str) -> str:
+        return format_facts(review_facts([e for e in shadows if e.source_id == sid]))
+    out = ("\n\n## 该影子复盘事实（代码计算，来自账本 review 字段）\n\n"
+           + facts(parent.shadow_id))
+    peer, peer_score, match = best_peer(parent, roster_mod.active(), _promotion_state(folder))
+    if peer is None or match != "group":
+        return out + "\n\n## 参考：同组表现最好的影子\n\n（同组还没有进入综合排名的其他影子）"
+    return out + (f"\n\n## 参考：同组综合分最高的另一个影子（{peer.display_name}，综合分 "
+                  f"{peer_score:.3f}）的复盘事实\n\n这是另一个影子的统计数字，不是它的方法论，"
+                  f"也不是本影子的成绩；只用来说明本组里什么做法有效。\n\n"
+                  + facts(peer.shadow_id))
+
+
 async def _call_llm(system: str, user: str) -> str:
     from marketmind.gateway import usage_tracker
     from marketmind.gateway.async_client import chat_flash
@@ -149,6 +187,18 @@ async def _call_llm(system: str, user: str) -> str:
     if result.get("error"):
         raise RuntimeError(f"LLM error: {result.get('error')}")
     return result.get("content") or ""
+
+
+async def rewrite(original: str, system: str, user: str, call=_call_llm) -> str:
+    """One LLM rewrite of a methodology, format-checked against `original` (same "## "
+    headings in the same order, 0.5-2x its length). Shared by variant trials and
+    retirement successors (promotion/retirement.py). Raises ValueError when rejected."""
+    variant = (await call(system, user)).strip()
+    variant = re.sub(r"^```(?:markdown|md)?\s*|\s*```$", "", variant)
+    errors = validate_variant(original, variant)
+    if errors:
+        raise ValueError("variant rejected: " + "; ".join(errors))
+    return variant
 
 
 def trial_bars_for(hold: int) -> int:
@@ -188,12 +238,9 @@ async def propose(parent_id: str, kind: str, note: str, *, store=None, call=_cal
         raise ValueError("a change note is required")
     original = roster_mod.load_prompt(parent)
     user = (f"## 原方法论\n\n{original}\n\n## 改动说明\n\n{note}\n\n"
-            f"## 该影子账本成绩\n\n{_parent_summary(store, parent_id)}")
-    variant = (await call(SYSTEM_PROMPT, user)).strip()
-    variant = re.sub(r"^```(?:markdown|md)?\s*|\s*```$", "", variant)
-    errors = validate_variant(original, variant)
-    if errors:
-        raise ValueError("variant rejected: " + "; ".join(errors))
+            f"## 该影子账本成绩\n\n{_parent_summary(store, parent_id)}"
+            + review_sections(store, parent, folder))
+    variant = await rewrite(original, SYSTEM_PROMPT, user, call)
     trial = Trial(uuid.uuid4().hex[:8], kind, parent_id, note.strip()[:500], today,
                   add_trading_days(today, trial_bars_for(parent_hold(store, parent_id))))
     pf = prompt_file(trial.trial_id, folder)
@@ -218,12 +265,14 @@ def roster_entries(folder: Path | None = None, today: str | None = None) -> list
     """Variants that still decide today. After `ends` a trial only waits for its
     records to settle; its later decisions would not count, so it stops calling the LLM."""
     by_id = roster_mod.by_id()
+    retired = roster_mod.retired_ids()      # a retired parent's trial stops calling the LLM
     today = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     out = []
     for t in load(folder):
         parent = by_id.get(t.parent_id)
         pf = prompt_file(t.trial_id, folder)
-        if t.status != "running" or t.ends <= today or parent is None or not pf.exists():
+        if (t.status != "running" or t.ends <= today or parent is None or not pf.exists()
+                or t.parent_id in retired):
             continue
         out.append(RosterEntry(
             shadow_id=f"trial:{t.trial_id}", name=f"trial_{parent.name}_{t.trial_id[:4]}",
@@ -406,7 +455,9 @@ def resolve(trial_id: str, approve: bool, *, folder: Path | None = None,
         raise ValueError(f"trial already {t.status}")
     if approve:
         parent = roster_mod.by_id()[t.parent_id]
-        target = (prompt_dir or roster_mod.PROMPT_DIR) / f"{parent.name}.md"
+        # a retirement successor keeps its methodology in the data dir (roster.prompt_file)
+        target = (parent.prompt_path if parent.prompt_file
+                  else (prompt_dir or roster_mod.PROMPT_DIR) / f"{parent.name}.md")
         stamp = datetime.now().strftime("%Y%m%d-%H%M")
         shutil.copy2(target, target.with_name(f"{target.name}.{stamp}.bak"))
         target.write_text(prompt_file(t.trial_id, folder).read_text(encoding="utf-8"),
