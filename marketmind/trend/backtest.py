@@ -175,8 +175,13 @@ def big_move_bars(ticker: str) -> int:
 
 def backtest_instrument(ticker: str, bars: Sequence[Bar], cfg: TrendConfig,
                         hurdle: float | Callable[[str], float], source: str = "") -> InstrumentResult:
+    return result_from_sim(simulate(ticker, bars, cfg, hurdle), source)
+
+
+def result_from_sim(sim: SimResult, source: str = "") -> InstrumentResult:
+    """Per-instrument metrics for a finished simulation (single or lean joint)."""
+    ticker, bars = sim.ticker, sim.bars
     cost = one_way_cost(ticker)
-    sim = simulate(ticker, bars, cfg, hurdle)
     net, gross, held = daily_returns(bars, sim.trades, cost)
     s = sim.first_ready
     res = InstrumentResult(ticker, source, bars[0].date, bars[-1].date,
