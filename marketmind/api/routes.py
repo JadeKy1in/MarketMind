@@ -190,6 +190,12 @@ async def wb_discovery(date: str = ""):
     return _wb(whitebox.get_discovery, date or None)
 
 
+@app.get("/api/wb/trend")
+async def wb_trend(date: str = ""):
+    from marketmind.api import whitebox
+    return _wb(whitebox.get_trend, date or None)
+
+
 @app.get("/api/wb/holdings")
 async def wb_holdings():
     from marketmind.api import whitebox

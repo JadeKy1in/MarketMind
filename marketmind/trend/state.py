@@ -61,29 +61,42 @@ class SimResult:
     first_ready: int | None = None   # first bar where every indicator exists
 
 
-def simulate(ticker: str, bars: Sequence[Bar], cfg: TrendConfig,
-             hurdle: float | Callable[[str], float] = 0.0) -> SimResult:
-    """Replay the rules over `bars` (complete daily bars, ascending).
+class Stepper:
+    """One instrument's state machine, advanced one bar at a time.
 
-    `hurdle` is the annual T-bill return used as the 12-month momentum threshold: a
-    constant, or a function of the bar date (the backtest's point-in-time ^IRX mean).
+    `simulate` drives it alone; the lean joint simulator (trend.lean) drives several
+    and may veto an entry. Per bar: `manage(t)` (fills/exits at the open, exit check
+    at the close, stop update) returns True when the instrument is flat and every
+    indicator exists; then `signal(t)` says whether the entry conditions hold and
+    `enter(t)` opens the trade (a vetoed signal is left as WATCH).
     """
-    ind = indicators(ticker, bars, cfg)
-    n = len(bars)
-    states: list[str] = [CASH] * n
-    stops: list[float | None] = [None] * n
-    hurdles = [float(hurdle(b.date)) if callable(hurdle) else float(hurdle) for b in bars]
-    res = SimResult(ticker, bars, ind, states, stops, hurdles)
-    trade: Trade | None = None
-    stop = hc = 0.0
-    for t in range(n):
+
+    def __init__(self, ticker: str, bars: Sequence[Bar], cfg: TrendConfig,
+                 hurdle: float | Callable[[str], float] = 0.0):
+        self.cfg = cfg
+        ind = indicators(ticker, bars, cfg)
+        n = len(bars)
+        hurdles = [float(hurdle(b.date)) if callable(hurdle) else float(hurdle) for b in bars]
+        self.res = SimResult(ticker, bars, ind, [CASH] * n, [None] * n, hurdles)
+        self.trade: Trade | None = None
+        self.stop = self.hc = 0.0
+
+    @property
+    def open_trade(self) -> Trade | None:
+        """The trade held (or pending fill) with no exit signal yet."""
+        tr = self.trade
+        return tr if tr is not None and tr.exit_signal_idx is None else None
+
+    def manage(self, t: int) -> bool:
+        res, cfg, ind, bars = self.res, self.cfg, self.res.ind, self.res.bars
         c = ind.close[t]
+        trade = self.trade
         # a pending fill / exit happens at this bar's open
         if trade is not None and trade.fill_idx is None:
             trade.fill_idx, trade.fill_date, trade.fill_price = t, bars[t].date, bars[t].open
         if trade is not None and trade.exit_signal_idx is not None:
             trade.exit_idx, trade.exit_date, trade.exit_price = t, bars[t].date, bars[t].open
-            trade = None
+            trade = self.trade = None
         r12, smaf, hp, atr = ind.ret_12m[t], ind.sma_filter[t], ind.high_prior[t], ind.atr[t]
         ready = None not in (r12, smaf, hp, atr) and (
             cfg.exit_rule != EXIT_SMA or ind.sma_exit[t] is not None)
@@ -91,31 +104,63 @@ def simulate(ticker: str, bars: Sequence[Bar], cfg: TrendConfig,
             res.first_ready = t
         if trade is not None:                       # holding (signal was on an earlier bar)
             if cfg.exit_rule == EXIT_SMA:
-                hit, why = ind.sma_exit[t] is not None and c < ind.sma_exit[t], \
-                    f"close < SMA{cfg.exit_sma}"
+                hit, why = ind.sma_exit[t] is not None and c < ind.sma_exit[t],                     f"close < SMA{cfg.exit_sma}"
             else:
-                hit, why = c < stop, f"close < chandelier stop {stop:.4f}"
+                hit, why = c < self.stop, f"close < chandelier stop {self.stop:.4f}"
             if hit:
                 trade.exit_signal_idx, trade.exit_signal_date = t, bars[t].date
                 trade.exit_reason = why
-                states[t] = EXIT
-                continue
-            hc = max(hc, c)
+                res.states[t] = EXIT
+                return False
+            self.hc = max(self.hc, c)
             if atr is not None:
-                stop = max(stop, hc - cfg.atr_mult * atr)
-            states[t], stops[t] = TREND, stop
-            continue
-        if not ready:
-            continue
-        filters = r12 > hurdles[t] and c > smaf
-        if filters and c > hp:
-            hc, stop = c, c - cfg.atr_mult * atr
-            trade = Trade(ticker, t, bars[t].date, c, stop, r12, hurdles[t])
-            res.trades.append(trade)
-            states[t], stops[t] = TREND, stop
-        elif filters:
-            states[t] = WATCH
-    return res
+                self.stop = max(self.stop, self.hc - cfg.atr_mult * atr)
+            res.states[t], res.stops[t] = TREND, self.stop
+            return False
+        return ready
+
+    def signal(self, t: int) -> bool:
+        """Flat and ready: True on an entry signal; marks WATCH when only the breakout is missing."""
+        ind, res = self.res.ind, self.res
+        c = ind.close[t]
+        filters = ind.ret_12m[t] > res.hurdles[t] and c > ind.sma_filter[t]
+        if filters and c > ind.high_prior[t]:
+            return True
+        if filters:
+            res.states[t] = WATCH
+        return False
+
+    def excess(self, t: int) -> float | None:
+        r12 = self.res.ind.ret_12m[t]
+        return None if r12 is None else r12 - self.res.hurdles[t]
+
+    def enter(self, t: int) -> Trade:
+        res, ind = self.res, self.res.ind
+        c = ind.close[t]
+        self.hc, self.stop = c, c - self.cfg.atr_mult * ind.atr[t]
+        self.trade = Trade(res.ticker, t, res.bars[t].date, c, self.stop, ind.ret_12m[t],
+                           res.hurdles[t])
+        res.trades.append(self.trade)
+        res.states[t], res.stops[t] = TREND, self.stop
+        return self.trade
+
+    def veto(self, t: int) -> None:
+        """An entry signal the caller did not take: the instrument stays flat (WATCH)."""
+        self.res.states[t] = WATCH
+
+
+def simulate(ticker: str, bars: Sequence[Bar], cfg: TrendConfig,
+             hurdle: float | Callable[[str], float] = 0.0) -> SimResult:
+    """Replay the rules over `bars` (complete daily bars, ascending).
+
+    `hurdle` is the annual T-bill return used as the 12-month momentum threshold: a
+    constant, or a function of the bar date (the backtest's point-in-time ^IRX mean).
+    """
+    st = Stepper(ticker, bars, cfg, hurdle)
+    for t in range(len(bars)):
+        if st.manage(t) and st.signal(t):
+            st.enter(t)
+    return st.res
 
 
 @dataclass
@@ -186,25 +231,32 @@ def compute_states(histories: dict[str, Sequence[Bar] | None], hurdle: float = 0
     out: dict[str, TrendState] = {}
     for ticker, bars in histories.items():
         src = (sources or {}).get(ticker)
-        if not bars:
-            out[ticker] = TrendState(ticker, UNAVAILABLE, source=src,
-                                     reason="no price history (all sources failed)")
-            continue
-        need = cfg.min_bars(ticker)
-        last = bars[-1].date
-        if len(bars) < need:
-            out[ticker] = TrendState(ticker, UNAVAILABLE, as_of=last, bars=len(bars), source=src,
-                                     reason=f"insufficient history: {len(bars)} < {need} bars")
-            continue
-        age = (today - date.fromisoformat(last)).days
-        if age > cfg.max_staleness_days:
-            out[ticker] = TrendState(ticker, UNAVAILABLE, as_of=last, bars=len(bars), source=src,
-                                     reason=f"stale: last complete bar {last} is {age} days old")
+        bad = unavailable_state(ticker, bars, cfg, today, src)
+        if bad is not None:
+            out[ticker] = bad
             continue
         st = state_from_sim(simulate(ticker, bars, cfg, hurdle), cfg)
         st.hurdle_source, st.source = hurdle_source, src
         out[ticker] = st
     return out
+
+
+def unavailable_state(ticker: str, bars: Sequence[Bar] | None, cfg: TrendConfig, today: date,
+                      src: str | None = None) -> TrendState | None:
+    """UNAVAILABLE with the reason (no history, too short, stale), or None when usable."""
+    if not bars:
+        return TrendState(ticker, UNAVAILABLE, source=src,
+                          reason="no price history (all sources failed)")
+    need = cfg.min_bars(ticker)
+    last = bars[-1].date
+    if len(bars) < need:
+        return TrendState(ticker, UNAVAILABLE, as_of=last, bars=len(bars), source=src,
+                          reason=f"insufficient history: {len(bars)} < {need} bars")
+    age = (today - date.fromisoformat(last)).days
+    if age > cfg.max_staleness_days:
+        return TrendState(ticker, UNAVAILABLE, as_of=last, bars=len(bars), source=src,
+                          reason=f"stale: last complete bar {last} is {age} days old")
+    return None
 
 
 def hurdle_from_tbill(bars: Sequence[Bar], window: int = 252) -> float | None:
@@ -215,14 +267,12 @@ def hurdle_from_tbill(bars: Sequence[Bar], window: int = 252) -> float | None:
     return sum(vals) / len(vals) / 100.0
 
 
-async def today_states(tickers: Sequence[str] | None = None,
-                       cfg: TrendConfig | None = None) -> dict[str, TrendState]:
-    """Fetch complete daily bars (5-year replay window) and compute today's states.
-    Network I/O; not used by tests."""
+async def fetch_inputs(tickers: Sequence[str]) -> tuple[dict, dict, float, str]:
+    """(complete bars by ticker, source by ticker, hurdle, hurdle source) on the 5-year
+    replay window. Network I/O; not used by tests."""
     from marketmind.gateway.price_history import complete_bars, get_price_histories, get_price_history
-    from marketmind.trend.universe import TBILL_PROXY, TREND_UNIVERSE
-    tickers = list(tickers or TREND_UNIVERSE)
-    hists = await get_price_histories(tickers, years=5)
+    from marketmind.trend.universe import TBILL_PROXY
+    hists = await get_price_histories(list(tickers), years=5)
     irx = await get_price_history(TBILL_PROXY, years=2)
     hurdle, src = None, "unavailable -> 0"
     if irx is not None:
@@ -234,4 +284,13 @@ async def today_states(tickers: Sequence[str] | None = None,
         hurdle = 0.0
     bars = {t: (complete_bars(t, h.daily) if h else None) for t, h in hists.items()}
     sources = {t: h.source for t, h in hists.items() if h}
+    return bars, sources, hurdle, src
+
+
+async def today_states(tickers: Sequence[str] | None = None,
+                       cfg: TrendConfig | None = None) -> dict[str, TrendState]:
+    """Fetch complete daily bars (5-year replay window) and compute today's states.
+    Network I/O; not used by tests."""
+    from marketmind.trend.universe import TREND_UNIVERSE
+    bars, sources, hurdle, src = await fetch_inputs(list(tickers or TREND_UNIVERSE))
     return compute_states(bars, hurdle, cfg, hurdle_source=src, sources=sources)

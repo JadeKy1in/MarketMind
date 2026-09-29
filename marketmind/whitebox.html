@@ -60,6 +60,7 @@ button.act:disabled{opacity:.5}
   <section id="s-arena"></section>
   <section id="s-promo"></section>
   <section id="s-discovery"></section>
+  <section id="s-trend"></section>
   <section id="s-evidence"></section>
   <section id="s-holdings"></section>
   <section id="s-alerts"></section>
@@ -68,7 +69,7 @@ button.act:disabled{opacity:.5}
 </main>
 <div id="drawer"></div>
 <script>
-const TABS=[["brief","今日简报"],["chain","主管线推理链"],["ledger","统一账本"],["arena","影子竞技场"],["promo","晋升淘汰日志"],["discovery","冷门发现"],["evidence","证据层"],["holdings","实盘持仓"],["alerts","大行情警报"],["health","系统健康"],["reporter","汇报员"]];
+const TABS=[["brief","今日简报"],["chain","主管线推理链"],["ledger","统一账本"],["arena","影子竞技场"],["promo","晋升淘汰日志"],["discovery","冷门发现"],["trend","趋势状态"],["evidence","证据层"],["holdings","实盘持仓"],["alerts","大行情警报"],["health","系统健康"],["reporter","汇报员"]];
 const $=s=>document.querySelector(s);
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const NA='<span class="mut">无数据</span>';
@@ -223,6 +224,29 @@ async function loadDiscovery(){
   <div class="card"><h2>按数据来源的成绩</h2>${o?`<table><tr><th>来源</th><th class="num">记录</th><th class="num">已结算</th><th class="num">胜率</th><th class="num">平均净收益</th><th class="num">Brier</th></tr>${o}</table>`:'<div class="empty">还没有带来源的账本记录</div>'}</div>`;
 }
 
+// ── trend state machine (TREND_DESIGN §9) ──
+const TSTATE={TREND:["持有中","green"],EXIT:["离场信号","red"],WATCH:["待突破","yellow"],CASH:["空仓",""],UNAVAILABLE:["不可用",""]};
+async function loadTrend(){
+  const d=await j("/api/wb/trend");
+  if(!d.available){$("#s-trend").innerHTML=`<div class="card empty">趋势状态：${esc(d.reason||"无数据")}</div>`;return}
+  const c=d.counts||{},ch=d.changes||{},lean=d.lean||{},ls=lean.states||{};
+  const list=a=>(a||[]).length?a.map(esc).join("，"):"无";
+  const st=s=>{const x=TSTATE[s]||[s,""];return `<span class="chip ${x[1]}">${esc(x[0])}</span>`};
+  const rows=(d.rows||[]).map(r=>`<tr><td><b>${esc(r.ticker)}</b>${r.lean_group?` <span class="chip">精简</span>`:""}</td><td>${st(r.state)}${r.event?` <span class="mut">${r.event==="ENTRY"?"今日入场信号":"今日离场信号"}</span>`:""}</td><td class="mut">${esc(r.as_of||"—")}${r.carried?' <span class="chip yellow">沿用上一份</span>':""}</td><td class="num">${num(r.close,2)}</td><td class="num">${pct(r.excess_12m)}</td><td class="num">${num(r.sma200,2)}</td><td class="num">${num(r.high_55,2)}</td><td class="num">${r.stop_level==null?'<span class="mut">—</span>':num(r.stop_level,2)}</td><td class="mut">${esc(r.entry_signal_date||"")}</td><td class="mut">${esc(r.reason||"")}</td></tr>`).join("");
+  const lrows=Object.entries(ls).map(([t,s])=>`<tr><td><b>${esc(t)}</b></td><td class="mut">${esc((lean.groups||{})[t]||t)}</td><td>${st(s.state)}</td><td class="num">${s.stop_level==null?'<span class="mut">—</span>':num(s.stop_level,2)}</td><td class="mut">${esc(s.entry_signal_date||"")}</td><td class="mut">${esc(s.reason||"")}</td></tr>`).join("");
+  $("#s-trend").innerHTML=`<div class="card"><h2>趋势状态 ${esc(d.date||"")} <span class="chip ${d.mode==="weekend"?"yellow":""}">${d.mode==="weekend"?"周末（只更新加密）":"每日"}</span></h2>
+  <div class="mut" style="margin-bottom:8px">纯代码状态机（55 日收盘突破 + 收盘高于 SMA200 + 12 个月收益高于 T-bill 入场；吊灯 3×ATR20 止损离场，次日开盘成交）。<b>尚未接入警报，不是交易指令。</b> 门槛 ${d.hurdle==null?"?":(d.hurdle*100).toFixed(2)+"%"}（${esc(d.hurdle_source||"")}）。</div>
+  <div class="grid">
+   <div class="stat"><div class="k">持有中 TREND</div><div class="v">${c.TREND??0}</div></div>
+   <div class="stat"><div class="k">空仓（含待突破 / 离场）</div><div class="v">${(c.CASH??0)+(c.WATCH??0)+(c.EXIT??0)}</div></div>
+   <div class="stat"><div class="k">不可用</div><div class="v">${c.UNAVAILABLE??0}</div></div>
+   <div class="stat"><div class="k">精简版最强行业</div><div class="v">${esc(lean.strongest_sector||"—")}</div></div>
+  </div>
+  <h3>今日变化</h3><div>入场：${list((ch.full||{}).entries)}；离场：${list((ch.full||{}).exits)}<span class="mut">（精简版 入场：${list((ch.lean||{}).entries)}；离场：${list((ch.lean||{}).exits)}）</span></div></div>
+  <div class="card"><h2>全池 ${(d.rows||[]).length} 个标的</h2><div class="tw"><table><tr><th>标的</th><th>状态</th><th>数据日期</th><th class="num">收盘</th><th class="num">12 月超额收益</th><th class="num">SMA200</th><th class="num">55 日高</th><th class="num">止损位</th><th>入场信号日</th><th>说明</th></tr>${rows}</table></div></div>
+  <div class="card"><h2>精简版（每组最多一个仓位）</h2>${lrows?`<div class="tw"><table><tr><th>标的</th><th>相关组</th><th>状态</th><th class="num">止损位</th><th>入场信号日</th><th>说明</th></tr>${lrows}</table></div>`:'<div class="empty">无</div>'}</div>`;
+}
+
 // ── evidence (S5) ──
 async function loadEvidence(){
   const d=await j("/api/wb/evidence");
@@ -317,7 +341,7 @@ async function loadAlerts(){
   <h3>接近触发（满足 2 条）</h3>${(r.near_misses||[]).length?`<table><tr><th>标的</th><th>A 一致</th><th>B 背离</th><th>C 趋势</th><th>说明</th></tr>${r.near_misses.map(row).join("")}</table>`:'<div class="empty">无</div>'}</div>
   <div class="card"><h2>历史警报与你的回应</h2>${(d.history||[]).length?`<table><tr><th>记录</th><th>日期</th><th>模式</th><th>标的</th><th>回应</th><th>状态</th><th class="num">净收益</th></tr>${d.history.map(h=>`<tr><td>${idl(h.entry_id)}</td><td>${esc(String(h.created_at).slice(0,10))}</td><td>${esc(h.mode)}</td><td>${esc(h.ticker)}</td><td>${h.response==="accept"?"接受":h.response==="reject"?"拒绝（放弃）":'<span class="mut">未回应</span>'}</td><td>${STATUS[h.status]||esc(h.status)}</td><td class="num">${pct(h.net_return)}</td></tr>`).join("")}</table>`:'<div class="empty">还没有警报</div>'}</div>`;
 }
-const LOAD={brief:loadBrief,alerts:loadAlerts,chain:loadChain,ledger:loadLedger,arena:loadArena,promo:loadPromo,evidence:loadEvidence,discovery:loadDiscovery,holdings:loadHoldings,health:loadHealth,reporter:loadReporter};
+const LOAD={brief:loadBrief,alerts:loadAlerts,chain:loadChain,ledger:loadLedger,arena:loadArena,promo:loadPromo,evidence:loadEvidence,discovery:loadDiscovery,trend:loadTrend,holdings:loadHoldings,health:loadHealth,reporter:loadReporter};
 $("#meta").textContent="只读 · 数据来自账本与运行文件";
 let start="brief";try{start=localStorage.getItem("wb.tab")||"brief"}catch(e){}
 show(TABS.some(t=>t[0]===start)?start:"brief");

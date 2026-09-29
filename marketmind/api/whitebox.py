@@ -313,6 +313,45 @@ def get_discovery(date: str | None = None) -> dict:
             "reason": None if report is not None else "冷门数据扫描尚未运行（每日运行后生成）"}
 
 
+# ── trend state machine (docs/TREND_DESIGN.md §9) ───────────────────────────
+
+_TREND_ORDER = {"TREND": 0, "EXIT": 1, "WATCH": 2, "CASH": 3, "UNAVAILABLE": 4}
+
+
+def get_trend(date: str | None = None) -> dict:
+    """Latest (or given) data/trend/<date>.json. A weekend file holds crypto only; the
+    other instruments are carried from their most recent earlier file and flagged."""
+    from marketmind.trend.daily import load, previous_states, trend_dir
+    if date and not _DATE_RE.match(date):
+        return {"available": False, "reason": "date must be YYYY-MM-DD"}
+    day, doc = load(data_dir(), date)
+    if doc is None:
+        return {"available": False, "date": day,
+                "reason": "趋势状态尚未运行（每日运行后生成 data/trend/）"}
+    full = dict(doc.get("full") or {})
+    carried = set()
+    for t, s in previous_states(trend_dir(data_dir()), day, "full").items():
+        if t not in full:
+            full[t] = s
+            carried.add(t)
+    lean = doc.get("lean") or {}
+    groups = lean.get("groups") or {}
+    rows = []
+    for t, s in full.items():
+        r12, h = s.get("ret_12m"), s.get("hurdle")
+        rows.append({k: s.get(k) for k in ("state", "event", "as_of", "close", "ret_12m", "hurdle",
+                                          "sma200", "high_55", "stop_level", "entry_signal_date",
+                                          "reason")}
+                    | {"ticker": t, "excess_12m": None if r12 is None or h is None else r12 - h,
+                       "lean_group": groups.get(t), "carried": t in carried})
+    rows.sort(key=lambda r: (_TREND_ORDER.get(r["state"], 9), r["ticker"]))
+    counts = {k: sum(r["state"] == k for r in rows) for k in _TREND_ORDER}
+    return {"available": True, "date": day, "mode": doc.get("mode"),
+            "written_at": doc.get("written_at"), "hurdle": doc.get("hurdle"),
+            "hurdle_source": doc.get("hurdle_source"), "counts": counts,
+            "changes": doc.get("changes"), "lean": lean, "rows": rows}
+
+
 # ── owner holdings (S6) ─────────────────────────────────────────────────────
 
 def get_holdings() -> dict:
