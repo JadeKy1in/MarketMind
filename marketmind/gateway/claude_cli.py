@@ -93,17 +93,23 @@ async def call(system_prompt: str, user_prompt: str, tier: str) -> dict:
         _sem = asyncio.Semaphore(MAX_CONCURRENCY)
     model = model_for(tier)
     fd, system_file = tempfile.mkstemp(prefix="mm_sys_", suffix=".txt", dir=_workdir())
+    ufd, user_file = tempfile.mkstemp(prefix="mm_usr_", suffix=".txt", dir=_workdir())
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(system_prompt)
+        with os.fdopen(ufd, "wb") as f:
+            f.write(user_prompt.encode("utf-8"))
         async with _sem:
-            proc = await asyncio.create_subprocess_exec(
-                *build_args(exe, model, system_file), cwd=str(_workdir()),
-                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE)
+            # The prompt is the child's stdin as a FILE, not a pipe we write to: `claude -p`
+            # gives up after 3 s without stdin data, and a busy event loop (seen on
+            # 2026-09-29, every call fell back to DeepSeek) could not write it in time.
+            with open(user_file, "rb") as stdin:
+                proc = await asyncio.create_subprocess_exec(
+                    *build_args(exe, model, system_file), cwd=str(_workdir()),
+                    stdin=stdin, stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE)
             try:
-                out, err = await asyncio.wait_for(proc.communicate(user_prompt.encode("utf-8")),
-                                                  timeout=TIMEOUT_S)
+                out, err = await asyncio.wait_for(proc.communicate(), timeout=TIMEOUT_S)
             except asyncio.TimeoutError:
                 _kill(proc)
                 await proc.wait()
@@ -121,7 +127,8 @@ async def call(system_prompt: str, user_prompt: str, tier: str) -> dict:
     except Exception as e:
         return {"content": "", "error": f"claude: {type(e).__name__}: {e}"}
     finally:
-        try:
-            os.unlink(system_file)
-        except OSError:
-            pass
+        for path in (system_file, user_file):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass

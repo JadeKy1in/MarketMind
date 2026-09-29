@@ -462,7 +462,8 @@ def _run_locked(slot: str, key: str, now: datetime, state_path: Path) -> int:
     save_state(state_path, state)
 
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
-    cmd = [sys.executable, str(ROOT / "marketmind" / "app.py"), "--mode", MODES[slot]]
+    # --verbose: stage lines with wall-clock and elapsed times in the run log
+    cmd = [sys.executable, str(ROOT / "marketmind" / "app.py"), "--mode", MODES[slot], "--verbose"]
     try:
         with log_path.open("a", encoding="utf-8") as log:
             log.write(f"\n===== {now.isoformat(timespec='seconds')} attempt {rec['attempts']}: "

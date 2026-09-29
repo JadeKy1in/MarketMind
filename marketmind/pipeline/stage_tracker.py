@@ -70,7 +70,8 @@ class StageTracker:
                 total_elapsed = now - self.total_start
                 prev_label = self._stage_msgs.get(prev_stage, "").split(":")[0].strip()
                 timing = f" ({prev_label}: {self._fmt(prev_elapsed)} | total: {self._fmt(total_elapsed)})"
-            print(f"[{stage}/9] {msg}{timing}")
+            # wall-clock time too: scheduled-run logs need it to see where a slow day went
+            print(f"[{stage}/9] {time.strftime('%H:%M:%S')} {msg}{timing}")
 
     def result(self, msg: str) -> None:
         if self.verbose:

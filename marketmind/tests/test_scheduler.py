@@ -79,7 +79,7 @@ def test_run_records_status_and_skips_second_trigger(tmp_path, monkeypatch):
     assert sr.main(["--slot", "weekday"]) == 0
     state = json.loads((tmp_path / "data" / "scheduler" / "state.json").read_text("utf-8"))
     run = state["runs"]["2026-09-28-weekday"]
-    assert run["status"] == "ok" and run["attempts"] == 1 and calls[0][-2:] == ["--mode", "daily"]
+    assert run["status"] == "ok" and run["attempts"] == 1 and calls[0][-3:] == ["--mode", "daily", "--verbose"]
     assert sr.main(["--slot", "weekday"]) == 0 and len(calls) == 1
     assert not (tmp_path / "data" / "scheduler" / "run.lock").exists()
 
@@ -490,4 +490,4 @@ def test_second_weekend_trigger_retries_a_failed_weekend_run(tmp_path, monkeypat
     for hour in (9, 11):                         # Saturday 12:00 and 14:00 Riyadh
         sr.main(["--slot", "weekend"], now=utc(2026, 10, 3, hour, 0))
     rec = sr.load_state(tmp_path / "data" / "scheduler" / "state.json")["runs"]["2026-10-03-weekend"]
-    assert len(calls) == 2 and rec["status"] == "ok" and calls[0][-1] == "weekend"
+    assert len(calls) == 2 and rec["status"] == "ok" and calls[0][-2:] == ["weekend", "--verbose"]

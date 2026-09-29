@@ -156,3 +156,26 @@ async def test_own_timeout_kills_the_child(monkeypatch, tmp_path):
     monkeypatch.setattr(claude_cli.asyncio, "create_subprocess_exec", fake_exec)
     out = await claude_cli.call("sys", "user", "flash")
     assert proc.killed and "timed out" in out["error"]
+
+
+def test_prompt_is_passed_as_a_stdin_file(monkeypatch):
+    """`claude -p` gives up after 3 s without stdin data; the prompt must already be
+    readable when the child starts, so stdin is a file, not a pipe written later."""
+    import asyncio as _asyncio
+    seen = {}
+
+    class _Proc:
+        returncode = 0
+
+        async def communicate(self, _input=None):
+            seen["input"] = _input
+            return (b'{"type":"result","subtype":"success","is_error":false,"result":"OK",'
+                    b'"usage":{"input_tokens":1,"output_tokens":1}}', b"")
+
+    async def fake_exec(*args, stdin=None, **kw):
+        seen["stdin_text"] = stdin.read().decode("utf-8")
+        return _Proc()
+    monkeypatch.setattr(claude_cli, "_executable", lambda: "claude")
+    monkeypatch.setattr(claude_cli.asyncio, "create_subprocess_exec", fake_exec)
+    r = _asyncio.run(claude_cli.call("sys", "用户提示 ping", "flash"))
+    assert r["content"] == "OK" and seen["stdin_text"] == "用户提示 ping" and seen["input"] is None
