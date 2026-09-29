@@ -45,6 +45,12 @@ Rules (all code, no judgement; see docs/S2_DESIGN.md §4):
   Only complete bars are used (price_history.complete_bars: each market's own
   session close; UTC days for crypto/FX), because a data source returns the
   running session as a partial bar.
+  Close-only bars (price_history.is_close_only: O=H=L=C, no volume; the true range is
+          unknown) are evaluated on the close alone: a fill on one is at its close (the
+          entry gap rules then apply to that close), stop / target count only when the
+          close is at or beyond them and exit at the close. A one-bar record whose fill
+          bar is close-only is void ("close_only": fill-to-close is unknowable). The
+          settle_note names the close-only bars in the window used.
 """
 from __future__ import annotations
 
@@ -197,17 +203,45 @@ def is_crypto(e: LedgerEntry) -> bool:
     return e.asset_type == "crypto" or e.ticker.upper().endswith("-USD")
 
 
+def _close_view(b: Bar) -> Bar:
+    """A close-only bar as the simulation sees it: open = high = low = close."""
+    if not getattr(b, "close_only", False):
+        return b
+    return replace(b, open=b.close, high=b.close, low=b.close)
+
+
+def _bars_used(e: LedgerEntry, out: Outcome, after: list[Bar]) -> list[Bar]:
+    """The bars the outcome was decided on (for the close-only note)."""
+    if out.exit_index is not None:
+        return after[:out.exit_index + 1]
+    if out.fill is not None:
+        return after[:out.fill.index + e.hold_bars]
+    return after[:entry_window(e) if e.entry_rule == "zone" else 1]
+
+
 def simulate(e: LedgerEntry, bars: list[Bar], decision_price: float | None = None) -> Outcome:
     """`decision_price`: the snapshot price at decision time in the current series; a
-    gap through the stop at the open is measured from it (see _simulate)."""
+    gap through the stop at the open is measured from it (see _simulate).
+    Close-only bars are simulated on their close alone (see the module docstring)."""
     after = bars_after_creation(e, bars)
     gap = None
     if is_crypto(e):
         # 24/7 market: bar index == calendar day only without holes (never estimated)
         after, gap = calendar_run(e, after)
-    out = _simulate(e, after, decision_price)
+    out = _simulate(e, [_close_view(b) for b in after], decision_price)
+    if (out.status == "settled" and e.hold_bars <= 1 and out.fill is not None
+            and getattr(after[out.fill.index], "close_only", False)):
+        out = Outcome("void", f"one-bar record on a close-only bar {after[out.fill.index].date}: "
+                              "open unknown, fill-to-close not scored", exit_reason="close_only")
     if gap and out.status in UNSETTLED:
         out.note = f"data gap {gap}"
+    close_only = [b.date for b in _bars_used(e, out, after) if getattr(b, "close_only", False)]
+    if close_only and out.exit_reason != "close_only":
+        fill_bar = after[out.fill.index] if out.fill is not None else None
+        text = f"close-only bar {', '.join(close_only)}: checked on the close only"
+        if fill_bar is not None and getattr(fill_bar, "close_only", False):
+            text += " (filled at the close)"
+        out.note = f"{out.note}; {text}" if out.note else text
     return out
 
 
