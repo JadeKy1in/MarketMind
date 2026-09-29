@@ -2,7 +2,8 @@
 
 Trade cards (after the decision guard) are recorded with a zone entry and the
 L3 stop / target. When no card survives, the forced paper trade is recorded
-instead, so the value of "no trade" can be measured later.
+instead, so the value of "no trade" can be measured later. There is always one:
+the code-chosen trade from the decision, else long SPY (SPEC_v3 L7).
 """
 from __future__ import annotations
 
@@ -10,7 +11,8 @@ import logging
 
 from marketmind.ledger.prices import PriceSource, latest_quotes
 from marketmind.ledger.settlement import target_session
-from marketmind.pipeline.decision import _probability
+from marketmind.pipeline.decision import _pick_paper_trade
+from marketmind.pipeline.decision_guard import levels_stop_pct
 from marketmind.ledger.store import LedgerEntry, LedgerStore
 
 logger = logging.getLogger("marketmind.ledger.recorder")
@@ -19,6 +21,7 @@ logger = logging.getLogger("marketmind.ledger.recorder")
 PAPER_CAPITAL_USD = 30_000.0
 FORCED_HOLD_BARS = 10
 # Forced trades are sized like shadow bets: confidence-scaled, at least $100 (SPEC_v3 §6.1).
+# Their confidence is unstated (code picks them), so they get the flagged 0.5 default.
 FORCED_BASE_USD = 1_000.0
 FORCED_MIN_USD = 100.0
 DEFAULT_CONFIDENCE = 0.5
@@ -60,6 +63,7 @@ def _card_entry(card, snapshot_id: str | None) -> LedgerEntry:
         stop_loss=card.stop_loss or None, target_price=card.target_price or None,
         snapshot_id=snapshot_id,
         meta={"position_size_pct": card.position_size_pct,
+              "llm_size_pct": getattr(card, "llm_size_pct", None),   # record only, never used
               "reward_risk_ratio": card.reward_risk_ratio,
               "risk_statement": card.risk_statement, "red_team_note": card.red_team_note},
     )
@@ -71,23 +75,24 @@ def _forced_entry(pt, l3, snapshot_id: str | None) -> LedgerEntry:
     lvl = l3.get(pt.ticker) if l3 is not None and hasattr(l3, "get") else None
     # L3 levels describe long setups only; use them only for a long paper trade.
     stop = target = None
-    if lvl is not None and direction == "long" and getattr(lvl, "data_available", False):
+    # (The SPY fallback may meet a non-green SPY result: use its levels only when sane.)
+    if (lvl is not None and direction == "long" and getattr(lvl, "data_available", False)
+            and levels_stop_pct(lvl.entry_zone_low, lvl.entry_zone_high, lvl.stop_loss)):
         stop = lvl.stop_loss or None
         target = lvl.target_price or None
     falsifier = (f"{pt.ticker} closes below the L3 stop {stop:.2f}" if stop else
                  f"{pt.ticker} {direction} loses money over {FORCED_HOLD_BARS} trading days")
-    conf = _probability(pt.confidence)
-    conf_default = not conf  # missing or 0 means "no stated belief", not certainty of loss
-    conf = DEFAULT_CONFIDENCE if conf_default else conf
+    # The forced trade is chosen by code, not believed in: its confidence is unstated
+    # whatever the object carries, and it is kept out of Brier aggregates (scoreboard).
     return LedgerEntry(
         source_type="main_forced", source_id="main_pipeline",
         ticker=pt.ticker.upper(), direction=direction, hold_bars=FORCED_HOLD_BARS,
-        confidence=conf, confidence_is_default=conf_default,
-        position_usd=max(FORCED_MIN_USD, round(FORCED_BASE_USD * conf, 2)),
+        confidence=DEFAULT_CONFIDENCE, confidence_is_default=True,
+        position_usd=max(FORCED_MIN_USD, round(FORCED_BASE_USD * DEFAULT_CONFIDENCE, 2)),
         falsifier=falsifier, thesis=(pt.thesis or "")[:2000],
         layer=layer, asset_type=asset_type, entry_rule="next_open",
         stop_loss=stop, target_price=target, snapshot_id=snapshot_id,
-        meta={"source": pt.source},
+        meta={"source": pt.source, "confidence_unstated": True},
     )
 
 
@@ -105,20 +110,21 @@ async def record_main_decision(decision, l3, store: LedgerStore, source: PriceSo
     same session records nothing and returns []."""
     cards = list(getattr(decision, "decision_cards", []) or [])
     paper = getattr(decision, "paper_trade", None)
-    if not cards and paper is None:
-        logger.warning("Ledger: decision has neither cards nor a paper trade; nothing recorded")
-        return []
+    if not cards and (paper is None or getattr(paper, "direction", None) not in ("long", "short")
+                      or not (getattr(paper, "ticker", "") or "").strip()):
+        # L7: a no-trade day still records exactly one forced trade. The direction is
+        # never invented: the code picker (L3 best R/R, else long SPY) chooses it.
+        picked = _pick_paper_trade(None, None, l3, None, None)
+        logger.warning("Ledger: forced paper trade %s unusable; recording code pick %s (%s)",
+                       None if paper is None else (paper.ticker, paper.direction),
+                       picked.ticker, picked.source)
+        paper = picked
     tickers = [c.ticker.upper() for c in cards] or [paper.ticker.upper()]
     snapshot_id = store.save_snapshot(await latest_quotes(source, tickers), taken_at=created_at)
     if cards:
         entries = [_card_entry(c, snapshot_id) for c in cards]
-    elif paper.direction in ("long", "short"):
-        entries = [_forced_entry(paper, l3, snapshot_id)]
     else:
-        # A direction must never be invented (SPEC_v3 L3); log the gap instead.
-        logger.warning("Ledger: forced paper trade %s has direction %r; not recorded",
-                       paper.ticker, paper.direction)
-        return []
+        entries = [_forced_entry(paper, l3, snapshot_id)]
     provenance = {k: v for k in ("llm", "prompt_version")
                   if (v := getattr(decision, k, None))}      # docs/S9_DESIGN.md §2
     valid = []

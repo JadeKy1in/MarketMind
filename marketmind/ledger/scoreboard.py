@@ -62,7 +62,9 @@ def score(entries: list[LedgerEntry]) -> SourceScore:
         total_pnl_usd=round(sum(pnl), 2) if pnl else None,
         mean_excess_market=_avg([e.excess_market for e in settled]),
         mean_excess_domain=_avg([e.excess_domain for e in settled]),
-        mean_brier=_avg([e.brier for e in settled]),
+        # An unstated confidence (the flagged 0.5 default, e.g. the forced trade) is not
+        # a forecast, so it is not scored (owner decision 2026-09-29).
+        mean_brier=_avg([e.brier for e in settled if not e.confidence_is_default]),
         min_position_share=round(
             sum(1 for e in entries if e.position_usd <= MIN_POSITION_USD) / len(entries), 4),
         first_date=days[0] if days else None, last_date=days[-1] if days else None,

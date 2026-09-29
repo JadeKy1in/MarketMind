@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 import logging
+import math
 import re
 
 from marketmind.notification.monitor_decorator import monitor
@@ -16,7 +17,7 @@ from marketmind.gateway.response_parser import strip_markdown_fences
 from marketmind.pipeline.layer1_narrative import Layer1Result
 from marketmind.pipeline.layer2_fundamental import Layer2Result
 from marketmind.pipeline.layer3_technical import Layer3BatchResult
-from marketmind.pipeline.decision_guard import enforce
+from marketmind.pipeline.decision_guard import CASH_EQUIVALENT_ETFS, enforce, levels_stop_pct
 from marketmind.pipeline.red_team import RedTeamReport
 from marketmind.pipeline.resonance import ResonanceResult
 from marketmind.pipeline.defang import defang_text
@@ -130,7 +131,7 @@ def get_rule_registry():
 class DecisionCard:
     ticker: str
     direction: str                # long | short
-    position_size_pct: float      # % of portfolio
+    position_size_pct: float      # % of portfolio; set by decision_guard from the L3 stop (L3)
     entry_low: float
     entry_high: float
     stop_loss: float
@@ -143,6 +144,7 @@ class DecisionCard:
     cash_reframing: str           # "if I had cash today, would I buy this?"
     invalidation: str = ""        # falsifiable condition: "I am wrong if ..." (SPEC_v3 L5)
     confidence: float | None = None  # P(trade ends profitable), 0-1; settled with Brier (SPEC_v3 §7)
+    llm_size_pct: float | None = None  # size the LLM volunteered, record only; never used
 
 
 @dataclass
@@ -171,9 +173,9 @@ class NoTradeCard:
 class PaperTrade:
     ticker: str
     direction: str  # "long" or "short"
-    confidence: float
+    confidence: float | None  # None: unstated (the code-chosen forced trade)
     thesis: str
-    source: str = ""  # e.g. "L2 fundamental", "L3 technical", "L1 narrative"
+    source: str = ""  # "L3" or "fallback:SPY" for the code-chosen forced trade
 
 
 @dataclass
@@ -375,14 +377,14 @@ _I18N = {
 DECISION_OUTPUT_SCHEMA = """
 
 OUTPUT FORMAT — use EXACTLY these keys, no others:
-{"decision_cards": [{"ticker": "TICKER", "direction": "long", "position_size_pct": <number>,
+{"decision_cards": [{"ticker": "TICKER", "direction": "long",
    "max_hold_days": 30, "confidence": <number>,
    "thesis": "1-2 sentence thesis", "risk_statement": "main risk",
    "red_team_note": "answer to the key red-team objection",
    "invalidation": "I am wrong if ... (observable, dated condition)",
    "cash_reframing": "if I had cash today, would I buy this?"}],
  (<number> = your own value, never a copied example.
-  position_size_pct: PERCENT of the portfolio, between 1 and 25, sized to your conviction.
+  Do not output a position size: sizes are computed by code from the L3 stop distance.
   confidence: your probability, 0-1, that this trade ends profitable; it is scored later
   with a Brier score, so state what you actually believe.)
  "no_trade_card": {"thesis": "why not trading is best", "supporting_evidence": ["..."],
@@ -421,7 +423,8 @@ You receive:
 
 Price levels (entry, stop, target, reward/risk, hold days) are computed by code
 and will overwrite whatever you output; copy them from the Layer 3 section.
-Position size is capped by code (25% per position, 25% total heat).
+Position sizes are computed by code from the stop distance (fixed risk per trade);
+do not output a position size.
 
 Output JSON:
 {
@@ -429,7 +432,6 @@ Output JSON:
     {
       "ticker": "TICKER",
       "direction": "long|short",
-      "position_size_pct": <number>,
       "entry_low": 0.0,
       "entry_high": 0.0,
       "stop_loss": 0.0,
@@ -455,7 +457,7 @@ Output JSON:
 }
 
 IMPORTANT: The no-trade card must be equally rigorous as the decision cards — not an afterthought. Include a pre-mortem narrative (assume 1yr later, traded position lost 50% — what broke?). Score no-trade strength 0-100.
-Position size: never exceed 25% total heat limit. Combined stop-losses across all positions ≤ 25% total equity.
+Position size and the 25% total heat limit are enforced by code.
 All prices must be verifiable. Never fabricate."""
 
 
@@ -600,67 +602,42 @@ async def generate_decision(
         )
 
 
-def _pick_paper_trade(l1, l2, l3, red_team, resonance) -> PaperTrade | None:
-    """When no_trade, pick the best-conviction direction for virtual (paper) trading.
+FORCED_FALLBACK_TICKER = "SPY"   # market benchmark when L3 has no usable candidate
 
-    Scans L2 candidates + L3 lights to find the ticker with strongest directional signal.
-    Used for post-hoc review (复盘) without risking real capital.
+
+def _pick_paper_trade(l1, l2, l3, red_team, resonance) -> PaperTrade:
+    """The day's forced paper trade when there is no card (SPEC_v3 L7, §5).
+
+    Chosen by code, never by the LLM (owner decision 2026-09-29): among the L3 green
+    lights with usable levels (data available, positive finite stop distance, finite
+    reward/risk, not a cash-equivalent ETF) take the highest reward/risk, ties broken by
+    ticker. With no usable candidate, fall back to a long SPY trade, so a forced trade
+    always exists. Its confidence is unstated (None); the recorder stores the 0.5
+    default flagged so it is not scored with Brier. l1, l2, red_team and resonance are
+    accepted for call-site compatibility and not used.
     """
-    candidates: list[dict] = []
-
-    # From L2 ticker candidates
-    for t in getattr(l2, 'ticker_candidates', []) or []:
-        candidates.append({
-            "ticker": str(t),
-            "direction": getattr(t, 'direction', 'neutral'),
-            "confidence": getattr(t, 'confidence', 0.0),
-            "thesis": getattr(t, 'thesis', ''),
-            "source": _t("src_l2"),
-        })
-
-    # From L3 green lights (strongest signal). green_lights holds Layer3Result
-    # objects — compare by ticker, not by object membership.
-    for r in getattr(l3, 'green_lights', []) or []:
-        candidates.append({
-            "ticker": str(r.ticker),
-            "direction": "long",  # L3 only validates long setups
-            "confidence": 0.65,
-            "thesis": getattr(r, 'raw_analysis', ''),
-            "source": _t("src_l3"),
-        })
-
-    # L2 candidates are often bare ticker strings with no direction; a forced
-    # trade needs a real direction, so directionless candidates cannot be picked.
-    candidates = [c for c in candidates if c["direction"] in ("long", "short")]
-
-    # From L1 sentiment if available
-    l1_dir = getattr(l1, 'sentiment_direction', 'neutral')
-    if l1_dir in ('bullish', 'bearish') and not candidates:
-        direction = 'long' if l1_dir == 'bullish' else 'short'
-        l1_label = _t("l1_bullish") if l1_dir == 'bullish' else _t("l1_bearish")
-        for r in getattr(l3, 'results', []) or []:
-            candidates.append({
-                "ticker": str(getattr(r, 'ticker', 'SPY')),
-                "direction": direction,
-                "confidence": 0.45,
-                "thesis": f"{_t('src_l1')}: {l1_label}",
-                "source": _t("src_l1"),
-            })
-            break
-
+    candidates = []
+    for r in getattr(l3, "green_lights", []) or []:
+        ticker = str(getattr(r, "ticker", "") or "").strip().upper()
+        rr = _num(getattr(r, "reward_risk_ratio", None), float("nan"))
+        if (not ticker or ticker in CASH_EQUIVALENT_ETFS
+                or not getattr(r, "data_available", False) or not math.isfinite(rr)
+                or levels_stop_pct(r.entry_zone_low, r.entry_zone_high, r.stop_loss) is None):
+            continue
+        candidates.append((-rr, ticker, r))
     if not candidates:
-        return None
-
-    # Sort by confidence descending
-    candidates.sort(key=lambda c: c["confidence"], reverse=True)
-    best = candidates[0]
+        return PaperTrade(
+            ticker=FORCED_FALLBACK_TICKER, direction="long", confidence=None,
+            thesis="No usable L3 candidate today; the forced paper trade defaults to long SPY.",
+            source=f"fallback:{FORCED_FALLBACK_TICKER}")
+    candidates.sort(key=lambda c: (c[0], c[1]))
+    neg_rr, ticker, _ = candidates[0]
     return PaperTrade(
-        ticker=best["ticker"],
-        direction=best["direction"],
-        confidence=best["confidence"],
-        thesis=best["thesis"],
-        source=best["source"],
-    )
+        ticker=ticker, direction="long",    # L3 only validates long setups
+        confidence=None,
+        thesis=(f"Forced paper trade: best L3 green light by reward/risk "
+                f"({-neg_rr:.2f}, {len(candidates)} usable candidate(s))."),
+        source="L3")
 
 
 def _l3_evidence(l3: Layer3BatchResult) -> str:
@@ -751,23 +728,18 @@ def _num(v: Any, default: float) -> float:
         return default
 
 
+def _llm_size(v: Any) -> float | None:
+    """The LLM's own size as it wrote it (unit unknown), kept for the record only."""
+    f = _num(v, float("nan"))
+    return f if math.isfinite(f) else None
+
+
 def _probability(v: Any) -> float | None:
     """0-1 probability from an LLM value; accepts percentages (65 -> 0.65)."""
     f = _num(v, -1.0)
     if f > 1.0:
         f /= 100.0
     return round(f, 4) if 0.0 <= f <= 1.0 else None
-
-
-def _normalise_size_units(cards: list[DecisionCard]) -> None:
-    """Sizes are percents. Flash has answered in fractions (0.06 meaning 6%, live run 5,
-    2026-09-27). The prompt asks for 1-25, so when every size is below 1 the batch is
-    read as fractions; a 1.0 is a legitimate 1%."""
-    sizes = [c.position_size_pct for c in cards if c.position_size_pct > 0]
-    if sizes and all(s < 1.0 for s in sizes):
-        logger.info("Decision sizes look like fractions %s; converting to percent", sizes)
-        for c in cards:
-            c.position_size_pct = round(c.position_size_pct * 100, 4)
 
 
 # A negated or deferred verdict ("DO NOT ENTER", "不买入", "AVOID LONG", "WAIT") contains a
@@ -833,7 +805,7 @@ def _parse_decision_response(content: str) -> DecisionOutput:
         cards.append(DecisionCard(
             ticker=ticker,
             direction=direction,
-            position_size_pct=_num(d.get("position_size_pct"), 0.0),
+            position_size_pct=0.0,        # computed by decision_guard from the L3 stop
             entry_low=0.0, entry_high=0.0, stop_loss=0.0, target_price=0.0,  # set by guard from L3
             max_hold_days=int(_num(_pick(d, "max_hold_days", "hold_days_max"), 30)),
             reward_risk_ratio=0.0,
@@ -843,6 +815,7 @@ def _parse_decision_response(content: str) -> DecisionOutput:
             cash_reframing=_text(_pick(d, "cash_reframing", "cash_reframing_cn")),
             invalidation=_text(_pick(d, "invalidation", "invalidation_cn", "falsifiable_condition")),
             confidence=_probability(_pick(d, "confidence", "probability", "win_probability", default=None)),
+            llm_size_pct=_llm_size(d.get("position_size_pct")),
         ))
     ntc_data = data.get("no_trade_card", {})
     no_trade = None
@@ -855,7 +828,6 @@ def _parse_decision_response(content: str) -> DecisionOutput:
             pre_mortem=ntc_data.get("pre_mortem", ""),
             no_trade_score=_num(_pick(ntc_data, "no_trade_score", "no_trade_strength"), 0.0),
         )
-    _normalise_size_units(cards)
     watch = []
     for d in data.get("watch_cards", []) or []:
         if not isinstance(d, dict) or not d.get("ticker"):
