@@ -44,6 +44,7 @@ FLASH_SYSTEM_PROMPT = """You are a financial news preprocessor. Your task is to 
 
 For each article, output a structured signal:
 {
+  "i": <the integer in [brackets] before the headline this signal came from>,
   "signal_id": "SIG-{date}-{seq}",
   "event_type": "monetary_policy|corporate_action|regulation|geopolitical|macro_data",
   "event_grade": "A|B|C|D|E",
@@ -79,7 +80,10 @@ async def preprocess_batch(items: list[NewsItem], batch_size: int = 15) -> list[
     for i in range(0, len(items), batch_size):
         batch = items[i:i + batch_size]
         headline_text = _build_headline_text(batch)
-        user_prompt = f"Process these headlines and return only the JSON array of signals:\n{headline_text}"
+        user_prompt = ("Process these headlines and return only the JSON array of signals. "
+                       "Every signal MUST carry \"i\": the [index] of the headline it came from "
+                       "(signals without a valid index are discarded; skipping headlines is fine):\n"
+                       f"{headline_text}")
         try:
             result = await chat_flash(
                 system_prompt=FLASH_SYSTEM_PROMPT,
@@ -89,16 +93,38 @@ async def preprocess_batch(items: list[NewsItem], batch_size: int = 15) -> list[
             )
             content = result["content"]
             raw_signals = _parse_json_response(content)
-            for j, sig_dict in enumerate(raw_signals):
+            for sig_dict in raw_signals:
+                idx = _signal_index(sig_dict, len(batch))
+                if idx is None:
+                    logger.info("Flash signal dropped: no valid input index (%r)",
+                                sig_dict.get("i") if isinstance(sig_dict, dict) else sig_dict)
+                    continue
                 signal = FlashSignal.from_dict(sig_dict)
-                if j < len(batch):
-                    signal.source_headline = batch[j].title
-                    signal.source_url = batch[j].url
+                signal.source_headline = batch[idx].title
+                signal.source_url = batch[idx].url
                 signals.append(signal)
         except Exception as e:
             logger.warning("Flash preprocessing failed for item: %s", e)
             continue
     return signals
+
+
+def _signal_index(sig: object, n: int) -> int | None:
+    """The input index a signal names ("i", or "index"), if it is an integer in 0..n-1.
+    Position in the output list is never used: Flash skips and merges items."""
+    if not isinstance(sig, dict):
+        return None
+    raw = sig.get("i", sig.get("index"))
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, str):
+        raw = raw.strip().strip("[]").strip()
+        if not raw.isdigit():
+            return None
+        raw = int(raw)
+    if isinstance(raw, float) and raw.is_integer():
+        raw = int(raw)
+    return raw if isinstance(raw, int) and 0 <= raw < n else None
 
 
 async def preprocess_single(item: NewsItem) -> FlashSignal | None:
