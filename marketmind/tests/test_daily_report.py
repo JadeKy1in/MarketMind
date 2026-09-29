@@ -160,3 +160,60 @@ async def test_pending_retirement_proposals_in_prompt_and_facts(env):
     assert p["failed_challengers"] == ["t1", "t2"] and p["excess_vs_domain_mean"] == -0.003
     assert p["approve"].endswith(f"retire approve {sid}") and f"{sid}@2" in seen["user"]
     assert sid in daily.fallback_text(daily.gather_facts(TODAY, store, briefs))
+
+
+def _eco(tmp, day, **doc):
+    (tmp / "ecosystem").mkdir(exist_ok=True)
+    (tmp / "ecosystem" / f"{day}.json").write_text(json.dumps({"date": day, **doc}), encoding="utf-8")
+
+
+def test_ecosystem_facts_one_liner_and_flags(env):
+    store, briefs, tmp = env
+    assert "ecosystem" not in daily.gather_facts(TODAY, store, briefs)       # no report yet
+    _eco(tmp, "2026-09-28", summary="[ecosystem] herding: none, N_eff 4.0/6")
+    f = daily.gather_facts(TODAY, store, briefs)["ecosystem"]              # latest, dated
+    assert f == {"date": "2026-09-28", "summary": "[ecosystem] herding: none, N_eff 4.0/6",
+                 "herding_flags": [], "duplicate_clusters": []}
+    _eco(tmp, TODAY, summary="[ecosystem] herding: us_equity_index long 3d behavioural",
+         herding={"flags": [{"group": "us_equity_index", "direction": "long", "days": 3,
+                             "verdict": "behavioural", "escalate": False, "daily": [1, 2, 3]}]},
+         diversity={"pnl": {"clusters": [{"members": ["a", "b"], "expected": False},
+                                         {"members": ["c", "trial:c1"], "expected": True}]},
+                    "direction": {"clusters": []}})
+    f = daily.gather_facts(TODAY, store, briefs)["ecosystem"]
+    assert f["date"] == TODAY and f["herding_flags"] == [{"group": "us_equity_index", "direction": "long",
+                                                          "days": 3, "verdict": "behavioural",
+                                                          "escalate": False}]
+    assert f["duplicate_clusters"] == [{"measure": "pnl", "members": ["a", "b"]}]
+    assert "behavioural" in daily.fallback_text(daily.gather_facts(TODAY, store, briefs))
+
+
+def test_playground_facts_today_only(env):
+    store, briefs, _ = env
+    assert daily.gather_facts(TODAY, store, briefs)["playground"] == {"calls": 0, "by_agent": {}}
+    ids = [store.add(LedgerEntry("playground", "playground:memory_desk", t, "long", 5, 0.6, 200, "x",
+                                 meta={"run_date": TODAY})) for t in ("SPY", "GLD")]
+    store.add(LedgerEntry("playground", "playground:tsmom", "TLT", "short", 5, 0.6, 200, "x",
+                          meta={"run_date": "2026-09-28"}))                     # not today
+    f = daily.gather_facts(TODAY, store, briefs)["playground"]
+    assert f["calls"] == 2 and list(f["by_agent"]) == ["memory_desk"]
+    assert [c["entry_id"] for c in f["by_agent"]["memory_desk"]] == ids
+    assert "Playground 调用：2" in daily.fallback_text(daily.gather_facts(TODAY, store, briefs))
+    assert "playground" not in daily.gather_facts(TODAY, None, briefs)
+
+
+@pytest.mark.asyncio
+async def test_prompt_has_short_ecosystem_and_playground_sections(env):
+    store, briefs, tmp = env
+    _eco(tmp, TODAY, summary="[ecosystem] herding: none")
+    seen = {}
+
+    async def call(system, user):
+        seen.update(system=system, user=user)
+        return "## 今日要闻\n- x"
+    await daily.build_report(TODAY, store=store, call=call, brief_dir=briefs)
+    sp = seen["system"]
+    assert sp.index("## 影子动向") < sp.index("## 生态健康") < sp.index("## Playground 实验") \
+        < sp.index("## 实盘持仓")
+    assert "market_driven" in sp and "behavioural" in sp and "简短" in sp
+    assert "[ecosystem] herding: none" in seen["user"] and '"playground"' in seen["user"]
