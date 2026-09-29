@@ -16,7 +16,11 @@ running whose lock is gone, whose process is dead, or which outlived its timeout
 retry is not blocked. Skipped triggers of an eligible day are recorded, and the
 state file is written atomically with a last-good copy. Each run has a hard
 timeout, its own log file, and a status record the dashboard reads; failures are
-pushed through the configured channels (marketmind/alerts/notify.py).
+pushed through the configured channels (marketmind/alerts/notify.py). Exit code 3
+from app.py means "finished, some steps failed": status "degraded", done for the
+day (no retry), steps taken from the last "[degraded]" log line, one short push.
+Pushes that fail (offline) wait in data/scheduler/push_queue.json for the next
+invocation of this script or of watchdog.py.
 """
 from __future__ import annotations
 
@@ -28,6 +32,7 @@ import re
 import subprocess
 import sys
 import time
+import uuid
 from datetime import datetime, time as dtime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -37,6 +42,7 @@ sys.path.insert(0, str(ROOT))
 
 NEW_YORK = ZoneInfo("America/New_York")
 WEEKDAY_EARLIEST = dtime(8, 25)
+US_OPEN = dtime(9, 30)
 MODES = {"weekday": "daily", "weekend": "weekend"}
 TIMEOUT_S = {"weekday": 3600, "weekend": 1800}
 MAX_ATTEMPTS = 2
@@ -57,6 +63,8 @@ def plan(slot: str, now: datetime) -> tuple[bool, str, str]:
             return False, key, "weekend in New York"
         if ny.time() < WEEKDAY_EARLIEST:
             return False, key, f"too early ({ny:%H:%M} New York)"
+        if ny.time() >= US_OPEN:
+            return True, key, f"late run ({ny:%H:%M} New York, after the open)"
         return True, key, "pre-open run"
     if slot == "weekend":
         return (True, key, "weekend run") if weekend else (False, key, "weekday in New York")
@@ -121,6 +129,8 @@ def should_attempt(state: dict, key: str) -> tuple[bool, str]:
         return True, "first attempt"
     if run.get("status") == "ok":
         return False, "already succeeded today"
+    if run.get("status") == "degraded":
+        return False, "already finished today (degraded)"
     if run.get("status") == "running":
         return False, "a run is in progress"
     if run.get("attempts", 0) >= MAX_ATTEMPTS:
@@ -228,19 +238,149 @@ def load_user_push_env() -> None:
             os.environ["MARKETMIND_CLAUDE_BIN"] = str(candidate)
 
 
-def notify_failure(slot: str, key: str, log_path: Path, reason: str) -> list[dict]:
+QUEUE_MAX = 20
+QUEUE_MAX_AGE_S = 3 * 86400
+QUEUE_LOCK_STALE_S = 600
+
+
+def queue_path() -> Path:
+    return data_dir() / "scheduler" / "push_queue.json"
+
+
+def _write_json(path: Path, obj) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
+    _replace(tmp, path)
+
+
+def load_queue(path: Path) -> list[dict]:
+    try:
+        items = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
+
+
+def _prune_queue(items: list[dict], now: float) -> list[dict]:
+    """Drop entries older than three days, keep the newest QUEUE_MAX."""
+    fresh = [i for i in items if isinstance(i.get("t"), (int, float))
+             and now - i["t"] <= QUEUE_MAX_AGE_S]
+    return fresh[-QUEUE_MAX:]
+
+
+def enqueue_push(title: str, body: str, now: float | None = None) -> None:
+    """Keep an undelivered push for the next scheduled_run / watchdog invocation."""
+    now = time.time() if now is None else now
+    path = queue_path()
+    items = load_queue(path) + [{"id": uuid.uuid4().hex, "t": now, "title": title, "body": body}]
+    _write_json(path, _prune_queue(items, now))
+
+
+def _send(title: str, body: str) -> list[dict]:
     from marketmind.alerts.notify import send
+    return asyncio.run(send(title, body))
+
+
+def _delivered(results: list[dict]) -> bool:
+    return any(r.get("ok") for r in results)
+
+
+def push(title: str, body: str) -> list[dict]:
+    """Send through the configured channels; if every channel failed (offline),
+    queue the message for a later retry. With no channel configured nothing is
+    queued (it could never be delivered)."""
+    try:
+        results = _send(title, body)
+    except Exception as e:                       # never mask the caller's own failure
+        print(f"notification not sent: {type(e).__name__}")
+        results = [{"channel": "?", "ok": False, "status": 0}]
+    if results and not _delivered(results):
+        try:
+            enqueue_push(title, body)
+            print("notification queued for retry")
+        except OSError as e:
+            print(f"notification could not be queued: {type(e).__name__}")
+    return results
+
+
+def flush_push_queue(now: float | None = None) -> int:
+    """Retry queued pushes, oldest first; stops at the first failure (still offline).
+    One process at a time (push_queue.lock) so a message is not sent twice.
+    Returns the number delivered."""
+    now = time.time() if now is None else now
+    path = queue_path()
+    if not load_queue(path):
+        return 0
+    lock = path.with_name("push_queue.lock")
+    try:
+        if lock.exists() and now - lock.stat().st_mtime > QUEUE_LOCK_STALE_S:
+            lock.unlink()
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except OSError:
+        return 0                                 # another process is flushing
+    sent: set[str] = set()
+    try:
+        os.close(fd)
+        load_user_push_env()
+        for item in _prune_queue(load_queue(path), now):
+            try:
+                ok = _delivered(_send(str(item.get("title", "")), str(item.get("body", ""))))
+            except Exception as e:
+                print(f"queued notification not sent: {type(e).__name__}")
+                ok = False
+            if not ok:
+                break
+            sent.add(item.get("id"))
+        # re-read: another process may have queued a message meanwhile
+        _write_json(path, _prune_queue([i for i in load_queue(path) if i.get("id") not in sent], now))
+    finally:
+        try:
+            lock.unlink()
+        except OSError:
+            pass
+    if sent:
+        print(f"delivered {len(sent)} queued notification(s)")
+    return len(sent)
+
+
+def notify_failure(slot: str, key: str, log_path: Path, reason: str) -> list[dict]:
     from marketmind.notification.log_redaction import redact
     try:
         tail = log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-15:]
     except OSError:
         tail = []
     body = f"{key}（{slot}）自动运行失败：{reason}\n日志：{log_path}\n\n" + redact("\n".join(tail))
+    return push("MarketMind 自动运行失败", body[:1800])
+
+
+EXIT_DEGRADED = 3
+DEGRADED_PREFIX = "[degraded]"
+
+
+def degraded_detail(log_path: Path, start: int = 0) -> str:
+    """Text after the last "[degraded]" line this attempt wrote (from byte `start`)."""
     try:
-        return asyncio.run(send("MarketMind 自动运行失败", body[:1800]))
-    except Exception as e:                       # never mask the original failure
-        print(f"failure notification not sent: {type(e).__name__}")
-        return []
+        with log_path.open("rb") as f:
+            f.seek(start)
+            lines = f.read().decode("utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    for line in reversed(lines):
+        line = line.strip()
+        if line.startswith(DEGRADED_PREFIX):
+            return line[len(DEGRADED_PREFIX):].strip(" :")[:500]
+    return ""
+
+
+def split_steps(detail: str) -> list[str]:
+    return [s.strip() for s in re.split(r"[,;，；]", detail) if s.strip()]
+
+
+def notify_degraded(slot: str, key: str, log_path: Path, detail: str) -> list[dict]:
+    from marketmind.notification.log_redaction import redact
+    body = f"{key}（{slot}）已完成，但部分步骤失败：{redact(detail) or '未列出'}\n日志：{log_path}"
+    return push("MarketMind 自动运行部分失败", body[:600])
 
 
 def recover_stale_run(slot: str, key: str, state_path: Path, reason: str) -> dict:
@@ -257,13 +397,16 @@ def recover_stale_run(slot: str, key: str, state_path: Path, reason: str) -> dic
     return state
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--slot", choices=sorted(MODES), required=True)
     p.add_argument("--dry-run", action="store_true", help="print the decision only")
     args = p.parse_args(argv)
 
-    now = datetime.now(timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    if not args.dry_run:
+        load_user_push_env()                     # failure pushes and the run need the keys
+        flush_push_queue()
     run, key, reason = plan(args.slot, now)
     sched = data_dir() / "scheduler"
     state_path = sched / "state.json"
@@ -310,12 +453,14 @@ def _run_locked(slot: str, key: str, now: datetime, state_path: Path) -> int:
     log_dir = data_dir() / "logs" / "scheduled"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{key}.log"
+    log_start = log_path.stat().st_size if log_path.exists() else 0
     rec = state["runs"].setdefault(key, {})
+    for stale in ("degraded", "degraded_steps"):
+        rec.pop(stale, None)
     rec.update(status="running", started=now.isoformat(timespec="seconds"),
                mode=MODES[slot], log=str(log_path), attempts=rec.get("attempts", 0) + 1)
     save_state(state_path, state)
 
-    load_user_push_env()                         # alerts and failure pushes need the keys
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
     cmd = [sys.executable, str(ROOT / "marketmind" / "app.py"), "--mode", MODES[slot]]
     try:
@@ -331,18 +476,27 @@ def _run_locked(slot: str, key: str, now: datetime, state_path: Path) -> int:
     except Exception as e:
         code, failure = -1, f"{type(e).__name__}: {e}"
 
-    rec.update(status="ok" if failure is None else "failed", exit_code=code, reason=failure,
+    status = "ok" if failure is None else "failed"
+    if code == EXIT_DEGRADED:                    # finished, some steps failed: done for the day
+        status, failure = "degraded", None
+        detail = degraded_detail(log_path, log_start)
+        rec.update(degraded=detail, degraded_steps=split_steps(detail))
+    rec.update(status=status, exit_code=code, reason=failure,
                ended=datetime.now(timezone.utc).isoformat(timespec="seconds"))
-    if failure:
+    if status == "degraded":
+        rec["reason"] = f"degraded: {rec['degraded'] or 'steps not listed'}"   # shown on the dashboard
+        rec["notified"] = notify_degraded(slot, key, log_path, rec["degraded"])
+    elif failure:
         rec["notified"] = notify_failure(slot, key, log_path, failure)
     state = load_state(state_path)               # merge: the other slot may have written meanwhile
-    skips = state["runs"].get(key, {}).get("skips")
-    if skips:
-        rec["skips"] = skips
+    latest = state["runs"].get(key, {})
+    for field in ("skips", "watchdog_notified"):  # written by other triggers / the watchdog
+        if latest.get(field):
+            rec[field] = latest[field]
     state["runs"][key] = rec
     state["runs"] = dict(sorted(state["runs"].items())[-60:])     # keep about two months
     save_state(state_path, state)
-    print(f"{key}: {rec['status']}" + (f" ({failure})" if failure else ""))
+    print(f"{key}: {rec['status']}" + (f" ({rec['reason']})" if rec.get("reason") else ""))
     return 0 if failure is None else 1
 
 

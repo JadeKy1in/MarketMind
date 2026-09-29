@@ -1,11 +1,24 @@
 """Scheduled runs (docs/AUTOMATION.md): New York clock, once per day, retries, lock."""
 import json
 import os
+import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from marketmind.scripts import scheduled_run as sr
+
+_REAL_LOAD_USER_PUSH_ENV = sr.load_user_push_env
+
+
+@pytest.fixture(autouse=True)
+def _no_real_push(monkeypatch):
+    """Never read the owner's push keys or reach a push channel from a test."""
+    monkeypatch.setattr(sr, "load_user_push_env", lambda: None)
+
+    def refuse(title, body):
+        raise AssertionError("a test tried to send a real notification")
+    monkeypatch.setattr(sr, "_send", refuse)
 
 
 def utc(y, m, d, h, mi):
@@ -236,5 +249,207 @@ def test_push_keys_loaded_from_user_environment(monkeypatch):
             return ("SCTtest", 1)
         raise OSError
     monkeypatch.setattr(winreg, "QueryValueEx", query)
-    sr.load_user_push_env()
+    _REAL_LOAD_USER_PUSH_ENV()
     assert os.environ["SERVERCHAN_SENDKEY"] == "SCTtest"
+
+
+# ── push queue ─────────────────────────────────────────────────────────
+
+def _queue_env(tmp_path, monkeypatch, outcomes):
+    """outcomes: list of results per _send call (a list of dicts, or an exception)."""
+    monkeypatch.setattr(sr, "ROOT", tmp_path)
+    monkeypatch.setenv("MARKETMIND_DATA_DIR", "data")
+    sent = []
+
+    def fake_send(title, body):
+        sent.append(title)
+        out = outcomes.pop(0) if outcomes else [{"channel": "serverchan", "ok": True, "status": 200}]
+        if isinstance(out, Exception):
+            raise out
+        return out
+    monkeypatch.setattr(sr, "_send", fake_send)
+    return sent
+
+
+OFFLINE = [{"channel": "serverchan", "ok": False, "status": 0}]
+DELIVERED = [{"channel": "serverchan", "ok": True, "status": 200}]
+
+
+def test_failed_push_is_queued_and_delivered_next_time(tmp_path, monkeypatch):
+    sent = _queue_env(tmp_path, monkeypatch, [OFFLINE, ConnectionError("offline")])
+    sr.push("t1", "b1")
+    sr.push("t2", "b2")
+    q = sr.load_queue(sr.queue_path())
+    assert [i["title"] for i in q] == ["t1", "t2"]
+    assert [p.name for p in sr.queue_path().parent.iterdir() if p.suffix == ".tmp"] == []
+    assert sr.flush_push_queue() == 2 and sent == ["t1", "t2", "t1", "t2"]
+    assert sr.load_queue(sr.queue_path()) == []
+    assert not sr.queue_path().with_name("push_queue.lock").exists()
+
+
+def test_push_without_channels_or_with_one_channel_ok_is_not_queued(tmp_path, monkeypatch):
+    _queue_env(tmp_path, monkeypatch, [[], OFFLINE + DELIVERED])
+    sr.push("no channel", "b")
+    sr.push("partly delivered", "b")
+    assert sr.load_queue(sr.queue_path()) == []
+
+
+def test_flush_stops_at_first_failure_and_keeps_order(tmp_path, monkeypatch):
+    sent = _queue_env(tmp_path, monkeypatch, [DELIVERED, OFFLINE])
+    now = time.time()
+    for i in range(3):
+        sr.enqueue_push(f"t{i}", "b", now=now + i)
+    assert sr.flush_push_queue(now=now + 10) == 1 and sent == ["t0", "t1"]
+    assert [i["title"] for i in sr.load_queue(sr.queue_path())] == ["t1", "t2"]
+
+
+def test_queue_is_capped_and_old_entries_dropped(tmp_path, monkeypatch):
+    sent = _queue_env(tmp_path, monkeypatch, [])
+    now = time.time()
+    sr.enqueue_push("old", "b", now=now - sr.QUEUE_MAX_AGE_S - 60)
+    for i in range(sr.QUEUE_MAX + 5):
+        sr.enqueue_push(f"t{i}", "b", now=now)
+    q = sr.load_queue(sr.queue_path())
+    assert len(q) == sr.QUEUE_MAX and q[0]["title"] == "t5"
+    # entries that age out while queued are dropped at flush, not sent
+    assert sr.flush_push_queue(now=now + sr.QUEUE_MAX_AGE_S + 60) == 0 and sent == []
+    assert sr.load_queue(sr.queue_path()) == []
+
+
+def test_flush_skips_while_another_process_flushes(tmp_path, monkeypatch):
+    sent = _queue_env(tmp_path, monkeypatch, [])
+    sr.enqueue_push("t", "b")
+    lock = sr.queue_path().with_name("push_queue.lock")
+    lock.write_text("", encoding="utf-8")
+    assert sr.flush_push_queue() == 0 and sent == []
+    os.utime(lock, (time.time() - sr.QUEUE_LOCK_STALE_S - 5,) * 2)     # stale lock
+    assert sr.flush_push_queue() == 1 and sent == ["t"]
+
+
+def test_scheduled_run_retries_the_queue_first(tmp_path, monkeypatch):
+    sent = _queue_env(tmp_path, monkeypatch, [])
+    sr.enqueue_push("queued", "b")
+    monkeypatch.setattr(sr, "plan", lambda slot, now: (False, "2026-10-03-weekday", "weekend in New York"))
+    assert sr.main(["--slot", "weekday"]) == 0 and sent == ["queued"]
+    assert sr.main(["--slot", "weekday", "--dry-run"]) == 0 and sent == ["queued"]
+
+
+# ── degraded exit code ─────────────────────────────────────────────────
+
+def _degraded_env(tmp_path, monkeypatch, key="2026-09-28-weekday", lines=(), code=3):
+    monkeypatch.setattr(sr, "ROOT", tmp_path)
+    monkeypatch.setenv("MARKETMIND_DATA_DIR", "data")
+    monkeypatch.setattr(sr, "plan", lambda slot, now: (True, key, "test"))
+    calls, pushed = [], []
+
+    class Done:
+        returncode = code
+
+    def fake_run(cmd, stdout=None, **kw):
+        calls.append(cmd)
+        for line in lines:
+            stdout.write(line + "\n")
+        return Done()
+    monkeypatch.setattr(sr.subprocess, "run", fake_run)
+    monkeypatch.setattr(sr, "push", lambda title, body: pushed.append((title, body)) or [])
+    return tmp_path / "data" / "scheduler" / "state.json", calls, pushed
+
+
+def test_exit_code_3_is_degraded_done_for_the_day(tmp_path, monkeypatch):
+    state_path, calls, pushed = _degraded_env(tmp_path, monkeypatch, lines=[
+        "[degraded] old line", "step output", "[degraded] news, evidence; alerts", "done"])
+    assert sr.main(["--slot", "weekday"]) == 0
+    run = sr.load_state(state_path)["runs"]["2026-09-28-weekday"]
+    assert run["status"] == "degraded" and run["exit_code"] == 3
+    assert run["degraded_steps"] == ["news", "evidence", "alerts"]
+    assert run["reason"] == "degraded: news, evidence; alerts"
+    assert len(pushed) == 1 and "news, evidence; alerts" in pushed[0][1]
+    assert sr.main(["--slot", "weekday"]) == 0 and len(calls) == 1       # no retry
+    assert sr.load_state(state_path)["runs"]["2026-09-28-weekday"]["skips"][-1]["reason"] \
+        == "already finished today (degraded)"
+
+
+def test_degraded_line_is_read_from_this_attempt_only(tmp_path, monkeypatch):
+    state_path, calls, pushed = _degraded_env(tmp_path, monkeypatch, lines=["no marker"])
+    log = tmp_path / "data" / "logs" / "scheduled" / "2026-09-28-weekday.log"
+    log.parent.mkdir(parents=True)
+    log.write_text("[degraded] from an earlier attempt\n", encoding="utf-8")
+    assert sr.main(["--slot", "weekday"]) == 0
+    run = sr.load_state(state_path)["runs"]["2026-09-28-weekday"]
+    assert run["status"] == "degraded" and run["degraded_steps"] == []
+    assert len(pushed) == 1
+
+
+def test_other_nonzero_exit_is_still_a_failure(tmp_path, monkeypatch):
+    state_path, calls, pushed = _degraded_env(tmp_path, monkeypatch, code=2,
+                                              lines=["[degraded] news"])
+    monkeypatch.setattr(sr, "notify_failure", lambda *a: pushed.append(a) or [])
+    assert sr.main(["--slot", "weekday"]) == 1
+    run = sr.load_state(state_path)["runs"]["2026-09-28-weekday"]
+    assert run["status"] == "failed" and "degraded_steps" not in run and len(pushed) == 1
+
+
+# ── the three weekday triggers (15:45 / 16:45 / 17:45 Riyadh) ──────────
+
+def _trigger_day(tmp_path, monkeypatch, codes):
+    """Run main() at the three weekday trigger times; `codes` are the app exit codes
+    of the attempts actually started."""
+    monkeypatch.setattr(sr, "ROOT", tmp_path)
+    monkeypatch.setenv("MARKETMIND_DATA_DIR", "data")
+    monkeypatch.setattr(sr, "notify_failure", lambda *a: [])
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+
+        class Done:
+            returncode = codes[len(calls) - 1]
+        return Done()
+    monkeypatch.setattr(sr.subprocess, "run", fake_run)
+    return calls
+
+
+@pytest.mark.parametrize("day,first_attempt_utc", [
+    ((2026, 9, 29), 12),       # US daylight time: 15:45 Riyadh = 08:45 New York
+    ((2026, 12, 1), 13),       # US standard time: 15:45 Riyadh = 07:45 New York (too early)
+])
+def test_later_trigger_retries_a_failed_run_in_both_dst_regimes(tmp_path, monkeypatch, day,
+                                                                 first_attempt_utc):
+    calls = _trigger_day(tmp_path, monkeypatch, codes=[1, 0])
+    key = f"{day[0]}-{day[1]:02d}-{day[2]:02d}-weekday"
+    for hour in (12, 13, 14):                    # 15:45, 16:45, 17:45 Riyadh (UTC+3)
+        now = utc(*day, hour, 45)
+        run, k, _ = sr.plan("weekday", now)
+        assert k == key and run is (hour >= first_attempt_utc)
+        assert sr.main(["--slot", "weekday"], now=now) in (0, 1)
+    rec = sr.load_state(tmp_path / "data" / "scheduler" / "state.json")["runs"][key]
+    assert len(calls) == 2 and rec["status"] == "ok" and rec["attempts"] == 2
+    if first_attempt_utc == 12:                  # daylight: the 17:45 trigger found it done
+        assert rec["skips"][-1]["reason"] == "already succeeded today"
+    else:                                        # standard: 15:45 was too early (not an attempt)
+        assert "skips" not in rec
+
+
+def test_17_45_trigger_is_a_late_catch_up_for_the_same_new_york_day():
+    for day in ((2026, 9, 29), (2026, 12, 1)):
+        run, key, reason = sr.plan("weekday", utc(*day, 14, 45))
+        assert run and key.startswith(f"{day[0]}-{day[1]:02d}-{day[2]:02d}")
+    assert "late run (10:45" in sr.plan("weekday", utc(2026, 9, 29, 14, 45))[2]
+    assert "late run (09:45" in sr.plan("weekday", utc(2026, 12, 1, 14, 45))[2]
+
+
+def test_at_most_two_attempts_even_with_three_triggers(tmp_path, monkeypatch):
+    calls = _trigger_day(tmp_path, monkeypatch, codes=[1, 1])
+    for hour in (12, 13, 14):
+        sr.main(["--slot", "weekday"], now=utc(2026, 9, 29, hour, 45))
+    rec = sr.load_state(tmp_path / "data" / "scheduler" / "state.json")["runs"]["2026-09-29-weekday"]
+    assert len(calls) == 2 and rec["status"] == "failed" and rec["attempts"] == 2
+    assert rec["skips"][-1]["reason"].startswith("gave up")
+
+
+def test_second_weekend_trigger_retries_a_failed_weekend_run(tmp_path, monkeypatch):
+    calls = _trigger_day(tmp_path, monkeypatch, codes=[1, 0])
+    for hour in (9, 11):                         # Saturday 12:00 and 14:00 Riyadh
+        sr.main(["--slot", "weekend"], now=utc(2026, 10, 3, hour, 0))
+    rec = sr.load_state(tmp_path / "data" / "scheduler" / "state.json")["runs"]["2026-10-03-weekend"]
+    assert len(calls) == 2 and rec["status"] == "ok" and calls[0][-1] == "weekend"
