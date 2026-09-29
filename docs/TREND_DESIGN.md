@@ -110,10 +110,48 @@
 - **日报**：`reports/daily.py::gather_facts` 增加 `趋势状态` 事实（今天的入场 / 离场、TREND 列表与止损位、不可用列表、精简版视图）。
 - **仪表盘**：白箱"趋势状态"页（`/api/wb/trend`）：每个标的的状态、数据日期、收盘、12 个月超额收益、SMA200、55 日高、止损位；周末文件缺的股票沿用上一份并标注。
 
+## 10. 月度长周期规则（MONTHLY）回测：预先登记（2026-09-29，在看任何月度结果之前写定）
+
+背景：日线突破的全池版与精简版信号太多（全池每年约 66 个、精简版约 12.5 个），在场时间 82%-94%，不符合所有人的画像（约 3 万美元、只做多、大部分时间持币、一年抓 3-4 波大行情、不被套）。本节登记两条**只在月度检查一次**的长周期规则。规则、参数、口径与通过标准在运行回测之前写定并单独提交；结果写在 `docs/TREND_BACKTEST_MONTHLY_2026-09-29.md`，不回头改这里。代码：`marketmind/trend/monthly.py`（模拟与组合）、`marketmind/trend/monthly_report.py`（报告）。**只回测，不接入每日运行、不发警报。**
+
+**标的（事先定，只用这 6 个）**：SPY、QQQ、GLD、TLT、BTC-USD、ETH-USD（美股、成长股、黄金、长债、加密两个）。不加 EFA/VNQ/DBC：所有人要"少数几个资产类别"；EFA、VNQ 与 SPY 高度相关，DBC 与全池版的 USO 一样有期货展期损耗。加密从各自有足够月线起加入。数据、复权与成本全部沿用 §6（yfinance 复权日线；加密 Coinbase/Binance 取较长者；成本 `ledger.settlement.cost_bps`：美股/ETF 单边 5bp，BTC/ETH 100bp）。
+
+**检查日与成交（两条规则相同）**
+- 检查日 = 每个标的**自己日历**上每月最后一个交易日（加密是当月最后一个 UTC 日线）。某根日线是月末，当且仅当下一根日线在另一个月（只用日期，不用价格）；数据最后一个月未走完，不检查。
+- 月线收盘 = 检查日的收盘价（复权）。第 t 个检查日的决定只用 ≤ t 的月线收盘；**下一根日线开盘成交**（进出都是），跳空如实计入。
+- 只在检查日改变持仓；两次检查之间不做任何操作（没有止损）。
+
+**规则 M1（Faber 2007/2013，10 个月均线）**：月线收盘 > 最近 10 个月线收盘（含当月）的简单平均 → 持有；否则空仓（现金）。需要至少 10 个月线收盘。
+
+**规则 M2（12 个月时间序列动量 / Antonacci 绝对动量，月度）**：月线收盘相对 12 个月前月线收盘的收益 > 同期 T-bill 收益 → 持有；否则空仓。T-bill 收益 = 检查日当时已知的 `^IRX` 过去 252 个交易日均值 ÷100（与 §3 的门槛完全相同，`backtest.tbill_hurdle_fn`，无前视；取不到时为 0）；回看 L 个月时门槛取 (1+h)^(L/12)−1。需要至少 13 个月线收盘。
+- 选它作为唯一变体的理由：(1) 与 M1 属于不同的信号家族（收益率 vs 价格相对均线），能检验结论是不是只属于均线；(2) 证据最长：Moskowitz-Ooi-Pedersen 2012 在 58 个品种上发现过去 12 个月超额收益正向预测未来收益，Hurst-Ooi-Pedersen 2017 回溯到 1880 年；Antonacci 的"绝对动量"就是"过去一年是否跑赢 T-bill"；(3) 没有新增参数，门槛与现有系统一致，所有人已经熟悉"12 个月超额收益"。不选 Antonacci 的完整双动量（相对动量只持有最强的一个）：6 个标的里加密波动最大，相对动量几乎总是把全部资金放到一个加密货币上，与"不被套"冲突（推论，未回测）。
+
+**仓位（事先定一种）**：6 个等权名额，每个名额 = 1/6。某标的在检查日发出"持有"且当前空仓 → 次日开盘用**当时总权益的 1/6** 买入（现金不足时用全部可用现金，< $100 跳过）；持有期间**不再平衡**（让赢家自己长）；发出"空仓" → 次日开盘全部卖出。还没有足够历史的标的（加密早期）名额留作现金。初始 $30,000，不加杠杆。现金收益：**主口径 0**（与 §6/§8 一致），另报一版现金按 T-bill（Faber 原文的做法），通过标准只看主口径。实现上复用 `backtest.run_portfolio`（`risk_per_trade=1.0, max_weight=1/6, max_positions=6`，初始止损记为 0 使 1/6 上限生效）。
+
+**区间**：组合 2006-01-01 至数据末（2005 年 12 月的最后一个交易日是第一次检查日，若当时"持有"则 2006 年第一个交易日开盘买入）；前后两半以 2016-01-01 分界。
+
+**基准（事先定）**：
+- **等权买入持有（主基准）**：同样 6 个名额、同样仓位机制，但信号永远是"持有"——每个标的在它第一次可检查时买入 1/6 权益（现金不足按可用现金），之后不卖、不再平衡。它与规则之间唯一的差别就是择时。
+- 每个标的各自的买入持有（从该标的第一次可检查日起），以及 SPY 买入持有（组合区间）。
+- 日线版对照（同一份缓存重新计算）：§3 主设计在同样 6 个标的、同样 1/6 名额上的结果；以及全池 28 标的版（§6 的 1% 风险仓位）。
+
+**口径**：入场次数/年（= 警报数；空仓 → 持有算一次，按信号日计，组合区间内；总计与分标的）；在场时间（每个标的持有天数 ÷ 该标的可检查以来的天数，6 个标的取平均；另报组合"至少一个仓位"的天数占比与平均投入比例）；CAGR；最大回撤；最差年份；大行情捕获（与 §6 同一定义：低点到高点 ≥20%、≤120 个交易日，加密 174 根；参与率、中段命中率、捕获比例；逐个标的 + 6 个合并，与日线版在同样行情上对比）；来回震荡次数（whipsaw = 入场后**下一个检查日**就发出离场，即持有不到 2 个月的来回）；前后两半。
+
+**稳健性（事先定）**：M1 均线 8 / 10 / 12 个月；M2 回看 9 / 12 / 15 个月；两者都再做一版**月中检查**（每月 15 日或之前最后一个交易日检查，均线/回看用月中收盘序列，下一根开盘成交）。共 12 组，每组报同样的指标，并按同一标准判定通过与否。
+
+**通过标准（事先定；主参数、主口径，5 条全部满足才算通过）**
+1. 全部 6 个标的合计入场次数 ≤ 10 次/年（组合区间）；
+2. 在场时间（6 个标的平均）≤ 60%；
+3. 组合最大回撤的绝对值 ≤ 等权买入持有最大回撤绝对值的一半；
+4. 组合 CAGR ≥ 等权买入持有 CAGR − 3 个百分点；
+5. 前后两半（2006-2015 / 2016-至今）组合 CAGR 都 > 0。
+
+大行情捕获、来回震荡次数只报告、不作为通过条件（月度规则天然吃不到 6 个月以内的短行情，事先说明）。M1、M2 分别判定；两者都通过时，建议优先考虑入场次数更少的一个，并看稳健性表里相邻参数是否大多也通过。
+
 ## References（访问日期 2026-09-29）
 
 1. Moskowitz, T. J., Ooi, Y. H., Pedersen, L. H. (2012). *Time Series Momentum*. Journal of Financial Economics 104, 228–250. https://w4.stern.nyu.edu/facdir/lpederse/papers/TimeSeriesMomentum.pdf — 摘要："We find persistence in returns for one to 12 months that partially reverses over longer horizons"；正文："the past 12-month excess return of each instrument is a positive predictor of its future return"。
-2. Faber, M. T. (2007). *A Quantitative Approach to Tactical Asset Allocation*. https://papers.ssrn.com/sol3/papers.cfm?abstract_id=962461 （SSRN 页面对抓取返回 403；内容据作者公开 PDF https://mebfaber.com/wp-content/uploads/2016/05/SSRN-id962461.pdf 及检索摘要：月末价格高于 10 个月均线持有，否则持现金；报告中回撤从 46% 降到 10% 以下）。
+2. Faber, M. T. (2007). *A Quantitative Approach to Tactical Asset Allocation*. https://papers.ssrn.com/sol3/papers.cfm?abstract_id=962461 （SSRN 页面对抓取返回 403；内容据作者公开 PDF https://mebfaber.com/wp-content/uploads/2016/05/SSRN-id962461.pdf 及检索摘要：月末价格高于 10 个月均线持有，否则持现金；报告中回撤从 46% 降到 10% 以下）。§10 的 M1 即此规则（作者 2013 年更新版沿用同一 SSRN 编号与同一规则）。
 3. Hurst, B., Ooi, Y. H., Pedersen, L. H. (2017). *A Century of Evidence on Trend-Following Investing*. Journal of Portfolio Management 44(1), 15–29. https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2993026 （SSRN 403；摘要据 https://www.aqr.com/Insights/Research/Journal-Article/A-Century-of-Evidence-on-Trend-Following-Investing 与 https://research.cbs.dk/en/publications/a-century-of-evidence-on-trend-following-investing/ ：1880 年以来每个十年平均收益为正，在 60/40 组合最大的 10 次危机中 8 次表现良好）。
 4. Rozario, E., Holt, S., West, J., Ng, S. (2020). *A Decade of Evidence of Trend Following Investing in Cryptocurrencies*. https://arxiv.org/pdf/2009.12155 — BTCUSD 2011-2019 均线趋势跟踪；作者也指出按年滚动优化的参数"no predictable and attractive Sharpe ratios"，且回测假设零成本。**推论**：加密趋势跟踪有效，但参数不稳定、成本敏感，所以这里不为加密单独调参，并计入 100/125bp 单边成本。
 5. 海龟交易法则（Curtis Faith 公开的原始规则）：System 2 = 55 日突破入场，N = 20 日 ATR（Wilder），2N 初始止损。https://oxfordstrat.com/coasdfASD32/uploads/2016/01/turtle-rules.pdf ；https://www.theturtletrader.com/turtle-trading-rules/
