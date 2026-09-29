@@ -5,12 +5,17 @@ Three-tier usage model:
   SUPPLEMENTAL — on-demand only (agent explicitly requests, or core < threshold)
   RETIRED      — kept for audit trail, never fetched
 
-Two fetch channels:
+Three channels:
   WP_API  — WordPress REST API (clean JSON, full article content)
   RSS     — traditional RSS 2.0 / Atom feed (headline + summary)
+  DATA    — structured public data served by a gateway loader (owner decision
+            2026-09-29). Never fetched by playground_fetcher's news path; an agent
+            that declares one (manifest `public_data_sources` naming the registry
+            entry) calls its loader(s) itself via `resolve_loader`.
 """
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 
@@ -31,6 +36,7 @@ class UsageTier(str, Enum):
 class SourceChannel(str, Enum):
     WP_API = "wp_api"
     RSS = "rss"
+    DATA = "data"
 
 
 @dataclass
@@ -46,6 +52,9 @@ class PlaygroundSource:
     usage_tier: UsageTier = UsageTier.CORE
     wp_api_url: str = ""            # Only for WP_API channel
     retire_reason: str = ""         # Only for RETIRED
+    loaders: tuple[str, ...] = ()   # Only for DATA: "module:function" (async)
+    licence: str = ""               # Only for DATA: terms / attribution to carry
+    lag: str = ""                   # Only for DATA: publication lag to state in outputs
 
 
 # ── WP API helpers ────────────────────────────────────────────────────────
@@ -57,7 +66,7 @@ def wp_posts_url(base: str, per_page: int = 20) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Playground Source Registry (all 16 discovered sources)
+# Playground Source Registry (news sources + DATA sources)
 # ══════════════════════════════════════════════════════════════════════════
 
 PLAYGROUND_SOURCES: list[PlaygroundSource] = [
@@ -238,6 +247,70 @@ PLAYGROUND_SOURCES: list[PlaygroundSource] = [
                       "No agent currently needs this domain.",
         coverage=["power_electronics", "GaN", "SiC"],
     ),
+
+    # ── DATA: structured public data (owner decision 2026-09-29) ─────────
+    # Reachability from Riyadh verified 2026-09-29; see docs/DATA_SOURCES_2026-09-29.md.
+    PlaygroundSource(
+        name="SEC Fails-to-Deliver",
+        url="https://www.sec.gov/data-research/sec-markets-data/fails-deliver-data",
+        channel=SourceChannel.DATA,
+        tier=SourceTier.PRIMARY,
+        reliability=0.95,
+        usage_tier=UsageTier.CORE,
+        description="Half-month SEC CNS fails-to-deliver files: per-ticker fails shares / "
+                    "value and change vs the prior half-month. ZIPs cached under the data dir.",
+        coverage=["short_squeeze", "settlement_stress", "US_equities", "ETFs"],
+        loaders=("marketmind.gateway.sec_ftd:load_ftd",),
+        licence="US government public data; SEC fair-access rules (declared User-Agent)",
+        lag="published about 2-4 weeks after settlement",
+    ),
+    PlaygroundSource(
+        name="Indeed Hiring Lab Job Postings",
+        url="https://github.com/hiring-lab/job_postings_tracker",
+        channel=SourceChannel.DATA,
+        tier=SourceTier.RELIABLE,
+        reliability=0.85,
+        usage_tier=UsageTier.CORE,
+        description="Indeed Job Postings Index (SA, 7-day avg, Feb 2020 = 100) for US, GB, DE, "
+                    "FR, CA, AU and US occupational sectors; latest value and 4-week change.",
+        coverage=["labour_market", "macro", "consumer", "sectors"],
+        loaders=("marketmind.gateway.hiring_lab:load_postings",),
+        licence="CC BY 4.0 — attribute Indeed Hiring Lab in every output",
+        lag="daily series refreshed weekly (latest date trails today by days)",
+    ),
+    PlaygroundSource(
+        name="Apple App Store Charts",
+        url="https://itunes.apple.com/us/rss/topfreeapplications/limit=100/json",
+        channel=SourceChannel.DATA,
+        tier=SourceTier.RELIABLE,
+        reliability=0.75,
+        usage_tier=UsageTier.CORE,
+        description="Top free / top grossing charts (all, finance, shopping, games) for US, GB, "
+                    "JP, CN. Apple serves only the current ranking: history comes from the "
+                    "daily archive (app_charts.archive_daily).",
+        coverage=["consumer", "fintech", "e-commerce", "gaming", "China_consumer"],
+        loaders=("marketmind.gateway.app_charts:fetch_snapshot",
+                 "marketmind.gateway.app_charts:archived_days"),
+        licence="Apple public marketing feed; no explicit data licence found (personal research use)",
+        lag="live ranking; rank changes need >= 2 archived days",
+    ),
+    PlaygroundSource(
+        name="akshare China Market Data",
+        url="https://github.com/akfamily/akshare",
+        channel=SourceChannel.DATA,
+        tier=SourceTier.FRAGILE,
+        reliability=0.60,
+        usage_tier=UsageTier.CORE,
+        description="A-share / HK index closes (Sina), southbound Stock Connect net buying and "
+                    "whole-market margin balances (Eastmoney) through akshare; northbound flow "
+                    "values are no longer published upstream and are labelled unavailable.",
+        coverage=["China", "Hong_Kong", "A_shares", "fund_flows", "leverage"],
+        loaders=("marketmind.gateway.china_akshare:index_closes",
+                 "marketmind.gateway.china_akshare:southbound",
+                 "marketmind.gateway.china_akshare:margin_balance"),
+        licence="akshare code MIT; akshare states its data is for academic research only",
+        lag="daily; index closes same day, margin balances one session behind",
+    ),
 ]
 
 
@@ -288,11 +361,13 @@ def get_sources_for_agent(agent_id: str) -> list[PlaygroundSource]:
 
 
 def get_core_sources(agent_ids: list[str]) -> list[PlaygroundSource]:
-    """Get union of CORE-tier sources across agents."""
+    """Get union of CORE-tier news sources (WP_API / RSS) across agents."""
     seen: set[str] = set()
     sources: list[PlaygroundSource] = []
     for aid in agent_ids:
         for src in get_sources_for_agent(aid):
+            if src.channel == SourceChannel.DATA:
+                continue
             if src.usage_tier == UsageTier.CORE and src.name not in seen:
                 seen.add(src.name)
                 sources.append(src)
@@ -300,11 +375,13 @@ def get_core_sources(agent_ids: list[str]) -> list[PlaygroundSource]:
 
 
 def get_supplemental_sources(agent_ids: list[str]) -> list[PlaygroundSource]:
-    """Get union of SUPPLEMENTAL-tier sources across agents."""
+    """Get union of SUPPLEMENTAL-tier news sources (WP_API / RSS) across agents."""
     seen: set[str] = set()
     sources: list[PlaygroundSource] = []
     for aid in agent_ids:
         for src in get_sources_for_agent(aid):
+            if src.channel == SourceChannel.DATA:
+                continue
             if src.usage_tier == UsageTier.SUPPLEMENTAL and src.name not in seen:
                 seen.add(src.name)
                 sources.append(src)
@@ -319,3 +396,28 @@ def get_retired_sources() -> list[PlaygroundSource]:
 def get_all_active_sources(agent_ids: list[str]) -> list[PlaygroundSource]:
     """Get CORE + SUPPLEMENTAL sources for given agents."""
     return get_core_sources(agent_ids) + get_supplemental_sources(agent_ids)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# DATA channel helpers
+# ══════════════════════════════════════════════════════════════════════════
+
+def get_data_sources() -> list[PlaygroundSource]:
+    """All non-retired DATA-channel sources."""
+    return [s for s in PLAYGROUND_SOURCES
+            if s.channel == SourceChannel.DATA and s.usage_tier != UsageTier.RETIRED]
+
+
+def declared_data_sources(declared: list[str]) -> list[PlaygroundSource]:
+    """The DATA sources a manifest's `public_data_sources` names (exact registry names)."""
+    index = _build_index()
+    return [index[n] for n in declared
+            if n in index and index[n].channel == SourceChannel.DATA]
+
+
+def resolve_loader(spec: str):
+    """'package.module:function' -> the callable (imported on demand)."""
+    module, _, func = spec.partition(":")
+    if not module or not func:
+        raise ValueError(f"bad loader spec {spec!r}")
+    return getattr(importlib.import_module(module), func)
