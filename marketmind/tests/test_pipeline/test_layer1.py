@@ -84,3 +84,15 @@ async def test_analyze_layer1_empty_signals():
     result = await analyze_layer1([], [])
     assert result.event_grade == "E"
     assert result.matrix_quadrant == "observe_skip"
+
+
+def test_regex_fallback_grade_is_unknown_when_not_stated():
+    from marketmind.pipeline.layer1_narrative import _parse_layer1_response
+    result = _parse_layer1_response("Markets were quiet; nothing notable happened today.")
+    assert result.event_grade == "unknown"
+
+
+def test_regex_fallback_keeps_a_stated_grade():
+    from marketmind.pipeline.layer1_narrative import _parse_layer1_response
+    result = _parse_layer1_response("event_grade: b -- the Fed surprised markets")
+    assert result.event_grade == "B"
