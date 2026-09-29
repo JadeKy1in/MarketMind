@@ -75,6 +75,15 @@ def parse_output(raw: str, model: str) -> dict:
                       "total_tokens": prompt + completion}}
 
 
+def _kill(proc) -> None:
+    """Kill a child that may already have exited."""
+    if proc.returncode is None:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+
+
 async def call(system_prompt: str, user_prompt: str, tier: str) -> dict:
     global _sem
     exe = _executable()
@@ -96,9 +105,14 @@ async def call(system_prompt: str, user_prompt: str, tier: str) -> dict:
                 out, err = await asyncio.wait_for(proc.communicate(user_prompt.encode("utf-8")),
                                                   timeout=TIMEOUT_S)
             except asyncio.TimeoutError:
-                proc.kill()
+                _kill(proc)
                 await proc.wait()
                 return {"content": "", "error": f"claude: timed out after {TIMEOUT_S:.0f}s"}
+            except BaseException:
+                # Outer cancellation (CancelledError is a BaseException) or an interrupt:
+                # never leave an orphaned `claude -p` child running and billing.
+                _kill(proc)
+                raise
         text = out.decode("utf-8", errors="replace")
         if proc.returncode != 0 and not text.strip():
             return {"content": "", "error": f"claude: exit {proc.returncode}: "

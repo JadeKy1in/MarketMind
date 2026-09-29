@@ -97,3 +97,34 @@ async def test_fetch_source_rss_returns_items():
         assert len(items) >= 1
         assert items[0].source_name == "TestRSS"
         assert source.status == SourceStatus.WORKING
+
+
+# --- undated items are marked, never stamped "now" (red-team 2026-09-29)
+
+def test_from_entry_without_publish_time_is_marked_time_unknown():
+    source = Source("TestSource", SourceTier.RELIABLE, "https://test.com/rss")
+    item = NewsItem.from_entry({"title": "Undated", "link": "https://x"}, source)
+    assert item.published_at == "" and item.time_unknown is True
+
+
+def test_from_entry_uses_updated_when_published_missing():
+    source = Source("TestSource", SourceTier.RELIABLE, "https://test.com/rss")
+    item = NewsItem.from_entry({"title": "T", "link": "u", "updated": "2026-09-28T10:00:00Z"}, source)
+    assert item.published_at == "2026-09-28T10:00:00Z" and item.time_unknown is False
+
+
+def test_empty_published_at_sets_flag_for_any_source():
+    item = NewsItem(id="1", title="t", url="", source_name="S", source_tier=1,
+                    published_at="  ", summary="")
+    assert item.time_unknown and item.published_at == ""
+
+
+def test_undated_item_does_not_get_maximum_freshness():
+    from datetime import datetime, timezone
+    from marketmind.pipeline.scout_content import compute_priority
+    now = datetime.now(timezone.utc)
+    dated = NewsItem(id="1", title="t", url="", source_name="S", source_tier=1,
+                     published_at=now.isoformat(), summary="")
+    undated = NewsItem(id="2", title="t", url="", source_name="S", source_tier=1,
+                       published_at="", summary="")
+    assert compute_priority(undated, now) < compute_priority(dated, now)

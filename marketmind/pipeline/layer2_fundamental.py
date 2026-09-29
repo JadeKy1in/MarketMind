@@ -159,7 +159,7 @@ async def analyze_layer2(l1: Layer1Result, market_context: dict | None = None,
     except Exception as e:
         logger.warning("Layer 2 analysis failed: %s", e)
         return Layer2Result(
-            macro_quadrant="contraction", macro_direction="risk_off",
+            macro_quadrant="unknown", macro_direction="unknown",
             preferred_assets=[], sector_shortlist=[], factor_scores={},
             ticker_candidates=[], ticker_weights={}, sector_momentum={},
             red_team_notes=["Layer 2 analysis failed to produce output"]
@@ -235,8 +235,8 @@ def _parse_layer2_response(content: str) -> Layer2Result:
         direction_match = re.search(r'"macro_direction"\s*:\s*"(\w+)"', content)
         logger.warning("L2 JSON parse failed — using regex extraction from %d chars", len(content))
         data = {
-            "macro_quadrant": quadrant_match.group(1) if quadrant_match else "contraction",
-            "macro_direction": direction_match.group(1) if direction_match else "risk_off",
+            "macro_quadrant": quadrant_match.group(1) if quadrant_match else "unknown",
+            "macro_direction": direction_match.group(1) if direction_match else "unknown",
             "sector_shortlist": [],
             "sector_directions": [],
             "strategy_groups": {},
@@ -259,8 +259,10 @@ def _parse_layer2_response(content: str) -> Layer2Result:
     strategy_groups = _parse_strategy_groups(strategy_groups_raw)
 
     return Layer2Result(
-        macro_quadrant=data.get("macro_quadrant", "contraction"),
-        macro_direction=data.get("macro_direction", "risk_off"),
+        # A missing or unparsed macro view is "unknown", never a bearish guess; every
+        # consumer only displays / records it (red-team 2026-09-29).
+        macro_quadrant=data.get("macro_quadrant") or "unknown",
+        macro_direction=data.get("macro_direction") or "unknown",
         preferred_assets=data.get("preferred_assets", []),
         sector_shortlist=sectors,
         sector_momentum=data.get("sector_momentum", {}),

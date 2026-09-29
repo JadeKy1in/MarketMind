@@ -3,8 +3,6 @@ import pytest
 import tempfile
 from pathlib import Path
 
-import vcr
-
 
 def pytest_configure(config):
     config.addinivalue_line(
@@ -57,27 +55,10 @@ def mock_pro_response():
     }
 
 
-# ── VCR.py News Cassette Fixtures ──────────────────────────────────────────
-# Record/replay HTTP calls for 28 news sources at the transport layer so the
-# real parsing pipeline (feedparser, JSON, NewsItem.from_entry, deduplication,
-# priority scoring) is exercised during replay.
-#
-# First run (cassette missing): records all sources. Requires network + API keys
-# for NewsAPI/GNews. Subsequent runs: replays from cassette, no network needed.
-#
-# Refresh procedure:
-#   1. Delete tests/fixtures/vcr/news_daily.yml
-#   2. Run tests again with network access
-#   3. Verify cassette was created and tests pass
-#
-# Edge cases:
-#   - If redirect chains change (source moves HTTP→HTTPS, CDN changes),
-#     the cassette will fail to match. Delete and re-record.
-#   - feedparser may produce slightly different timestamps for RSS entries
-#     without published dates. This is pre-existing non-determinism from
-#     feedparser filling in datetime.now(), not a VCR.py issue.
-#   - API keys (NewsAPI/GNews in query strings) are filtered from the cassette
-#     via filter_query_parameters. The cassette NEVER contains real API keys.
+# ── VCR.py recording helper ────────────────────────────────────────────────
+# Pass as before_record_request= to any VCR recorder. The news cassette fixtures
+# (vcr_news / vcr_news_offline) live in tests/test_pipeline/conftest.py, their only
+# users; the root copies were shadowed there and have been removed.
 
 
 def _drop_request_body(request):
@@ -88,109 +69,84 @@ def _drop_request_body(request):
     return request
 
 
-@pytest.fixture
-def vcr_news():
-    """Record/replay news HTTP calls via VCR.py.
+# ── Network guard ───────────────────────────────────────────────────────────
+# The offline suite must not reach the internet (real calls made it slow and
+# nondeterministic, and some cost money). Any non-loopback connection or DNS
+# lookup raises NetworkBlockedError unless the test is marked `slow` or
+# MARKETMIND_LIVE_TESTS=1. VCR replay patches the HTTP layer, so cassette tests
+# never reach a socket.
 
-    First run (cassette missing): records all 28 sources. Requires network.
-    Subsequent runs: replays from cassette. No network required.
+class NetworkBlockedError(RuntimeError):
+    """A test tried to reach the network without being marked slow/live."""
 
-    To refresh: delete tests/fixtures/vcr/news_daily.yml and re-run.
 
-    NOTE: If redirect chains change (source moves HTTP→HTTPS, CDN changes),
-    the cassette will fail to match. Delete and re-record in that case.
+_LOOPBACK_NAMES = {"localhost", "localhost.localdomain", "ip6-localhost", ""}
 
-    NOTE: feedparser may produce slightly different timestamps for RSS
-    entries without published dates. This is pre-existing non-determinism,
-    not a VCR.py issue.
-    """
-    import os as _os
-    from marketmind.config.source_authority import SOURCES
 
-    # Snapshot SOURCES state before recording (prevents mutation leakage)
-    saved_state = [
-        (s.status, s.consecutive_failures, s.last_checked)
-        for s in SOURCES
-    ]
-
-    # Clear Z1 content hash cache so cross-run dedup doesn't zero out results
-    # when replaying the same cassette twice. The cache file is repopulated by
-    # fetch_all_sources() and is safe to delete (it's a 72h dedup tracker).
-    _cache_backup = None
-    from marketmind.pipeline.scout import _CACHE_PATH as _z1_cache_path
-    if _os.path.exists(_z1_cache_path):
-        with open(_z1_cache_path, "r", encoding="utf-8") as _f:
-            _cache_backup = _f.read()
-        _os.remove(_z1_cache_path)
-
+def _is_loopback(host) -> bool:
+    if host is None:
+        return True
+    if isinstance(host, bytes):
+        host = host.decode("ascii", "ignore")
+    host = str(host).strip("[]").lower()
+    if host in _LOOPBACK_NAMES:
+        return True
+    import ipaddress
     try:
-        with vcr.use_cassette(
-            'tests/fixtures/vcr/news_daily.yml',
-            record_mode='once',
-            decode_compressed_response=True,
-            filter_headers=['authorization', 'cookie'],
-            filter_query_parameters=['apiKey', 'apikey', 'key'],  # CRITICAL: strip API keys from URLs
-            before_record_request=_drop_request_body,
-            match_on=['method', 'scheme', 'host', 'port', 'path', 'query'],
-        ) as cassette:
-            yield cassette
-    finally:
-        # Restore SOURCES state so recording side-effects don't leak
-        for i, (status, failures, last_checked) in enumerate(saved_state):
-            if i < len(SOURCES):
-                SOURCES[i].status = status
-                SOURCES[i].consecutive_failures = failures
-                SOURCES[i].last_checked = last_checked
-        # Restore Z1 cache if it existed before the test
-        if _cache_backup is not None:
-            _os.makedirs(_os.path.dirname(_z1_cache_path), exist_ok=True)
-            with open(_z1_cache_path, "w", encoding="utf-8") as _f:
-                _f.write(_cache_backup)
+        return ipaddress.ip_address(host.split("%", 1)[0]).is_loopback
+    except ValueError:
+        return False
 
 
-@pytest.fixture
-def vcr_news_offline():
-    """Offline-only: replay existing cassette, fail if missing.
+def _check_address(address, what: str) -> None:
+    if isinstance(address, (str, bytes)):          # AF_UNIX path
+        return
+    host = address[0] if isinstance(address, tuple) and address else None
+    if not _is_loopback(host):
+        raise NetworkBlockedError(
+            f"offline test suite: {what} to {address!r} blocked. Mock the call, or mark "
+            f"the test @pytest.mark.slow (runs only with MARKETMIND_LIVE_TESTS=1).")
 
-    Use this variant in CI or offline environments where network access
-    is not available and a pre-recorded cassette is expected.
-    """
-    import os as _os
-    from marketmind.config.source_authority import SOURCES
 
-    saved_state = [
-        (s.status, s.consecutive_failures, s.last_checked)
-        for s in SOURCES
-    ]
+@pytest.fixture(autouse=True)
+def _block_network(request, monkeypatch):
+    import os
+    if os.environ.get("MARKETMIND_LIVE_TESTS") == "1" or "slow" in request.keywords:
+        yield
+        return
+    import asyncio.proactor_events
+    import asyncio.selector_events
+    import socket
 
-    # Clear Z1 content hash cache (same rationale as vcr_news fixture)
-    _cache_backup = None
-    from marketmind.pipeline.scout import _CACHE_PATH as _z1_cache_path
-    if _os.path.exists(_z1_cache_path):
-        with open(_z1_cache_path, "r", encoding="utf-8") as _f:
-            _cache_backup = _f.read()
-        _os.remove(_z1_cache_path)
+    real_connect, real_connect_ex = socket.socket.connect, socket.socket.connect_ex
+    real_getaddrinfo = socket.getaddrinfo
 
-    try:
-        with vcr.use_cassette(
-            'tests/fixtures/vcr/news_daily.yml',
-            record_mode='none',  # fail if cassette doesn't exist
-            filter_headers=['authorization', 'cookie'],
-            filter_query_parameters=['apiKey', 'apikey', 'key'],
-            before_record_request=_drop_request_body,
-            match_on=['method', 'scheme', 'host', 'port', 'path', 'query'],
-        ) as cassette:
-            yield cassette
-    finally:
-        for i, (status, failures, last_checked) in enumerate(saved_state):
-            if i < len(SOURCES):
-                SOURCES[i].status = status
-                SOURCES[i].consecutive_failures = failures
-                SOURCES[i].last_checked = last_checked
-        if _cache_backup is not None:
-            _os.makedirs(_os.path.dirname(_z1_cache_path), exist_ok=True)
-            with open(_z1_cache_path, "w", encoding="utf-8") as _f:
-                _f.write(_cache_backup)
+    def connect(self, address):
+        _check_address(address, "connect")
+        return real_connect(self, address)
+
+    def connect_ex(self, address):
+        _check_address(address, "connect")
+        return real_connect_ex(self, address)
+
+    def getaddrinfo(host, *args, **kwargs):
+        _check_address((host,), "DNS lookup")
+        return real_getaddrinfo(host, *args, **kwargs)
+
+    monkeypatch.setattr(socket.socket, "connect", connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", connect_ex)
+    monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+    # asyncio's proactor loop (Windows default) connects with ConnectEx, not
+    # socket.connect; an IP-literal address never goes through getaddrinfo.
+    for cls in (asyncio.proactor_events.BaseProactorEventLoop,
+                asyncio.selector_events.BaseSelectorEventLoop):
+        real = cls.sock_connect
+
+        async def sock_connect(self, sock, address, _real=real):
+            _check_address(address, "connect")
+            return await _real(self, sock, address)
+        monkeypatch.setattr(cls, "sock_connect", sock_connect)
+    yield
 
 
 @pytest.fixture(autouse=True)

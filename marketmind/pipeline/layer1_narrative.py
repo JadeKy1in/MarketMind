@@ -173,8 +173,10 @@ def _parse_layer1_response(content: str) -> Layer1Result:
             m = re.search(pattern, text)
             return m.group(1) if m else default
 
-        # ── Grade: try "event_grade: X", then "grade: X" ──
-        grade = "D"
+        # ── Grade: try "event_grade: X", then "grade: X"; "unknown" when neither is
+        # stated (was "D", an invented geopolitical grade; consumers only display,
+        # count or compare with "E") ──
+        grade = "unknown"
         m = re.search(r'event.grade[:\s]*["\']?([A-Ea-e])', content)
         if m:
             grade = m.group(1).upper()

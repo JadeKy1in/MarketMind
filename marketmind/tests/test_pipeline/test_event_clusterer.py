@@ -288,7 +288,15 @@ class TestParseTopicJson:
 # ── Main Cluster Events Tests ──
 
 class TestClusterEventsAsync:
-    """Async tests for the main cluster_events function."""
+    """Async tests for the main cluster_events function. Tier 3 (topic naming and
+    cross-cluster chains) calls Flash; it is mocked here, never a real call."""
+
+    @pytest.fixture(autouse=True)
+    def fake_flash(self, monkeypatch):
+        fake = AsyncMock(return_value={
+            "content": '{"title": "Euro policy divergence", "narrative": "ECB versus Fed"}'})
+        monkeypatch.setattr("marketmind.gateway.async_client.chat_flash", fake)
+        return fake
 
     @pytest.mark.asyncio
     async def test_empty_input(self):
@@ -308,12 +316,28 @@ class TestClusterEventsAsync:
         assert len(result.clusters) == 1
 
     @pytest.mark.asyncio
-    async def test_related_headlines_clustered_together(self):
+    async def test_related_headlines_clustered_together(self, fake_flash):
         headlines = ECB_HEADLINES + EURUSD_HEADLINES
         entities = _make_entities(headlines)
         result = await cluster_events(headlines, entities)
-        # Should form fewer clusters than headlines (some grouped)
-        assert result.clusters_formed <= len(headlines)
+        assert result.total_headlines == len(headlines)
+        assert 1 <= result.clusters_formed == len(result.clusters)
+        # every headline ends up in exactly one cluster or in noise
+        clustered = [h for c in result.clusters for h in c.headlines]
+        assert len(clustered) == len(set(clustered))
+        assert len(clustered) + result.noise_count == len(headlines)
+        assert set(clustered) <= set(headlines)
+        # Tier 3 named every cluster from the (mocked) Flash reply
+        assert all(c.title == "Euro policy divergence" for c in result.clusters)
+        assert fake_flash.await_count >= result.clusters_formed
+
+    @pytest.mark.xfail(reason="clustering currently leaves each ECB headline in its own "
+                              "cluster (red-team 2026-09-29); remove when grouping works",
+                       strict=False)
+    @pytest.mark.asyncio
+    async def test_ecb_headlines_share_a_cluster(self):
+        result = await cluster_events(ECB_HEADLINES, _make_entities(ECB_HEADLINES))
+        assert any(len(set(c.headlines) & set(ECB_HEADLINES)) >= 2 for c in result.clusters)
 
     @pytest.mark.asyncio
     async def test_cluster_has_title_fallback(self):

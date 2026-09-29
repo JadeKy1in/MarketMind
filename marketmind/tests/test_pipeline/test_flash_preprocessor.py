@@ -103,6 +103,7 @@ def test_flash_system_prompt_has_integrity():
 async def test_preprocess_batch_returns_signals():
     mock_result = {
         "content": json.dumps([{
+            "i": 0,
             "signal_id": "SIG-TEST-1",
             "event_type": "macro_data",
             "event_grade": "E",
@@ -151,3 +152,47 @@ async def test_preprocess_single_returns_signal():
         assert signal is not None
         assert signal.event_type == "corporate_action"
         assert "AAPL" in signal.affected_assets
+
+
+def _batch_reply(*sigs):
+    return {"content": json.dumps(list(sigs))}
+
+
+@pytest.mark.asyncio
+async def test_batch_maps_signals_by_explicit_index_not_position():
+    # Flash skipped [0] and answered [2] before [1]: position would misalign everything.
+    items = [make_item(0, "H0"), make_item(1, "H1"), make_item(2, "H2")]
+    reply = _batch_reply({"i": 2, "signal_id": "S2", "direction": "bearish"},
+                         {"i": "1", "signal_id": "S1", "direction": "bullish"})
+    with patch("marketmind.pipeline.flash_preprocessor.chat_flash", AsyncMock(return_value=reply)):
+        signals = await preprocess_batch(items, batch_size=15)
+    assert [(s.signal_id, s.source_headline, s.source_url) for s in signals] == [
+        ("S2", "H2", "https://test.com/2"), ("S1", "H1", "https://test.com/1")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad", [None, -1, 3, "x", True, 1.5, "[9]"])
+async def test_batch_drops_signals_without_a_valid_index(bad):
+    items = [make_item(0, "H0"), make_item(1, "H1"), make_item(2, "H2")]
+    sig = {"signal_id": "BAD"} if bad is None else {"i": bad, "signal_id": "BAD"}
+    reply = _batch_reply(sig, {"i": 0, "signal_id": "OK"})
+    with patch("marketmind.pipeline.flash_preprocessor.chat_flash", AsyncMock(return_value=reply)):
+        signals = await preprocess_batch(items)
+    assert [(s.signal_id, s.source_headline) for s in signals] == [("OK", "H0")]
+
+
+@pytest.mark.asyncio
+async def test_batch_index_is_relative_to_its_batch():
+    items = [make_item(k, f"H{k}") for k in range(4)]
+    replies = [_batch_reply({"i": 1, "signal_id": "A"}), _batch_reply({"i": 0, "signal_id": "B"})]
+    with patch("marketmind.pipeline.flash_preprocessor.chat_flash", AsyncMock(side_effect=replies)):
+        signals = await preprocess_batch(items, batch_size=2)
+    assert [(s.signal_id, s.source_headline) for s in signals] == [("A", "H1"), ("B", "H2")]
+
+
+@pytest.mark.asyncio
+async def test_batch_prompt_asks_for_the_index():
+    mock = AsyncMock(return_value=_batch_reply())
+    with patch("marketmind.pipeline.flash_preprocessor.chat_flash", mock):
+        await preprocess_batch([make_item(0, "H0")])
+    assert '"i"' in mock.call_args.kwargs["user_prompt"] and '"i"' in FLASH_SYSTEM_PROMPT

@@ -488,11 +488,15 @@ class TestVerifyClaim:
     @pytest.mark.asyncio
     async def test_returns_verification_result_structure(self):
         """verify_claim should return a properly populated VerificationResult."""
-        result = await verify_claim(
-            claim="Fed will cut rates by 25bps next month",
-            affected_assets=["SPY"],
-            source_names=["Reuters", "Financial Times", "SEC EDGAR"],
-        )
+        # A rate claim reads CFTC COT positioning; mocked (it was a real CFTC call).
+        cot = {"asset": "ES", "source": "cftc", "date": "2026-09-22",
+               "signal": "Speculative positioning near neutral (1,000) — no directional signal"}
+        with patch("marketmind.gateway.macro_data.get_cot_data", AsyncMock(return_value=cot)):
+            result = await verify_claim(
+                claim="Fed will cut rates by 25bps next month",
+                affected_assets=["SPY"],
+                source_names=["Reuters", "Financial Times", "SEC EDGAR"],
+            )
         assert isinstance(result, VerificationResult)
         assert result.claim == "Fed will cut rates by 25bps next month"
         assert 0.0 <= result.layer_1_market <= 1.0

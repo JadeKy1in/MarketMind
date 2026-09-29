@@ -50,8 +50,8 @@ def test_parse_layer2_response_markdown_wrapped():
 
 def test_parse_layer2_response_defaults_on_empty():
     result = _parse_layer2_response("{}")
-    assert result.macro_quadrant == "contraction"
-    assert result.macro_direction == "risk_off"
+    assert result.macro_quadrant == "unknown"
+    assert result.macro_direction == "unknown"
     assert result.ticker_candidates == []
 
 
@@ -92,6 +92,17 @@ async def test_analyze_layer2_returns_defaults_on_failure():
     with patch("marketmind.pipeline.layer2_fundamental.chat_pro",
                side_effect=RuntimeError("API error")):
         result = await analyze_layer2(l1)
-        assert result.macro_quadrant == "contraction"
-        assert result.macro_direction == "risk_off"
+        assert result.macro_quadrant == "unknown"
+        assert result.macro_direction == "unknown"
         assert len(result.red_team_notes) == 1
+
+
+def test_parse_layer2_regex_fallback_defaults_to_unknown():
+    result = _parse_layer2_response('not json at all, "ticker_candidates": [broken')
+    assert (result.macro_quadrant, result.macro_direction) == ("unknown", "unknown")
+    assert result.red_team_notes                      # the parse failure is reported
+
+
+def test_parse_layer2_regex_fallback_keeps_stated_values():
+    result = _parse_layer2_response('{"macro_quadrant": "recovery", "macro_direction": "risk_on", oops')
+    assert (result.macro_quadrant, result.macro_direction) == ("recovery", "risk_on")

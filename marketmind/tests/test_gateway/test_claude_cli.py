@@ -1,4 +1,5 @@
 """Claude provider via the local CLI (docs/LLM_PROVIDER.md); no real calls here."""
+import asyncio
 import json
 
 import pytest
@@ -98,3 +99,60 @@ async def test_deepseek_selected_never_calls_claude(monkeypatch):
         raise AssertionError("claude must not be called")
     monkeypatch.setattr(claude_cli, "call", boom)
     assert await async_client._try_claude("s", "u", "flash") is None
+
+
+class _HangingProc:
+    """A `claude -p` stand-in whose communicate() never returns."""
+    def __init__(self):
+        self.returncode = None
+        self.killed = False
+        self.started = asyncio.Event()
+
+    async def communicate(self, _input=None):
+        self.started.set()
+        await asyncio.Event().wait()
+
+    def kill(self):
+        self.killed = True
+        self.returncode = -9
+
+    async def wait(self):
+        return self.returncode
+
+
+@pytest.mark.asyncio
+async def test_outer_cancellation_kills_the_child(monkeypatch, tmp_path):
+    from marketmind.gateway import claude_cli
+    proc = _HangingProc()
+
+    async def fake_exec(*a, **kw):
+        return proc
+
+    monkeypatch.setenv("MARKETMIND_CLAUDE_BIN", "claude-fake")
+    monkeypatch.setattr(claude_cli, "_workdir", lambda: tmp_path)
+    monkeypatch.setattr(claude_cli, "_sem", None)
+    monkeypatch.setattr(claude_cli.asyncio, "create_subprocess_exec", fake_exec)
+    task = asyncio.create_task(claude_cli.call("sys", "user", "flash"))
+    await asyncio.wait_for(proc.started.wait(), 5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert proc.killed
+    assert list(tmp_path.iterdir()) == []          # system-prompt temp file removed too
+
+
+@pytest.mark.asyncio
+async def test_own_timeout_kills_the_child(monkeypatch, tmp_path):
+    from marketmind.gateway import claude_cli
+    proc = _HangingProc()
+
+    async def fake_exec(*a, **kw):
+        return proc
+
+    monkeypatch.setenv("MARKETMIND_CLAUDE_BIN", "claude-fake")
+    monkeypatch.setattr(claude_cli, "_workdir", lambda: tmp_path)
+    monkeypatch.setattr(claude_cli, "_sem", None)
+    monkeypatch.setattr(claude_cli, "TIMEOUT_S", 0.05)
+    monkeypatch.setattr(claude_cli.asyncio, "create_subprocess_exec", fake_exec)
+    out = await claude_cli.call("sys", "user", "flash")
+    assert proc.killed and "timed out" in out["error"]

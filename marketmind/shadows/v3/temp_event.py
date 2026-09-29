@@ -19,6 +19,7 @@ from pathlib import Path
 from statistics import pstdev
 
 from marketmind.config.source_independence import count_independent_sources
+from marketmind.pipeline.defang import defang_text
 from marketmind.shadows.v3.roster import PROMPT_DIR, RosterEntry
 
 logger = logging.getLogger("marketmind.shadows.v3.temp_event")
@@ -212,15 +213,28 @@ def refresh(events: list[Event], candidates: list[Event], today: str) -> tuple[l
     return events, spawned
 
 
+# shadow_id -> the event's LLM-written title/summary. They are untrusted text, so they
+# never go into the shadow's SYSTEM prompt; context.build_context puts them in the
+# user message inside a delimited untrusted-data block (red-team 2026-09-29).
+_BRIEFS: dict[str, dict[str, str]] = {}
+
+
+def event_brief(shadow_id: str) -> dict[str, str] | None:
+    """Title/type/summary of an event shadow built by roster_entries in this process."""
+    return _BRIEFS.get(shadow_id)
+
+
 def roster_entries(events: list[Event], today: str) -> list[RosterEntry]:
     template = (PROMPT_DIR / "_temp_event.md").read_text(encoding="utf-8")
     out = []
     for e in events:
         if e.status != "active":
             continue
-        prompt = template.format(title=e.title, type_name=f"{e.type} {TYPES[e.type][0]}",
-                                 spawned=e.spawned, summary=e.summary or e.title,
+        type_name = f"{e.type} {TYPES[e.type][0]}"
+        prompt = template.format(type_name=type_name, spawned=e.spawned,
                                  watchlist=", ".join(e.watchlist), days_left=e.days_left(today))
+        _BRIEFS[f"temp_event:{e.event_id}"] = {"title": e.title, "type": type_name,
+                                               "summary": e.summary or e.title}
         out.append(RosterEntry(
             shadow_id=f"temp_event:{e.event_id}", name=f"temp_{e.type}_{e.event_id[:6]}",
             display_name=e.title, group="temp_event", domain=f"{e.type} {TYPES[e.type][0]}",
@@ -257,8 +271,9 @@ async def daily_events(news_items: list, histories: dict, *, today: str | None =
     news = prefilter(news_items)
     if news:
         by_id = {n.id: n for n in news}
-        user = "\n".join(f"[{n.id}] ({getattr(n, 'source_name', '')}) {n.title}\n    "
-                         f"{(getattr(n, 'summary', '') or '')[:240]}" for n in news)
+        user = "\n".join(f"[{n.id}] ({defang_text(getattr(n, 'source_name', '') or '')}) "
+                         f"{defang_text(n.title)}\n    "
+                         f"{defang_text((getattr(n, 'summary', '') or '')[:240])}" for n in news)
         try:
             found, dropped = parse_events(await call(SYSTEM_PROMPT, user), by_id, today, tradable)
             candidates += found
