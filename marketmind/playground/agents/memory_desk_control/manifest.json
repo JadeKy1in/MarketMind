@@ -1,0 +1,37 @@
+{
+  "agent_id": "memory_desk_control",
+  "display_name": "Memory Desk control (LLM, no memory)",
+  "description": "No-memory control twin of memory_desk: identical universe, daily fact sheet, system prompt and code rules, but no memory section and no lessons. Exists so the promotion ladder can test, on the same days, whether memory helps (legacy AEL control-group requirement).",
+  "output_character": "daily long/short calls on six liquid ETFs and crypto, confidence 0.50-0.70, 3 x ATR20 code stop, 5-bar hold",
+  "public_data_sources": [
+    "public daily price bars via gateway.price_history (complete bars only)",
+    "public news headlines passed by the Playground runner"
+  ],
+  "requires_proprietary_data": false,
+  "primary_metric": "brier",
+  "secondary_metrics": [
+    "net_excess_return_vs_domain_benchmark",
+    "direction_accuracy"
+  ],
+  "min_sample_size": 20,
+  "min_observation_days": 60,
+  "target_pipeline_node": "baseline_benchmark",
+  "version": "1.0.0",
+  "author": "MarketMind (owner decision 2026-09-29)",
+  "tags": [
+    "llm",
+    "control",
+    "no-memory",
+    "cross-asset",
+    "daily"
+  ],
+  "domain_benchmark": "SPY",
+  "domain_universe": [
+    "SPY",
+    "QQQ",
+    "GLD",
+    "TLT",
+    "BTC-USD",
+    "ETH-USD"
+  ]
+}
