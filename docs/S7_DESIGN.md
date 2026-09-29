@@ -205,10 +205,7 @@
 - 代码：`promotion/retirement.py`（提案条件、donor 选择、批准 / 驳回、摘要）、`promotion/review_facts.py`（复盘事实）、`promotion/__main__.py`（命令行）；`roster.py` 新增运行时覆盖（`retirements_path`、`retired_ids`、`successor_entries`、`all_entries`，`active()` / `by_id()` 已包含接任者、排除退役者）；`shadows/v3/runner.py` 只加了"跳过已退役影子"的过滤；`ladder.evaluate` 新增 `retired_ids` 参数与 `retired` 阶段；`run_promotion` 把接任者并入评审名册、在评审后检查提案。
 - 每日流程不变，`pipeline/orchestration.py` 没有改动：提案在 `run_promotion` 内检查，读取的是前一天及更早判定的试验（试验判定在晋升评审之后运行），所以提案最多晚一天。
 - 接任者沿用原影子的 `name`，因此按 `name` 取数的影子数据源（`shadow_feeds`）照常可用；方法论从数据目录读取，不用 `prompts/<name>.md`。
-- **待办（不在本次修改的文件范围内）**：
-  1. `shadows/v3/runner.py`、`context.py` 里按固定编号启用的专用输入（FRED 序列、fade_master 的共识、news_hound / bear_tracker 的额外标的、squeeze_watch 的空头数据、options_reader 的期权摘要、scalper 的 1 天持有期）对接任者不生效；应改为按 `roster.lineage_id(编号)` 判断。
-  2. `alerts/runner.py::load_voters` 用 `roster.ROSTER` 取组别，接任者成为顾问后不会投票；应改用 `roster.all_entries()`。
-  3. `api/whitebox.py` 的影子竞技场与晋升页只遍历 `roster.ROSTER`，看不到接任者；`STAGE_CN` 缺少 `retired`（建议"退役"）；待批准的退役提案应显示在晋升页（读 `data/promotion/retirements.json` 或 `retirement.summary()`），并进入日报事实。
+- **已完成（2026-09-29，v3-succ）**：接任者按 `roster.lineage_id` 继承前任的专用输入（FRED、fade_master 共识、news_hound / bear_tracker 额外标的、squeeze / options 数据、scalper 1 天持有）；`alerts/runner.py::load_voters` 用 `roster.all_entries()`，接任者成为顾问后可投票；仪表盘晋升页显示待批准退役提案与已退役影子，竞技场列出接任者；每日汇报新增"待批准：影子退役提案"一节。
 
 ## 现实预期（2026-09-28）
 
