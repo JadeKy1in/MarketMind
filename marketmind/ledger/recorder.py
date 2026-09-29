@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 
 from marketmind.ledger.prices import PriceSource, latest_quotes
+from marketmind.ledger.settlement import target_session
 from marketmind.pipeline.decision import _probability
 from marketmind.ledger.store import LedgerEntry, LedgerStore
 
@@ -99,7 +100,9 @@ async def record_main_decision(decision, l3, store: LedgerStore, source: PriceSo
     """Record today's cards (or the forced paper trade). Returns the new entry ids.
 
     `origins` maps ticker -> meta["origin"] (docs/S10_DESIGN.md §4): which cold-data
-    anomaly led to the idea; tickers without one came from the news-driven path."""
+    anomaly led to the idea; tickers without one came from the news-driven path.
+    One submission per target session (docs/S2_DESIGN.md §4): a second run for the
+    same session records nothing and returns []."""
     cards = list(getattr(decision, "decision_cards", []) or [])
     paper = getattr(decision, "paper_trade", None)
     if not cards and paper is None:
@@ -118,13 +121,22 @@ async def record_main_decision(decision, l3, store: LedgerStore, source: PriceSo
         return []
     provenance = {k: v for k in ("llm", "prompt_version")
                   if (v := getattr(decision, k, None))}      # docs/S9_DESIGN.md §2
-    ids = []
+    valid = []
     for e in entries:
         e.meta = {**(e.meta or {}), **provenance,
                   "origin": (origins or {}).get(e.ticker.upper(), DEFAULT_ORIGIN)}
         try:
-            ids.append(store.add(e, created_at=created_at))
+            e.validate()
+            valid.append(e)
         except ValueError as exc:
             logger.warning("Ledger: rejected %s %s: %s", e.source_type, e.ticker, exc)
+    if not valid:
+        return []
+    ids = store.add_submission(valid, target_session, created_at=created_at)
+    if ids is None:
+        logger.warning("Ledger: main pipeline already recorded this session; "
+                       "duplicate %s submission (%s) not recorded",
+                       valid[0].source_type, ", ".join(tickers))
+        return []
     logger.info("Ledger: recorded %d entries (%s)", len(ids), ", ".join(tickers))
     return ids

@@ -76,7 +76,7 @@ async def test_forced_trade_zero_or_percent_confidence(tmp_path):
     e = store.get(ids[0])
     assert e.confidence == 0.5 and e.confidence_is_default
     ids = await record_main_decision(DecisionOutput(paper_trade=PaperTrade("NVDA", "long", 65, "", "")),
-                                     None, store, SRC)
+                                     None, store, SRC, created_at=CREATED)   # another session
     assert store.get(ids[0]).confidence == 0.65
 
 
@@ -95,5 +95,6 @@ async def test_cards_carry_their_origin(tmp_path):
     ids = await record_main_decision(DecisionOutput(decision_cards=[card()]), None, store, SRC,
                                      origins={card().ticker.upper(): origin})
     assert store.get(ids[0]).meta["origin"] == origin
-    ids = await record_main_decision(DecisionOutput(decision_cards=[card()]), None, store, SRC)
+    ids = await record_main_decision(DecisionOutput(decision_cards=[card()]), None, store, SRC,
+                                     created_at=CREATED)                      # another session
     assert store.get(ids[0]).meta["origin"] == {"kind": "news"}

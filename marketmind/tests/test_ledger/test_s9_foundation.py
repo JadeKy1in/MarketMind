@@ -137,8 +137,10 @@ def test_review_facts_long():
 
 
 def test_review_facts_short_rescaled_and_missing_levels():
+    # settled under the same x0.97 adjustment: the entry price is already in this series
     r = compute_review(settled(direction="short", gross_return=-0.04, net_return=-0.041,
-                               stop_loss=None, target_price=100.0, excess_market=None),
+                               stop_loss=None, target_price=100.0, excess_market=None,
+                               meta={"price_factor": 0.97}),
                        BARS, factor=0.97)
     assert r["direction_correct"] is False and r["mfe"] == 0.04 and r["mae"] == -0.08
     assert r["touched_target"] is True and r["target_distance"] == 0.03     # 97 vs fill 100

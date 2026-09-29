@@ -4,7 +4,9 @@ docs/S3_DESIGN.md §3. One call per active shadow (plus one repair retry when
 the reply fails validation); a shadow with no valid decision after that has
 "missed" the day, which is reported, never filled in. Each shadow that
 submitted also gets a same-domain random benchmark record (§3.6).
-Re-running on the same UTC day skips shadows that already have records.
+A shadow submits once per target session (docs/S2_DESIGN.md §4): a re-run skips
+shadows that already have records for the session a record made now would trade
+in, and the ledger rejects a second submission for the same session atomically.
 """
 from __future__ import annotations
 
@@ -13,12 +15,13 @@ import json
 import logging
 import random
 import statistics
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
 from marketmind.gateway import llm_trace, usage_tracker
 from marketmind.gateway.price_history import get_price_histories
+from marketmind.ledger.settlement import target_session
 from marketmind.ledger.store import LedgerEntry, LedgerStore
 from marketmind.shadows.v3 import roster as roster_mod
 from marketmind.shadows.v3.context import (
@@ -39,7 +42,7 @@ SCALPER_ID = "momentum:intraday:scalper"
 @dataclass
 class ShadowResult:
     shadow_id: str
-    status: str                      # submitted | missed | skipped
+    status: str                      # submitted | missed | skipped | duplicate
     entry_ids: list[str] = field(default_factory=list)
     benchmark_id: str | None = None
     errors: list[str] = field(default_factory=list)
@@ -54,10 +57,13 @@ class RunReport:
     results: list[ShadowResult] = field(default_factory=list)
 
     def summary(self) -> str:
-        n = {s: sum(r.status == s for r in self.results) for s in ("submitted", "missed", "skipped")}
+        n = {s: sum(r.status == s for r in self.results)
+             for s in ("submitted", "missed", "skipped", "duplicate")}
         records = sum(len(r.entry_ids) for r in self.results)
         text = (f"shadows: {n['submitted']} submitted ({records} decisions), "
                 f"{n['missed']} missed, {n['skipped']} already done today")
+        if n["duplicate"]:
+            text += f", {n['duplicate']} duplicate submissions not recorded"
         missed = [r.shadow_id.rsplit(':', 1)[-1] for r in self.results if r.status == "missed"]
         return text + (f" — missed: {', '.join(missed)}" if missed else "")
 
@@ -110,9 +116,16 @@ def _run_date(e: LedgerEntry) -> str:
     return (e.meta or {}).get("run_date") or e.created_at[:10]
 
 
-def _already_recorded(store: LedgerStore, today: str) -> set[str]:
-    return {e.source_id for st in ("shadow", "temp_shadow") for e in store.list(source_type=st)
-            if _run_date(e) == today}
+def _already_recorded(store: LedgerStore, entries: list, created_at: str) -> set[str]:
+    """Shadows that already have a record for the session the same ticker would
+    target if recorded at `created_at` (so no LLM call is spent on a duplicate)."""
+    done = set()
+    for e in entries:
+        for r in store.recent(e.source_type, e.shadow_id, created_at):
+            if target_session(r) == target_session(replace(r, created_at=created_at)):
+                done.add(e.shadow_id)
+                break
+    return done
 
 
 def _previous_consensus(store: LedgerStore, today: str) -> list[tuple[str, str, str]]:
@@ -222,11 +235,12 @@ def _benchmark_entry(ctx: ShadowContext, holds: list[int], today: str,
 async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | None = None,
                          entries: list | None = None, call=_call_llm, fred_fetch=None,
                          derivs_fetch=None, report_dir: Path | None = None,
-                         feeds_fetch=None) -> RunReport:
+                         feeds_fetch=None, created_at: str | None = None) -> RunReport:
     today = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    created_at = created_at or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     entries = entries if entries is not None else roster_mod.active()
     report = RunReport(today)
-    done = _already_recorded(store, today)
+    done = _already_recorded(store, entries, created_at)
     todo = []
     for e in entries:
         if e.shadow_id in done:
@@ -294,11 +308,12 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
             meta["temp"] = ctx.entry.group        # temp_event | trial
         if ctx.entry.shadow_id == SCALPER_ID:
             meta["intraday_approx"] = True
+        records = []
         for d in parsed.decisions:
             d_meta = {**meta, "market": market_for(d.ticker).code}
             if d.ticker in ctx.off_context:
                 d_meta["off_context"] = True
-            res.entry_ids.append(store.add(LedgerEntry(
+            records.append(LedgerEntry(
                 source_type=ctx.entry.source_type, source_id=ctx.entry.shadow_id, ticker=d.ticker,
                 direction=d.direction, hold_bars=d.hold_days, confidence=d.confidence,
                 position_usd=d.position_usd, falsifier=d.falsifier, thesis=d.thesis,
@@ -306,12 +321,23 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
                 stop_loss=d.stop, target_price=d.target, falsifier_rule=d.falsifier_rule,
                 domain_benchmark=ctx.entry.domain_benchmark, snapshot_id=snapshot_id,
                 meta=d_meta,
-            )))
+            ))
         # random benchmarks pair with long-term shadows; trials compare with their parent
         bench = (_benchmark_entry(ctx, [d.hold_days for d in parsed.decisions], today, snapshot_id)
                  if ctx.entry.source_type == "shadow" else None)
-        if bench is not None:
-            res.benchmark_id = store.add(bench)
+        # one transaction: a duplicate session writes neither the calls nor the benchmark
+        ids = store.add_submission(records, target_session, created_at=created_at,
+                                   companions=[bench] if bench is not None else [])
+        if ids is None:
+            res.status = "duplicate"
+            sessions = sorted({s for r in records if (s := target_session(r))})
+            res.errors.append(f"already submitted for session {', '.join(sessions)}; "
+                              "not recorded")
+            logger.warning("Shadow %s: duplicate submission for session %s not recorded",
+                           ctx.entry.shadow_id, ", ".join(sessions))
+            return res
+        res.entry_ids = ids[:len(records)]
+        res.benchmark_id = ids[len(records)] if bench is not None else None
         return res
 
     results = await asyncio.gather(*(one(c) for c in contexts), return_exceptions=True)
