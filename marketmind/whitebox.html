@@ -59,6 +59,8 @@ button.act:disabled{opacity:.5}
   <section id="s-ledger"></section>
   <section id="s-arena"></section>
   <section id="s-promo"></section>
+  <section id="s-ecosystem"></section>
+  <section id="s-playground"></section>
   <section id="s-discovery"></section>
   <section id="s-trend"></section>
   <section id="s-evidence"></section>
@@ -69,7 +71,7 @@ button.act:disabled{opacity:.5}
 </main>
 <div id="drawer"></div>
 <script>
-const TABS=[["brief","今日简报"],["chain","主管线推理链"],["ledger","统一账本"],["arena","影子竞技场"],["promo","晋升淘汰日志"],["discovery","冷门发现"],["trend","趋势状态"],["evidence","证据层"],["holdings","实盘持仓"],["alerts","大行情警报"],["health","系统健康"],["reporter","汇报员"]];
+const TABS=[["brief","今日简报"],["chain","主管线推理链"],["ledger","统一账本"],["arena","影子竞技场"],["promo","晋升淘汰日志"],["ecosystem","生态健康"],["playground","Playground"],["discovery","冷门发现"],["trend","趋势状态"],["evidence","证据层"],["holdings","实盘持仓"],["alerts","大行情警报"],["health","系统健康"],["reporter","汇报员"]];
 const $=s=>document.querySelector(s);
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const NA='<span class="mut">无数据</span>';
@@ -195,8 +197,32 @@ async function loadArena(){
 }
 
 // ── promotion ──
+const INS=(t,lbl)=>`<span class="chip yellow">${esc(lbl||"数据不足")}</span>${t?` <span class="mut">${esc(t)}</span>`:""}`;
+const tstat=v=>v==null?NA:`<span class="${Math.abs(v)>=2?(v>0?"pos":"neg"):"mut"}">${num(v,2)}</span>`;
+function diagCard(g,names){
+  if(!g.available)return `<div class="card"><h2>因子诊断与纸面→实盘差距</h2><div class="empty">${esc(g.reason||"无数据")}</div></div>`;
+  const nm=id=>names[id]||id;
+  const FST={insufficient:"数据不足",unavailable:"无因子数据",missing:"未计算"};
+  const PST={insufficient:"样本不足",empty:"无已结算交易",missing:"未计算"};
+  const rows=(g.rows||[]).map(r=>{const f=r.factors||{},p=r.paper_live||{},dr=f.drift||{};
+    const fac=f.status==="ok"?`<td class="num">${pct(f.alpha_annual)}</td><td class="num">${tstat(f.alpha_t)}</td>
+      <td>${(f.main_betas||[]).map(b=>`<div>${esc(b.factor)} ${num(b.beta,2)} <span class="mut">t ${b.t==null?"—":num(b.t,1)}</span></div>`).join("")}${f.meaningful===false?'<div class="mut">载荷不具解释力（加密 / 非美股占比高）</div>':""}</td>
+      <td class="num">${num(f.r2,2)}</td>
+      <td>${dr.status!=="ok"?INS(dr.reason):(dr.flags||[]).length?`<span class="chip ${(dr.flags_family||[]).length?"red":"yellow"}">漂移</span> ${dr.flags.map(esc).join(", ")}`:'<span class="chip green">稳定</span>'}</td>`
+     :`<td colspan="5">${INS(`${f.reason||""}${f.obs!=null?`（${f.obs} 天）`:""}`,FST[f.status]||f.status)}</td>`;
+    const cap=p.capacity_breaches==null?"—":`${p.capacity_breaches}/${p.capacity_priced??0}`;
+    const pl=p.status==="ok"||(p.status==="insufficient"&&p.trades)?`<td class="num">${p.extra_cost_median_bps==null?"—":num(p.extra_cost_median_bps,1)} / ${p.extra_cost_mean_bps==null?"—":num(p.extra_cost_mean_bps,1)}</td>
+      <td class="num">${pct(p.paper_mean_excess_domain)} → ${pct(p.live_mean_excess_domain)}</td><td class="num">${cap}${p.capacity_usd_p10!=null?`<div class="mut">P10 容量 $${Number(p.capacity_usd_p10).toLocaleString(undefined,{maximumFractionDigits:0})}</div>`:""}</td>
+      <td>${p.status!=="ok"?INS(`${p.trades} 笔`,PST[p.status]):p.live_ready?'<span class="chip green">可实盘</span>':`<span class="chip red">未就绪</span> <span class="mut">${Object.entries(p.checks||{}).filter(([k,v])=>!v).map(([k])=>esc(k)).join(", ")}</span>`}</td>`
+     :`<td colspan="4">${INS(p.trades!=null?`${p.trades} 笔`:"",PST[p.status]||p.status)}</td>`;
+    return `<tr><td>${esc(nm(r.shadow_id))}<div class="mut">${esc(r.shadow_id)}</div></td>${fac}${pl}</tr>`}).join("");
+  return `<div class="card"><h2>因子诊断与纸面→实盘差距 <span class="mut">只做报告，不参与晋升门槛；计算于 ${esc(g.updated_at||"—")}</span></h2>
+  <div class="mut" style="margin-bottom:8px">α 为日度因子回归截距 ×252（HAC t，|t|≥2 着色）；主要 β 取 |t| 最大的三个因子；风格漂移比较最近窗口与此前的载荷（红色 = 通过族错误率校正）。额外成本是在账本成本之外按 ATR 与平方根冲击再扣的往返成本（中位 / 均值，bp）；容量超限 = 仓位超过 20 日成交额 1% 的笔数 / 可定价笔数。</div>
+  <div class="tw"><table><tr><th>影子</th><th class="num">α 年化</th><th class="num">α t(HAC)</th><th>主要 β</th><th class="num">R²</th><th>风格漂移</th><th class="num">额外成本 bp</th><th class="num">领域超额 纸面→实盘</th><th class="num">容量超限</th><th>实盘就绪</th></tr>${rows}</table></div></div>`;
+}
 async function loadPromo(){
-  const d=await j("/api/wb/promotion");
+  const [d,g]=await Promise.all([j("/api/wb/promotion"),j("/api/wb/diagnostics")]);
+  const pnames={};(d.rows||[]).forEach(r=>pnames[r.shadow_id]=r.display_name);
   const rt=d.retirements||{},rp=rt.pending||[],rr=rt.retired||[];
   const retHtml=`<h3>待批准：影子退役提案</h3>${rt.error?`<div class="neg">退役提案文件无法读取（${esc(rt.error)}）</div>`:""}${rp.length?`<table><tr><th>影子</th><th>提案日</th><th>阶段</th><th>理由</th><th>接任者</th><th>方法论来源</th><th>批准命令</th></tr>${rp.map(p=>`<tr><td>${esc(p.display_name)}<div class="mut">${esc(p.shadow_id)}</div></td><td>${esc(p.proposed_at)}</td><td>${esc(p.stage)}</td><td>最近挑战者均未通过：${esc((p.challengers||[]).join(", "))}；评估期 ${esc((p.window||[]).join(" → "))} 相对 ${esc(p.domain_benchmark)} 平均超额 ${pct(p.excess_domain_mean)}（${p.excess_n??0} 笔）</td><td>${esc(p.successor_id)}（从见习开始）</td><td>${p.donor_id?`${esc(p.donor_name)}（${p.donor_match==="group"?"同组":"同领域"}综合分最高，LLM 改写）`:"沿用原方法论"}</td><td class="mut">${esc(p.command)}</td></tr>`).join("")}</table>`:'<div class="empty">没有待批准的退役提案</div>'}
   ${rr.length?`<div class="mut" style="margin-top:6px">已退役：${rr.map(r=>`${esc(r.display_name)}（${esc(r.decided_at)}，接任者 ${esc(r.successor||"—")}）`).join("；")}</div>`:""}`;
@@ -206,7 +232,73 @@ async function loadPromo(){
   <table><tr><th>影子</th><th>阶段</th><th class="num">有记录交易日</th><th class="num">已结算</th><th class="num">N_eff / MinTRL</th><th class="num">综合分</th><th>Tier</th><th>说明</th></tr>
   ${(d.rows||[]).map(r=>`<tr><td>${esc(r.display_name)}</td><td>${esc(r.stage)}</td><td class="num">${r.active_days}/${r.probation_days}</td><td class="num">${r.settled}</td><td class="num">${r.n_eff==null?"—":num(r.n_eff,1)} / ${r.min_trl==null?"—":num(r.min_trl,1)}</td><td class="num">${r.score==null?"—":num(r.score,3)}</td><td>${r.tier?"Tier"+r.tier:"—"}</td><td class="mut">${esc(r.note)}</td></tr>`).join("")}</table>
   <h3>事件</h3>${(d.events||[]).length?`<table><tr><th>日期</th><th>事件</th><th>影子</th><th>变化</th><th>依据</th></tr>${d.events.map(e=>`<tr><td>${esc(e.date)}</td><td>${esc(e.type)}</td><td>${esc(e.shadow_id)}</td><td>${esc(e.from)} → ${esc(e.to)}</td><td class="mut">${esc(JSON.stringify(e.detail||{}))}</td></tr>`).join("")}</table>`:'<div class="empty">暂无晋升、暂停或挑战事件</div>'}
-  <h3>门槛（promotion/config.py）</h3><pre>${esc(JSON.stringify(d.thresholds||{},null,2))}</pre></div>`;
+  <h3>门槛（promotion/config.py）</h3><pre>${esc(JSON.stringify(d.thresholds||{},null,2))}</pre></div>
+  ${diagCard(g,pnames)}`;
+}
+
+// ── shadow-ecosystem health (ECOSYSTEM_DESIGN) ──
+const VERDICT={market_driven:["市场驱动","green"],behavioural:["行为性","red"],unclassified:["无法判定",""]};
+const MKT={"no trend":"无趋势",increasing:"上升",decreasing:"下降"};
+async function loadEcosystem(){
+  const d=await j("/api/wb/ecosystem");
+  if(!d.available){$("#s-ecosystem").innerHTML=`<div class="card empty">生态健康：${esc(d.reason||"无数据")}</div>`;return}
+  const h=d.herding||{},dv=d.diversity||{},hm=d.homogenisation||{},st=d.stagnation||{},it=d.integrity||{},dg=d.degradation||{},p=d.population||{};
+  const dir=x=>x==="long"?"多":x==="short"?"空":esc(x);
+  const vd=v=>{const x=VERDICT[v]||[v,""];return `<span class="chip ${x[1]}">${esc(x[0])}</span>`};
+  const flags=(h.flags||[]).map(f=>`<tr><td><b>${esc(f.group)}</b></td><td>${dir(f.direction)}</td><td class="num">${f.days}</td><td>${esc(f.start)} → ${esc(f.end)}</td><td class="num">${f.min_share==null?"—":(f.min_share*100).toFixed(0)+"%"} / ${f.min_voters??"—"}</td><td class="num">${f.joint_p==null?NA:Number(f.joint_p).toExponential(1)}</td><td>${vd(f.verdict)}${f.escalate?' <span class="chip red">持续 ≥10 天</span>':""}</td></tr>`).join("");
+  const today=(h.today||[]).map(r=>`<span class="chip ${r.concentrated?"yellow":""}">${esc(r.group)} ${dir(r.direction)} ${(r.share*100).toFixed(0)}% / ${r.n}</span>`).join(" ");
+  const divRow=(x,label)=>{x=x||{};const cl=x.clusters||[];return `<tr><td>${label}</td><td class="num">${x.n_eff==null?INS(x.note):`${num(x.n_eff,1)} / ${x.eligible}`}</td><td class="num">${x.mean_abs_rho==null?"—":num(x.mean_abs_rho,2)}</td><td>${cl.length?cl.map(c=>`<div><span class="chip ${c.expected?"":"red"}">${c.expected?"同源（预期）":"非预期重复"}</span> ${(c.members||[]).map(esc).join(", ")}</div>`).join(""):'<span class="mut">无</span>'}</td></tr>`};
+  const homRow=(x,label)=>{x=x||{};return `<tr><td>${label}</td><td>${x.top==null?'<span class="mut">无记录</span>':esc(x.top)}</td><td class="num">${x.share==null?"—":(x.share*100).toFixed(0)+"%"} <span class="mut">(${x.count??0}/${x.actors??0})</span></td><td>${x.top==null?"":x.flag?'<span class="chip red">同质化</span>':'<span class="chip green">正常</span>'}</td></tr>`};
+  const mkRow=(x,label)=>{x=x||{};return `<tr><td>${label}</td><td>${!x.trend||x.trend==="insufficient"?INS(`${x.n??0} 个点`):`<span class="chip ${x.trend==="decreasing"?"red":""}">${esc(MKT[x.trend]||x.trend)}</span>`}</td><td class="num">${x.tau==null?"—":num(x.tau,2)}</td><td class="num">${x.p==null?"—":num(x.p,3)}</td></tr>`};
+  const ns=hm.news_source||{},br=dg.beat_random||[],lb=br[br.length-1],el=dg.entropy_latest;
+  const zo=it.zombies||[],or=it.orphans||[],rs=it.retired_submitting||[],sf=st.flags||[];
+  $("#s-ecosystem").innerHTML=`<div class="card"><h2>生态健康 ${esc(d.date||"")} <span class="mut">只做监测，不改变任何决策、晋升或警报</span></h2>
+  <pre>${esc(d.summary||"")}</pre>
+  <div class="grid">
+   <div class="stat"><div class="k">羊群标记</div><div class="v">${(h.flags||[]).length}</div><div class="k">历史片段 ${h.episodes??0}</div></div>
+   <div class="stat"><div class="k">N_eff（盈亏）</div><div class="v">${dv.pnl&&dv.pnl.n_eff!=null?num(dv.pnl.n_eff,1)+" / "+dv.pnl.eligible:"数据不足"}</div></div>
+   <div class="stat"><div class="k">非预期重复簇</div><div class="v">${((dv.pnl||{}).unexpected_clusters||[]).length+((dv.direction||{}).unexpected_clusters||[]).length}</div></div>
+   <div class="stat"><div class="k">僵尸 / 孤儿来源</div><div class="v">${zo.length} / ${or.length}</div></div>
+   <div class="stat"><div class="k">完整运行日</div><div class="v">${p.full_run_days??0}</div><div class="k">${esc(p.first_run_day||"—")} → ${esc(p.last_run_day||"—")}，参与者 ${p.actors??0}</div></div>
+  </div></div>
+  <div class="card"><h2>羊群（同一资产组 ≥80% 投票同向且连续 ≥3 个完整运行日）</h2>
+  <div class="mut" style="margin-bottom:8px">市场驱动 = 与该组趋势状态一致（多 + TREND，或空 + 空仓）；行为性 = 与趋势状态不一致，更值得警惕。</div>
+  ${flags?`<div class="tw"><table><tr><th>资产组</th><th>方向</th><th class="num">连续天数</th><th>期间</th><th class="num">最低占比 / 票数</th><th class="num">联合 p</th><th>判定</th></tr>${flags}</table></div>`:'<div class="empty">今天没有羊群标记</div>'}
+  <h3>今日各组投票</h3><div>${today||'<span class="mut">今天不是完整运行日或没有投票</span>'}</div></div>
+  <div class="card"><h2>输出多样性与重复簇</h2><table><tr><th>口径</th><th class="num">N_eff / 合格数</th><th class="num">平均 |ρ|</th><th>重复簇</th></tr>${divRow(dv.pnl,"每日盈亏相关")}${divRow(dv.direction,"方向向量余弦")}</table></div>
+  <div class="card"><h2>来源 / 模型同质化 <span class="mut">最近 ${hm.window_days??0} 个完整运行日</span></h2>
+  <table><tr><th>维度</th><th>最常见</th><th class="num">占比</th><th>判定</th></tr>${homRow(hm.dominant_group,"主要资产组")}${homRow(hm.dominant_ticker,"主要标的")}${homRow(hm.llm,"LLM 模型")}</table>
+  <div class="mut" style="margin-top:6px">标的集合平均 Jaccard：${hm.mean_ticker_jaccard==null?"—":num(hm.mean_ticker_jaccard,2)}；新闻来源：${ns.status==="not_recorded"?'<span class="chip yellow">未记录</span> '+esc(ns.detail||""):esc(ns.status||"—")}</div></div>
+  <div class="card"><h2>停滞 <span class="mut">${esc(st.note||"")}${st.insufficient?`；${st.insufficient} 个影子天数不足未判断`:""}</span></h2>
+  ${sf.length?`<table><tr><th>影子</th><th>类型</th><th>详情</th></tr>${sf.map(f=>`<tr><td>${esc(f.shadow_id)}</td><td>${f.kind==="repetition"?"重复同一标的方向":"平台期"}</td><td class="mut">${f.kind==="repetition"?`${esc(f.top)} 占 ${(f.share*100).toFixed(0)}%（${f.days} 天）`:`标的 Jaccard ${num(f.ticker_jaccard,2)}，确信度漂移 ${num(f.conf_shift,3)}，标准差 ${num(f.conf_std,3)}`}</td></tr>`).join("")}</table>`:'<div class="empty">没有停滞标记</div>'}</div>
+  <div class="card"><h2>僵尸 / 孤儿 <span class="mut">检查 ${it.run_days_checked??0} 个完整运行日，名册在役 ${it.active??0}</span></h2>
+  <h3>僵尸（在役但连续未交卷）</h3>${zo.length?`<table><tr><th>影子</th><th class="num">连续沉默运行日</th><th>最后出现</th></tr>${zo.map(z=>`<tr><td>${esc(z.shadow_id)}</td><td class="num">${z.silent_run_days}</td><td>${esc(z.last_seen||"从未")}</td></tr>`).join("")}</table>`:'<div class="empty">无</div>'}
+  <h3>孤儿来源（账本里有记录，但名册 / 清单里没有）</h3>${or.length?`<table><tr><th>类型</th><th>来源</th><th class="num">记录</th><th>最后一天</th><th>原因</th></tr>${or.map(o=>`<tr><td>${SRC[o.source_type]||esc(o.source_type)}</td><td>${esc(o.source_id)}</td><td class="num">${o.records}</td><td>${esc(o.last_day)}</td><td class="mut">${esc(o.reason)}</td></tr>`).join("")}</table>`:'<div class="empty">无</div>'}
+  ${rs.length?`<h3>已退役仍在交卷</h3><div>${rs.map(r=>`<span class="chip red">${esc(r.shadow_id)}（退役 ${esc(r.retired_on)} 后 ${r.days_after} 天）</span>`).join(" ")}</div>`:""}</div>
+  <div class="card"><h2>整体退化趋势 <span class="mut">Mann-Kendall；${esc(dg.note||"")}</span></h2>
+  <table><tr><th>序列</th><th>趋势</th><th class="num">tau</th><th class="num">p</th></tr>${mkRow(dg.direction_entropy_trend,"方向熵")}${mkRow(dg.spread_trend,"组 × 方向分散度")}${mkRow(dg.beat_random_trend,"跑赢自身随机基准的影子占比")}</table>
+  <div class="mut" style="margin-top:6px">最近一日：${el?`方向熵 ${num(el.direction_entropy,3)} 比特，分散度 ${el.spread==null?"—":num(el.spread,3)}（${esc(el.day)}，${el.records} 笔）`:"无数据"}；跑赢随机占比：${lb?`${(lb.share*100).toFixed(0)}%（截至 ${esc(lb.window_end)}，${lb.eligible} 个影子）`:"数据不足（需要足够的已结算交易）"}</div></div>
+  ${(d.notes||[]).length?`<div class="card"><h2>数据说明</h2>${d.notes.map(n=>`<div class="mut">${esc(n)}</div>`).join("")}</div>`:""}`;
+}
+
+// ── Playground agents (PLAYGROUND_AGENTS.md) ──
+async function loadPlayground(){
+  const d=await j("/api/wb/playground");
+  if(!d.available){$("#s-playground").innerHTML=`<div class="card empty">Playground：${esc(d.reason||"没有安装任何 agent")}</div>`;return}
+  const counts=c=>Object.entries(c||{}).map(([k,v])=>`${STATUS[k]||esc(k)} ${v}`).join(" · ")||'<span class="mut">还没有记录</span>';
+  const call=c=>`<div>${esc(String(c.created_at||"").slice(0,10))} <b>${esc(c.ticker)}</b> ${c.direction==="long"?"多":"空"} <span class="mut">${num(c.confidence)} · ${STATUS[c.status]||esc(c.status)}</span>${c.net_return!=null?" "+pct(c.net_return):""} ${idl(c.entry_id)}</div>`;
+  const rows=(d.agents||[]).map(a=>{const s=a.score||{};return `<tr${a.pair_with?' style="background:var(--chip)"':""}>
+   <td>${a.is_control?'<span class="mut">↳ </span>':""}<b><a href="#" onclick="LQ={status:'',source_type:'playground',source_id:'${esc(a.source_id)}',ticker:'',offset:0};loaded.ledger=1;show('ledger');loadLedger();return false">${esc(a.display_name)}</a></b>
+    ${a.pair_with?` <span class="chip yellow">${a.is_control?"对照组":"配对实验"}</span>`:""}<div class="mut">${esc(a.agent_id)} · v${esc(a.version)} · ${esc(a.author)}</div><div class="mut" style="max-width:420px">${esc(a.description)}</div></td>
+   <td>${esc(a.domain_benchmark)}</td><td>${esc(a.primary_metric)}</td>
+   <td>${a.records} 笔<div class="mut">${counts(a.status_counts)}</div>${s.settled?`<div class="mut">已结算 ${s.settled}，胜率 ${s.win_rate==null?"—":(s.win_rate*100).toFixed(0)+"%"}，平均净收益 ${s.mean_net_return==null?"—":(s.mean_net_return*100).toFixed(2)+"%"}</div>`:""}</td>
+   <td>${a.stage?`${esc(a.stage)}${a.tier?" · Tier"+esc(a.tier):""}`:'<span class="mut">尚未进入晋升评审</span>'}</td>
+   <td>${(a.latest||[]).map(call).join("")||'<span class="mut">无</span>'}</td></tr>`}).join("");
+  const un=d.unknown_sources||[];
+  $("#s-playground").innerHTML=`<div class="card"><h2>Playground 实验 agent <span class="mut">共 ${(d.agents||[]).length} 个；账本来源 playground:&lt;agent&gt;，与影子同一套晋升阶梯</span></h2>
+  <div class="mut" style="margin-bottom:8px">${(d.pairs||[]).length?`配对：${d.pairs.map(p=>esc(p[0])+" ↔ "+esc(p[1])).join("；")}（对照组与被检验 agent 用同一输入与规则，只差被检验的那一项，按同一交易日配对比较）。`:""}${d.ledger?"":"账本数据库不存在，记录数为 0。"}点击名称查看该 agent 的全部账本记录。</div>
+  <div class="tw"><table><tr><th>Agent</th><th>领域基准</th><th>主指标</th><th>账本记录</th><th>晋升阶段</th><th>最近调用</th></tr>${rows}</table></div>
+  ${un.length?`<h3>账本中没有清单的 Playground 来源</h3><div>${un.map(u=>`<span class="chip">${esc(u.source_id)} ${u.records}</span>`).join(" ")}</div>`:""}</div>`;
 }
 
 // ── cold-data discovery + watchlist (S10) ──
@@ -357,7 +449,7 @@ async function loadAlerts(){
   ${sk.length?`<h3>跳过（所有人无法执行）</h3><div>${sk.map(x=>`<span class="chip">${esc(x.ticker)} ${esc(x.kind)}</span>`).join(" ")}</div>`:""}</div>
   <div class="card"><h2>历史警报与你的回应</h2>${(d.history||[]).length?`<table><tr><th>记录</th><th>日期</th><th>模式</th><th>标的</th><th>回应</th><th>状态</th><th class="num">净收益</th></tr>${d.history.map(h=>`<tr><td>${idl(h.entry_id)}</td><td>${esc(String(h.created_at).slice(0,10))}</td><td>${esc(h.mode)}</td><td>${esc(h.ticker)}</td><td>${h.response==="accept"?"接受":h.response==="reject"?"拒绝（放弃）":'<span class="mut">未回应</span>'}</td><td>${STATUS[h.status]||esc(h.status)}</td><td class="num">${pct(h.net_return)}</td></tr>`).join("")}</table>`:'<div class="empty">还没有警报</div>'}</div>`;
 }
-const LOAD={brief:loadBrief,alerts:loadAlerts,chain:loadChain,ledger:loadLedger,arena:loadArena,promo:loadPromo,evidence:loadEvidence,discovery:loadDiscovery,trend:loadTrend,holdings:loadHoldings,health:loadHealth,reporter:loadReporter};
+const LOAD={brief:loadBrief,alerts:loadAlerts,chain:loadChain,ledger:loadLedger,arena:loadArena,promo:loadPromo,ecosystem:loadEcosystem,playground:loadPlayground,evidence:loadEvidence,discovery:loadDiscovery,trend:loadTrend,holdings:loadHoldings,health:loadHealth,reporter:loadReporter};
 $("#meta").textContent="只读 · 数据来自账本与运行文件";
 let start="brief";try{start=localStorage.getItem("wb.tab")||"brief"}catch(e){}
 show(TABS.some(t=>t[0]===start)?start:"brief");
