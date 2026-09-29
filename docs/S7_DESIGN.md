@@ -244,6 +244,7 @@
 - 每日流程不变，`pipeline/orchestration.py` 没有改动：提案在 `run_promotion` 内检查，读取的是前一天及更早判定的试验（试验判定在晋升评审之后运行），所以提案最多晚一天。
 - 接任者沿用原影子的 `name`，因此按 `name` 取数的影子数据源（`shadow_feeds`）照常可用；方法论从数据目录读取，不用 `prompts/<name>.md`。
 - **已完成（2026-09-29，v3-succ）**：接任者按 `roster.lineage_id` 继承前任的专用输入（FRED、fade_master 共识、news_hound / bear_tracker 额外标的、squeeze / options 数据、scalper 1 天持有）；`alerts/runner.py::load_voters` 用 `roster.all_entries()`，接任者成为顾问后可投票；仪表盘晋升页显示待批准退役提案与已退役影子，竞技场列出接任者；每日汇报新增"待批准：影子退役提案"一节。
+- **条件信号（2026-09-29）**：批准退役时，原影子未触发的条件信号一律过期，不转给接任者（接任者方法论不同、成绩从零计）；被作废的编号记在提案的 `successor.expired_pending_signals`。规则与理由见 `docs/S3_DESIGN.md` §9。
 
 ## 现实预期（2026-09-28）
 

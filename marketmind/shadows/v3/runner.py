@@ -7,6 +7,10 @@ submitted also gets a same-domain random benchmark record (§3.6).
 A shadow submits once per target session (docs/S2_DESIGN.md §4): a re-run skips
 shadows that already have records for the session a record made now would trade
 in, and the ledger rejects a second submission for the same session atomically.
+Conditional signals (docs/S3_DESIGN.md §9, pending_signals.py) are registered with a
+recorded submission and checked at the start of every run; a triggered one becomes a
+ledger record with meta.pending_signal_id, which the once-per-session check ignores
+(it never stands in for the forced daily decision).
 """
 from __future__ import annotations
 
@@ -23,6 +27,7 @@ from marketmind.gateway import llm_trace, usage_tracker
 from marketmind.gateway.price_history import get_price_histories
 from marketmind.ledger.settlement import target_session
 from marketmind.ledger.store import LedgerEntry, LedgerStore
+from marketmind.shadows.v3 import pending_signals
 from marketmind.shadows.v3 import roster as roster_mod
 from marketmind.shadows.v3 import self_feedback
 from marketmind.shadows.v3.context import (
@@ -56,12 +61,14 @@ class ShadowResult:
     warnings: list[str] = field(default_factory=list)
     attempts: int = 0
     raw: list[str] = field(default_factory=list)
+    pending_ids: list[str] = field(default_factory=list)     # conditional signals registered
 
 
 @dataclass
 class RunReport:
     date: str
     results: list[ShadowResult] = field(default_factory=list)
+    pending: dict = field(default_factory=dict)     # conditional-signal check (pending_signals.check)
 
     def summary(self) -> str:
         n = {s: sum(r.status == s for r in self.results)
@@ -71,6 +78,11 @@ class RunReport:
                 f"{n['missed']} missed, {n['skipped']} already done today")
         if n["duplicate"]:
             text += f", {n['duplicate']} duplicate submissions not recorded"
+        new = sum(len(r.pending_ids) for r in self.results)
+        fired, gone = len(self.pending.get("triggered", [])), (
+            len(self.pending.get("expired", [])) + len(self.pending.get("cancelled", [])))
+        if new or fired or gone:
+            text += f"; conditional signals: {new} new, {fired} triggered, {gone} expired"
         missed = [r.shadow_id.rsplit(':', 1)[-1] for r in self.results if r.status == "missed"]
         return text + (f" — missed: {', '.join(missed)}" if missed else "")
 
@@ -94,6 +106,8 @@ async def _price_off_context(text: str, known: dict[str, float]) -> dict[str, fl
     raw = data.get("decisions") if isinstance(data, dict) else data
     if not isinstance(raw, list):
         return {}
+    extra = data.get("conditional_signals") if isinstance(data, dict) else None
+    raw = raw + (extra if isinstance(extra, list) else [])
     known_upper = {k.upper() for k in known}
     wanted = []
     for d in raw:
@@ -123,12 +137,25 @@ def _run_date(e: LedgerEntry) -> str:
     return (e.meta or {}).get("run_date") or e.created_at[:10]
 
 
+def _from_signal(e: LedgerEntry) -> bool:
+    """A triggered conditional signal: counts toward the record, not the daily minimum."""
+    return bool((e.meta or {}).get("pending_signal_id"))
+
+
+def daily_session(e: LedgerEntry) -> str | None:
+    """Session key of the once-per-session submission check; triggered conditional
+    signals have none, so they neither block nor satisfy a day's forced decision."""
+    return None if _from_signal(e) else target_session(e)
+
+
 def _already_recorded(store: LedgerStore, entries: list, created_at: str) -> set[str]:
     """Shadows that already have a record for the session the same ticker would
     target if recorded at `created_at` (so no LLM call is spent on a duplicate)."""
     done = set()
     for e in entries:
         for r in store.recent(e.source_type, e.shadow_id, created_at):
+            if _from_signal(r):
+                continue
             if target_session(r) == target_session(replace(r, created_at=created_at)):
                 done.add(e.shadow_id)
                 break
@@ -137,7 +164,8 @@ def _already_recorded(store: LedgerStore, entries: list, created_at: str) -> set
 
 def _previous_consensus(store: LedgerStore, today: str) -> list[tuple[str, str, str]]:
     """(source_id, ticker, direction) of the most recent earlier day with shadow records."""
-    rows = [e for e in store.list(source_type="shadow") if _run_date(e) < today]
+    rows = [e for e in store.list(source_type="shadow")
+            if _run_date(e) < today and not _from_signal(e)]
     if not rows:
         return []
     last = max(_run_date(e) for e in rows)
@@ -187,13 +215,34 @@ async def decide(ctx: ShadowContext, call=_call_llm) -> tuple[ParseResult, list[
         extra = await _price_off_context(text, ctx.closes)
         off_context.update(extra)
         result = parse_decisions(text, {**ctx.closes, **extra}, fixed_hold=fixed,
-                                 no_levels=set(extra), atrs=ctx.atrs)
+                                 no_levels=set(extra), atrs=ctx.atrs,
+                                 ret_5d={v.ticker: v.ret_5d for v in ctx.views
+                                         if v.ret_5d is not None})
         if result.ok:
             return result, raws, attempt
         user = (ctx.render() + "\n\n## Your previous reply was rejected\n"
                 + "\n".join(f"- {e}" for e in result.errors)
                 + "\nReply again with valid JSON only, at least one decision.")
     return result, raws, 2
+
+
+async def _check_pending(store: LedgerStore, entries: list, retired: set[str], today: str,
+                         created_at: str, path: Path) -> dict:
+    """Trigger check of the run's shadows' conditional signals; never fails the run."""
+    try:
+        ids = {e.shadow_id for e in entries}
+        tickers = pending_signals.tickers_to_check(path, ids)
+        histories = await get_price_histories(tickers) if tickers else {}
+        out = pending_signals.check(path, store, histories, shadow_ids=ids, retired=retired,
+                                    today=today, created_at=created_at)
+    except Exception as exc:
+        logger.error("conditional-signal check failed", exc_info=True)
+        return {"error": f"{type(exc).__name__}: {exc}"}
+    if out["triggered"] or out["expired"] or out["cancelled"]:
+        logger.info("conditional signals: %d triggered, %d expired, %d cancelled, %d waiting",
+                    len(out["triggered"]), len(out["expired"]), len(out["cancelled"]),
+                    out["waiting"])
+    return out
 
 
 async def _derivatives_lines(todo: list, histories: dict, today: str, fetch=None) -> dict:
@@ -245,13 +294,17 @@ def _benchmark_entry(ctx: ShadowContext, holds: list[int], today: str,
 async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | None = None,
                          entries: list | None = None, call=_call_llm, fred_fetch=None,
                          derivs_fetch=None, report_dir: Path | None = None,
-                         feeds_fetch=None, created_at: str | None = None) -> RunReport:
+                         feeds_fetch=None, created_at: str | None = None,
+                         pending_path: Path | None = None) -> RunReport:
     today = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     created_at = created_at or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     entries = entries if entries is not None else roster_mod.active()
     retired = roster_mod.retired_ids()      # owner-approved retirements: no more LLM calls
     entries = [e for e in entries if e.shadow_id not in retired]
     report = RunReport(today)
+    pending_path = pending_path or pending_signals.default_path()
+    report.pending = await _check_pending(store, entries, retired, today, created_at,
+                                          pending_path)
     done = _already_recorded(store, entries, created_at)
     todo = []
     for e in entries:
@@ -284,6 +337,12 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
     if any(self_feedback.is_on(e) for e in todo):
         shadow_rows, bench_rows = store.list(source_type="shadow"), store.list(source_type="benchmark")
 
+    try:
+        open_pending = pending_signals.load(pending_path)
+    except (OSError, ValueError):
+        logger.warning("pending-signal registry unreadable", exc_info=True)
+        open_pending = {"signals": []}
+
     contexts = []
     for e in todo:
         fred_failed = False
@@ -298,6 +357,9 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
                                       feeds=feeds.get(e.name), **derivs.get(e.shadow_id, {})))
         if self_feedback.is_on(e):
             contexts[-1].own_record = self_feedback.lines_for(e, shadow_rows, bench_rows)
+        if lines := pending_signals.context_lines(open_pending, e.shadow_id):
+            contexts[-1].feeds = {**contexts[-1].feeds,
+                                  "Your open conditional signals (checked by code daily)": lines}
 
     quotes = {}
     for ctx in contexts:
@@ -348,7 +410,7 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
         bench = (_benchmark_entry(ctx, [d.hold_days for d in parsed.decisions], today, snapshot_id)
                  if ctx.entry.source_type == "shadow" else None)
         # one transaction: a duplicate session writes neither the calls nor the benchmark
-        ids = store.add_submission(records, target_session, created_at=created_at,
+        ids = store.add_submission(records, daily_session, created_at=created_at,
                                    companions=[bench] if bench is not None else [])
         if ids is None:
             res.status = "duplicate"
@@ -360,6 +422,19 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
             return res
         res.entry_ids = ids[:len(records)]
         res.benchmark_id = ids[len(records)] if bench is not None else None
+        if parsed.conditionals:          # only with a recorded submission
+            try:
+                res.pending_ids, warn = pending_signals.register(
+                    pending_path, ctx.entry, parsed.conditionals, today=today,
+                    created_at=created_at, closes={**ctx.closes, **ctx.off_context},
+                    as_of={v.ticker: v.snap.as_of for v in ctx.views if v.snap is not None},
+                    atrs=ctx.atrs, meta=meta)
+                res.warnings = [*res.warnings, *warn]
+            except Exception as exc:
+                logger.error("Shadow %s: conditional signals not registered",
+                             ctx.entry.shadow_id, exc_info=True)
+                res.warnings = [*res.warnings,
+                                f"conditional signals not registered ({type(exc).__name__})"]
         return res
 
     results = await asyncio.gather(*(one(c) for c in contexts), return_exceptions=True)
