@@ -102,7 +102,10 @@ async def test_daily_events_runs_llm_once_per_day(env):
     assert s1["spawned"] == ["美联储意外降息"] and s2["skipped"] and len(calls) == 1
     entries = temp_event.roster_entries(temp_event.load(), TODAY)
     assert entries[0].source_type == "temp_shadow" and entries[0].shadow_id.startswith("temp_event:")
-    assert "美联储意外降息" in roster.load_prompt(entries[0]) and "{" not in entries[0].prompt_text[:200]
+    # LLM-written event text never enters the SYSTEM prompt; it is in the context message
+    assert "美联储意外降息" not in roster.load_prompt(entries[0]) and "{" not in entries[0].prompt_text
+    from marketmind.shadows.v3.context import build_context
+    assert "title: 美联储意外降息" in build_context(entries[0], {}, [], today=TODAY).render()
 
 
 # ── runner with temp entries ────────────────────────────────────────────────
