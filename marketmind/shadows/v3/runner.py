@@ -311,7 +311,8 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
             return res
         meta = {"model": MODEL, "shadow": ctx.entry.name, "attempts": attempts,
                 "run_date": today, "llm": llm_trace.label(models),
-                "prompt_version": llm_trace.prompt_version(system_prompt(ctx.entry))}
+                "prompt_version": llm_trace.prompt_version(system_prompt(ctx.entry)),
+                "news_sources": list(ctx.news_sources)}
         if ctx.entry.source_type != "shadow":
             meta["temp"] = ctx.entry.group        # temp_event | trial
         if _lineage(ctx.entry) == SCALPER_ID:

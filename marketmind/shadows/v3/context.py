@@ -137,6 +137,11 @@ def event_lines(entry: RosterEntry) -> list[str]:
             f"summary: {brief.get('summary', '')}"]
 
 
+def news_sources(items: list) -> list[str]:
+    """Sorted unique source names of the headlines a shadow was shown (meta.news_sources)."""
+    return sorted({src for item in items if (src := _attr(item, "source_name").strip())})
+
+
 def news_lines(items: list) -> list[str]:
     lines = []
     for item in items:
@@ -219,6 +224,7 @@ class ShadowContext:
     event: list[str] = field(default_factory=list)              # event shadows only (untrusted)
     today: str = ""
     off_context: dict[str, float] = field(default_factory=dict)  # priced after the reply
+    news_sources: list[str] = field(default_factory=list)       # sources of `headlines`
 
     @property
     def closes(self) -> dict[str, float]:
@@ -272,9 +278,9 @@ def build_context(entry: RosterEntry, histories: dict[str, PriceHistory | None],
                   fred_failed: bool = False) -> ShadowContext:
     tickers = list(dict.fromkeys([*entry.watchlist, *(extra_tickers or [])]))
     views = [ticker_view(t, histories.get(t)) for t in tickers]
-    headlines = news_lines(filter_news(news_items, entry.news_keywords))
+    shown = filter_news(news_items, entry.news_keywords)
     return ShadowContext(
-        entry=entry, views=views, headlines=headlines,
+        entry=entry, views=views, headlines=news_lines(shown), news_sources=news_sources(shown),
         # A failed FRED fetch is stated, not silently dropped (the section would vanish).
         fred=[FRED_UNAVAILABLE_LINE] if fred_failed else fred_lines(fred or {}),
         consensus=(consensus_lines(consensus_rows or [])
