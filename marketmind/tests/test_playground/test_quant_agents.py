@@ -333,3 +333,14 @@ async def test_bridge_hold_bars_and_misplaced_rule(tmp_path):
     c, _ = lb.parse_call({"ticker": "AAA", "direction": "long", "confidence": 0.6,
                           "falsifier_rule": {"type": "bogus", "price": 1}}, lambda t: True)
     assert c["falsifier_rule"] is None and c["hold"] == lb.DEFAULT_HOLD
+
+
+def test_llm_agent_provenance_is_copied_to_top_level_meta():
+    from marketmind.playground.ledger_bridge import _provenance
+    assert _provenance({"llm": ["claude-sonnet-5-5", "claude-sonnet-5-5", "deepseek-flash"],
+                        "prompt_version": "memory_desk/v1"}) == {
+        "llm": "claude-sonnet-5-5+deepseek-flash", "prompt_version": "memory_desk/v1"}
+    assert _provenance({"llm": "claude-opus", "prompt_version": "debate_desk/v1",
+                        "prompt_fingerprint": "abc123abc123"}) == {
+        "llm": "claude-opus", "prompt_version": "abc123abc123"}
+    assert _provenance({"rule": "tsmom"}) == {}

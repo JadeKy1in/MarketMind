@@ -74,6 +74,21 @@ def parse_call(call: dict, tradable) -> tuple[dict | None, str | None]:
             "signal": signal}, None
 
 
+def _provenance(signal: dict) -> dict:
+    """Top-level meta.llm / meta.prompt_version like shadow records (docs/S9_DESIGN.md §2),
+    taken from what an LLM agent reported in its signal facts."""
+    out = {}
+    llm = signal.get("llm")
+    if isinstance(llm, (list, tuple)):
+        llm = "+".join(dict.fromkeys(str(m) for m in llm if m)) or None
+    if llm:
+        out["llm"] = str(llm)
+    version = signal.get("prompt_fingerprint") or signal.get("prompt_version")
+    if version:
+        out["prompt_version"] = str(version)
+    return out
+
+
 def _rule_fits(rule: dict | None, direction: str, close: float) -> bool:
     """close_below under the price for a long, close_above over it for a short."""
     if rule is None:
@@ -147,6 +162,7 @@ async def record_run(store: LedgerStore, result, manifests: dict, *, today: str 
                 meta["signal_key"] = c["signal_key"]
             if c["signal"]:
                 meta["signal"] = c["signal"]
+                meta.update(_provenance(c["signal"]))
             ids.append(store.add(LedgerEntry(
                 source_type="playground", source_id=sid, ticker=c["ticker"],
                 direction=c["direction"], hold_bars=c["hold"], confidence=c["confidence"],
