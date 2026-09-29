@@ -80,3 +80,22 @@ def test_playground_enters_the_promotion_ladder(tmp_path):
     s = run_promotion(store, today=TODAY, data_dir=tmp_path,
                       roster=tuple(roster.ROSTER) + tuple(cands), active_ids=active)
     assert s["probation_progress"]["playground:serenity_reply"] == 1
+
+
+@pytest.mark.asyncio
+async def test_snapshot_uses_the_last_complete_bar_not_the_running_one(tmp_path):
+    store = LedgerStore(tmp_path / "l.db")
+
+    async def with_partial(tickers):
+        # the last bar is a session that has not closed yet (dated in the future here)
+        return {t: PriceHistory(t, "static", [Bar("2026-09-25", 10, 11, 9, 10, 1e6),
+                                              Bar("2999-01-01", 10, 13, 9, 12.5, 1e3)], [])
+                for t in tickers}
+
+    result = SimpleNamespace(decisions=[
+        _decision([{"ticker": "AXTI", "direction": "bullish", "confidence": 0.8}])])
+    await lb.record_run(store, result, MANIFESTS, today=TODAY, tradable=lambda t: True,
+                        histories_fn=with_partial)
+    e = store.list(source_type="playground")[0]
+    snap = store.snapshot(e.snapshot_id)["AXTI"]
+    assert (snap["price"], snap["price_date"]) == (10, "2026-09-25")
