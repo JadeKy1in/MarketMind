@@ -5,6 +5,9 @@ same ledger as shadows (source_type "playground", source_id "playground:<agent>"
 and are judged by the same ladder. Unlike long-term shadows they are not forced
 to trade every day. Each agent with at least one call that day also gets a
 same-domain random benchmark (manifest `domain_universe`), like shadows do.
+Pure-code agents (docs/PLAYGROUND_AGENTS.md) may also pass `hold_bars`, a
+`falsifier_rule` (close_below / close_above, settled by the ledger), a `signal_key`
+(recorded once per agent across runs, e.g. one monthly rebalance) and `signal` facts.
 """
 from __future__ import annotations
 
@@ -49,15 +52,35 @@ def parse_call(call: dict, tradable) -> tuple[dict | None, str | None]:
     if not 0.0 <= conf <= 1.0:
         return None, f"{ticker}: confidence {conf} outside 0-1"
     try:
-        hold = int(call.get("hold_days") or DEFAULT_HOLD)
+        hold = int(call.get("hold_bars") or call.get("hold_days") or DEFAULT_HOLD)
     except (TypeError, ValueError):
         hold = DEFAULT_HOLD
     thesis = str(call.get("thesis") or "")[:600]
+    # optional code-computed pieces (pure-code agents, docs/PLAYGROUND_AGENTS.md)
+    rule = call.get("falsifier_rule")
+    try:
+        rule = ({"type": rule["type"], "price": float(rule["price"])}
+                if isinstance(rule, dict) and rule.get("type") in ("close_below", "close_above")
+                else None)
+    except (KeyError, TypeError, ValueError):
+        rule = None
+    signal = call.get("signal") if isinstance(call.get("signal"), dict) else None
     return {"ticker": ticker, "direction": direction, "confidence": conf,
             "hold": max(1, min(hold, 60)), "thesis": thesis,
             "falsifier": str(call.get("falsifier") or "").strip()
             or f"{max(1, min(hold, 60))} 个交易日内走势与判断相反（净收益为负）",
-            "model": call.get("mental_model_used")}, None
+            "model": call.get("mental_model_used"), "falsifier_rule": rule,
+            "signal_key": str(call.get("signal_key") or "").strip() or None,
+            "signal": signal}, None
+
+
+def _rule_fits(rule: dict | None, direction: str, close: float) -> bool:
+    """close_below under the price for a long, close_above over it for a short."""
+    if rule is None:
+        return False
+    if direction == "long":
+        return rule["type"] == "close_below" and rule["price"] < close
+    return rule["type"] == "close_above" and rule["price"] > close
 
 
 async def record_run(store: LedgerStore, result, manifests: dict, *, today: str | None = None,
@@ -69,8 +92,11 @@ async def record_run(store: LedgerStore, result, manifests: dict, *, today: str 
         from marketmind.markets import is_shadow_tradable as tradable
     if histories_fn is None:
         from marketmind.gateway.price_history import get_price_histories as histories_fn
-    done = {e.source_id for e in store.list(source_type="playground")
-            if (e.meta or {}).get("run_date") == today}
+    existing = store.list(source_type="playground")
+    done = {e.source_id for e in existing if (e.meta or {}).get("run_date") == today}
+    # a signal an agent already recorded on an earlier run (e.g. this month's rebalance)
+    keys = {(e.source_id, (e.meta or {}).get("signal_key")) for e in existing
+            if (e.meta or {}).get("signal_key")}
     out: dict[str, list[str]] = {}
     dropped: list[str] = []
     for decision in getattr(result, "decisions", []):
@@ -80,7 +106,9 @@ async def record_run(store: LedgerStore, result, manifests: dict, *, today: str 
         calls = []
         for c in decision.directional_calls:
             parsed, why = parse_call(c, tradable)
-            if parsed:
+            if parsed and parsed["signal_key"] and (sid, parsed["signal_key"]) in keys:
+                dropped.append(f"{decision.agent_id}: {parsed['signal_key']} already recorded")
+            elif parsed:
                 calls.append(parsed)
             else:
                 dropped.append(f"{decision.agent_id}: {why}")
@@ -107,14 +135,25 @@ async def record_run(store: LedgerStore, result, manifests: dict, *, today: str 
                 dropped.append(f"{decision.agent_id}: {c['ticker']} has no price data")
                 continue
             layer, asset_type = classify_ticker(c["ticker"])
+            rule = c["falsifier_rule"]
+            if rule is not None and not _rule_fits(rule, c["direction"], quotes[c["ticker"]][0]):
+                logger.warning("%s: %s falsifier_rule %s does not fit a %s at %s, dropped",
+                               decision.agent_id, c["ticker"], rule, c["direction"],
+                               quotes[c["ticker"]][0])
+                rule = None
+            meta = {"run_date": today, "agent": decision.agent_id, "model": c["model"],
+                    "run_id": decision.run_id}
+            if c["signal_key"]:
+                meta["signal_key"] = c["signal_key"]
+            if c["signal"]:
+                meta["signal"] = c["signal"]
             ids.append(store.add(LedgerEntry(
                 source_type="playground", source_id=sid, ticker=c["ticker"],
                 direction=c["direction"], hold_bars=c["hold"], confidence=c["confidence"],
                 position_usd=_position(c["confidence"]), falsifier=c["falsifier"],
                 thesis=c["thesis"], layer=layer, asset_type=asset_type, entry_rule="next_open",
-                domain_benchmark=domain_bench, snapshot_id=snapshot_id,
-                meta={"run_date": today, "agent": decision.agent_id, "model": c["model"],
-                      "run_id": decision.run_id})))
+                falsifier_rule=rule, domain_benchmark=domain_bench, snapshot_id=snapshot_id,
+                meta=meta)))
         if ids and bench_ticker in quotes:
             rng = random.Random(f"{today}:{sid}:dir")
             store.add(LedgerEntry(
