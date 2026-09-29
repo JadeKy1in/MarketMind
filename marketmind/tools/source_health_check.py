@@ -40,7 +40,7 @@ async def test_rss(source: Source) -> tuple[int, str]:
 
 
 async def test_api(source: Source) -> tuple[int, str]:
-    """Test API source (NewsAPI, GNews, Bluesky, etc.)."""
+    """Test API source (NewsAPI, GNews)."""
     from marketmind.config.settings import MarketMindConfig
     config = MarketMindConfig()
 
@@ -49,38 +49,6 @@ async def test_api(source: Source) -> tuple[int, str]:
         return 0, "No NEWSAPI_KEY configured"
     if source.name == "GNews" and not config.gnews_key:
         return 0, "No GNEWS_KEY configured"
-    if source.name == "Bluesky Social":
-        # Try OAuth with env credentials (same as production code)
-        import os as _os
-        username = _os.environ.get("BLUESKY_USERNAME", "")
-        app_password = _os.environ.get("BLUESKY_APP_PASSWORD", "")
-        if not username or not app_password:
-            return 0, "Requires OAuth (BLUESKY_USERNAME + BLUESKY_APP_PASSWORD)"
-        try:
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                # Create session
-                auth_resp = await client.post(
-                    "https://bsky.social/xrpc/com.atproto.server.createSession",
-                    json={"identifier": username, "password": app_password},
-                    headers={"Content-Type": "application/json"},
-                )
-                if auth_resp.status_code != 200:
-                    return 0, f"Auth failed: HTTP {auth_resp.status_code}"
-                token = auth_resp.json().get("accessJwt", "")
-                # Search posts
-                resp = await client.get(
-                    "https://bsky.social/xrpc/app.bsky.feed.searchPosts",
-                    params={"q": "finance OR stocks OR market", "limit": 5},
-                    headers={"Authorization": f"Bearer {token}"},
-                )
-                if resp.status_code != 200:
-                    return 0, f"HTTP {resp.status_code}"
-                data = resp.json()
-                posts = data.get("posts", [])
-                return len(posts), ""
-        except Exception as e:
-            return 0, str(e)[:100]
-
     # For NewsAPI/GNews — skip actual API call (would consume quota), just check key exists
     if source.name in ("NewsAPI", "GNews"):
         return -1, "SKIPPED (API call would consume quota)"

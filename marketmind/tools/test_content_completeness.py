@@ -46,7 +46,6 @@ ALL_SOURCES = [
     # === API sources (tested separately) ===
     {"name": "NewsAPI", "url": None, "type": "api", "region": "US"},
     {"name": "GNews", "url": None, "type": "api", "region": "US"},
-    {"name": "Bluesky", "url": None, "type": "bluesky", "region": "US"},
     {"name": "BLS API", "url": None, "type": "bls_api", "region": "US"},
 ]
 

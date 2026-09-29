@@ -375,3 +375,54 @@ def test_redaction_covers_path_keys():
     from marketmind.notification.log_redaction import redact
     assert "SCTkey" not in redact("POST https://sctapi.ftqq.com/SCTkey.send")
     assert "abc" not in redact("https://open.feishu.cn/open-apis/bot/v2/hook/abc")
+
+
+# ── dashboard view of the alert report ──────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_dashboard_view_reads_trunk_annotation_evidence(env):
+    from marketmind.api import whitebox
+    store, tmp = env
+    _add(store, "shadow", "f1", "SPY")                      # us_equity_index, long
+    _add(store, "shadow", "m1", "ES=F")
+    _add(store, "playground", "playground:pg1", "GC=F")     # long gold: against the GLD exit
+    _add(store, "evidence", "div", "QQQ", claim="breadth diverges up", claim_type="breadth")
+    _add(store, "evidence", "div", "NQ=F", "short", claim="rates headwind")
+    await _run(store, tmp)
+    d = whitebox.get_big_alerts()
+    v = d["view"]
+    assert d["available"] and d["report"]["fired"]               # raw report still served
+    assert v["mode"] == "observe" and v["live_switch"] is False and v["pushed"] == 0
+    assert v["trend_source"]["name"] == "daily_state_machine"
+    assert v["trend_source"]["universe"] == "lean"
+    rows = {r["ticker"]: r for r in v["alerts"]}
+    assert set(rows) == {"QQQ", "GLD", "BTC-USD"}
+    q = rows["QQQ"]
+    assert q["kind"] == "entry" and q["trunk"]["move"] == "→TREND"
+    assert q["trunk"]["stop_level"] == 90.0 and q["trunk"]["close"] == 100.0
+    assert q["annotation"] == {"status": "supported", "status_cn": "顾问支持", "veto": False,
+                               "votes_for": 2, "votes_against": 0,
+                               "groups_for": ["fundamental", "momentum"], "groups_against": []}
+    assert [e["claim"] for e in q["evidence"]["for"]] == ["breadth diverges up"]
+    assert [e["claim"] for e in q["evidence"]["against"]] == ["rates headwind"]
+    assert q["entry_id"]
+    g = rows["GLD"]
+    assert g["kind"] == "exit" and g["trunk"]["move"] == "TREND→EXIT" and g["entry_id"] is None
+    assert g["annotation"]["status"] == "vetoed" and g["annotation"]["veto"] is True
+    assert g["annotation"]["votes_against"] == 1 and g["annotation"]["groups_against"] == ["playground"]
+    assert rows["BTC-USD"]["annotation"]["status"] == "no_votes"
+    assert [(r["ticker"], r["kind"]) for r in v["near_misses"]] == [("SPY", "watch")]
+    assert v["near_misses"][0]["note"].startswith("WATCH")
+    assert v["near_misses"][0]["annotation"]["status"] == "supported"
+    assert [s["ticker"] for s in v["skipped"]] == ["IWM"]
+
+
+def test_dashboard_view_tolerates_missing_fields():
+    from marketmind.api import whitebox
+    assert whitebox.alert_report_view(None) is None
+    v = whitebox.alert_report_view({"mode": "live", "fired": [{"ticker": "X", "kind": "entry"}]})
+    assert v["mode"] == "live" and v["near_misses"] == [] and v["trend_source"]["name"] is None
+    r = v["alerts"][0]
+    assert r["trunk"]["move"] == "→TREND" and r["trunk"]["stop_level"] is None
+    assert r["annotation"]["status"] == "no_votes" and r["annotation"]["votes_for"] == 0
+    assert r["evidence"] == {"for": [], "against": []}

@@ -340,7 +340,9 @@ def benchmark_return(bars: list[Bar] | None, start: str, end: str) -> float | No
     """Open of the first bar on/after `start` to close of the last bar on/before `end`,
     each at most BENCHMARK_ALIGN_DAYS away. A shifted date must be an interior gap
     (bars exist on its other side), so a stale or short series is never passed off
-    as the real return."""
+    as the real return. When that first bar is close-only (its open is a copy of the
+    close) the base is the previous bar's close instead (close-to-close); with no
+    previous bar the return is None."""
     if not bars:
         return None
     first = next((b for b in bars if b.date >= start), None)
@@ -353,6 +355,11 @@ def benchmark_return(bars: list[Bar] | None, start: str, end: str) -> float | No
     if last.date != end and (last.date < _shift(end, -BENCHMARK_ALIGN_DAYS)
                              or bars[-1].date <= end):
         return None
+    if getattr(first, "close_only", False):
+        i = bars.index(first)
+        if i == 0 or bars[i - 1].close <= 0:
+            return None
+        return last.close / bars[i - 1].close - 1
     return last.close / first.open - 1
 
 
@@ -391,6 +398,7 @@ def apply_outcome(e: LedgerEntry, out: Outcome, bars: list[Bar],
 
 # Bump when compute_review gains or changes fields: older reviews are then recomputed.
 REVIEW_VERSION = 1
+ATR_BARS = 14                    # true ranges in the review's ATR
 
 
 def compute_review(e: LedgerEntry, bars: list[Bar], factor: float = 1.0) -> dict | None:
@@ -401,7 +409,7 @@ def compute_review(e: LedgerEntry, bars: list[Bar], factor: float = 1.0) -> dict
     (settle_factor), so it is moved by factor / settle_factor into the current series.
     The fill bar's whole high/low range counts (an approximation for a zone fill
     inside that bar)."""
-    from marketmind.pipeline.l3_indicators import atr
+    from marketmind.pipeline.l3_indicators import true_ranges
     if not (e.entry_date and e.exit_date and e.entry_price):
         return None
     dates = [b.date for b in bars]
@@ -427,9 +435,12 @@ def compute_review(e: LedgerEntry, bars: list[Bar], factor: float = 1.0) -> dict
 
     mfe, mae = max(ret(best), 0.0), min(ret(worst), 0.0)
     stop_distance = None if stop is None else ret(stop)
-    # ATR as a fraction of the last close before entry: comparable across assets
-    atr_pct = (round(atr(before[-15:]) / before[-1].close, 6)
-               if len(before) >= 15 and before[-1].close > 0 else None)
+    # ATR14 as a fraction of the last close before entry: comparable across assets.
+    # Close-only bars have no known range and are skipped; the last 14 true ranges of
+    # the remaining bars are used, None when there are fewer.
+    trs = true_ranges(before)[-ATR_BARS:]
+    atr_pct = (round(sum(trs) / len(trs) / before[-1].close, 6)
+               if len(trs) == ATR_BARS and before[-1].close > 0 else None)
 
     # After an early exit: did the original plan work out by its own expiry?
     expiry = i0 + e.hold_bars - 1

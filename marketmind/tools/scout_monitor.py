@@ -122,7 +122,7 @@ def _compute_change(prev: str, current_status: str) -> str:
 async def fetch_one(source: Source, config: MarketMindConfig, prev: str) -> SourceReport:
     """Check the health of a single source.
 
-    Delegates actual fetching to pipeline/scout.py (for RSS, BLS, Bluesky,
+    Delegates actual fetching to pipeline/scout.py (for RSS, BLS,
     NewsAPI, GNews) and gateway/macro_data.py (for CFTC COT).  The monitor
     only adds its own health-reporting layer on top.
 
@@ -167,7 +167,7 @@ async def fetch_one(source: Source, config: MarketMindConfig, prev: str) -> Sour
                 f"COT available (latest: {result.get('date', 'N/A')})", False,
             )
 
-        # ── RSS / BLS / Bluesky / NewsAPI / GNews: delegate to scout ──
+        # ── RSS / BLS / NewsAPI / GNews: delegate to scout ──
         from marketmind.pipeline.scout import fetch_source as scout_fetch
 
         items = await scout_fetch(source, config)

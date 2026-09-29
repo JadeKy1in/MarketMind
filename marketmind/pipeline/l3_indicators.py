@@ -87,14 +87,20 @@ def sma(values: list[float], n: int) -> float | None:
     return sum(values[-n:]) / n
 
 
+def true_ranges(bars: list[Bar]) -> list[float]:
+    """True range of each bar after the first, skipping close-only bars
+    (price_history.Bar.close_only: the range is unknown, H=L=C would understate it).
+    A close-only bar's close is still a real close, so it may serve as the previous
+    close of the next bar."""
+    return [max(cur.high - cur.low, abs(cur.high - prev.close), abs(cur.low - prev.close))
+            for prev, cur in zip(bars[:-1], bars[1:]) if not getattr(cur, "close_only", False)]
+
+
 def atr(bars: list[Bar], n: int = 14) -> float:
-    if len(bars) < 2:
-        return 0.0
-    trs = []
-    for prev, cur in zip(bars[:-1], bars[1:]):
-        trs.append(max(cur.high - cur.low, abs(cur.high - prev.close), abs(cur.low - prev.close)))
-    window = trs[-n:]
-    return sum(window) / len(window)
+    """Mean of the last n true ranges; close-only bars are skipped (true_ranges).
+    0.0 when there is no true range at all."""
+    window = true_ranges(bars)[-n:]
+    return sum(window) / len(window) if window else 0.0
 
 
 def nearest_swing_high(daily: list[Bar], close: float, a: float) -> float | None:
