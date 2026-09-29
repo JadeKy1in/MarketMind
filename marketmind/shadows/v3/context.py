@@ -225,6 +225,9 @@ class ShadowContext:
     today: str = ""
     off_context: dict[str, float] = field(default_factory=dict)  # priced after the reply
     news_sources: list[str] = field(default_factory=list)       # sources of `headlines`
+    # Self-feedback treatment arm only (docs/S3_DESIGN.md §8): the shadow's own record,
+    # code-computed; empty = the shadow does not see it (control arm or switched off).
+    own_record: list[str] = field(default_factory=list)
 
     @property
     def closes(self) -> dict[str, float]:
@@ -263,6 +266,8 @@ class ShadowContext:
                       "interest strikes.", *self.options]
         for title, lines in self.feeds.items():
             parts += ["", f"## {title}", *lines]
+        if self.own_record:
+            parts += ["", *self.own_record]
         parts += ["", "## Today's headlines",
                   *(untrusted_block(self.headlines) if self.headlines
                     else ["- (no relevant headlines today)"])]
