@@ -153,7 +153,7 @@
 ## 11. 接入大行情警报（2026-09-29）
 
 - **位置**：状态机是大行情警报的主干（`docs/S8_DESIGN.md`）。`marketmind/alerts/trend_source.py` 读取 §9 写的 `<数据目录>/trend/<纽约日期>.json`；当天的入场 / 离场即警报候选，再由顾问投票与证据做注释（不作为条件）。
-- **信号来源**：默认 `daily_state_machine`——文件里有精简版列表就用精简版，否则用全池；可用 `alerts/config.py::TREND_SOURCE` 或环境变量 `MARKETMIND_ALERT_TREND_SOURCE` 换成其他来源。
+- **信号来源**：默认 `daily_state_machine:six`——全池状态里只取 SPY、QQQ、GLD、TLT、BTC-USD、ETH-USD（所有人 2026-09-29 决定）；可用 `alerts/config.py::TREND_SOURCE` 或环境变量 `MARKETMIND_ALERT_TREND_SOURCE` 换成其他来源。
 - **模式**：默认观察模式——警报照常计算，写入警报报告与账本（`source_id=alert:observe`），不推送；只有设置 `MARKETMIND_ALERTS_LIVE=1` 才推送。
 - **月度规则**：§10 的 M1、M2 未通过事先登记的标准，未接入。
 

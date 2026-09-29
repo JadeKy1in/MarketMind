@@ -13,7 +13,10 @@ import os
 # ── owner switches ──────────────────────────────────────────────────────
 LIVE = False                           # owner's explicit switch; env below overrides
 LIVE_ENV = "MARKETMIND_ALERTS_LIVE"
-TREND_SOURCE = "daily_state_machine"   # lean universe when the file has one, else full
+# Owner decision 2026-09-29: the daily rule on six asset-class instruments (per instrument
+# ~30% time in market, MaxDD -17% in the 2006-2026 backtest; docs/TREND_BACKTEST_MONTHLY_*).
+TREND_SOURCE = "daily_state_machine:six"
+SIX = ("SPY", "QQQ", "GLD", "TLT", "BTC-USD", "ETH-USD")
 TREND_SOURCE_ENV = "MARKETMIND_ALERT_TREND_SOURCE"
 
 # ── advisor votes (annotations, not conditions) ─────────────────────────

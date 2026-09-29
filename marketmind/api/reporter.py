@@ -113,9 +113,11 @@ def build_context(question: str) -> dict[str, Any]:
         rep = big.get("report") or {}
         ctx["big_move_alerts"] = {
             "date": big.get("date"), "mode": rep.get("mode"),
-            "fired": [{k: f.get(k) for k in ("ticker", "entry_id", "groups")}
+            "trend_source": rep.get("trend_source"),
+            "fired": [{k: f.get(k) for k in ("ticker", "kind", "direction", "status", "veto",
+                                              "asset_group", "entry_id")}
                       for f in rep.get("fired", [])],
-            "near_misses": [{k: n.get(k) for k in ("ticker", "a_ok", "b_ok", "c_ok", "met")}
+            "near_misses": [{k: n.get(k) for k in ("ticker", "note", "asset_group")}
                             for n in rep.get("near_misses", [])][:10],
             "history": big.get("history", [])[:20]}
     rep = whitebox.get_daily_report()

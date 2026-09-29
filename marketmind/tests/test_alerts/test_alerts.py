@@ -56,6 +56,9 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("MARKETMIND_DATA_DIR", str(tmp_path))
     monkeypatch.delenv(C.LIVE_ENV, raising=False)
     monkeypatch.delenv(C.TREND_SOURCE_ENV, raising=False)
+    # these tests exercise the lean/auto file layout; the production default ("six")
+    # is covered by test_six_source_and_default below
+    monkeypatch.setattr(C, "TREND_SOURCE", "daily_state_machine")
     monkeypatch.setattr(runner, "load_voters", lambda entries=(): (runner.ADVISORS, dict(VOTERS)))
     _trend_file(tmp_path)
     return LedgerStore(tmp_path / "ledger.db"), tmp_path
@@ -168,8 +171,9 @@ def make_monthly():
 
 
 def test_source_is_a_config_switch(monkeypatch):
-    assert C.trend_source_name({}) == "daily_state_machine"
-    assert ts.get_source().name == "daily_state_machine"
+    monkeypatch.delenv(C.TREND_SOURCE_ENV, raising=False)
+    assert C.trend_source_name({}) == "daily_state_machine:six"      # owner decision 2026-09-29
+    assert ts.get_source().name == "daily_state_machine:six"
     assert ts.get_source("daily_state_machine:full").universe == "full"
     monkeypatch.setenv(C.TREND_SOURCE_ENV, f"{__name__}:make_monthly")
     assert ts.get_source().name == "monthly_test"
@@ -426,3 +430,12 @@ def test_dashboard_view_tolerates_missing_fields():
     assert r["trunk"]["move"] == "→TREND" and r["trunk"]["stop_level"] is None
     assert r["annotation"]["status"] == "no_votes" and r["annotation"]["votes_for"] == 0
     assert r["evidence"] == {"for": [], "against": []}
+
+
+def test_six_source_and_default(tmp_path):
+    _trend_file(tmp_path)
+    r = ts.DailyStateMachineSource("six", data_dir=tmp_path).read(DAY)
+    assert r.available and r.universe == "six"
+    assert set(r.states) == {"QQQ", "GLD", "BTC-USD", "SPY", "TLT"}      # IWM, NVDA not in SIX
+    assert r.entries == ["BTC-USD", "QQQ"] and r.exits == ["GLD"]
+    assert set(C.SIX) == {"SPY", "QQQ", "GLD", "TLT", "BTC-USD", "ETH-USD"}

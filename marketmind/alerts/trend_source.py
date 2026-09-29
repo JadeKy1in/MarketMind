@@ -49,11 +49,12 @@ class TrendSource(Protocol):
 
 class DailyStateMachineSource:
     """data/trend/<New York date>.json written by trend.daily (docs/TREND_DESIGN.md §9).
-    universe "auto" = the lean list when the file has one, else the full universe.
+    universe "auto" = the lean list when the file has one, else the full universe;
+    "six" = the full-universe states of config.SIX only (each instrument is independent).
     Only the file of `day` itself is used: entries / exits are that day's changes."""
 
     def __init__(self, universe: str = "auto", data_dir: str | Path | None = None):
-        if universe not in ("auto", "lean", "full"):
+        if universe not in ("auto", "lean", "full", "six"):
             raise ValueError(f"unknown universe {universe!r}")
         self.universe = universe
         self.data_dir = data_dir
@@ -71,6 +72,10 @@ class DailyStateMachineSource:
             else "full"
         states = lean_states if section == "lean" else (doc.get("full") or {})
         ch = (doc.get("changes") or {}).get(section) or {}
+        if self.universe == "six":
+            section, keep = "six", set(C.SIX)
+            states = {t: s for t, s in states.items() if t in keep}
+            ch = {k: [t for t in v if t in keep] for k, v in ch.items()}
         if not states:
             return TrendReading(self.name, day, False, universe=section,
                                 reason=f"trend/{day}.json has no {section} states")
@@ -82,6 +87,7 @@ SOURCES: dict[str, Callable[[], TrendSource]] = {
     "daily_state_machine": lambda: DailyStateMachineSource("auto"),
     "daily_state_machine:lean": lambda: DailyStateMachineSource("lean"),
     "daily_state_machine:full": lambda: DailyStateMachineSource("full"),
+    "daily_state_machine:six": lambda: DailyStateMachineSource("six"),
 }
 
 

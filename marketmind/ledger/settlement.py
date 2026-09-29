@@ -397,7 +397,7 @@ def apply_outcome(e: LedgerEntry, out: Outcome, bars: list[Bar],
 
 
 # Bump when compute_review gains or changes fields: older reviews are then recomputed.
-REVIEW_VERSION = 1
+REVIEW_VERSION = 2   # 2: ATR skips close-only bars (2026-09-29)
 ATR_BARS = 14                    # true ranges in the review's ATR
 
 

@@ -126,7 +126,7 @@ BARS = [bar("2026-09-01", 90, 91, 89, 90), bar("2026-09-02", 100, 103, 96, 102),
 
 def test_review_facts_long():
     r = compute_review(settled(), BARS)
-    assert r == {"v": 1, "direction_correct": True, "error_class": "beta_carried",
+    assert r == {"v": 2, "direction_correct": True, "error_class": "beta_carried",
                  "mfe": 0.08, "mae": -0.04, "bars_held": 3,
                  "touched_target": False, "touched_stop": False, "ambiguous_bar": False,
                  "target_distance": 0.1, "stop_distance": -0.05, "r_multiple": 0.8,
@@ -193,7 +193,7 @@ async def test_settlement_writes_and_backfills_review(tmp_path):
     stale_id = store.add(settled(review={"v": 0, "mfe": 9}), created_at=CREATED)
     rep = await settle_all(store, src, today="2026-09-12")
     assert store.get(new_id).status == "settled" and store.get(new_id).review["bars_held"] == 3
-    assert store.get(old_id).review["mfe"] == 0.01 and store.get(stale_id).review["v"] == 1
+    assert store.get(old_id).review["mfe"] == 0.01 and store.get(stale_id).review["v"] == 2
     assert rep.reviews_backfilled == 2 and "reviews backfilled 2" in rep.summary()
 
 

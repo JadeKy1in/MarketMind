@@ -63,7 +63,7 @@
 ## 所有人开关（`alerts/config.py`）
 
 - **正式模式（推送）只由所有人明确打开**：`LIVE = False`（默认），或环境变量 `MARKETMIND_ALERTS_LIVE=1`。顾问人数不再决定模式（取代 2026-09-29 红队修复里"顾问能满足条件 A 才转正式"的规则；那条修复的本意——不在条件不具备时贸然推送——由人工开关保留）。观察模式照旧：计算、写报告、入场警报记账本（`alert:observe`），不推送。
-- **换趋势信号源**：`TREND_SOURCE`（默认 `daily_state_machine`），或环境变量 `MARKETMIND_ALERT_TREND_SOURCE`。可选 `daily_state_machine`（精简版优先，否则全池）、`daily_state_machine:lean`、`daily_state_machine:full`，或 `包.模块:工厂函数`——任何返回带 `name` 和 `read(日期) -> TrendReading` 的对象的无参函数。月度规则（Faber 式回测进行中）确认后，实现一个这样的源，在 `SOURCES` 里登记或直接用环境变量指向它，警报代码不用改。
+- **换趋势信号源**：`TREND_SOURCE`（默认 `daily_state_machine:six`：日线状态机、只看 SPY、QQQ、GLD、TLT、BTC-USD、ETH-USD，所有人 2026-09-29 按三次回测结果选定——单品种在场约 30%、最大回撤 −17%、每年约 13 次入场），或环境变量 `MARKETMIND_ALERT_TREND_SOURCE`。可选 `daily_state_machine`（精简版优先，否则全池）、`daily_state_machine:lean`、`daily_state_machine:full`、`daily_state_machine:six`，或 `包.模块:工厂函数`——任何返回带 `name` 和 `read(日期) -> TrendReading` 的对象的无参函数。月度规则已回测、未通过预注册标准，不接入（`docs/TREND_BACKTEST_MONTHLY_2026-09-29.md`）。顾问多数反对（vetoed）时照常推送并附否决标记（所有人 2026-09-29 决定）。
 - 投票参数（窗口 5 天、持有期门槛 10、支持门槛）都在同一个文件里。
 
 ## 实现说明（2026-09-29，红队修复）
