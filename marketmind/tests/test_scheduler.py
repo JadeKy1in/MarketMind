@@ -387,3 +387,69 @@ def test_other_nonzero_exit_is_still_a_failure(tmp_path, monkeypatch):
     assert sr.main(["--slot", "weekday"]) == 1
     run = sr.load_state(state_path)["runs"]["2026-09-28-weekday"]
     assert run["status"] == "failed" and "degraded_steps" not in run and len(pushed) == 1
+
+
+# ── the three weekday triggers (15:45 / 16:45 / 17:45 Riyadh) ──────────
+
+def _trigger_day(tmp_path, monkeypatch, codes):
+    """Run main() at the three weekday trigger times; `codes` are the app exit codes
+    of the attempts actually started."""
+    monkeypatch.setattr(sr, "ROOT", tmp_path)
+    monkeypatch.setenv("MARKETMIND_DATA_DIR", "data")
+    monkeypatch.setattr(sr, "notify_failure", lambda *a: [])
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+
+        class Done:
+            returncode = codes[len(calls) - 1]
+        return Done()
+    monkeypatch.setattr(sr.subprocess, "run", fake_run)
+    return calls
+
+
+@pytest.mark.parametrize("day,first_attempt_utc", [
+    ((2026, 9, 29), 12),       # US daylight time: 15:45 Riyadh = 08:45 New York
+    ((2026, 12, 1), 13),       # US standard time: 15:45 Riyadh = 07:45 New York (too early)
+])
+def test_later_trigger_retries_a_failed_run_in_both_dst_regimes(tmp_path, monkeypatch, day,
+                                                                 first_attempt_utc):
+    calls = _trigger_day(tmp_path, monkeypatch, codes=[1, 0])
+    key = f"{day[0]}-{day[1]:02d}-{day[2]:02d}-weekday"
+    for hour in (12, 13, 14):                    # 15:45, 16:45, 17:45 Riyadh (UTC+3)
+        now = utc(*day, hour, 45)
+        run, k, _ = sr.plan("weekday", now)
+        assert k == key and run is (hour >= first_attempt_utc)
+        assert sr.main(["--slot", "weekday"], now=now) in (0, 1)
+    rec = sr.load_state(tmp_path / "data" / "scheduler" / "state.json")["runs"][key]
+    assert len(calls) == 2 and rec["status"] == "ok" and rec["attempts"] == 2
+    if first_attempt_utc == 12:                  # daylight: the 17:45 trigger found it done
+        assert rec["skips"][-1]["reason"] == "already succeeded today"
+    else:                                        # standard: 15:45 was too early (not an attempt)
+        assert "skips" not in rec
+
+
+def test_17_45_trigger_is_a_late_catch_up_for_the_same_new_york_day():
+    for day in ((2026, 9, 29), (2026, 12, 1)):
+        run, key, reason = sr.plan("weekday", utc(*day, 14, 45))
+        assert run and key.startswith(f"{day[0]}-{day[1]:02d}-{day[2]:02d}")
+    assert "late run (10:45" in sr.plan("weekday", utc(2026, 9, 29, 14, 45))[2]
+    assert "late run (09:45" in sr.plan("weekday", utc(2026, 12, 1, 14, 45))[2]
+
+
+def test_at_most_two_attempts_even_with_three_triggers(tmp_path, monkeypatch):
+    calls = _trigger_day(tmp_path, monkeypatch, codes=[1, 1])
+    for hour in (12, 13, 14):
+        sr.main(["--slot", "weekday"], now=utc(2026, 9, 29, hour, 45))
+    rec = sr.load_state(tmp_path / "data" / "scheduler" / "state.json")["runs"]["2026-09-29-weekday"]
+    assert len(calls) == 2 and rec["status"] == "failed" and rec["attempts"] == 2
+    assert rec["skips"][-1]["reason"].startswith("gave up")
+
+
+def test_second_weekend_trigger_retries_a_failed_weekend_run(tmp_path, monkeypatch):
+    calls = _trigger_day(tmp_path, monkeypatch, codes=[1, 0])
+    for hour in (9, 11):                         # Saturday 12:00 and 14:00 Riyadh
+        sr.main(["--slot", "weekend"], now=utc(2026, 10, 3, hour, 0))
+    rec = sr.load_state(tmp_path / "data" / "scheduler" / "state.json")["runs"]["2026-10-03-weekend"]
+    assert len(calls) == 2 and rec["status"] == "ok" and calls[0][-1] == "weekend"

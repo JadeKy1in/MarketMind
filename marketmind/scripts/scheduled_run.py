@@ -42,6 +42,7 @@ sys.path.insert(0, str(ROOT))
 
 NEW_YORK = ZoneInfo("America/New_York")
 WEEKDAY_EARLIEST = dtime(8, 25)
+US_OPEN = dtime(9, 30)
 MODES = {"weekday": "daily", "weekend": "weekend"}
 TIMEOUT_S = {"weekday": 3600, "weekend": 1800}
 MAX_ATTEMPTS = 2
@@ -62,6 +63,8 @@ def plan(slot: str, now: datetime) -> tuple[bool, str, str]:
             return False, key, "weekend in New York"
         if ny.time() < WEEKDAY_EARLIEST:
             return False, key, f"too early ({ny:%H:%M} New York)"
+        if ny.time() >= US_OPEN:
+            return True, key, f"late run ({ny:%H:%M} New York, after the open)"
         return True, key, "pre-open run"
     if slot == "weekend":
         return (True, key, "weekend run") if weekend else (False, key, "weekday in New York")
@@ -486,9 +489,10 @@ def _run_locked(slot: str, key: str, now: datetime, state_path: Path) -> int:
     elif failure:
         rec["notified"] = notify_failure(slot, key, log_path, failure)
     state = load_state(state_path)               # merge: the other slot may have written meanwhile
-    skips = state["runs"].get(key, {}).get("skips")
-    if skips:
-        rec["skips"] = skips
+    latest = state["runs"].get(key, {})
+    for field in ("skips", "watchdog_notified"):  # written by other triggers / the watchdog
+        if latest.get(field):
+            rec[field] = latest[field]
     state["runs"][key] = rec
     state["runs"] = dict(sorted(state["runs"].items())[-60:])     # keep about two months
     save_state(state_path, state)
