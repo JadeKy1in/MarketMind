@@ -28,6 +28,7 @@ import re
 import subprocess
 import sys
 import time
+import uuid
 from datetime import datetime, time as dtime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -228,19 +229,120 @@ def load_user_push_env() -> None:
             os.environ["MARKETMIND_CLAUDE_BIN"] = str(candidate)
 
 
-def notify_failure(slot: str, key: str, log_path: Path, reason: str) -> list[dict]:
+QUEUE_MAX = 20
+QUEUE_MAX_AGE_S = 3 * 86400
+QUEUE_LOCK_STALE_S = 600
+
+
+def queue_path() -> Path:
+    return data_dir() / "scheduler" / "push_queue.json"
+
+
+def _write_json(path: Path, obj) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
+    _replace(tmp, path)
+
+
+def load_queue(path: Path) -> list[dict]:
+    try:
+        items = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
+
+
+def _prune_queue(items: list[dict], now: float) -> list[dict]:
+    """Drop entries older than three days, keep the newest QUEUE_MAX."""
+    fresh = [i for i in items if isinstance(i.get("t"), (int, float))
+             and now - i["t"] <= QUEUE_MAX_AGE_S]
+    return fresh[-QUEUE_MAX:]
+
+
+def enqueue_push(title: str, body: str, now: float | None = None) -> None:
+    """Keep an undelivered push for the next scheduled_run / watchdog invocation."""
+    now = time.time() if now is None else now
+    path = queue_path()
+    items = load_queue(path) + [{"id": uuid.uuid4().hex, "t": now, "title": title, "body": body}]
+    _write_json(path, _prune_queue(items, now))
+
+
+def _send(title: str, body: str) -> list[dict]:
     from marketmind.alerts.notify import send
+    return asyncio.run(send(title, body))
+
+
+def _delivered(results: list[dict]) -> bool:
+    return any(r.get("ok") for r in results)
+
+
+def push(title: str, body: str) -> list[dict]:
+    """Send through the configured channels; if every channel failed (offline),
+    queue the message for a later retry. With no channel configured nothing is
+    queued (it could never be delivered)."""
+    try:
+        results = _send(title, body)
+    except Exception as e:                       # never mask the caller's own failure
+        print(f"notification not sent: {type(e).__name__}")
+        results = [{"channel": "?", "ok": False, "status": 0}]
+    if results and not _delivered(results):
+        try:
+            enqueue_push(title, body)
+            print("notification queued for retry")
+        except OSError as e:
+            print(f"notification could not be queued: {type(e).__name__}")
+    return results
+
+
+def flush_push_queue(now: float | None = None) -> int:
+    """Retry queued pushes, oldest first; stops at the first failure (still offline).
+    One process at a time (push_queue.lock) so a message is not sent twice.
+    Returns the number delivered."""
+    now = time.time() if now is None else now
+    path = queue_path()
+    if not load_queue(path):
+        return 0
+    lock = path.with_name("push_queue.lock")
+    try:
+        if lock.exists() and now - lock.stat().st_mtime > QUEUE_LOCK_STALE_S:
+            lock.unlink()
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except OSError:
+        return 0                                 # another process is flushing
+    sent: set[str] = set()
+    try:
+        os.close(fd)
+        load_user_push_env()
+        for item in _prune_queue(load_queue(path), now):
+            try:
+                ok = _delivered(_send(str(item.get("title", "")), str(item.get("body", ""))))
+            except Exception as e:
+                print(f"queued notification not sent: {type(e).__name__}")
+                ok = False
+            if not ok:
+                break
+            sent.add(item.get("id"))
+        # re-read: another process may have queued a message meanwhile
+        _write_json(path, _prune_queue([i for i in load_queue(path) if i.get("id") not in sent], now))
+    finally:
+        try:
+            lock.unlink()
+        except OSError:
+            pass
+    if sent:
+        print(f"delivered {len(sent)} queued notification(s)")
+    return len(sent)
+
+
+def notify_failure(slot: str, key: str, log_path: Path, reason: str) -> list[dict]:
     from marketmind.notification.log_redaction import redact
     try:
         tail = log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-15:]
     except OSError:
         tail = []
     body = f"{key}（{slot}）自动运行失败：{reason}\n日志：{log_path}\n\n" + redact("\n".join(tail))
-    try:
-        return asyncio.run(send("MarketMind 自动运行失败", body[:1800]))
-    except Exception as e:                       # never mask the original failure
-        print(f"failure notification not sent: {type(e).__name__}")
-        return []
+    return push("MarketMind 自动运行失败", body[:1800])
 
 
 def recover_stale_run(slot: str, key: str, state_path: Path, reason: str) -> dict:
@@ -257,13 +359,16 @@ def recover_stale_run(slot: str, key: str, state_path: Path, reason: str) -> dic
     return state
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--slot", choices=sorted(MODES), required=True)
     p.add_argument("--dry-run", action="store_true", help="print the decision only")
     args = p.parse_args(argv)
 
-    now = datetime.now(timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    if not args.dry_run:
+        load_user_push_env()                     # failure pushes and the run need the keys
+        flush_push_queue()
     run, key, reason = plan(args.slot, now)
     sched = data_dir() / "scheduler"
     state_path = sched / "state.json"
@@ -315,7 +420,6 @@ def _run_locked(slot: str, key: str, now: datetime, state_path: Path) -> int:
                mode=MODES[slot], log=str(log_path), attempts=rec.get("attempts", 0) + 1)
     save_state(state_path, state)
 
-    load_user_push_env()                         # alerts and failure pushes need the keys
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
     cmd = [sys.executable, str(ROOT / "marketmind" / "app.py"), "--mode", MODES[slot]]
     try:

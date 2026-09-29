@@ -1,11 +1,24 @@
 """Scheduled runs (docs/AUTOMATION.md): New York clock, once per day, retries, lock."""
 import json
 import os
+import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from marketmind.scripts import scheduled_run as sr
+
+_REAL_LOAD_USER_PUSH_ENV = sr.load_user_push_env
+
+
+@pytest.fixture(autouse=True)
+def _no_real_push(monkeypatch):
+    """Never read the owner's push keys or reach a push channel from a test."""
+    monkeypatch.setattr(sr, "load_user_push_env", lambda: None)
+
+    def refuse(title, body):
+        raise AssertionError("a test tried to send a real notification")
+    monkeypatch.setattr(sr, "_send", refuse)
 
 
 def utc(y, m, d, h, mi):
@@ -236,5 +249,86 @@ def test_push_keys_loaded_from_user_environment(monkeypatch):
             return ("SCTtest", 1)
         raise OSError
     monkeypatch.setattr(winreg, "QueryValueEx", query)
-    sr.load_user_push_env()
+    _REAL_LOAD_USER_PUSH_ENV()
     assert os.environ["SERVERCHAN_SENDKEY"] == "SCTtest"
+
+
+# ── push queue ─────────────────────────────────────────────────────────
+
+def _queue_env(tmp_path, monkeypatch, outcomes):
+    """outcomes: list of results per _send call (a list of dicts, or an exception)."""
+    monkeypatch.setattr(sr, "ROOT", tmp_path)
+    monkeypatch.setenv("MARKETMIND_DATA_DIR", "data")
+    sent = []
+
+    def fake_send(title, body):
+        sent.append(title)
+        out = outcomes.pop(0) if outcomes else [{"channel": "serverchan", "ok": True, "status": 200}]
+        if isinstance(out, Exception):
+            raise out
+        return out
+    monkeypatch.setattr(sr, "_send", fake_send)
+    return sent
+
+
+OFFLINE = [{"channel": "serverchan", "ok": False, "status": 0}]
+DELIVERED = [{"channel": "serverchan", "ok": True, "status": 200}]
+
+
+def test_failed_push_is_queued_and_delivered_next_time(tmp_path, monkeypatch):
+    sent = _queue_env(tmp_path, monkeypatch, [OFFLINE, ConnectionError("offline")])
+    sr.push("t1", "b1")
+    sr.push("t2", "b2")
+    q = sr.load_queue(sr.queue_path())
+    assert [i["title"] for i in q] == ["t1", "t2"]
+    assert [p.name for p in sr.queue_path().parent.iterdir() if p.suffix == ".tmp"] == []
+    assert sr.flush_push_queue() == 2 and sent == ["t1", "t2", "t1", "t2"]
+    assert sr.load_queue(sr.queue_path()) == []
+    assert not sr.queue_path().with_name("push_queue.lock").exists()
+
+
+def test_push_without_channels_or_with_one_channel_ok_is_not_queued(tmp_path, monkeypatch):
+    _queue_env(tmp_path, monkeypatch, [[], OFFLINE + DELIVERED])
+    sr.push("no channel", "b")
+    sr.push("partly delivered", "b")
+    assert sr.load_queue(sr.queue_path()) == []
+
+
+def test_flush_stops_at_first_failure_and_keeps_order(tmp_path, monkeypatch):
+    sent = _queue_env(tmp_path, monkeypatch, [DELIVERED, OFFLINE])
+    now = time.time()
+    for i in range(3):
+        sr.enqueue_push(f"t{i}", "b", now=now + i)
+    assert sr.flush_push_queue(now=now + 10) == 1 and sent == ["t0", "t1"]
+    assert [i["title"] for i in sr.load_queue(sr.queue_path())] == ["t1", "t2"]
+
+
+def test_queue_is_capped_and_old_entries_dropped(tmp_path, monkeypatch):
+    sent = _queue_env(tmp_path, monkeypatch, [])
+    now = time.time()
+    sr.enqueue_push("old", "b", now=now - sr.QUEUE_MAX_AGE_S - 60)
+    for i in range(sr.QUEUE_MAX + 5):
+        sr.enqueue_push(f"t{i}", "b", now=now)
+    q = sr.load_queue(sr.queue_path())
+    assert len(q) == sr.QUEUE_MAX and q[0]["title"] == "t5"
+    # entries that age out while queued are dropped at flush, not sent
+    assert sr.flush_push_queue(now=now + sr.QUEUE_MAX_AGE_S + 60) == 0 and sent == []
+    assert sr.load_queue(sr.queue_path()) == []
+
+
+def test_flush_skips_while_another_process_flushes(tmp_path, monkeypatch):
+    sent = _queue_env(tmp_path, monkeypatch, [])
+    sr.enqueue_push("t", "b")
+    lock = sr.queue_path().with_name("push_queue.lock")
+    lock.write_text("", encoding="utf-8")
+    assert sr.flush_push_queue() == 0 and sent == []
+    os.utime(lock, (time.time() - sr.QUEUE_LOCK_STALE_S - 5,) * 2)     # stale lock
+    assert sr.flush_push_queue() == 1 and sent == ["t"]
+
+
+def test_scheduled_run_retries_the_queue_first(tmp_path, monkeypatch):
+    sent = _queue_env(tmp_path, monkeypatch, [])
+    sr.enqueue_push("queued", "b")
+    monkeypatch.setattr(sr, "plan", lambda slot, now: (False, "2026-10-03-weekday", "weekend in New York"))
+    assert sr.main(["--slot", "weekday"]) == 0 and sent == ["queued"]
+    assert sr.main(["--slot", "weekday", "--dry-run"]) == 0 and sent == ["queued"]
