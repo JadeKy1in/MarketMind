@@ -560,16 +560,22 @@ def missing_utc_day(daily: list[Bar], lookback: int = 30) -> str | None:
     return None
 
 
+# A US session bar counts as complete only this long after the 16:00 ET close.
+US_CLOSE_SETTLE_MINUTES = 30
+
+
 def complete_bars(ticker: str, daily: list[Bar], now=None) -> list[Bar]:
     """Drop the running session's partial bar.
 
     Crypto and FX bars are UTC days: only dates before today (UTC) are complete.
     Exchange-traded bars are local sessions: today's bar is complete only after
-    that exchange's close in its own timezone (marketmind.markets).
+    that exchange's close in its own timezone (marketmind.markets). US equity bars
+    need US_CLOSE_SETTLE_MINUTES more: Alpaca's request ends 20 minutes in the past,
+    so a run at 16:00-16:20 New York could record a bar without the closing auction.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime, timedelta, timezone
     from zoneinfo import ZoneInfo
-    from marketmind.markets import market_for
+    from marketmind.markets import US, market_for
     now = now or datetime.now(timezone.utc)
     m = market_for(ticker)
     if m.utc_days:
@@ -577,7 +583,10 @@ def complete_bars(ticker: str, daily: list[Bar], now=None) -> list[Bar]:
         return [b for b in daily if b.date < cutoff]
     local = now.astimezone(ZoneInfo(m.tz))
     today = local.date().isoformat()
-    closed = local.time() >= m.close
+    close_at = datetime.combine(local.date(), m.close)
+    if m is US:
+        close_at += timedelta(minutes=US_CLOSE_SETTLE_MINUTES)
+    closed = local.replace(tzinfo=None) >= close_at
     return [b for b in daily if b.date < today or (b.date == today and closed)]
 
 
