@@ -34,6 +34,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # repo root
 from marketmind.config.settings import MarketMindConfig
 
 
+async def _show_elite(config, text: str = "", tickers=(), shown=()) -> list[str]:
+    """Print advisors' latest ledger decisions on the discussed asset groups (SPEC §6.1:
+    owner reference only, never passed into the pipeline's prompts; docs/S7_DESIGN.md §五)."""
+    try:
+        from marketmind.pipeline.orchestration import _ledger_store
+        from marketmind.shadows.v3 import elite
+        block, groups = await elite.owner_block(text, tickers, store=_ledger_store(config),
+                                                data_dir=config.data_dir, exclude_groups=shown)
+    except Exception:
+        logger.warning("advisor opinions unavailable", exc_info=True)
+        return list(shown)
+    if block:
+        print("\n" + block + "\n")
+    return [*shown, *groups]
+
+
 async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose: bool = False,
                           shadow_count: int | None = None) -> int:
     """Run L1 as an interactive Socratic dialogue with the user.
@@ -189,6 +205,9 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
         social_items=ctx.social_items,
     )
 
+    # Advisors' ledger opinions on what the owner discussed (owner reference only)
+    elite_shown = await _show_elite(config, " ".join(map(str, (l1_session or {}).get("user_ideas") or [])))
+
     if should_observe:
         print("\n" + "=" * 60)
         print("  Today's verdict: OBSERVE")
@@ -242,6 +261,7 @@ async def run_interactive(config: MarketMindConfig, mock: bool = False, verbose:
     l2_result = ctx.l2_result
     selected_tickers = ctx.selected_tickers
     tracker.result(f"L2: {len(selected_tickers)} tickers selected, {l2_result.macro_quadrant}")
+    await _show_elite(config, "", selected_tickers, elite_shown)
 
     # 6. L3 Technical — lowest interaction density (extracted module)
     tracker.advance(6, "L3: technical analysis (AI working)...", ctx.stage_times)

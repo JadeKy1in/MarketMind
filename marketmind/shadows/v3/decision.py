@@ -11,6 +11,12 @@ comes from code (the same completed bars as the context); when it is missing
 the check is skipped with a warning, never guessed. One-bar (hold_days 1)
 decisions are exempt: settlement ignores their levels and the scalper's prompt
 asks for 0.5-1.0x ATR stops.
+
+Optional conditional signals (owner decision 2026-09-29, docs/S3_DESIGN.md §9): up
+to MAX_CONDITIONALS trades the shadow would take only when a code-checkable
+condition holds on a later completed bar. They never replace the daily decisions:
+a bad conditional signal is dropped with a warning and never fails the day or
+triggers the repair retry. Registry and trigger check: shadows/v3/pending_signals.py.
 """
 from __future__ import annotations
 
@@ -25,6 +31,13 @@ MAX_DECISIONS = 3
 MIN_HOLD, MAX_HOLD = 1, 60
 MIN_POSITION_USD, MAX_POSITION_USD = 100.0, 1000.0
 MIN_LEVEL_ATR = 1.0              # stop/target at least this many ATR14 from the close
+MAX_CONDITIONALS = 2             # conditional signals kept per reply
+MAX_EXPIRES_DAYS = 20            # a conditional signal waits at most this many bars
+MAX_PCT_5D = 50.0                # |pct| bound of the 5-day change conditions
+# condition type -> parameter key ("" = none). Level types need a ticker from today's context.
+CONDITION_TYPES = {"close_above": "level", "close_below": "level",
+                   "pct_change_5d_above": "pct", "pct_change_5d_below": "pct",
+                   "breakout_20d": ""}
 
 
 @dataclass
@@ -45,10 +58,27 @@ class Decision:
 
 
 @dataclass
+class ConditionalSignal:
+    ticker: str
+    direction: str                 # long | short
+    condition: dict                # {"type": ..., "level" | "pct": number} (see CONDITION_TYPES)
+    hold_days: int
+    confidence: float
+    expires_in_days: int           # completed bars of the ticker's market it may wait
+    thesis: str
+    falsifier: str
+
+    @property
+    def position_usd(self) -> float:
+        return position_for(self.confidence)
+
+
+@dataclass
 class ParseResult:
     decisions: list[Decision] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)      # decision dropped
     warnings: list[str] = field(default_factory=list)    # field dropped
+    conditionals: list[ConditionalSignal] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -99,7 +129,8 @@ def _bad_number(v) -> bool:
 
 def parse_decisions(text: str, closes: dict[str, float], fixed_hold: int | None = None,
                     no_levels: set[str] | frozenset = frozenset(),
-                    atrs: dict[str, float] | None = None) -> ParseResult:
+                    atrs: dict[str, float] | None = None,
+                    ret_5d: dict[str, float] | None = None) -> ParseResult:
     """Validate the LLM's decisions against today's context.
 
     `closes`: ticker -> last close for every tradable ticker with data (the
@@ -108,6 +139,9 @@ def parse_decisions(text: str, closes: dict[str, float], fixed_hold: int | None 
     those numbers could only be invented. `fixed_hold` forces hold_days (scalper = 1).
     `atrs`: ticker -> ATR14 computed by code; a ticker missing from it has no ATR,
     so the minimum-distance rule is skipped for it with a warning.
+    `ret_5d`: ticker -> 5-day change in percent (the context's), used to reject a
+    5-day-change condition that already holds. The optional "conditional_signals"
+    list is validated into `conditionals`; its problems are warnings only.
     """
     res = ParseResult()
     try:
@@ -134,7 +168,120 @@ def parse_decisions(text: str, closes: dict[str, float], fixed_hold: int | None 
             _parse_one(d, tag, closes, upper, seen, fixed_hold, no_levels, atrs or {}, res)
         except Exception as e:  # noqa: BLE001 - one bad decision must not cost the day
             res.errors.append(f"{tag}: could not be read ({type(e).__name__}: {e})")
+    if isinstance(data, dict):
+        _parse_conditionals(data.get("conditional_signals"), closes, upper, fixed_hold,
+                            no_levels, atrs or {}, ret_5d or {}, res)
     return res
+
+
+def _parse_conditionals(raw, closes: dict[str, float], upper: dict[str, str],
+                        fixed_hold: int | None, no_levels: set[str] | frozenset,
+                        atrs: dict[str, float], ret_5d: dict[str, float],
+                        res: ParseResult) -> None:
+    """Optional conditional signals: each bad one is dropped with a warning."""
+    if raw is None or raw == []:
+        return
+    if not isinstance(raw, list):
+        res.warnings.append("conditional_signals must be a list, ignored")
+        return
+    if len(raw) > MAX_CONDITIONALS:
+        res.warnings.append(f"{len(raw)} conditional signals given, only the first "
+                            f"{MAX_CONDITIONALS} kept")
+        raw = raw[:MAX_CONDITIONALS]
+    seen: set[tuple] = set()
+    for i, d in enumerate(raw, 1):
+        try:
+            problem = _parse_conditional(d, closes, upper, fixed_hold, no_levels, atrs,
+                                         ret_5d, seen, res)
+        except Exception as e:  # noqa: BLE001 - optional field, never costs the day
+            problem = f"could not be read ({type(e).__name__}: {e})"
+        if problem:
+            res.warnings.append(f"conditional signal {i}: {problem}; dropped")
+
+
+def _parse_conditional(d, closes, upper, fixed_hold, no_levels, atrs, ret_5d, seen,
+                       res: ParseResult) -> str | None:
+    """Append one valid ConditionalSignal to res.conditionals, or return the problem."""
+    if not isinstance(d, dict):
+        return "not an object"
+    ticker = upper.get(str(d.get("ticker", "")).strip().upper().lstrip("$"))
+    if ticker is None:
+        return f"ticker {d.get('ticker')!r} is not in today's context"
+    direction = str(d.get("direction", "")).strip().lower()
+    if direction not in ("long", "short"):
+        return f"direction must be long or short, got {d.get('direction')!r}"
+    conf = _num(d.get("confidence"))
+    if conf is None or not 0.0 <= conf <= 1.0:
+        return f"confidence must be a number in 0-1, got {d.get('confidence')!r}"
+    hold = fixed_hold if fixed_hold is not None else _num(d.get("hold_days"))
+    if hold is None or int(hold) != hold or not MIN_HOLD <= hold <= MAX_HOLD:
+        return f"hold_days must be an integer {MIN_HOLD}-{MAX_HOLD}, got {d.get('hold_days')!r}"
+    exp = _num(d.get("expires_in_days"))
+    if exp is None or int(exp) != exp or not 1 <= exp <= MAX_EXPIRES_DAYS:
+        return (f"expires_in_days must be an integer 1-{MAX_EXPIRES_DAYS}, "
+                f"got {d.get('expires_in_days')!r}")
+    thesis = str(d.get("thesis") or "").strip()
+    falsifier = str(d.get("falsifier") or "").strip()
+    if not thesis or not falsifier:
+        return "thesis and falsifier are required"
+    cond, problem = _condition(d.get("condition"), ticker, closes[ticker], no_levels,
+                               atrs, ret_5d)
+    if problem:
+        return problem
+    key = (ticker, direction, cond["type"])
+    if key in seen:
+        return f"duplicate {direction} {ticker} {cond['type']}"
+    seen.add(key)
+    res.conditionals.append(ConditionalSignal(
+        ticker=ticker, direction=direction, condition=cond, hold_days=int(hold),
+        confidence=round(conf, 4), expires_in_days=int(exp), thesis=thesis[:500],
+        falsifier=falsifier[:500]))
+    return None
+
+
+def _condition(raw, ticker: str, close: float, no_levels: set[str] | frozenset,
+               atrs: dict[str, float], ret_5d: dict[str, float]) -> tuple[dict, str | None]:
+    """Normalised condition, or ({}, problem). A level condition must not hold already
+    and must sit >= MIN_LEVEL_ATR x ATR14 from the last close; without ATR it is
+    rejected (the distance cannot be checked). A 5-day-change condition must not hold
+    already (when the context's 5-day change is known)."""
+    if not isinstance(raw, dict):
+        return {}, "condition must be an object"
+    ctype = raw.get("type")
+    if ctype not in CONDITION_TYPES:
+        return {}, f"condition type {ctype!r} is not one of {', '.join(CONDITION_TYPES)}"
+    key = CONDITION_TYPES[ctype]
+    if key == "level":
+        if ticker in no_levels:
+            return {}, f"{ticker} was not in your context, so no price level can be used"
+        level = _num(raw.get("level"))
+        if level is None or level <= 0:
+            return {}, f"{ctype} needs a positive level, got {raw.get('level')!r}"
+        above = ctype == "close_above"
+        if (level <= close) if above else (level >= close):
+            return {}, (f"{ctype} {level:g} already holds at the last close {close:g} "
+                        f"(the level must be {'above' if above else 'below'} it)")
+        a = _num(atrs.get(ticker))
+        if a is None or a <= 0:
+            return {}, f"ATR14 unavailable for {ticker}; the level distance cannot be checked"
+        if abs(level - close) < MIN_LEVEL_ATR * a - 1e-9 * max(abs(close), 1.0):
+            bound = close + MIN_LEVEL_ATR * a if above else close - MIN_LEVEL_ATR * a
+            ratio = min(round(abs(level - close) / a, 2), 0.99)
+            return {}, (f"level {level:g} is {ratio:g}×ATR from the close {close:g}; must be "
+                        f"≥ {MIN_LEVEL_ATR:g}×ATR (ATR14 = {a:g}), i.e. "
+                        f"{'at or above' if above else 'at or below'} {bound:.6g}")
+        return {"type": ctype, "level": level}, None
+    if key == "pct":
+        pct = _num(raw.get("pct"))
+        up = ctype == "pct_change_5d_above"
+        if pct is None or not ((0 < pct <= MAX_PCT_5D) if up else (-MAX_PCT_5D <= pct < 0)):
+            need = f"0 < pct <= {MAX_PCT_5D:g}" if up else f"-{MAX_PCT_5D:g} <= pct < 0"
+            return {}, f"{ctype} needs a percent with {need}, got {raw.get('pct')!r}"
+        now = _num(ret_5d.get(ticker))
+        if now is not None and ((now > pct) if up else (now < pct)):
+            return {}, f"{ctype} {pct:g}% already holds (5-day change now {now:+.1f}%)"
+        return {"type": ctype, "pct": pct}, None
+    return {"type": ctype}, None
 
 
 def _parse_one(d: dict, tag: str, closes: dict[str, float], upper: dict[str, str],
@@ -266,7 +413,8 @@ Reply with ONE JSON object and nothing else:
     "falsifier_rule": {{"type": "close_below" | "close_above", "price": <number>}} or null,
     "stop": <number or null>,
     "target": <number or null>}}
-]}}
+],
+ "conditional_signals": []}}
 Rules: {MIN_DECISIONS}-{MAX_DECISIONS} decisions, at least one every day - abstaining is not
 allowed. Any instrument in your domain that trades on a real market worldwide is allowed
 (Yahoo-style symbols: AAPL, 0700.HK, 600519.SS, 7203.T, SAP.DE, CL=F, EURUSD=X, BTC-USD;
@@ -278,4 +426,15 @@ For a long, stop < last close < target; mirrored for a short. When given, stop a
 target must each be at least {MIN_LEVEL_ATR:g}x ATR14 (shown per ticker) away from the last
 close, or the decision is rejected; this does not apply to hold_days 1. Use prices from the
 context only; never invent data. The placeholders above are not suggestions.
+Optional conditional_signals (0-{MAX_CONDITIONALS}, next to - never instead of - your decisions):
+trades you would take only if a condition holds on a later completed daily bar. Each has
+the decision fields ticker, direction, hold_days, confidence, thesis, falsifier, plus
+"expires_in_days": <integer 1-{MAX_EXPIRES_DAYS}, bars to wait> and "condition", one of
+{{"type": "close_above" | "close_below", "level": <price>}},
+{{"type": "pct_change_5d_above" | "pct_change_5d_below", "pct": <5-day change in %, e.g. 6 or -6>}},
+{{"type": "breakout_20d"}} (long: close above the prior 20-day high; short: below the low).
+Levels only for tickers in today's context: close_above above the last close, close_below
+below it, each at least {MIN_LEVEL_ATR:g}x ATR14 away. Code checks the condition daily; when it
+holds, the trade is entered at the next open and scored like any decision, but it never
+counts as a day's decision. Leave the list empty when you have none.
 """.strip()

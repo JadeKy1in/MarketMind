@@ -19,6 +19,8 @@ Owner decision 2026-09-29:
   approved proposals at runtime (roster.active / retired_ids / successor_entries).
 - The retired shadow's ledger history stays and still counts in the DSR trials
   (ladder.trial_ids reads the ledger); it is no longer evaluated, ranked or an advisor.
+- Its open conditional signals (shadows/v3/pending_signals.py) expire on approval; the
+  successor does not inherit them (its record starts from zero under another methodology).
 """
 from __future__ import annotations
 
@@ -278,6 +280,17 @@ async def approve(shadow_id: str, *, data_dir: str | Path | None = None, call=No
     tmp.replace(path)
     succ.update(prompt_file=rel, method=method, started=today,
                 donor_id=donor.shadow_id if donor else None)
+    # Its conditional signals expire; the successor (new methodology, record from zero)
+    # does not inherit them (docs/S3_DESIGN.md §9). A failure here is caught up by the
+    # next shadow run, which cancels signals of retired shadows.
+    try:
+        from marketmind.shadows.v3 import pending_signals
+        succ["expired_pending_signals"] = pending_signals.expire_for_retired(
+            shadow_id, successor=succ["shadow_id"], today=today, data_dir=data_dir)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning("pending signals of %s not expired", shadow_id,
+                                            exc_info=True)
     prop.update(status=APPROVED, decided_at=today)
     save(data, data_dir)
     append_events([
