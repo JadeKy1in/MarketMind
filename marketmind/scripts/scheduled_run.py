@@ -183,6 +183,35 @@ def acquire_lock(lock: Path) -> bool:
     return True
 
 
+_ES_CONTINUOUS, _ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+
+
+class keep_awake:
+    """Ask Windows not to idle into sleep / Modern Standby while a run is in progress.
+
+    Seen 2026-09-29: the laptop went on battery and into Modern Standby at 15:06, the
+    15:45 run started at 16:04 and was frozen until 18:17 (a 2 h 22 min run; timeouts
+    do not count while suspended). Closing the lid or a user-chosen sleep still wins.
+    No-op outside Windows or if the call fails."""
+
+    def __enter__(self):
+        self._ok = False
+        if os.name == "nt":
+            try:
+                import ctypes
+                self._ok = bool(ctypes.windll.kernel32.SetThreadExecutionState(
+                    _ES_CONTINUOUS | _ES_SYSTEM_REQUIRED))
+            except Exception as e:                      # never block the run on this
+                print(f"keep_awake: not available ({type(e).__name__}: {e})")
+        return self
+
+    def __exit__(self, *exc):
+        if self._ok:
+            import ctypes
+            ctypes.windll.kernel32.SetThreadExecutionState(_ES_CONTINUOUS)
+        return False
+
+
 def stale_run_reason(rec: dict, lock: Path, now: datetime, timeout_s: int) -> str | None:
     """Why a record still marked "running" cannot belong to a live attempt
     (the process crashed, or the machine slept mid-run), or None if it may be live."""
@@ -469,8 +498,9 @@ def _run_locked(slot: str, key: str, now: datetime, state_path: Path) -> int:
             log.write(f"\n===== {now.isoformat(timespec='seconds')} attempt {rec['attempts']}: "
                       f"{' '.join(cmd[1:])}\n")
             log.flush()
-            proc = subprocess.run(cmd, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT,
-                                  timeout=TIMEOUT_S[slot])
+            with keep_awake():
+                proc = subprocess.run(cmd, cwd=ROOT, env=env, stdout=log,
+                                      stderr=subprocess.STDOUT, timeout=TIMEOUT_S[slot])
         code, failure = proc.returncode, (None if proc.returncode == 0 else f"exit code {proc.returncode}")
     except subprocess.TimeoutExpired:
         code, failure = -1, f"timed out after {TIMEOUT_S[slot] // 60} minutes"

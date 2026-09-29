@@ -1,6 +1,7 @@
 """Scheduled runs (docs/AUTOMATION.md): New York clock, once per day, retries, lock."""
 import json
 import os
+import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -491,3 +492,15 @@ def test_second_weekend_trigger_retries_a_failed_weekend_run(tmp_path, monkeypat
         sr.main(["--slot", "weekend"], now=utc(2026, 10, 3, hour, 0))
     rec = sr.load_state(tmp_path / "data" / "scheduler" / "state.json")["runs"]["2026-10-03-weekend"]
     assert len(calls) == 2 and rec["status"] == "ok" and calls[0][-2:] == ["weekend", "--verbose"]
+
+
+def test_keep_awake_sets_and_restores_execution_state(monkeypatch):
+    import types
+    calls = []
+    fake = types.SimpleNamespace(windll=types.SimpleNamespace(kernel32=types.SimpleNamespace(
+        SetThreadExecutionState=lambda flags: calls.append(flags) or 1)))
+    monkeypatch.setitem(sys.modules, "ctypes", fake)
+    monkeypatch.setattr(sr.os, "name", "nt")
+    with sr.keep_awake():
+        assert calls == [0x80000001]
+    assert calls == [0x80000001, 0x80000000]
