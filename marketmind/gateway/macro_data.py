@@ -89,20 +89,28 @@ _CFTC_ASSETS: dict[str, dict[str, str]] = {
 # ---------------------------------------------------------------------------
 _EIA_BASE = "https://api.eia.gov/v2"
 
-# Product codes for EIA weekly stocks data
+# EIA weekly stocks: one exact series per product (verified live 2026-09-29 with
+# facets[series][]=<id> on /petroleum/stoc/wstk/data/; each returns units "MBBL").
+# Without a series facet the route mixes every area/product/process, so a single
+# unfiltered row is arbitrary.
+_EIA_WSTK_ROUTE = "/petroleum/stoc/wstk/data/"
+_EIA_UNITS = "MBBL"
 _EIA_PRODUCTS: dict[str, dict[str, str]] = {
     "crude": {
-        "route": "/petroleum/stoc/wstk/data/",
+        "route": _EIA_WSTK_ROUTE,
+        "series": "WCESTUS1",   # U.S. Ending Stocks excluding SPR of Crude Oil
         "label": "Crude Oil (excl. SPR)",
         "cadence": "weekly",
     },
     "gasoline": {
-        "route": "/petroleum/stoc/wstk/data/",
+        "route": _EIA_WSTK_ROUTE,
+        "series": "WGTSTUS1",   # U.S. Ending Stocks of Total Gasoline
         "label": "Total Gasoline",
         "cadence": "weekly",
     },
     "distillate": {
-        "route": "/petroleum/stoc/wstk/data/",
+        "route": _EIA_WSTK_ROUTE,
+        "series": "WDISTUS1",   # U.S. Ending Stocks of Distillate Fuel Oil
         "label": "Distillate Fuel Oil",
         "cadence": "weekly",
     },
@@ -458,34 +466,46 @@ async def _fetch_eia(product: str) -> dict:
         return {"error": "source_unavailable", "detail": "EIA_KEY not configured"}
 
     route = product_info["route"]
-    url = (
-        f"{_EIA_BASE}{route}"
-        f"?api_key={eia_key}"
-        f"&frequency=weekly"
-        f"&data[0]=value"
-        f"&sort[0][column]=period"
-        f"&sort[0][direction]=desc"
-        f"&length=1"
-    )
+    series = product_info["series"]
+    params = {
+        "api_key": eia_key,
+        "frequency": "weekly",
+        "data[0]": "value",
+        "facets[series][]": series,
+        "sort[0][column]": "period",
+        "sort[0][direction]": "desc",
+        "length": 1,
+    }
 
     client = httpx.AsyncClient(timeout=httpx.Timeout(10.0))
     try:
-        resp = await client.get(url)
+        resp = await client.get(f"{_EIA_BASE}{route}", params=params)
         resp.raise_for_status()
         data = resp.json()
 
-        response_data = data.get("response", {})
-        records = response_data.get("data", [])
+        response_data = data.get("response", {}) if isinstance(data, dict) else {}
+        records = response_data.get("data", []) or []
 
         if not records:
             return {"error": "source_unavailable", "detail": f"No EIA data for {product}"}
 
         record = records[0]
-        inventory_mbbl = _parse_float(record.get("value", 0))
+        if record.get("series") != series:
+            return {"error": "source_unavailable",
+                    "detail": f"EIA returned series {record.get('series')!r}, expected {series}"}
+        if record.get("units") != _EIA_UNITS:
+            return {"error": "source_unavailable",
+                    "detail": f"EIA {series} units {record.get('units')!r}, expected {_EIA_UNITS}"}
+        inventory_mbbl = _finite_or_none(record.get("value"))
+        if inventory_mbbl is None:
+            return {"error": "source_unavailable",
+                    "detail": f"EIA {series} {record.get('period', '')} has no value"}
 
         return {
             "product": product,
             "label": product_info["label"],
+            "series": series,
+            "units": _EIA_UNITS,
             "inventory_mbbl": inventory_mbbl,
             "date": record.get("period", ""),
             "source": "eia",
@@ -536,6 +556,18 @@ def _parse_float(val: Any) -> float:
         return float(val)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _finite_or_none(val: Any) -> float | None:
+    """float(val) when it is a finite number, else None (missing is never 0.0)."""
+    import math
+    if val is None or isinstance(val, bool):
+        return None
+    try:
+        f = float(val)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
 
 
 def _parse_int(val: Any) -> int:

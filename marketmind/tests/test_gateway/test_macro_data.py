@@ -404,3 +404,53 @@ class TestHelpers:
     def test_parse_int_invalid(self):
         assert _parse_int(None) == 0
         assert _parse_int("abc") == 0
+
+
+# ---------------------------------------------------------------------------
+# 9. EIA series filter and missing values (red-team fix 2026-09-29)
+# ---------------------------------------------------------------------------
+
+
+def _eia_payload(series, value="206046", units="MBBL", period="2026-09-18"):
+    return {"response": {"data": [{"period": period, "series": series, "value": value,
+                                   "units": units}]}}
+
+
+async def _eia_call(product, payload):
+    _clear_cache()
+    with patch("marketmind.gateway.macro_data._get_eia_key", return_value="test_key"), \
+         patch.object(httpx.AsyncClient, "get", new_callable=AsyncMock) as mock_get:
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = lambda: None
+        mock_resp.json.return_value = payload
+        mock_get.return_value = mock_resp
+        result = await get_eia_inventory(product)
+        return result, mock_get.call_args
+
+
+@pytest.mark.asyncio
+class TestEIASeries:
+
+    @pytest.mark.parametrize("product, series", [
+        ("crude", "WCESTUS1"), ("gasoline", "WGTSTUS1"), ("distillate", "WDISTUS1"),
+    ])
+    async def test_each_product_requests_its_own_series(self, product, series):
+        result, call = await _eia_call(product, _eia_payload(series))
+        assert call.kwargs["params"]["facets[series][]"] == series
+        assert "api_key=" not in str(call.args)          # key sent in params, not the URL
+        assert result["series"] == series and result["units"] == "MBBL"
+        assert result["inventory_mbbl"] == 206046.0 and result["date"] == "2026-09-18"
+
+    async def test_wrong_series_is_unavailable(self):
+        result, _ = await _eia_call("gasoline", _eia_payload("WCESTUS1"))
+        assert result["error"] == "source_unavailable" and "WCESTUS1" in result["detail"]
+
+    async def test_wrong_units_is_unavailable(self):
+        result, _ = await _eia_call("crude", _eia_payload("WCESTUS1", units="MBBL/D"))
+        assert result["error"] == "source_unavailable"
+
+    @pytest.mark.parametrize("value", [None, "", "NA", "nan"])
+    async def test_missing_value_is_unavailable_never_zero(self, value):
+        result, _ = await _eia_call("crude", _eia_payload("WCESTUS1", value=value))
+        assert result["error"] == "source_unavailable"
+        assert "inventory_mbbl" not in result
