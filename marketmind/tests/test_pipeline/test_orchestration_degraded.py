@@ -38,7 +38,7 @@ def _stub_daily(monkeypatch, fail_step=None):
     monkeypatch.setattr(orch, "run_daily", fake_run_daily)
     for fn, name in (("inspect_holdings_step", "holdings"), ("promotion_step", "promotion"),
                      ("alerts_step", "alerts"), ("daily_report_step", "daily report"),
-                     ("trend_step", "trend"), ("ecosystem_step", "ecosystem")):
+                     ("trend_step", "trend"), ("ecosystem_step", "ecosystem"), ("app_charts_step", "app charts")):
         monkeypatch.setattr(orch, fn, failing(name) if name == fail_step else ok)
     from marketmind.gateway import usage_tracker
     monkeypatch.setattr(usage_tracker, "append_log", lambda *a, **k: None)
@@ -49,7 +49,7 @@ def test_clean_daily_run_exits_zero(monkeypatch):
     assert asyncio.run(orch._run_daily_with_shadows(object(), _args())) == 0
 
 
-@pytest.mark.parametrize("step", ["holdings", "promotion", "alerts", "daily report", "trend",
+@pytest.mark.parametrize("step", ["holdings", "promotion", "alerts", "daily report", "trend", "app charts",
                                   "ecosystem"])
 def test_failed_step_makes_daily_run_degraded(monkeypatch, capsys, step):
     _stub_daily(monkeypatch, fail_step=step)

@@ -985,6 +985,23 @@ async def ecosystem_step(config) -> None:
     print(f"  {doc['summary']}")
 
 
+async def app_charts_step(config) -> None:
+    """Archive today's App Store charts (docs/DATA_SOURCES_2026-09-29.md): the feed has no
+    history, so rank changes exist only for days archived here."""
+    from marketmind.gateway.app_charts import archive_daily
+    try:
+        data_dir = Path(getattr(config, "data_dir", None) or os.getenv("MARKETMIND_DATA_DIR", "data"))
+        res = await archive_daily(data_dir=data_dir)
+    except Exception:
+        logger.warning("App Store chart archive failed", exc_info=True)
+        print("  [app charts] failed (see log)")
+        _step_failed("app charts")
+        return
+    print(f"  [app charts] {res.get('day')}: {res.get('charts_ok')} charts archived"
+          + (f", {res.get('charts_failed')} failed" if res.get("charts_failed") else "")
+          + (" (already archived)" if res.get("skipped") else ""))
+
+
 async def alerts_step(config, crypto_only: bool = False) -> None:
     """S8 big-move alerts (docs/S8_DESIGN.md): today's trend-state changes, annotated with
     advisor votes and evidence, after the trend step. Pure code; pushes only in live mode
@@ -1054,6 +1071,7 @@ async def run_weekend(config) -> int:
     await watchlist_step(config, None, discovery, crypto_only=True)
     await trend_step(config, crypto_only=True)
     await alerts_step(config, crypto_only=True)
+    await app_charts_step(config)
     print(f"  [tokens] {usage_tracker.summary_line()}")
     usage_tracker.append_log("weekend")
     return _finish_exit_code(0)
@@ -1144,6 +1162,7 @@ async def _run_daily_with_shadows(config, args) -> int:
         await trend_step(config)
         await alerts_step(config)
         await ecosystem_step(config)
+        await app_charts_step(config)
         await daily_report_step(config)
     await _finish_shadows()
     await _finish_background(_playground_task, "playground timeout")
