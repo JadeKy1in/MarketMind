@@ -24,6 +24,7 @@ from marketmind.gateway.price_history import get_price_histories
 from marketmind.ledger.settlement import target_session
 from marketmind.ledger.store import LedgerEntry, LedgerStore
 from marketmind.shadows.v3 import roster as roster_mod
+from marketmind.shadows.v3 import self_feedback
 from marketmind.shadows.v3.context import (
     BEAR_TRACKER_ID, FADE_MASTER_ID, NEWS_HOUND_ID, OPTIONS_READER_ID, SQUEEZE_WATCH_ID,
     ShadowContext, build_context, news_tickers, red_flag_tickers, ticker_view,
@@ -158,13 +159,16 @@ async def _call_llm(system: str, user: str, stage: str) -> str:
     return result.get("content") or ""
 
 
-def system_prompt(entry) -> str:
-    return roster_mod.load_prompt(entry) + "\n\n" + OUTPUT_INSTRUCTIONS
+def system_prompt(entry, own_record: bool = False) -> str:
+    """Methodology + output format; the self-feedback treatment arm (docs/S3_DESIGN.md §8)
+    also gets the instruction on using its record, so its prompt_version differs."""
+    text = roster_mod.load_prompt(entry) + "\n\n" + OUTPUT_INSTRUCTIONS
+    return text + "\n\n" + self_feedback.SYSTEM_INSTRUCTIONS if own_record else text
 
 
 async def decide(ctx: ShadowContext, call=_call_llm) -> tuple[ParseResult, list[str], int]:
     """Ask once, retry once with the validation errors; returns (result, raw replies, attempts)."""
-    system = system_prompt(ctx.entry)
+    system = system_prompt(ctx.entry, bool(ctx.own_record))
     user = ctx.render()
     fixed = 1 if _lineage(ctx.entry) == SCALPER_ID else None
     stage = f"shadow:{ctx.entry.name}"
@@ -275,6 +279,11 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
         logger.warning("shadow feeds unavailable", exc_info=True)
         feeds = {}
 
+    # Self-feedback treatment arm: each shadow's own ledger rows only (isolation)
+    shadow_rows = bench_rows = []
+    if any(self_feedback.is_on(e) for e in todo):
+        shadow_rows, bench_rows = store.list(source_type="shadow"), store.list(source_type="benchmark")
+
     contexts = []
     for e in todo:
         fred_failed = False
@@ -287,6 +296,8 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
                                       consensus_rows=consensus if _lineage(e) == FADE_MASTER_ID else None,
                                       extra_tickers=extra.get(_lineage(e)), today=today,
                                       feeds=feeds.get(e.name), **derivs.get(e.shadow_id, {})))
+        if self_feedback.is_on(e):
+            contexts[-1].own_record = self_feedback.lines_for(e, shadow_rows, bench_rows)
 
     quotes = {}
     for ctx in contexts:
@@ -309,9 +320,12 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
             logger.warning("Shadow %s missed today: %s", ctx.entry.shadow_id,
                            "; ".join(parsed.errors)[:300])
             return res
+        on = bool(ctx.own_record)
         meta = {"model": MODEL, "shadow": ctx.entry.name, "attempts": attempts,
                 "run_date": today, "llm": llm_trace.label(models),
-                "prompt_version": llm_trace.prompt_version(system_prompt(ctx.entry))}
+                "prompt_version": llm_trace.prompt_version(system_prompt(ctx.entry, on)),
+                "self_feedback": "on" if on else "off",
+                "news_sources": list(ctx.news_sources)}
         if ctx.entry.source_type != "shadow":
             meta["temp"] = ctx.entry.group        # temp_event | trial
         if _lineage(ctx.entry) == SCALPER_ID:

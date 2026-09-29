@@ -152,3 +152,65 @@
   - **Twelve Data**（`TWELVEDATA_API_KEY`，2026-09-28 接入）排在所有市场的最后一位。免费档实测（2026-09-28）只覆盖美股 / ETF、外汇、加密货币，每天 800 次、每分钟 8 次；欧股返回"需 Grow / Pro 档"，日股返回无数据。所以**日股、欧股目前实际只有 Yahoo 一个来源**。代码遇到"需升级"会在本次运行内跳过该市场；以后升级付费档无需改代码。期货、指数不走 Twelve Data（它的商品是现货，不是期货合约）。
 - **上下文之外的标的**：影子可以交易观察清单以外、但属于自己领域的标的。运行器会补取它的行情，取不到就丢弃这笔决策。因为影子没看到这个标的的价格，它给的止损、目标、证伪价位一律丢弃，只保留文字形式的证伪条件，并在 meta 里标注 `off_context`。
 - **观察清单**：各领域加入海外标的（期货、外汇、港股、A 股、日股、欧股等）。
+
+## 8. 自我反馈对照试验（2026-09-29 所有人决定）
+
+- **决定**：影子的目标是优化自己的策略（SPEC §6.1），所以可以看到**自己**的历史成绩。这改变了方法论，先在一半影子上做对照试验，由所有人看结果后决定是否推广。
+- 代码：`marketmind/shadows/v3/self_feedback.py`；接入 `context.py`（`own_record`）、`runner.py`；测试 `marketmind/tests/test_shadows_v3/test_self_feedback.py`。
+
+### 8.1 "YOUR RECORD" 区块（纯代码，不调用 LLM）
+
+- **只用本影子自己的账本记录**：`source_type` 与 `source_id` 都等于本影子（接任者 `x@2` 只看自己的，不看前任的——方法论已换）。其他影子的记录一律不出现（信息隔离）。
+- **只用代码结算的结果**（S9 §5）：不回传任何 LLM 写的文字（论点、可证伪条件都不给），避免"事后编故事"。作废记录不计。
+- 内容：
+  - 已结算笔数、胜率（净收益 > 0）、平均净收益；与自己的同领域随机基准（`random:<影子>`，每天一条）对比；
+  - `error_class` 分布、`right_but_stopped` 占比（止损过紧）；
+  - 按入场时标的相对 200 日均线（上 / 下 / 未知）分组的胜率和平均净收益；
+  - 最近 10 笔已结算交易（按退出日倒序）：标的、方向、计划 / 实际持有、净收益、离场原因、`error_class`；
+  - 当前未平仓（待入场 / 已入场），避免重复叠加。
+- 任何一组少于 10 笔时标注 `n < 10: weak evidence`。
+- 放在用户消息里、今日新闻之前，用 `<<< BEGIN YOUR RECORD >>>` / `<<< END YOUR RECORD >>>` 分隔。系统 prompt 追加一段中性说明：用这些事实改进自己的方法（止损距离、持有期、适用的市场状态）；样本小是弱证据；不追涨、不报复性交易、不因为赚过就重复；加仓前先看未平仓。因此试验组的 `meta.prompt_version` 会变。
+
+示例：
+
+```
+## YOUR RECORD (facts computed by code)
+<<< BEGIN YOUR RECORD >>>
+Only your own trades; other shadows' records are never shown.
+Settled trades: n=3, hit rate 66.7%, mean net +0.46% (n < 10: weak evidence).
+Your random baseline (same-domain random picks, one a day): n=1, hit rate 0.0%, mean net -0.30% (n < 10: weak evidence).
+error_class (code-classified): win 1, beta_carried 1, cost_flipped 0, right_but_stopped 1, thesis_wrong 0
+right_but_stopped share: 33.3% (stopped out, then the target was reached within the planned hold)
+By market regime at entry (instrument vs its 200-day average):
+- above MA200: n=2, hit rate 100.0%, mean net +1.39% (n < 10: weak evidence)
+- below MA200: n=1, hit rate 0.0%, mean net -1.42% (n < 10: weak evidence)
+Last 3 settled trades (newest first):
+- exit 2026-10-05 | VXX long | hold 5d, held 3 | net +2.31% | exit target | win
+- exit 2026-10-02 | SPY short | hold 5d, held 3 | net -1.42% | exit stop | right_but_stopped
+- exit 2026-09-30 | SVXY long | hold 5d, held 3 | net +0.48% | exit expiry | beta_carried
+Open positions (1):
+- QQQ long, decided 2026-10-06, hold 5d, entered 2026-10-07
+<<< END YOUR RECORD >>>
+```
+
+### 8.2 分组（固定、平衡、可复现）
+
+- **试验总体**：2026-09-29 在册活跃的 31 个长期影子（`EXPERIMENT_IDS`，写死）。以后名册变化（odds_analyst 上线、新增影子）不会让已有影子换组；总体之外的长期影子一律算对照组（不看记录）。
+- **规则**（`balanced_split`）：按组名排序，组内按 `shadow_id` 排序后交替分配（第 1 个试验组、第 2 个对照组……）；人数为奇数的组，多出的一个轮流给试验组和对照组。结果 16 : 15，每组内两边相差不超过 1。结果写成常量 `TREATMENT_IDS`，测试检查规则仍得出同一集合。
+- **试验组（16）**：fade_master、vol_surfer；dragon_watch、carry_watch；harvest_seer、wallet_watcher、defi_scout、oil_geologist、currency_dealer、trial_reviewer、cycle_reader、reit_analyst、vega_trader；news_hound、rotation_engine；bear_tracker。
+- **对照组（15）**：crash_hunter、sideways_scout；euro_watch；options_reader；yield_whisperer、chain_oracle、frontier_scout、bank_examiner、bullion_broker、factory_floor、steel_trader、silicon_oracle；scalper、trend_rider；squeeze_watch。
+- 接任者继承前任谱系的组别；临时 / 事件影子、missed_path、变体试验（`trial:*`）一律不看记录（不属于试验）。
+- **总开关**：`self_feedback.SELF_FEEDBACK_ENABLED = False`，或环境变量 `MARKETMIND_SELF_FEEDBACK=off`（也接受 `0` / `false` / `no`），全部影子都不看记录。
+- **账本标注**：每条影子决策记录的 `meta.self_feedback` = `on` / `off`（实际是否看到）。随机基准不带这个字段。
+
+### 8.3 评估方法（满 40 个交易日后）
+
+- 函数：`self_feedback.compare_arms(entries, measure="net" | "excess")`，只读；命令行 `python -m marketmind.shadows.v3.self_feedback [--ledger PATH] [--excess]`（以只读方式打开账本，输出 JSON）。
+- **样本**：试验总体内、带 `meta.self_feedback` 的影子记录（试验开始前的记录不带，自动排除）。试验组中开关关闭期间产生的记录（`off`）不算接受了处理，剔除并计数（`treatment_unexposed_rows`）。
+- **每美元日盈亏**（主指标，与 S7 变体试验同一口径）：每组已结算记录的 `pnl_usd` 记在退出日；交易日历 = 全账本已结算退出日 ∪ 两组退出日，从最早到最晚退出日逐日，无退出记 0；每组除以本组在区间内的平均每日总敞口 Σ(仓位 × 持有期)/天数。差值 = 试验组 − 对照组。`measure="excess"` 时先减去同资金放在市场基准上的收益（辅助指标）。
+- **Brier**（辅助）：按决策日，每组当天已结算记录的平均 Brier；两组都有的日子逐日取 对照 − 试验（正数 = 试验组预测更好）。
+- **检验**：差值序列做 HAC（Newey–West）t 检验，复用 `promotion.metrics.hac_t_test`（fixed-b p 值）；同一天的所有记录先汇总成一个观测（按日聚类），再用 HAC 处理持有期重叠带来的自相关；带宽与变体试验相同（`trials.hac_bandwidth`：max(持有期中位数 − 1, 天数 // 2 − 1)）。输出单侧 p（试验组更好）和双侧 p（可能变差也要看）。
+- **按模型**：对两组都用过的每个 `meta.llm` 分别重复上面的比较（`by_model`），因为教训跨模型不一定成立（S9 §5）。
+- **就绪**：决策日 ≥ 40（`MIN_TRADING_DAYS`）时 `ready = true`；之前的数字只作参考。
+- **决定**：由所有人看结果后决定是否推广到全部影子，代码不会自动切换。
+- **局限**：两组领域不同（组内平衡，但标的不同），组间差异包含领域差异；31 个影子分两组，检验力有限，结论只能作为倾向；同时换模型的日子要看 `by_model`。

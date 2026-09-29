@@ -153,3 +153,17 @@ def test_undated_headlines_are_labelled_time_unknown():
     assert lines[0] == "- [Wire] (time unknown) Undated story"
     assert lines[1] == "- [Wire, 2026-09-28 09:30] Dated story"
     assert "(time unknown)" in lines[2]
+
+
+def test_news_sources_are_the_shown_headlines_sources():
+    """meta.news_sources (ECOSYSTEM_DESIGN §三.3): sources of the keyword-filtered headlines."""
+    from marketmind.shadows.v3.context import news_sources
+    entry = roster.by_id()["expert:gold:bullion_broker"]
+    items = [news("Gold up", source="Kitco"), news("Oil down", source="Reuters"),
+             news("Silver up", source=""), news("gold again", source="Kitco"),
+             news("Bullion demand", source="Bloomberg")]
+    ctx = build_context(entry, {}, items, today="2026-09-28")
+    assert ctx.news_sources == ["Bloomberg", "Kitco"]
+    assert build_context(entry, {}, [], today="2026-09-28").news_sources == []
+    assert news_sources([{"source_name": "B"}, {"source_name": "A"}, {}, {"source_name": "A"}]) \
+        == ["A", "B"]

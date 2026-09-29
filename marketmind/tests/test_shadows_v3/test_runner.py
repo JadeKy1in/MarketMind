@@ -366,3 +366,26 @@ async def test_successors_inherit_their_predecessors_inputs(tmp_path, prices, mo
 
 async def _async(value):
     return value
+
+
+@pytest.mark.asyncio
+async def test_news_sources_recorded_in_meta(tmp_path, prices):
+    from marketmind.tests.test_shadows_v3.test_roster_context import news
+    store = LedgerStore(tmp_path / "l.db")
+
+    async def call(system, user, stage):
+        return reply(good("GLD"))
+    items = [news("Gold hits record", source="Kitco"), news("Oil slides", source="Reuters"),
+             news("Gold ETF flows", source="Bloomberg"), news("Silver rally", source="Kitco")]
+    await runner.run_shadow_day(store, items, today=TODAY,
+                                entries=entries("expert:gold:bullion_broker"),
+                                call=call, fred_fetch=no_fred)
+    rec = store.list(source_type="shadow")[0]
+    assert rec.meta["news_sources"] == ["Bloomberg", "Kitco"]
+    assert "news_sources" not in store.list(source_type="benchmark")[0].meta
+
+    store2 = LedgerStore(tmp_path / "l2.db")
+    await runner.run_shadow_day(store2, [], today=TODAY,
+                                entries=entries("expert:gold:bullion_broker"),
+                                call=call, fred_fetch=no_fred)
+    assert store2.list(source_type="shadow")[0].meta["news_sources"] == []
