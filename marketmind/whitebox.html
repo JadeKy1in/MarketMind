@@ -331,14 +331,26 @@ function loadReporter(){
 async function loadAlerts(){
   const d=await j("/api/wb/big_alerts");
   if(!d.available){$("#s-alerts").innerHTML=`<div class="card empty">${esc(d.reason||"无数据")}</div>`;return}
-  const r=d.report||{};
-  const ok=v=>v?'<span class="chip green">✓</span>':(v===null||v===undefined)?'<span class="mut">—</span>':'<span class="chip red">✗</span>';
-  const row=c=>`<tr><td><b>${esc(c.ticker)}</b></td><td>${ok(c.a_ok)} <span class="mut">${(c.advisors_long||[]).length} 多 / ${(c.advisors_short||[]).length} 空，${esc((c.groups||[]).join(", "))}</span></td><td>${ok(c.b_ok)} <span class="mut">${(c.evidence||[]).length} 条</span></td><td>${ok(c.c_ok)} <span class="mut">${esc((c.l3||{}).light||"")}</span></td><td>${c.entry_id?idl(c.entry_id):`<span class="mut">${esc(c.note||"")}</span>`}</td></tr>`;
-  const live=r.mode==="live";
-  $("#s-alerts").innerHTML=`<div class="card"><h2>大行情警报 ${esc(d.date||"")} <span class="chip ${live?"green":"yellow"}">${live?"正式":"观察模式"}</span></h2>
-  <div class="mut" style="margin-bottom:8px">三个条件同时满足才触发：A 至少 3 个${live?"顾问":"影子"}（≥2 个组）近 5 天做多；B 证据层同向背离；C L3 三灯全绿。只列 Robinhood 可执行、非期权、做多。${live?"":"S7 产生顾问之前是观察模式：记账本、不推送手机。"}</div>
-  <h3>触发</h3>${(r.fired||[]).length?`<table><tr><th>标的</th><th>A 一致</th><th>B 背离</th><th>C 趋势</th><th>账本</th></tr>${r.fired.map(row).join("")}</table>`:'<div class="empty">今天没有触发</div>'}
-  <h3>接近触发（满足 2 条）</h3>${(r.near_misses||[]).length?`<table><tr><th>标的</th><th>A 一致</th><th>B 背离</th><th>C 趋势</th><th>说明</th></tr>${r.near_misses.map(row).join("")}</table>`:'<div class="empty">无</div>'}</div>
+  const v=d.view||{alerts:[],near_misses:[],duplicates:[],skipped:[],trend_source:{}};
+  const live=v.mode==="live",src=v.trend_source||{};
+  const num=x=>x==null?NA:esc(x);
+  const ANN={supported:"green",vetoed:"red",weak:"yellow",no_votes:""};
+  const ann=a=>`<span class="chip ${ANN[a.status]||""}">${esc(a.status_cn||a.status)}</span> <span class="mut">同向 ${a.votes_for} / 反向 ${a.votes_against}${(a.groups_for||[]).length?"，"+a.groups_for.map(esc).join(", "):""}</span>${a.veto?' <span class="neg">⚠ 否决标记</span>':""}`;
+  const evn=e=>{const f=e.for||[],g=e.against||[];if(!f.length&&!g.length)return '<span class="mut">无</span>';
+    return [...f.slice(0,3).map(x=>`<div>＋ ${esc(String(x.claim||"").slice(0,80))} ${x.entry_id?idl(x.entry_id):""}</div>`),
+            ...g.slice(0,2).map(x=>`<div class="mut">－ ${esc(String(x.claim||"").slice(0,80))} ${x.entry_id?idl(x.entry_id):""}</div>`),
+            f.length+g.length>5?`<div class="mut">共 ${f.length} 条同向、${g.length} 条反向</div>`:""].join("")};
+  const trunk=r=>`${esc(r.trunk.move)} <span class="mut">收盘 ${num(r.trunk.close)}（${esc(r.trunk.as_of||"—")}）</span>`;
+  const row=(r,last)=>`<tr><td>${r.kind==="entry"?'<span class="chip green">入场</span>':r.kind==="exit"?'<span class="chip red">离场</span>':'<span class="chip">WATCH</span>'}</td><td><b>${esc(r.ticker)}</b> <span class="mut">${esc(r.asset_group||"")}</span></td><td>${trunk(r)}</td><td class="num">${num(r.trunk.stop_level)}</td><td>${ann(r.annotation)}</td><td>${evn(r.evidence)}</td><td>${last(r)}</td></tr>`;
+  const head=last=>`<tr><th>主干</th><th>标的</th><th>趋势变化</th><th class="num">趋势止损</th><th>顾问注释</th><th>证据层</th><th>${last}</th></tr>`;
+  const al=v.alerts||[],nm=v.near_misses||[],du=v.duplicates||[],sk=v.skipped||[];
+  $("#s-alerts").innerHTML=`<div class="card"><h2>大行情警报 ${esc(d.date||"")} <span class="chip ${live?"green":"yellow"}">${live?"正式（推送）":"观察模式"}</span>${v.crypto_only?' <span class="chip">周末：只算加密</span>':""}</h2>
+  <div class="mut" style="margin-bottom:8px">主干：趋势信号来源（${esc(src.name||"—")}${src.universe?"，"+esc(src.universe==="lean"?"精简版":src.universe==="full"?"全池":src.universe):""}）当天的入场 / 离场，只列 Robinhood 可执行、非期权。顾问投票（${esc(v.voter_basis==="advisors"?"顾问":"影子代投")} ${v.voters??"—"} 个）与证据层只做注释，不是条件。${live?`本次推送 ${v.pushed} 个渠道。`:"观察模式：记报告与账本、不推送；所有人设置 MARKETMIND_ALERTS_LIVE=1 后才推送。"}</div>
+  ${src.available===false?`<div class="empty">趋势来源不可用：${esc(src.reason||"")}</div>`:""}
+  <h3>警报</h3>${al.length?`<table>${head("账本")}${al.map(r=>row(r,x=>x.entry_id?idl(x.entry_id):`<span class="mut">${x.kind==="exit"?"离场只报告":esc(x.note||"")}</span>`)).join("")}</table>`:'<div class="empty">今天没有入场 / 离场</div>'}
+  <h3>接近触发（WATCH：只差 55 日突破）</h3>${nm.length?`<table>${head("说明")}${nm.map(r=>row(r,x=>`<span class="mut">${esc(x.note||"")}</span>`)).join("")}</table>`:'<div class="empty">无</div>'}
+  ${du.length?`<h3>已警报过（去重）</h3><div>${du.map(r=>`<span class="chip">${esc(r.ticker)} ${esc(r.kind)}</span>`).join(" ")}</div>`:""}
+  ${sk.length?`<h3>跳过（所有人无法执行）</h3><div>${sk.map(x=>`<span class="chip">${esc(x.ticker)} ${esc(x.kind)}</span>`).join(" ")}</div>`:""}</div>
   <div class="card"><h2>历史警报与你的回应</h2>${(d.history||[]).length?`<table><tr><th>记录</th><th>日期</th><th>模式</th><th>标的</th><th>回应</th><th>状态</th><th class="num">净收益</th></tr>${d.history.map(h=>`<tr><td>${idl(h.entry_id)}</td><td>${esc(String(h.created_at).slice(0,10))}</td><td>${esc(h.mode)}</td><td>${esc(h.ticker)}</td><td>${h.response==="accept"?"接受":h.response==="reject"?"拒绝（放弃）":'<span class="mut">未回应</span>'}</td><td>${STATUS[h.status]||esc(h.status)}</td><td class="num">${pct(h.net_return)}</td></tr>`).join("")}</table>`:'<div class="empty">还没有警报</div>'}</div>`;
 }
 const LOAD={brief:loadBrief,alerts:loadAlerts,chain:loadChain,ledger:loadLedger,arena:loadArena,promo:loadPromo,evidence:loadEvidence,discovery:loadDiscovery,trend:loadTrend,holdings:loadHoldings,health:loadHealth,reporter:loadReporter};

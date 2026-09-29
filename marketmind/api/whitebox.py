@@ -412,6 +412,62 @@ def get_alerts(source: str | None = None, limit: int = 50) -> dict:
 
 # ── big-move alerts (S8) ────────────────────────────────────────────────────
 
+_ALERT_STATUS_CN = {"supported": "顾问支持", "vetoed": "顾问反对（否决标记）",
+                    "weak": "支持不足", "no_votes": "无顾问意见"}
+
+
+def _alert_row(r: dict) -> dict:
+    """One report row (alerts/runner.py::_row) as trunk / annotation / evidence."""
+    t = r.get("trend") or {}
+    kind = r.get("kind")
+    state = t.get("state")
+    move = {"entry": f"→{state or 'TREND'}", "exit": f"TREND→{state or '?'}"}.get(
+        kind, f"{state or '?'}（只差 55 日突破）" if kind == "watch" else (state or "?"))
+    status = r.get("status") or "no_votes"
+    vf, va = r.get("votes_for") or [], r.get("votes_against") or []
+    ev_for, ev_against = r.get("evidence") or [], r.get("evidence_against") or []
+    claim = lambda e: {"entry_id": e.get("entry_id"), "ticker": e.get("ticker"),
+                       "claim": e.get("claim", ""), "type": e.get("type")}
+    return {
+        "ticker": r.get("ticker"), "kind": kind, "direction": r.get("direction"),
+        "asset_group": r.get("asset_group"), "key": r.get("key"),
+        "trunk": {"move": move, "state": state, "as_of": t.get("as_of"),
+                  "close": t.get("close"), "stop_level": t.get("stop_level"),
+                  "entry_signal_date": t.get("entry_signal_date")},
+        "annotation": {"status": status,
+                       "status_cn": r.get("status_cn") or _ALERT_STATUS_CN.get(status, status),
+                       "veto": bool(r.get("veto", status == "vetoed")),
+                       "votes_for": len(vf), "votes_against": len(va),
+                       "groups_for": sorted({v.get("group") for v in vf if v.get("group")}),
+                       "groups_against": sorted({v.get("group") for v in va if v.get("group")})},
+        "evidence": {"for": [claim(e) for e in ev_for], "against": [claim(e) for e in ev_against]},
+        "entry_id": r.get("entry_id"), "note": r.get("note", ""),
+        "notified": len(r.get("notified") or []),
+    }
+
+
+def alert_report_view(report: dict | None) -> dict | None:
+    """The alert report JSON (alerts/runner.py::run_alerts) reshaped for the dashboard:
+    trend trunk per alert, advisor annotation, evidence notes, near misses (WATCH), mode."""
+    if not report:
+        return None
+    src = report.get("trend_source") or {}
+    return {
+        "date": report.get("date"), "written_at": report.get("written_at"),
+        "mode": report.get("mode") or "observe", "live_switch": bool(report.get("live_switch")),
+        "crypto_only": bool(report.get("crypto_only")),
+        "trend_source": {"name": src.get("source"), "universe": src.get("universe"),
+                         "available": src.get("available"), "reason": src.get("reason"),
+                         "date": src.get("date")},
+        "voter_basis": report.get("voter_basis"), "voters": report.get("advisors"),
+        "alerts": [_alert_row(r) for r in report.get("fired") or []],
+        "near_misses": [_alert_row(r) for r in report.get("near_misses") or []],
+        "duplicates": [_alert_row(r) for r in report.get("duplicates") or []],
+        "skipped": list(report.get("skipped") or []),
+        "pushed": len(report.get("pushed") or []),
+    }
+
+
 def get_big_alerts() -> dict:
     from marketmind.alerts.runner import load_responses
     day, report = _latest_json(data_dir() / "alerts")
@@ -427,7 +483,9 @@ def get_big_alerts() -> dict:
     if report is None and not history:
         return {"available": False,
                 "reason": "警报尚未运行（每日运行最后一步，或 python -m marketmind.alerts run）"}
-    return {"available": True, "date": day, "report": report, "history": history}
+    return {"available": True, "date": day, "report": report,
+            "view": alert_report_view(report if isinstance(report, dict) else None),
+            "history": history}
 
 
 # ── temporary shadows (S7) ──────────────────────────────────────────────────
