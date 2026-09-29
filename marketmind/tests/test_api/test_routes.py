@@ -261,3 +261,28 @@ def test_pipeline_run_logs_to_file_and_takes_the_lock(client, tmp_path, monkeypa
     assert kw["stdout"] not in (None, subprocess.DEVNULL) and kw["stderr"] == subprocess.STDOUT
     assert r.json()["log"].startswith(str(data / "logs" / "dashboard_runs"))
     assert sr.read_lock(data / "scheduler" / "run.lock")["pid"] == 4321
+
+
+# ── Info inject reads only the uploads folder ─────────────────────────
+
+def test_info_inject_rejects_files_outside_uploads(client, tmp_path, monkeypatch):
+    from marketmind.scripts import scheduled_run as sr
+    monkeypatch.setattr(sr, "ROOT", tmp_path)
+    monkeypatch.setenv("MARKETMIND_DATA_DIR", "data")
+    outside = tmp_path / "secret.txt"
+    outside.write_text("fake", encoding="utf-8")
+    called = []
+
+    async def fake_inject(text="", files=None):
+        called.append(files)
+        return _mock_inject_result()
+    with patch("marketmind.pipeline.info_injector.inject_user_info", fake_inject), \
+         patch("marketmind.api.routes.add_log_entry"):
+        for bad in ([str(outside)], ["../secret.txt"], ["../../etc/passwd"], ["."], "notes.txt", [3]):
+            r = client.post("/api/info/inject", json={"text": "x", "files": bad})
+            assert r.status_code == 400, bad
+        assert called == []
+        r = client.post("/api/info/inject", json={"text": "x", "files": ["gs_q2.pdf", "sub/n.txt"]})
+    uploads = (tmp_path / "data" / "uploads").resolve()
+    assert r.status_code == 200
+    assert called == [[str(uploads / "gs_q2.pdf"), str(uploads / "sub" / "n.txt")]]

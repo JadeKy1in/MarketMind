@@ -357,11 +357,35 @@ async def decision_history():
         return JSONResponse({"decisions": []})
 
 
+def uploads_dir() -> Path:
+    """The only folder /api/info/inject may read files from."""
+    from marketmind.scripts.scheduled_run import data_dir
+    return data_dir() / "uploads"
+
+
+def _upload_paths(files) -> list[str]:
+    """Resolve requested files inside uploads_dir(); names are taken relative to it.
+    Raises ValueError for anything else (absolute paths elsewhere, .., symlinks out)."""
+    if not isinstance(files, list) or not all(isinstance(f, str) and f.strip() for f in files):
+        raise ValueError("files must be a list of file names")
+    root = uploads_dir().resolve()
+    out = []
+    for f in files:
+        path = (root / f).resolve()                  # an absolute f replaces root here
+        if path == root or not path.is_relative_to(root):
+            raise ValueError(f"files must be inside the uploads folder ({root})")
+        out.append(str(path))
+    return out
+
+
 @app.post("/api/info/inject")
 async def info_inject(request: dict):
     from marketmind.pipeline.info_injector import inject_user_info
     text = request.get("text", "")
-    files = request.get("files", [])
+    try:
+        files = _upload_paths(request.get("files") or [])
+    except ValueError as e:
+        return JSONResponse({"status": "error", "error": str(e)}, status_code=400)
     result = await inject_user_info(text=text, files=files)
     add_log_entry("info", f"Info injected: {len(result.items)} items, {result.total_chars} chars")
     return JSONResponse({
