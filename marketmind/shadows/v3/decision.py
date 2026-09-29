@@ -4,6 +4,13 @@ The LLM returns JSON; code decides what is valid. Hard errors drop a decision
 (unknown ticker, bad direction, missing falsifier ...); soft errors drop only
 the offending optional field (an inverted stop, a falsifier rule on the wrong
 side) and are reported. Nothing is invented to fill a gap.
+
+A stop or target closer than MIN_LEVEL_ATR x ATR14 to the last close is a hard
+error (owner decision 2026-09-29), so the retry loop asks for a rewrite. ATR14
+comes from code (the same completed bars as the context); when it is missing
+the check is skipped with a warning, never guessed. One-bar (hold_days 1)
+decisions are exempt: settlement ignores their levels and the scalper's prompt
+asks for 0.5-1.0x ATR stops.
 """
 from __future__ import annotations
 
@@ -17,6 +24,7 @@ MIN_DECISIONS = 1
 MAX_DECISIONS = 3
 MIN_HOLD, MAX_HOLD = 1, 60
 MIN_POSITION_USD, MAX_POSITION_USD = 100.0, 1000.0
+MIN_LEVEL_ATR = 1.0              # stop/target at least this many ATR14 from the close
 
 
 @dataclass
@@ -90,13 +98,16 @@ def _bad_number(v) -> bool:
 
 
 def parse_decisions(text: str, closes: dict[str, float], fixed_hold: int | None = None,
-                    no_levels: set[str] | frozenset = frozenset()) -> ParseResult:
+                    no_levels: set[str] | frozenset = frozenset(),
+                    atrs: dict[str, float] | None = None) -> ParseResult:
     """Validate the LLM's decisions against today's context.
 
     `closes`: ticker -> last close for every tradable ticker with data (the
     context plus any off-context ticker the runner priced). `no_levels`: tickers
     the shadow never saw prices for - their stop/target/rule are dropped, since
     those numbers could only be invented. `fixed_hold` forces hold_days (scalper = 1).
+    `atrs`: ticker -> ATR14 computed by code; a ticker missing from it has no ATR,
+    so the minimum-distance rule is skipped for it with a warning.
     """
     res = ParseResult()
     try:
@@ -120,7 +131,7 @@ def parse_decisions(text: str, closes: dict[str, float], fixed_hold: int | None 
             res.errors.append(f"{tag}: not an object")
             continue
         try:
-            _parse_one(d, tag, closes, upper, seen, fixed_hold, no_levels, res)
+            _parse_one(d, tag, closes, upper, seen, fixed_hold, no_levels, atrs or {}, res)
         except Exception as e:  # noqa: BLE001 - one bad decision must not cost the day
             res.errors.append(f"{tag}: could not be read ({type(e).__name__}: {e})")
     return res
@@ -128,7 +139,8 @@ def parse_decisions(text: str, closes: dict[str, float], fixed_hold: int | None 
 
 def _parse_one(d: dict, tag: str, closes: dict[str, float], upper: dict[str, str],
                seen: set[tuple[str, str]], fixed_hold: int | None,
-               no_levels: set[str] | frozenset, res: ParseResult) -> None:
+               no_levels: set[str] | frozenset, atrs: dict[str, float],
+               res: ParseResult) -> None:
     """Validate one decision; appends to res.decisions or res.errors."""
     ticker = upper.get(str(d.get("ticker", "")).strip().upper().lstrip("$"))
     if ticker is None:
@@ -185,6 +197,17 @@ def _parse_one(d: dict, tag: str, closes: dict[str, float], upper: dict[str, str
         res.warnings.append(f"{tag}: target {target} on the wrong side of close {close}, "
                             f"dropped")
         target = None
+    if (stop is not None or target is not None) and int(hold) > 1:
+        a = _num(atrs.get(ticker))
+        if a is None or a <= 0:
+            res.warnings.append(f"{tag}: ATR14 unavailable for {ticker}; the "
+                                f">= {MIN_LEVEL_ATR:g}x ATR stop/target distance was not checked")
+        else:
+            problems = [p for p in (_too_close("stop", stop, close, a, long),
+                                    _too_close("target", target, close, a, not long)) if p]
+            if problems:
+                res.errors.append(f"{tag}: " + "; ".join(problems))
+                return
     rule = _falsifier_rule(d.get("falsifier_rule"), long, close, tag, res)
 
     seen.add((ticker, direction))
@@ -193,6 +216,23 @@ def _parse_one(d: dict, tag: str, closes: dict[str, float], upper: dict[str, str
         falsifier=falsifier[:500], thesis=thesis[:500], falsifier_rule=rule,
         stop=stop, target=target,
     ))
+
+
+def _too_close(name: str, level: float | None, close: float, a: float,
+               below: bool) -> str | None:
+    """Message when `level` is nearer than MIN_LEVEL_ATR x ATR to `close`, else None.
+    `below`: the level must sit under the close (a long's stop, a short's target)."""
+    if level is None:
+        return None
+    dist = abs(close - level)
+    need = MIN_LEVEL_ATR * a
+    if dist >= need - 1e-9 * max(abs(close), 1.0):   # float slack: exactly 1x ATR passes
+        return None
+    bound = close - need if below else close + need
+    ratio = min(round(dist / a, 2), 0.99)   # never print '1x' for a failing level
+    return (f"{name} {level:g} is {ratio:g}×ATR from the close {close:g}; must be "
+            f"≥ {MIN_LEVEL_ATR:g}×ATR (ATR14 = {a:g}), i.e. "
+            f"{'at or below' if below else 'at or above'} {bound:.6g}, or null")
 
 
 def _falsifier_rule(raw, long: bool, close: float, tag: str, res: ParseResult) -> dict | None:
@@ -234,6 +274,8 @@ not bare indices like ^N225 - use an ETF or future). Prefer tickers in today's c
 for any other ticker you have no prices, so give no stop/target/falsifier_rule for it.
 Entry is the next session's open.
 falsifier_rule: close_below (for a long) or close_above (for a short) a price level.
-For a long, stop < last close < target; mirrored for a short. Use prices from the
+For a long, stop < last close < target; mirrored for a short. When given, stop and
+target must each be at least {MIN_LEVEL_ATR:g}x ATR14 (shown per ticker) away from the last
+close, or the decision is rejected; this does not apply to hold_days 1. Use prices from the
 context only; never invent data. The placeholders above are not suggestions.
 """.strip()

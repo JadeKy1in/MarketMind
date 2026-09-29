@@ -223,6 +223,12 @@ class ShadowContext:
     def closes(self) -> dict[str, float]:
         return {v.ticker: v.snap.close for v in self.views if v.snap is not None}
 
+    @property
+    def atrs(self) -> dict[str, float]:
+        """ATR14 per priced ticker: l3_indicators.atr over the same completed daily
+        bars as the close (compute_snapshot), exactly as shown in the price lines."""
+        return {v.ticker: v.snap.atr14 for v in self.views if v.snap is not None}
+
     def render(self) -> str:
         parts = [f"Date (UTC): {self.today}",
                  f"You are {defang_text(self.entry.display_name)}; domain: {self.entry.domain}.",

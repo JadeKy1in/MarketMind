@@ -8,6 +8,7 @@ from marketmind.shadows.v3.decision import (
 )
 
 CLOSES = {"SPY": 100.0, "GLD": 200.0, "BTC-USD": 50000.0}
+ATRS = {"SPY": 2.0, "GLD": 4.0, "BTC-USD": 1500.0}
 
 
 def _d(**kw):
@@ -24,7 +25,8 @@ def _text(*decisions, fenced=False):
 
 def test_valid_decision_with_optional_fields():
     res = parse_decisions(_text(_d(stop=95, target=110,
-                                   falsifier_rule={"type": "close_below", "price": 96})), CLOSES)
+                                   falsifier_rule={"type": "close_below", "price": 96})),
+                          CLOSES, atrs=ATRS)
     assert res.ok and not res.errors and not res.warnings
     d = res.decisions[0]
     assert (d.ticker, d.direction, d.hold_days, d.stop, d.target) == ("SPY", "long", 5, 95, 110)
@@ -124,3 +126,73 @@ def test_nan_hold_with_fixed_hold_does_not_raise():
 def test_nan_falsifier_rule_price_is_dropped_not_raised():
     res = parse_decisions(_text(_d(falsifier_rule={"type": "close_below", "price": "nan"})), CLOSES)
     assert res.ok and res.decisions[0].falsifier_rule is None and res.warnings
+
+
+# --- stop/target at least 1x ATR14 from the close (owner decision 2026-09-29)
+
+def test_stop_closer_than_one_atr_is_an_error():
+    res = parse_decisions(_text(_d(stop=99.4, target=110), _d(ticker="GLD", stop=190)),
+                          CLOSES, atrs=ATRS)
+    assert [d.ticker for d in res.decisions] == ["GLD"]
+    assert res.errors == ["decision 1: stop 99.4 is 0.3×ATR from the close 100; must be "
+                          "≥ 1×ATR (ATR14 = 2), i.e. at or below 98, or null"]
+
+
+def test_target_closer_than_one_atr_is_an_error():
+    res = parse_decisions(_text(_d(stop=95, target=101.5)), CLOSES, atrs=ATRS)
+    assert not res.ok and len(res.errors) == 1
+    assert "target 101.5 is 0.75×ATR" in res.errors[0] and "at or above 102" in res.errors[0]
+
+
+def test_both_levels_too_close_are_reported_together():
+    res = parse_decisions(_text(_d(stop=99, target=101)), CLOSES, atrs=ATRS)
+    assert not res.ok and "stop 99" in res.errors[0] and "target 101" in res.errors[0]
+
+
+@pytest.mark.parametrize("close, atr, stop, target", [
+    (100.0, 2.0, 98.0, 102.0),
+    (100.3, 1.1, 99.2, 101.4),          # 100.3 - 99.2 != 1.1 in binary floats
+])
+def test_exactly_one_atr_passes(close, atr, stop, target):
+    res = parse_decisions(_text(_d(stop=stop, target=target)), {"SPY": close},
+                          atrs={"SPY": atr})
+    assert res.ok and not res.errors and not res.warnings
+    assert (res.decisions[0].stop, res.decisions[0].target) == (stop, target)
+
+
+def test_short_direction_is_mirrored():
+    short = dict(ticker="GLD", direction="short")
+    ok = parse_decisions(_text(_d(**short, stop=204, target=196)), CLOSES, atrs=ATRS)
+    assert ok.ok and not ok.errors
+    bad = parse_decisions(_text(_d(**short, stop=202, target=180)), CLOSES, atrs=ATRS)
+    assert not bad.ok and "stop 202 is 0.5×ATR" in bad.errors[0]
+    assert "at or above 204" in bad.errors[0]
+    bad = parse_decisions(_text(_d(**short, stop=220, target=197)), CLOSES, atrs=ATRS)
+    assert not bad.ok and "target 197" in bad.errors[0] and "at or below 196" in bad.errors[0]
+
+
+def test_missing_atr_is_a_warning_not_an_error():
+    res = parse_decisions(_text(_d(stop=99.9, target=100.1)), CLOSES, atrs={"GLD": 4.0})
+    assert res.ok and not res.errors
+    assert res.decisions[0].stop == 99.9 and "ATR14 unavailable for SPY" in res.warnings[0]
+    zero = parse_decisions(_text(_d(stop=99.9)), CLOSES, atrs={"SPY": 0.0})
+    assert zero.ok and "ATR14 unavailable" in zero.warnings[0]
+
+
+def test_no_levels_no_atr_check_and_wrong_side_levels_are_dropped_first():
+    assert not parse_decisions(_text(_d()), CLOSES).warnings
+    res = parse_decisions(_text(_d(stop=100.5, target=110)), CLOSES, atrs=ATRS)
+    assert res.ok and res.decisions[0].stop is None and "wrong side" in res.warnings[0]
+
+
+def test_one_bar_decisions_are_exempt():
+    # settlement ignores one-bar levels; the scalper prompt asks for 0.5-1.0x ATR stops
+    res = parse_decisions(_text(_d(hold_days=5, stop=99, target=101)), CLOSES,
+                          fixed_hold=1, atrs=ATRS)
+    assert res.ok and not res.errors and res.decisions[0].stop == 99
+    own = parse_decisions(_text(_d(hold_days=1, stop=99)), CLOSES, atrs=ATRS)
+    assert own.ok and not own.errors
+
+
+def test_output_instructions_state_the_atr_rule():
+    assert "1x ATR14" in OUTPUT_INSTRUCTIONS and "hold_days 1" in OUTPUT_INSTRUCTIONS
