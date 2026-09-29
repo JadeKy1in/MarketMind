@@ -312,3 +312,57 @@ async def test_duplicate_found_at_insert_writes_neither_calls_nor_benchmark(tmp_
     assert r.status == "duplicate" and not r.entry_ids and r.benchmark_id is None
     assert "2026-09-29" in r.errors[0] and len(store.list()) == before
     assert "1 duplicate submissions not recorded" in dup.summary()
+
+
+def successors(*ids):
+    """Successor entries "<id>@2" (docs/S7_DESIGN.md §一 退役) with the predecessor's slot."""
+    from dataclasses import replace
+    by = roster.by_id()
+    return [replace(by[i], shadow_id=f"{i}@2", successor_of=i) for i in ids]
+
+
+@pytest.mark.asyncio
+async def test_successors_inherit_their_predecessors_inputs(tmp_path, prices, monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(runner, "_tradable", lambda t: True)
+    store = LedgerStore(tmp_path / "l.db")
+    # yesterday: one ordinary shadow and the retired fade_master itself (excluded, same lineage)
+    await runner.run_shadow_day(
+        store, [], today="2026-09-27",
+        entries=entries("momentum:weekly:trend_rider", "contrarian:consensus:fade_master"),
+        call=lambda s, u, st: _async(reply(good("SPY"))), fred_fetch=no_fred,
+        created_at="2026-09-27T22:00:00Z")
+    fred_asked, seen = [], {}
+
+    async def fred(shadow_id):
+        fred_asked.append(shadow_id)
+        return {}
+
+    async def call(system, user, stage):
+        seen[stage] = user
+        return reply(good("SPY", hold_days=4), good("IWM"))
+
+    news = [SimpleNamespace(title="$ZZZZ jumps", summary="", source_name="Wire",
+                            published_at="2026-09-28T10:00:00Z"),
+            SimpleNamespace(title='Acme Corp (ACME) 8-K: "restatement"', summary="",
+                            source_name="SEC EDGAR Full-Text Flags", published_at="")]
+    ids = ["momentum:intraday:scalper", "contrarian:consensus:fade_master",
+           "momentum:event:news_hound", "expert:short:bear_tracker",
+           "short:squeeze:squeeze_watch", "derivatives:options:options_reader"]
+    await runner.run_shadow_day(store, news, today=TODAY, entries=successors(*ids), call=call,
+                                fred_fetch=fred, derivs_fetch=FakeDerivs,
+                                created_at="2026-09-28T22:00:00Z")
+    assert sorted(fred_asked) == sorted(ids)              # FRED series keyed by lineage
+    scalp = [e for e in store.list(source_type="shadow")
+             if e.source_id == "momentum:intraday:scalper@2"]
+    assert scalp and all(e.hold_bars == 1 and e.meta.get("intraday_approx") for e in scalp)
+    assert "held exactly 1 session" in seen["shadow:scalper"]
+    assert "SPY: 1 shadows, 100% long" in seen["shadow:fade_master"]   # own lineage excluded
+    assert "- ZZZZ [US] |" in seen["shadow:news_hound"]
+    assert "- ACME [US] |" in seen["shadow:bear_tracker"]
+    assert "UPST: short interest" in seen["shadow:squeeze_watch"]
+    assert "NVDA options ok" in seen["shadow:options_reader"]
+
+
+async def _async(value):
+    return value

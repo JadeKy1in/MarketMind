@@ -139,6 +139,49 @@ def test_promotion_log_reads_ladder_state(env):
     assert json.loads((tmp / "advisors.json").read_text("utf-8"))["advisors"] == []
 
 
+def _retirements(tmp):
+    """One approved retirement (trend_rider -> @2) and one pending proposal (SHADOW)."""
+    old = "momentum:weekly:trend_rider"
+    (tmp / "promotion").mkdir(exist_ok=True)
+    (tmp / "promotion" / "retirements.json").write_text(json.dumps({"proposals": [
+        {"shadow_id": old, "status": "approved", "decided_at": "2026-09-20",
+         "successor": {"shadow_id": f"{old}@2", "prompt_file": "successors/x.md"}},
+        {"shadow_id": SHADOW, "status": "pending", "proposed_at": "2026-09-28",
+         "stage": "formal",
+         "reason": {"rule": "last 2 challenger trials failed", "challengers": ["t1", "t2"],
+                    "excess_domain_mean": -0.004, "excess_n": 12,
+                    "window": ["2026-08-01", "2026-09-26"], "domain_benchmark": "GLD"},
+         "successor": {"shadow_id": f"{SHADOW}@2", "donor_id": "expert:energy:oil_geologist",
+                       "donor_match": "group", "method": "donor_rewrite"}}]}), "utf-8")
+    return old
+
+
+def test_arena_lists_successors_and_marks_retired(env):
+    from marketmind.api import whitebox
+    old = _retirements(env[2])
+    rows = {r["shadow_id"]: r for r in whitebox.get_arena()["shadows"]}
+    assert rows[old]["roster_status"] == "retired"
+    assert rows[f"{old}@2"]["roster_status"] == "active"
+    assert rows[f"{old}@2"]["successor_of"] == old and rows[SHADOW]["successor_of"] is None
+
+
+def test_promotion_log_shows_retirement_proposals_and_retired(env):
+    from marketmind.api import whitebox
+    old = _retirements(env[2])
+    assert whitebox.STAGE_CN["retired"] == "退役"
+    d = whitebox.get_promotion_log()
+    rows = {r["shadow_id"]: r for r in d["rows"]}
+    assert rows[old]["stage"] == "退役" and rows[old]["stage_code"] == "retired"
+    assert "接任者" in rows[old]["note"] and rows[f"{old}@2"]["stage"] == "见习"
+    assert rows[f"{old}@2"]["note"].startswith("接任 ")
+    (p,) = d["retirements"]["pending"]
+    assert (p["shadow_id"], p["stage"], p["successor_id"], p["donor_id"]) == (
+        SHADOW, "正式", f"{SHADOW}@2", "expert:energy:oil_geologist")
+    assert p["challengers"] == ["t1", "t2"] and p["excess_domain_mean"] == -0.004
+    assert p["donor_name"] != p["donor_id"] and p["command"].endswith(SHADOW)
+    assert d["retirements"]["retired"][0]["successor"] == f"{old}@2"
+
+
 def test_health_and_token_usage(env):
     from marketmind.api import whitebox
     from marketmind.gateway import usage_tracker

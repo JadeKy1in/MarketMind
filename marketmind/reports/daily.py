@@ -32,6 +32,7 @@ SYSTEM_PROMPT = """你是 MarketMind 的每日汇报员，给所有人写今天�
    ## 影子动向（多空分布、共识集中的标的、新出现的事件影子）
    ## 实盘持仓（巡检结论；没有持仓就写"未录入持仓"）
    ## 大行情警报（触发 / 接近触发；观察模式要注明不推送）
+   ## 待批准：影子退役提案（retirement_proposals：影子、理由——未通过的挑战者与评估期相对领域基准的平均超额、拟接任者与方法论来源、批准命令；只是提案，需所有人批准）
    ## 值得关注（从以上事实中归纳 2–3 点，明确标注"观察"而非建议）
 3. 提到账本记录时写出记录编号。
 4. 结尾不写免责声明，不给交易指令；系统不下单。"""
@@ -132,7 +133,31 @@ def gather_facts(today: str, store=None, brief_dir: Path | None = None) -> dict:
     promo = _read(d / "promotion" / "state.json")
     if promo:
         facts["promotion"] = dict(Counter(r.get("stage") for r in promo.get("shadows", {}).values()))
+    facts["retirement_proposals"] = retirement_facts()
     return facts
+
+
+def retirement_facts() -> list[dict]:
+    """Pending shadow retirement proposals awaiting the owner (docs/S7_DESIGN.md §一 退役)."""
+    try:
+        from marketmind.promotion import retirement
+        pending = retirement.summary(data_dir()).get("pending", [])
+    except Exception:
+        logger.warning("retirement proposals unavailable", exc_info=True)
+        return []
+    out = []
+    for p in pending:
+        reason, succ = p.get("reason") or {}, p.get("successor") or {}
+        out.append({"shadow_id": p.get("shadow_id"), "proposed_at": p.get("proposed_at"),
+                    "stage": p.get("stage"), "failed_challengers": reason.get("challengers"),
+                    "excess_vs_domain_mean": reason.get("excess_domain_mean"),
+                    "excess_n": reason.get("excess_n"), "window": reason.get("window"),
+                    "domain_benchmark": reason.get("domain_benchmark"),
+                    "successor": succ.get("shadow_id"), "donor": succ.get("donor_id"),
+                    "method": succ.get("method"),
+                    "approve": f"python -m marketmind.promotion retire approve {p.get('shadow_id')}",
+                    "reject": f"python -m marketmind.promotion retire reject {p.get('shadow_id')}"})
+    return out
 
 
 async def _call_llm(system: str, user: str) -> str:
@@ -159,7 +184,8 @@ def fallback_text(facts: dict) -> str:
              f"- 观察名单：新增 {len((facts.get('watchlist') or {}).get('new', []))}，"
              f"触发 {len((facts.get('watchlist') or {}).get('triggered', []))}",
              f"- 证据层背离：{(facts.get('evidence') or {}).get('divergences', 0)}",
-             f"- 警报：{(facts.get('alerts') or {}).get('fired') or '无'}"]
+             f"- 警报：{(facts.get('alerts') or {}).get('fired') or '无'}",
+             f"- 待批准退役提案：{[r['shadow_id'] for r in facts.get('retirement_proposals') or []] or '无'}"]
     lines += [f"- 要闻：{h['title']}（{h['source']}）" for h in facts.get("headlines", [])[:5]]
     return "\n".join(lines)
 

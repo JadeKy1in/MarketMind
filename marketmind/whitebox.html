@@ -171,8 +171,8 @@ async function loadArena(){
   const d=await j("/api/wb/arena");
   const rows=d.shadows||[];
   const body=rows.map(r=>{const s=r.score||{},b=r.random_benchmark||{};return `<tr class="click" onclick="LQ={status:'',source_type:'shadow',source_id:'${esc(r.shadow_id)}',ticker:'',offset:0};loaded.ledger=1;show('ledger');loadLedger()">
-   <td><b>${esc(r.display_name)}</b><div class="mut">${esc(r.domain)}</div></td><td>${esc(r.group)}</td>
-   <td>${r.roster_status==="active"?'<span class="chip green">上线</span>':`<span class="chip yellow">${esc(r.roster_status)}</span>`}</td>
+   <td><b>${esc(r.display_name)}</b><div class="mut">${esc(r.domain)}${r.successor_of?` · 接任 ${esc(r.successor_of)}`:""}</div></td><td>${esc(r.group)}</td>
+   <td>${r.roster_status==="active"?'<span class="chip green">上线</span>':r.roster_status==="retired"?'<span class="chip">退役</span>':`<span class="chip yellow">${esc(r.roster_status)}</span>`}</td>
    <td class="num">${s.records??0}</td><td class="num">${s.pending??0}/${s.open??0}/${s.settled??0}/${s.void??0}</td>
    <td class="num">${s.win_rate==null?NA:(s.win_rate*100).toFixed(0)+"%"}</td><td class="num">${pct(s.mean_net_return)}</td>
    <td class="num">${pct(b.mean_net_return)}</td><td class="num">${pct(s.mean_excess_market)}</td><td class="num">${pct(s.mean_excess_domain)}</td>
@@ -197,8 +197,12 @@ async function loadArena(){
 // ── promotion ──
 async function loadPromo(){
   const d=await j("/api/wb/promotion");
+  const rt=d.retirements||{},rp=rt.pending||[],rr=rt.retired||[];
+  const retHtml=`<h3>待批准：影子退役提案</h3>${rt.error?`<div class="neg">退役提案文件无法读取（${esc(rt.error)}）</div>`:""}${rp.length?`<table><tr><th>影子</th><th>提案日</th><th>阶段</th><th>理由</th><th>接任者</th><th>方法论来源</th><th>批准命令</th></tr>${rp.map(p=>`<tr><td>${esc(p.display_name)}<div class="mut">${esc(p.shadow_id)}</div></td><td>${esc(p.proposed_at)}</td><td>${esc(p.stage)}</td><td>最近挑战者均未通过：${esc((p.challengers||[]).join(", "))}；评估期 ${esc((p.window||[]).join(" → "))} 相对 ${esc(p.domain_benchmark)} 平均超额 ${pct(p.excess_domain_mean)}（${p.excess_n??0} 笔）</td><td>${esc(p.successor_id)}（从见习开始）</td><td>${p.donor_id?`${esc(p.donor_name)}（${p.donor_match==="group"?"同组":"同领域"}综合分最高，LLM 改写）`:"沿用原方法论"}</td><td class="mut">${esc(p.command)}</td></tr>`).join("")}</table>`:'<div class="empty">没有待批准的退役提案</div>'}
+  ${rr.length?`<div class="mut" style="margin-top:6px">已退役：${rr.map(r=>`${esc(r.display_name)}（${esc(r.decided_at)}，接任者 ${esc(r.successor||"—")}）`).join("；")}</div>`:""}`;
   $("#s-promo").innerHTML=`<div class="card"><h2>晋升淘汰日志</h2>
   <div class="mut" style="margin-bottom:8px">最近评审：${esc(d.reviewed_on||"尚未评审（每日运行中执行）")}。见习 → 正式需满 60 个交易日且通过全部门槛；排名、Tier 只在正式影子之间计算（数据不足前不评等级）。</div>
+  ${retHtml}
   <table><tr><th>影子</th><th>阶段</th><th class="num">有记录交易日</th><th class="num">已结算</th><th class="num">N_eff / MinTRL</th><th class="num">综合分</th><th>Tier</th><th>说明</th></tr>
   ${(d.rows||[]).map(r=>`<tr><td>${esc(r.display_name)}</td><td>${esc(r.stage)}</td><td class="num">${r.active_days}/${r.probation_days}</td><td class="num">${r.settled}</td><td class="num">${r.n_eff==null?"—":num(r.n_eff,1)} / ${r.min_trl==null?"—":num(r.min_trl,1)}</td><td class="num">${r.score==null?"—":num(r.score,3)}</td><td>${r.tier?"Tier"+r.tier:"—"}</td><td class="mut">${esc(r.note)}</td></tr>`).join("")}</table>
   <h3>事件</h3>${(d.events||[]).length?`<table><tr><th>日期</th><th>事件</th><th>影子</th><th>变化</th><th>依据</th></tr>${d.events.map(e=>`<tr><td>${esc(e.date)}</td><td>${esc(e.type)}</td><td>${esc(e.shadow_id)}</td><td>${esc(e.from)} → ${esc(e.to)}</td><td class="mut">${esc(JSON.stringify(e.detail||{}))}</td></tr>`).join("")}</table>`:'<div class="empty">暂无晋升、暂停或挑战事件</div>'}

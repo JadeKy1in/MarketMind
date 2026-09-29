@@ -130,3 +130,33 @@ async def test_trend_section_in_prompt_and_facts(env):
     assert f["trend"] == [{"ticker": "SPY", "stop_level": 640.5, "close": 670.0,
                            "entry_signal_date": TODAY, "as_of": TODAY}]
     assert "640.5" in seen["user"]
+
+
+@pytest.mark.asyncio
+async def test_pending_retirement_proposals_in_prompt_and_facts(env):
+    store, briefs, tmp = env
+    assert daily.gather_facts(TODAY, store, briefs)["retirement_proposals"] == []
+    sid = "momentum:weekly:trend_rider"
+    (tmp / "promotion").mkdir()
+    (tmp / "promotion" / "retirements.json").write_text(json.dumps({"proposals": [
+        {"shadow_id": sid, "status": "pending", "proposed_at": TODAY, "stage": "formal",
+         "reason": {"challengers": ["t1", "t2"], "excess_domain_mean": -0.003, "excess_n": 9,
+                    "window": ["2026-08-01", "2026-09-26"], "domain_benchmark": "SPY"},
+         "successor": {"shadow_id": f"{sid}@2", "donor_id": "momentum:event:news_hound",
+                       "method": "donor_rewrite"}},
+        {"shadow_id": "x", "status": "rejected", "successor": {}}]}), encoding="utf-8")
+    seen = {}
+
+    async def call(system, user):
+        seen.update(system=system, user=user)
+        return "## 今日要闻\n- x"
+    await daily.build_report(TODAY, store=store, call=call, brief_dir=briefs)
+    assert "## 待批准：影子退役提案" in seen["system"]
+    assert seen["system"].index("## 大行情警报") < seen["system"].index("## 待批准：影子退役提案") \
+        < seen["system"].index("## 值得关注")
+    (p,) = daily.gather_facts(TODAY, store, briefs)["retirement_proposals"]
+    assert (p["shadow_id"], p["successor"], p["donor"]) == (
+        sid, f"{sid}@2", "momentum:event:news_hound")
+    assert p["failed_challengers"] == ["t1", "t2"] and p["excess_vs_domain_mean"] == -0.003
+    assert p["approve"].endswith(f"retire approve {sid}") and f"{sid}@2" in seen["user"]
+    assert sid in daily.fallback_text(daily.gather_facts(TODAY, store, briefs))

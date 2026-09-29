@@ -125,14 +125,18 @@ def get_arena() -> dict:
     scores = {(s.source_type, s.source_id): s for s in scoreboard(entries)}
     run_day, run_results = _latest_run()
     run_by_id = {r.get("shadow_id"): r for r in run_results}
+    retired = roster_mod.retired_ids(data_dir())
     rows = []
-    for r in roster_mod.ROSTER:
+    # the fixed roster plus approved successors; retired shadows stay listed (history)
+    for r in roster_mod.all_entries(data_dir()):
         s = scores.get(("shadow", r.shadow_id))
         b = scores.get(("benchmark", benchmark_id_for(r.shadow_id)))
         last = run_by_id.get(r.shadow_id)
         rows.append({
             "shadow_id": r.shadow_id, "name": r.name, "display_name": r.display_name,
-            "group": r.group, "domain": r.domain, "roster_status": r.status,
+            "group": r.group, "domain": r.domain,
+            "roster_status": "retired" if r.shadow_id in retired else r.status,
+            "successor_of": r.successor_of or None,
             "notes": r.notes, "domain_benchmark": r.domain_benchmark,
             "score": s.to_dict() if s else None,
             "random_benchmark": b.to_dict() if b else None,
@@ -146,7 +150,36 @@ def get_arena() -> dict:
 
 
 STAGE_CN = {"probation": "见习", "formal": "正式", "advisor": "顾问", "paused": "暂停",
-            "blocked": "暂缓"}
+            "blocked": "暂缓", "retired": "退役"}
+
+
+def get_retirements(names: dict[str, str] | None = None) -> dict:
+    """Pending retirement proposals (reason, proposed successor and donor) and retired
+    shadows, from promotion/retirement.summary() (data/promotion/retirements.json; the
+    ids also appear in state.json `retirements`). docs/S7_DESIGN.md §一 退役."""
+    from marketmind.promotion import retirement
+    names = names or {}
+    summ = retirement.summary(data_dir())
+    pending = []
+    for p in summ.get("pending", []):
+        reason, succ = p.get("reason") or {}, p.get("successor") or {}
+        donor = succ.get("donor_id")
+        pending.append({
+            "shadow_id": p.get("shadow_id"),
+            "display_name": names.get(p.get("shadow_id"), p.get("shadow_id")),
+            "proposed_at": p.get("proposed_at"),
+            "stage": STAGE_CN.get(p.get("stage"), p.get("stage")),
+            "rule": reason.get("rule"), "challengers": reason.get("challengers") or [],
+            "excess_domain_mean": reason.get("excess_domain_mean"),
+            "excess_n": reason.get("excess_n"), "window": reason.get("window"),
+            "domain_benchmark": reason.get("domain_benchmark"),
+            "successor_id": succ.get("shadow_id"), "donor_id": donor,
+            "donor_name": names.get(donor, donor) if donor else None,
+            "donor_match": succ.get("donor_match"), "method": succ.get("method"),
+            "command": f"python -m marketmind.promotion retire approve {p.get('shadow_id')}"})
+    retired = [{**r, "display_name": names.get(r.get("shadow_id"), r.get("shadow_id"))}
+               for r in summ.get("retired", [])]
+    return {"pending": pending, "retired": retired, "error": summ.get("error")}
 
 
 def get_promotion_log() -> dict:
@@ -165,21 +198,34 @@ def get_promotion_log() -> dict:
                 continue
     events.reverse()
     arena = get_arena()
+    names = {r["shadow_id"]: r["display_name"] for r in arena["shadows"]}
+    retirements = get_retirements(names)
+    successor_by_id = {r["shadow_id"]: r.get("successor") for r in retirements["retired"]}
     recs = (state or {}).get("shadows", {})
     rows = []
     for r in arena["shadows"]:
         rec = recs.get(r["shadow_id"], {})
         m = rec.get("metrics") or {}
         s = r["score"] or {}
-        stage = rec.get("stage") or ("probation" if r["roster_status"] == "active" else "blocked")
+        if r["roster_status"] == "retired":
+            stage = "retired"
+        else:
+            stage = rec.get("stage") or ("probation" if r["roster_status"] == "active"
+                                         else "blocked")
+        if stage == "retired":
+            succ = successor_by_id.get(r["shadow_id"])
+            note = f"已退役，接任者 {names.get(succ, succ)}" if succ else "已退役"
+        elif r.get("successor_of"):
+            note = f"接任 {names.get(r['successor_of'], r['successor_of'])}"
+        else:
+            note = r["notes"] if stage == "blocked" else ""
         rows.append({"shadow_id": r["shadow_id"], "display_name": r["display_name"],
                      "stage": STAGE_CN.get(stage, stage), "stage_code": stage,
                      "active_days": m.get("record_days", s.get("active_days", 0)),
                      "probation_days": PROBATION_DAYS, "settled": s.get("settled", 0),
                      "n_eff": m.get("n_eff"), "min_trl": m.get("min_trl"),
                      "score": rec.get("score"), "tier": rec.get("tier"),
-                     "first_date": s.get("first_date"),
-                     "note": r["notes"] if stage == "blocked" else ""})
+                     "first_date": s.get("first_date"), "note": note})
     for sid, rec in recs.items():                      # Playground candidates (S8)
         if not sid.startswith("playground:"):
             continue
@@ -192,6 +238,7 @@ def get_promotion_log() -> dict:
                      "note": "Playground 候选"})
     return {"review_implemented": True, "reviewed_on": (state or {}).get("updated_at"),
             "pbo": (state or {}).get("pbo"), "rows": rows, "events": events[:100],
+            "retirements": retirements,
             "thresholds": pconf.thresholds()}
 
 
