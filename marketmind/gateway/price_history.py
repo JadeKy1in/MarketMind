@@ -8,7 +8,8 @@ Sources: Alpaca market data first for US stocks/ETFs when ALPACA_API_KEY_ID and
 ALPACA_API_SECRET_KEY are set (owner decision 2026-09-27); yfinance for stocks,
 ETFs, indices and crypto (e.g. "BTC-USD");
 Binance public klines, then Bybit public spot klines, then Coinbase Exchange
-daily candles, as crypto fallbacks; the
+daily candles, as crypto fallbacks (also used when the yfinance crypto series
+skips a UTC day, as Yahoo did for 2026-09-28); the
 Nasdaq public historical API
 (api.nasdaq.com) as a fallback for US stocks/ETFs. No API keys. Returns None
 when every source fails — callers must report "data unavailable", never guess.
@@ -103,12 +104,21 @@ async def get_price_history(ticker: str, years: int = 5) -> PriceHistory | None:
     hist = await _from_alpaca(ticker, years) if market is US else None
     if hist is None:
         hist = await _from_yfinance(ticker, years)
+    gapped = None
+    if hist is not None and is_crypto_ticker(ticker) and (gap := missing_utc_day(hist.daily)):
+        # Seen live 2026-09-29 ~00:15 UTC: Yahoo BTC-USD/SOL-USD skipped 09-28 entirely.
+        # Settlement would fill on the wrong day, so prefer an exchange series.
+        logger.warning("yfinance %s has no bar for %s; trying exchange sources", ticker, gap)
+        gapped, hist = hist, None
     if hist is None and ticker.upper().endswith("-USD"):
         hist = await _from_binance(ticker)
         if hist is None:
             hist = await _from_bybit(ticker, years)
         if hist is None:
             hist = await _from_coinbase(ticker, years)
+        if hist is None and gapped is not None:
+            logger.warning("Using gapped yfinance series for %s — exchange sources failed", ticker)
+            hist = gapped
     elif hist is None and market is US:
         hist = await _from_nasdaq(ticker, years)
     elif hist is None:
@@ -493,6 +503,17 @@ def to_weekly(daily: list[Bar]) -> list[Bar]:
 
 def is_crypto_ticker(ticker: str) -> bool:
     return ticker.upper().endswith("-USD")
+
+
+def missing_utc_day(daily: list[Bar], lookback: int = 30) -> str | None:
+    """First calendar date missing among the last `lookback` bars of a 7-day market."""
+    from datetime import date, timedelta
+    recent = daily[-lookback:]
+    for prev, cur in zip(recent, recent[1:]):
+        expected = date.fromisoformat(prev.date) + timedelta(days=1)
+        if cur.date > expected.isoformat():
+            return expected.isoformat()
+    return None
 
 
 def complete_bars(ticker: str, daily: list[Bar], now=None) -> list[Bar]:

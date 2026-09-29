@@ -173,3 +173,46 @@ def test_non_crypto_never_sent_to_coinbase(_isolate):
     for t in ("AAPL", "^GSPC", "600519.SS", "GC=F"):
         assert asyncio.run(ph.get_price_history(t, years=1)) is None
     assert calls == []
+
+
+def _bars(*dates):
+    return [ph.Bar(d, 1, 1, 1, 1, 1) for d in dates]
+
+
+def test_missing_utc_day():
+    assert ph.missing_utc_day(_bars("2026-09-26", "2026-09-27", "2026-09-28")) is None
+    assert ph.missing_utc_day(_bars("2026-09-27", "2026-09-29")) == "2026-09-28"
+    assert ph.missing_utc_day(_bars("2026-09-30", "2026-10-01")) is None
+
+
+def test_gapped_yfinance_crypto_falls_back_to_exchange(_isolate, monkeypatch):
+    async def _yf(ticker, years):
+        return ph.PriceHistory(ticker, "yfinance", _bars("2026-09-27", "2026-09-29"))
+
+    async def _bb(ticker, years):
+        return ph.PriceHistory(ticker, "bybit", _bars("2026-09-27", "2026-09-28", "2026-09-29"))
+    monkeypatch.setattr(ph, "_from_yfinance", _yf)
+    monkeypatch.setattr(ph, "_from_bybit", _bb)
+    assert asyncio.run(ph.get_price_history("BTC-USD", years=1)).source == "bybit"
+
+
+def test_gapped_yfinance_kept_when_exchanges_fail(_isolate, monkeypatch):
+    async def _yf(ticker, years):
+        return ph.PriceHistory(ticker, "yfinance", _bars("2026-09-27", "2026-09-29"))
+    monkeypatch.setattr(ph, "_from_yfinance", _yf)
+    assert asyncio.run(ph.get_price_history("BTC-USD", years=1)).source == "yfinance"
+
+
+def test_contiguous_yfinance_crypto_skips_exchanges(_isolate, monkeypatch):
+    _, calls = _isolate
+
+    async def _yf(ticker, years):
+        return ph.PriceHistory(ticker, "yfinance", _bars("2026-09-27", "2026-09-28"))
+
+    async def _boom(*args):
+        raise AssertionError("exchange source must not be called")
+    monkeypatch.setattr(ph, "_from_yfinance", _yf)
+    monkeypatch.setattr(ph, "_from_binance", _boom)
+    monkeypatch.setattr(ph, "_from_bybit", _boom)
+    assert asyncio.run(ph.get_price_history("BTC-USD", years=1)).source == "yfinance"
+    assert calls == []
