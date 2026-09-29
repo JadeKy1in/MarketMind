@@ -51,6 +51,9 @@ Rules (all code, no judgement; see docs/S2_DESIGN.md §4):
           close is at or beyond them and exit at the close. A one-bar record whose fill
           bar is close-only is void ("close_only": fill-to-close is unknowable). The
           settle_note names the close-only bars in the window used.
+  Unsettleable markets (markets.is_settleable: unknown exchange suffix) are never
+          simulated or scored: the record keeps its pending / open status with the
+          note UNSETTLEABLE_NOTE, and settles normally once markets.py maps the suffix.
 """
 from __future__ import annotations
 
@@ -61,7 +64,7 @@ from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from marketmind.gateway.price_history import Bar, complete_bars
-from marketmind.markets import CASH, market_for
+from marketmind.markets import CASH, is_settleable, market_for
 from marketmind.ledger.prices import PriceSource, source_of
 from marketmind.ledger.store import UNSETTLED, LedgerEntry, LedgerStore
 
@@ -201,6 +204,9 @@ def _parse_ts(value: str | None) -> datetime | None:
 
 def is_crypto(e: LedgerEntry) -> bool:
     return e.asset_type == "crypto" or e.ticker.upper().endswith("-USD")
+
+
+UNSETTLEABLE_NOTE = "market not settleable (unknown exchange suffix)"
 
 
 def _close_view(b: Bar) -> Bar:
@@ -613,6 +619,7 @@ class SettleReport:
     reviews_backfilled: int = 0
     changed_meanwhile: list[str] = field(default_factory=list)
     unavailable: list[str] = field(default_factory=list)
+    unsettleable: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
@@ -626,6 +633,8 @@ class SettleReport:
             text += f", changed by another process (not overwritten): {len(self.changed_meanwhile)}"
         if self.unavailable:
             text += f", no price data: {', '.join(sorted(set(self.unavailable)))}"
+        if self.unsettleable:
+            text += f", not settleable (unknown exchange suffix): {', '.join(sorted(set(self.unsettleable)))}"
         if self.errors:
             text += f", errors: {len(self.errors)} (see settle_note)"
         return text
@@ -663,6 +672,14 @@ async def settle_all(store: LedgerStore, source: PriceSource,
 
     for e in store.unsettled():
         report.checked += 1
+        if not is_settleable(e.ticker):
+            # never simulated or scored; stays pending / open (markets.py may map the
+            # suffix later), so no void and no bars are fetched
+            report.unsettleable.append(e.ticker)
+            if e.settle_note != UNSETTLEABLE_NOTE:
+                e.settle_note = UNSETTLEABLE_NOTE
+                write(e, UNSETTLED)
+            continue
         try:
             bars = await bars_for(e.ticker)
             if not bars:

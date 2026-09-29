@@ -4,7 +4,7 @@ import pytest
 
 from marketmind.gateway.price_history import Bar
 from marketmind.ledger.prices import StaticPriceSource
-from marketmind.ledger.settlement import settle_all, simulate
+from marketmind.ledger.settlement import UNSETTLEABLE_NOTE, settle_all, simulate
 from marketmind.ledger.store import LedgerEntry, LedgerStore
 
 CREATED = "2026-09-01T21:00:00Z"
@@ -86,3 +86,26 @@ async def test_settle_all_writes_the_close_only_note(tmp_path):
     assert report.settled == 1 and e.status == "settled"
     assert "close-only bar 2026-09-02" in e.settle_note and e.entry_price == 100.0
 
+
+@pytest.mark.asyncio
+async def test_unknown_exchange_suffix_is_never_settled_or_scored(tmp_path):
+    store = LedgerStore(tmp_path / "ledger.db")
+    fetched = []
+
+    class Src(StaticPriceSource):
+        async def daily_bars(self, ticker):
+            fetched.append(ticker)
+            return await super().daily_bars(ticker)
+
+    src = Src({"2222.SR": flat(DAYS[:10]), "AAA": flat(DAYS[:10]), "SPY": flat(DAYS[:10])})
+    bad = store.add(entry(ticker="2222.SR"), created_at=CREATED)
+    good = store.add(entry(), created_at=CREATED)
+    report = await settle_all(store, src, today="2026-09-30")
+    e = store.get(bad)
+    assert e.status == "pending" and e.settle_note == UNSETTLEABLE_NOTE
+    assert e.brier is None and e.net_return is None and e.entry_price is None
+    assert "2222.SR" not in fetched
+    assert report.unsettleable == ["2222.SR"] and "not settleable" in report.summary()
+    assert store.get(good).status == "settled"
+    again = await settle_all(store, src, today="2026-09-30")    # stays, idempotent
+    assert store.get(bad).status == "pending" and again.unsettleable == ["2222.SR"]
