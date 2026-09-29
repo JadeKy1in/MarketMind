@@ -42,6 +42,8 @@ TIER1_TOP_SHARE = 0.20
 TIER2_TOP_SHARE = 0.50
 STRESS_WORST_SHARE = 0.10        # worst 10% market-benchmark days: shadow mean >= market mean
 STRESS_MIN_DAYS = 10             # market days needed before the stress test can pass
+STRESS_ALPHA = 0.05              # ... and mean(shadow - market) on those days > 0, one-sided HAC
+STRESS_MIN_WORST_DAYS = 10       # fewer worst-decile days -> significance insufficient (not passed)
 FORWARD_OOS_DAYS = 20            # net return over the first 20 trading days as formal > 0
 PBO_MAX = 0.30                   # C20 stricter bar
 PBO_BLOCKS = 16                  # CSCV blocks

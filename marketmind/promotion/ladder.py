@@ -421,7 +421,8 @@ def evaluate(entries: list[LedgerEntry], roster_entries: list[RosterEntry], toda
             oos_days = [d for d, _ in oos_pairs]
             oos = sum(x for _, x in oos_pairs)
             stress, stress_detail = M.stress_test(s["series"], s["market"], C.STRESS_WORST_SHARE,
-                                                  C.STRESS_MIN_DAYS)
+                                                  C.STRESS_MIN_DAYS, C.STRESS_ALPHA,
+                                                  C.STRESS_MIN_WORST_DAYS)
             dsr = M.dsr(s["series"], n_trials)
             gates = {
                 "formal_days": len(after) >= C.ADVISOR_MIN_FORMAL_DAYS,

@@ -442,24 +442,49 @@ def calibrate_cusum_h(ref, k: float = C.CUSUM_K, arl0: float = C.CUSUM_ARL0,
     return float(np.quantile(hs, quantile))
 
 
+def stress_hac_lag(n: int) -> int:
+    """Newey-West (1994) rule-of-thumb bandwidth floor(4 (n/100)^(2/9)), at least 1.
+    The worst-decile days are sparse in time, so little overlap is expected between
+    them; fixed-b p-values (`hac_t_test`) keep the size right for whatever lag is used."""
+    return max(1, int(math.floor(4.0 * (max(n, 1) / 100.0) ** (2.0 / 9.0))))
+
+
 def stress_test(shadow_r, market_r, worst_share: float = C.STRESS_WORST_SHARE,
-                min_days: int = C.STRESS_MIN_DAYS) -> tuple[bool | None, dict]:
+                min_days: int = C.STRESS_MIN_DAYS, alpha: float = C.STRESS_ALPHA,
+                min_worst_days: int = C.STRESS_MIN_WORST_DAYS) -> tuple[bool | None, dict]:
     """On the worst `worst_share` market-benchmark days (days with market exposure only),
-    the shadow's mean daily return must be >= the market benchmark's mean on those days:
-    it beats holding the market with the same capital when the market is worst
-    (fix 2026-09-29; the old bar, >= 2 x the market mean, let 99% of zero-skill beta-1
-    longs through). Returns (passed, or None with fewer than `min_days` market days;
-    details)."""
+    two conditions must both hold:
+
+    1. the shadow's mean daily return >= the market benchmark's mean on those days
+       (it beats holding the market with the same capital when the market is worst;
+       fix 2026-09-29, the old bar >= 2 x the market mean let 99% of zero-skill beta-1
+       longs through);
+    2. the paired daily differences d = shadow - market on those days (in date order)
+       are significantly > 0: one-sided HAC (Newey-West, fixed-b) t-test
+       (`hac_t_test`, lag `stress_hac_lag`), p <= `alpha` (owner decision 2026-09-29;
+       without it a zero-skill beta-1 long passed about half the time).
+
+    Returns (passed, details). passed is None when there are fewer than `min_days`
+    market days or fewer than `min_worst_days` worst-decile days ("insufficient":
+    not passed); False when the differences have no variation (not testable)."""
     s, mk = np.asarray(shadow_r, dtype=float), np.asarray(market_r, dtype=float)
     idx = np.flatnonzero(mk != 0)
     if idx.size < min_days:
-        return None, {"market_days": int(idx.size)}
+        return None, {"market_days": int(idx.size), "significance": "insufficient"}
     n_worst = max(1, math.ceil(worst_share * idx.size))
-    worst = idx[np.argsort(mk[idx], kind="stable")[:n_worst]]
+    worst = np.sort(idx[np.argsort(mk[idx], kind="stable")[:n_worst]])
     s_mean, m_mean = float(s[worst].mean()), float(mk[worst].mean())
-    return bool(s_mean >= m_mean), {
-        "market_days": int(idx.size), "worst_days": int(n_worst),
-        "shadow_mean": s_mean, "market_mean": m_mean}
+    detail = {"market_days": int(idx.size), "worst_days": int(n_worst),
+              "shadow_mean": s_mean, "market_mean": m_mean, "mean_rule": bool(s_mean >= m_mean)}
+    if n_worst < min_worst_days:
+        detail["significance"] = "insufficient"
+        return None, detail
+    test = hac_t_test(s[worst] - mk[worst], stress_hac_lag(n_worst))
+    p = test["p_value"]
+    detail.update(significance="tested" if p is not None else "untestable",
+                  diff_mean=test["mean"], diff_t=test["t"], p_value=p, hac_lag=test["lag"],
+                  alpha=alpha)
+    return bool(detail["mean_rule"] and p is not None and p <= alpha), detail
 
 
 # ── Paired comparison (variant trials, docs/S7_DESIGN.md §二) ─────────────
