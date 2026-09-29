@@ -4,7 +4,7 @@ Once per ISO week (the first run of the week; later runs return the stored resul
   1. code builds the liquidity dashboard from FRED and the trend states of SPY QQQ TLT GLD
      BTC-USD (dashboard.py);
   2. code gates: only assets whose trend agrees with the liquidity impulse are candidates;
-     only candidates that were not in the gate 7 days earlier are "fresh";
+     only candidates in none of the previous 13 weekly gates are "fresh";
   3. if there is a fresh candidate, ONE Flash call through the gateway picks at most one of
      them (strict JSON {ticker, action, confidence, hold_days 20-60, thesis}); anything
      that fails the schema -> no call. No fresh candidate -> no LLM call at all.
@@ -105,11 +105,12 @@ def render_dashboard(ev: dict) -> str:
         lines.append(f"- {t}: {tr['state']}, close {_n(tr['close'])}, SMA200 {_n(tr['sma200'])}, "
                      f"12-month return {_n(tr['ret_12m'], '{:+.2%}')} vs T-bill {_n(tr['hurdle'], '{:.2%}')}"
                      + (f", in trend since {tr['entry_signal_date']}" if tr.get("entry_signal_date") else ""))
-    lines += ["", "CANDIDATES that passed the rule gate this week (new since last week):"]
+    lines += ["", f"CANDIDATES that passed the rule gate this week (not gated in the previous "
+                  f"{D.COOLDOWN_WEEKS} weeks):"]
     lines += [f"- {c.ticker}: {c.direction} ({c.why})" for c in ev["fresh"]]
     others = [c for c in ev["candidates"] if c not in ev["fresh"]]
     if others:
-        lines.append("Already in the gate last week (not offered again): "
+        lines.append(f"Also gated but already offered within {D.COOLDOWN_WEEKS} weeks: "
                      + ", ".join(f"{c.ticker} {c.direction}" for c in others))
     lines.append("Standing aside by rule: " + "; ".join(f"{t}: {w}" for t, w in ev["stand_aside"].items()))
     return "\n".join(lines) + "\n\nReturn the JSON object now."
@@ -290,7 +291,8 @@ def token_estimate() -> int:
 def _public(ev: dict) -> dict:
     return {"dashboard": ev["dashboard"], "trends": ev["trends"],
             "gate": [f"{c.ticker}:{c.direction}" for c in ev["candidates"]],
-            "gate_prev": [f"{c.ticker}:{c.direction}" for c in ev["candidates_prev"]],
+            "gate_prev": [f"{t}:{d}" for t, d in ev["candidates_prev"]],
+            "recently_gated": [f"{t}:{d}" for t, d in ev["recently_gated"]],
             "fresh": [f"{c.ticker}:{c.direction}" for c in ev["fresh"]],
             "stand_aside": ev["stand_aside"], "prev_as_of": ev["prev_as_of"]}
 
@@ -325,7 +327,7 @@ async def analyze(context: dict, *, mock: bool = False, fetch_fred=None, fetch_b
         out["no_calls_reason"] = ("no fresh gated candidate: " + "; ".join(
             f"{t}: {w}" for t, w in ev["stand_aside"].items())
             + ("" if not ev["candidates"] else
-               f"; still gated from last week: {', '.join(out['gate'])}"))
+               f"; already offered within {D.COOLDOWN_WEEKS} weeks: {', '.join(out['gate'])}"))
         if usable:
             save_week(root, week, {"evaluated_on": today.isoformat(), "llm_called": False, "output": out})
         return out

@@ -392,9 +392,12 @@ def test_gate_tlt_short_only_with_falling_liquidity_rising_yields_and_downtrend(
     assert DD.gate(_dash("falling", y13=0.30), {"TLT": _tr("EXIT", close=85, sma200=90)})[0]
 
 
-def test_fresh_only_newly_gated():
+def test_fresh_only_if_not_gated_in_the_cooldown():
     a, b = DD.Candidate("SPY", "long", ""), DD.Candidate("GLD", "long", "")
-    assert DD.fresh([a, b], [a]) == [b] and DD.fresh([a], [a]) == []
+    assert DD.fresh([a, b], [{("SPY", "long")}]) == [b] and DD.fresh([a], []) == [a]
+    # gate shut last week but open 3 weeks ago: a flicker, not re-offered
+    assert DD.fresh([a], [set(), set(), {("SPY", "long")}]) == []
+    assert DD.fresh([a], [{("SPY", "short")}]) == [a]
 
 
 # ── Druckenmiller adapter ──────────────────────────────────────────────────
@@ -457,10 +460,11 @@ async def test_druckenmiller_fresh_gate_one_llm_call_and_code_stop(tmp_path):
     again = await dl_run(tmp_path, llm, now=DL_NOW + timedelta(days=2))
     assert len(llm.calls) == 1 and again["llm_calls"] == 0
     assert again["directional_calls"][0]["signal_key"] == "SPY:2026-W41"
-    # next week: the gate was already open 7 days earlier -> nothing fresh, no call
+    # next week: the gate was already open a week earlier -> nothing fresh, no call
     nxt = await dl_run(tmp_path, llm, now=DL_NOW + timedelta(days=7), bars=dl_bars(date(2026, 10, 9)))
     assert nxt["fresh"] == [] and len(llm.calls) == 1 and nxt["directional_calls"] == []
-    assert "still gated" in nxt["no_calls_reason"]
+    assert "already offered within 13 weeks" in nxt["no_calls_reason"]
+    assert "SPY:long" in nxt["recently_gated"]
 
 
 @pytest.mark.asyncio

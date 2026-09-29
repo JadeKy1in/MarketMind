@@ -27,8 +27,12 @@ Gate (both sides must agree - liquidity impulse and the asset's own trend):
                    wins were bond positions, both ways); for equities, gold and bitcoin a
                    falling impulse only means stand aside.
   stand aside      everything else, with the reason.
-A candidate is fresh when it is in the gate now but was not 7 days earlier; only fresh
-candidates go to the LLM, so an open gate is offered once, not every week.
+A candidate is fresh when it is in the gate now and was in none of the weekly gates of
+the previous 13 weeks (as of D-7, D-14, ..., D-91: the impulse horizon). Only fresh
+candidates go to the LLM, so an open gate is offered once, and a gate that flickers
+open / shut is not re-offered every few weeks. The 13-week cooldown is a cost setting:
+with a 1-week lookback the gate opened in ~8.8 weeks a year on 2023-01..2026-09 data,
+with 13 weeks ~4.4 (owner target 2-6 LLM calls a year); no returns were looked at.
 
 Point in time: an evaluation "as of" day D uses observations dated before D and bars
 dated on or before D. FRED revises little in these series; revisions are not modelled.
@@ -57,7 +61,8 @@ MAX_WEEKLY_AGE = 14                              # days: WALCL older than this -
 MAX_DAILY_AGE = 7
 RRP_LOOKBACK = 5
 TGA_LOOKBACK = 6
-FRESH_DAYS = 7
+FRESH_DAYS = 7                                   # weekly evaluation grid
+COOLDOWN_WEEKS = 13
 
 Obs = list[tuple[str, float]]
 
@@ -231,32 +236,46 @@ def gate(dash: dict, trends: dict[str, dict]) -> tuple[list[Candidate], dict[str
     return cands, aside
 
 
-def fresh(now: list[Candidate], before: list[Candidate]) -> list[Candidate]:
-    prev = {(c.ticker, c.direction) for c in before}
-    return [c for c in now if (c.ticker, c.direction) not in prev]
+def fresh(now: list[Candidate], recent: list[set[tuple[str, str]]]) -> list[Candidate]:
+    """Candidates in none of the `recent` weekly gates ({(ticker, direction)} each)."""
+    seen = set().union(*recent) if recent else set()
+    return [c for c in now if (c.ticker, c.direction) not in seen]
+
+
+def gate_on(fred: dict, bars: dict, hurdle: float, day: date) -> tuple[dict, dict, list[Candidate], dict]:
+    """(dashboard, trends, candidates, stand aside) as of `day`."""
+    dash = dashboard(fred, day)
+    trends = {t: trend_at(t, bars.get(t), hurdle, day) for t in ASSETS}
+    cands, aside = gate(dash, trends)
+    return dash, trends, cands, aside
+
+
+def _keys(cands: list[Candidate]) -> set[tuple[str, str]]:
+    return {(c.ticker, c.direction) for c in cands}
 
 
 def evaluate(fred: dict, bars: dict, hurdle: float, as_of: date) -> dict:
-    """Dashboard, trends and gate now and FRESH_DAYS earlier; fresh candidates."""
+    """Dashboard, trends and gate now; the gates of the previous COOLDOWN_WEEKS weeks;
+    fresh candidates."""
+    dash, trends, cands, aside = gate_on(fred, bars, hurdle, as_of)
+    recent = [_keys(gate_on(fred, bars, hurdle, as_of - timedelta(days=FRESH_DAYS * k))[2])
+              for k in range(1, COOLDOWN_WEEKS + 1)]
     prev_day = as_of - timedelta(days=FRESH_DAYS)
-    dash, dash_prev = dashboard(fred, as_of), dashboard(fred, prev_day)
-    trends = {t: trend_at(t, bars.get(t), hurdle, as_of) for t in ASSETS}
-    trends_prev = {t: trend_at(t, bars.get(t), hurdle, prev_day) for t in ASSETS}
-    cands, aside = gate(dash, trends)
-    cands_prev, _ = gate(dash_prev, trends_prev)
     return {"dashboard": dash, "trends": trends, "candidates": cands, "stand_aside": aside,
-            "candidates_prev": cands_prev, "fresh": fresh(cands, cands_prev),
-            "prev_as_of": prev_day.isoformat()}
+            "candidates_prev": sorted(recent[0]), "recently_gated": sorted(set().union(*recent)),
+            "fresh": fresh(cands, recent), "prev_as_of": prev_day.isoformat()}
 
 
 def gate_history(fred: dict, bars: dict, hurdle: float, start: date, end: date) -> list[dict]:
     """Weekly (every 7 days from `start`) fresh candidates: how often the LLM would be asked.
-    Uses today's constant hurdle, so it is an estimate of the frequency, not a backtest."""
-    out, d = [], start
-    while d <= end:
-        ev = evaluate(fred, bars, hurdle, d)
-        if ev["fresh"]:
-            out.append({"as_of": d.isoformat(), "impulse": ev["dashboard"]["liquidity"]["impulse"],
-                        "fresh": [f"{c.ticker}:{c.direction}" for c in ev["fresh"]]})
-        d += timedelta(days=FRESH_DAYS)
+    Uses today's constant hurdle, so it estimates the frequency; it is not a backtest."""
+    days = [start + timedelta(days=FRESH_DAYS * k)
+            for k in range(-COOLDOWN_WEEKS, (end - start).days // FRESH_DAYS + 1)]
+    gates = [gate_on(fred, bars, hurdle, d) for d in days]
+    out = []
+    for i in range(COOLDOWN_WEEKS, len(days)):
+        f = fresh(gates[i][2], [_keys(g[2]) for g in gates[i - COOLDOWN_WEEKS:i]])
+        if f:
+            out.append({"as_of": days[i].isoformat(), "impulse": gates[i][0]["liquidity"]["impulse"],
+                        "fresh": [f"{c.ticker}:{c.direction}" for c in f]})
     return out
