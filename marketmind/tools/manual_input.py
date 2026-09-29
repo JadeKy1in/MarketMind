@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "manual"
@@ -48,40 +47,12 @@ def input_congress() -> None:
         print(f"  已保存 {len(trades)} 条交易 → {fpath}")
 
 
-def input_bluesky() -> None:
-    """Paste Bluesky posts about finance/markets."""
-    print("=" * 60)
-    print("  Bluesky 帖子录入")
-    print("  打开 bsky.app，搜索 finance 或 $AAPL")
-    print("  每行粘贴一条帖子内容")
-    print("  输入完按 Enter 两次结束")
-    print("=" * 60)
-
-    lines = []
-    while True:
-        line = input("> ").strip()
-        if not line:
-            if lines:
-                break
-            continue
-        lines.append(line)
-
-    if lines:
-        fpath = DATA_DIR / "bluesky_posts.json"
-        posts = [{"text": l, "timestamp": datetime.now(timezone.utc).isoformat()} for l in lines]
-        with open(fpath, "w", encoding="utf-8") as f:
-            json.dump(posts, f, indent=2, ensure_ascii=False)
-        print(f"  已保存 {len(lines)} 条帖子 → {fpath}")
-
-
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("用法: python tools/manual_input.py congress|bluesky")
+        print("用法: python tools/manual_input.py congress")
         sys.exit(1)
     cmd = sys.argv[1].lower()
     if cmd == "congress":
         input_congress()
-    elif cmd == "bluesky":
-        input_bluesky()
     else:
-        print(f"未知命令: {cmd}，用 congress 或 bluesky")
+        print(f"未知命令: {cmd}，用 congress")
