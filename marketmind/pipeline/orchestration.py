@@ -969,20 +969,24 @@ async def trend_step(config, crypto_only: bool = False) -> None:
     print(f"  {summary_line(snap)}")
 
 
-async def alerts_step(config) -> None:
-    """S8: big-move alert conditions, after shadows have filed today's decisions."""
+async def alerts_step(config, crypto_only: bool = False) -> None:
+    """S8 big-move alerts (docs/S8_DESIGN.md): today's trend-state changes, annotated with
+    advisor votes and evidence, after the trend step. Pure code; pushes only in live mode
+    (owner switch), as one priority message. Weekend: crypto instruments only."""
     from marketmind.alerts.notify import send
     from marketmind.alerts.runner import OBSERVE, run_alerts
     try:
-        report = await run_alerts(_ledger_store(config), notifier=send)
+        report = await run_alerts(_ledger_store(config), notifier=send, crypto_only=crypto_only)
     except Exception:
         logger.warning("alerts step failed", exc_info=True)
         print("  [alerts] failed (see log)")
         _step_failed("alerts")
         return
     mode = "observe" if report["mode"] == OBSERVE else "live"
-    fired = ", ".join(f["ticker"] for f in report["fired"]) or "none"
-    print(f"  [alerts] {mode}: fired {fired}; near misses {len(report['near_misses'])}")
+    fired = ", ".join(f"{f['ticker']} {f['kind']} ({f['status']})" for f in report["fired"]) or "none"
+    src = report["trend_source"]
+    note = "" if src["available"] else f"; trend source unavailable: {src.get('reason')}"
+    print(f"  [alerts] {mode}: fired {fired}; watch {len(report['near_misses'])}{note}")
 
 
 async def inspect_holdings_step(config) -> None:
@@ -1033,6 +1037,7 @@ async def run_weekend(config) -> int:
     discovery = await run_discovery_step(news_items, registry=crypto_registry())
     await watchlist_step(config, None, discovery, crypto_only=True)
     await trend_step(config, crypto_only=True)
+    await alerts_step(config, crypto_only=True)
     print(f"  [tokens] {usage_tracker.summary_line()}")
     usage_tracker.append_log("weekend")
     return _finish_exit_code(0)

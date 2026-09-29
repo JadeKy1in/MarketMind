@@ -167,6 +167,11 @@ def test_weekend_run_degraded_on_failed_step(monkeypatch, capsys):
     async def trend(config, crypto_only=False):
         trend_calls.append(crypto_only)
     monkeypatch.setattr(orch, "trend_step", trend)
+    alert_calls = []
+
+    async def alerts(config, crypto_only=False):
+        alert_calls.append(crypto_only)
+    monkeypatch.setattr(orch, "alerts_step", alerts)
     monkeypatch.setattr(scout, "fetch_all_sources", news)
     monkeypatch.setattr(runner, "run_shadow_day", shadow_day)
     monkeypatch.setattr(usage_tracker, "append_log", lambda *a, **k: None)
@@ -174,3 +179,4 @@ def test_weekend_run_degraded_on_failed_step(monkeypatch, capsys):
     assert asyncio.run(orch.run_weekend(config)) == 3
     assert "[degraded] shadows, watchlist" in capsys.readouterr().out
     assert trend_calls == [True]                 # weekend: crypto instruments only
+    assert alert_calls == [True]                 # weekend alerts: crypto instruments only

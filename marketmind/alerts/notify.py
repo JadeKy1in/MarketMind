@@ -18,6 +18,12 @@ Request formats verified against the official docs on 2026-09-28:
   JSON {"msg_type":"text","content":{"text":...}}; success code == 0.
   https://open.feishu.cn/document/client-docs/bot-v3/add-custom-bot
 Keys sit in URLs for three of these, so errors never log the URL or response body.
+
+Priority (big-move alerts, owner decision 2026-09-29): `send(..., priority=True)` adds
+"@all" to the 企业微信 message (text.mentioned_list ["@all"], same doc page, checked
+2026-09-29). The other channels have no priority field; for them priority changes nothing.
+Feishu's `<at user_id="all">` is not used: it needs the group's @all permission, and
+the doc does not say a group without it accepts the message.
 """
 from __future__ import annotations
 
@@ -51,7 +57,8 @@ def _truncate_bytes(text: str, limit: int) -> str:
     return raw[: limit - 3].decode("utf-8", errors="ignore") + "..."
 
 
-def build_requests(title: str, body: str, env=os.environ) -> dict[str, Request]:
+def build_requests(title: str, body: str, env=os.environ, *,
+                   priority: bool = False) -> dict[str, Request]:
     """channel -> request, for every channel whose variable is set."""
     title = " ".join(title.split())            # Server酱 titles cannot contain newlines
     out: dict[str, Request] = {}
@@ -63,10 +70,12 @@ def build_requests(title: str, body: str, env=os.environ) -> dict[str, Request]:
                                   json={"token": env["PUSHPLUS_TOKEN"], "title": title[:100],
                                         "content": body, "template": "txt"})
     if env.get("WECOM_WEBHOOK_KEY"):
+        text: dict = {"content": _truncate_bytes(f"{title}\n{body}", WECOM_MAX_BYTES)}
+        if priority:
+            text["mentioned_list"] = ["@all"]
         out["wecom"] = Request(
             f"https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key={env['WECOM_WEBHOOK_KEY']}",
-            json={"msgtype": "text",
-                  "text": {"content": _truncate_bytes(f"{title}\n{body}", WECOM_MAX_BYTES)}})
+            json={"msgtype": "text", "text": text})
     if env.get("FEISHU_WEBHOOK_TOKEN"):
         payload: dict = {"msg_type": "text", "content": {"text": f"{title}\n{body}"}}
         secret = env.get("FEISHU_WEBHOOK_SECRET")
@@ -95,10 +104,10 @@ def succeeded(channel: str, status: int, payload: dict) -> bool:
 
 
 async def send(title: str, body: str, *, env=os.environ,
-               client: httpx.AsyncClient | None = None) -> list[dict]:
+               client: httpx.AsyncClient | None = None, priority: bool = False) -> list[dict]:
     """Send to every configured channel; returns [{channel, ok, status}] (no secrets)."""
     results = []
-    reqs = build_requests(title, body, env)
+    reqs = build_requests(title, body, env, priority=priority)
     if not reqs:
         logger.warning("no push channel configured (SERVERCHAN_SENDKEY / PUSHPLUS_TOKEN / "
                        "WECOM_WEBHOOK_KEY / FEISHU_WEBHOOK_TOKEN)")

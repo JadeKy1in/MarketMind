@@ -14,7 +14,8 @@ def _store():
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="python -m marketmind.alerts")
     sub = p.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("run", help="evaluate today's alert conditions")
+    r = sub.add_parser("run", help="evaluate today's alerts (trend changes + annotations)")
+    r.add_argument("--crypto-only", action="store_true", help="weekend: crypto instruments only")
     a = sub.add_parser("ack", help="record your response to an alert")
     a.add_argument("entry_id")
     a.add_argument("decision", choices=["accept", "reject"])
@@ -26,11 +27,16 @@ def main(argv: list[str] | None = None) -> int:
     from marketmind.alerts import runner
     if args.cmd == "run":
         from marketmind.alerts.notify import send
-        report = asyncio.run(runner.run_alerts(_store(), notifier=send))
+        report = asyncio.run(runner.run_alerts(_store(), notifier=send,
+                                               crypto_only=args.crypto_only))
+        src = report["trend_source"]
         print(f"模式：{'观察（不推送）' if report['mode'] == runner.OBSERVE else '正式'}；"
-              f"触发 {len(report['fired'])}，接近触发 {len(report['near_misses'])}")
+              f"趋势来源 {src['source']}（{src.get('universe') or '不可用'}）；"
+              f"触发 {len(report['fired'])}，WATCH {len(report['near_misses'])}")
+        if not src["available"]:
+            print(f"  趋势来源不可用：{src.get('reason')}")
         for f in report["fired"]:
-            print(f"  触发 {f['ticker']}：账本 {f['entry_id']}")
+            print(f"  {f['kind']} {f['ticker']}：{f['status_cn']}；账本 {f['entry_id'] or '（离场只进报告）'}")
         return 0
     if args.cmd == "ack":
         try:
