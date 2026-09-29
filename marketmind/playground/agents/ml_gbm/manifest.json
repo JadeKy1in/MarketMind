@@ -1,0 +1,36 @@
+{
+  "agent_id": "ml_gbm",
+  "display_name": "Gradient-Boosted Trees (walk-forward ML)",
+  "description": "Pure-code classic machine learning: a scikit-learn HistGradientBoostingClassifier with fixed conservative hyperparameters predicts, per instrument, the probability that the next 10-bar return beats the ledger's round-trip cost, from price/volume features on complete daily bars (Gu, Kelly & Xiu 2020). Trained walk-forward with purging and embargo (Lopez de Prado 2018), retrained at most weekly; at most 2 long calls a day above a 0.55 calibrated probability, 10-bar hold, 3xATR20 stop. Zero LLM tokens.",
+  "output_character": "daily long-only directional calls (0-2) on sector SPDR ETFs, broad index ETFs, gold, long bonds and BTC/ETH; 10-bar hold, ATR disaster stop",
+  "public_data_sources": [
+    "public daily price bars via gateway.price_history (complete bars only)",
+    "^VIX daily close via gateway.price_history (optional feature; missing values allowed)"
+  ],
+  "requires_proprietary_data": false,
+  "primary_metric": "net_excess_return_vs_domain_benchmark",
+  "secondary_metrics": [
+    "direction_accuracy",
+    "brier",
+    "sharpe_ratio",
+    "max_drawdown"
+  ],
+  "min_sample_size": 20,
+  "min_observation_days": 60,
+  "target_pipeline_node": "baseline_benchmark",
+  "version": "1.0.0",
+  "author": "MarketMind (pure code, owner decision 2026-09-29)",
+  "tags": [
+    "pure-code",
+    "zero-llm",
+    "machine-learning",
+    "gradient-boosting",
+    "cross-asset",
+    "daily"
+  ],
+  "domain_benchmark": "SPY",
+  "domain_universe": [
+    "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY",
+    "SPY", "QQQ", "IWM", "GLD", "TLT", "BTC-USD", "ETH-USD"
+  ]
+}
