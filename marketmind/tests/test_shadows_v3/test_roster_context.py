@@ -30,7 +30,9 @@ def news(title, summary="", source="Test"):
                            published_at="2026-09-28T01:00:00Z")
 
 
-def test_roster_matches_spec_and_launch_decision():
+def test_roster_matches_spec_and_launch_decision(tmp_path, monkeypatch):
+    # isolate from real retirements (data/promotion/retirements.json changes active())
+    monkeypatch.setenv("MARKETMIND_DATA_DIR", str(tmp_path))
     assert len(roster.ROSTER) == 32
     assert len({r.shadow_id for r in roster.ROSTER}) == 32
     assert len({r.name for r in roster.ROSTER}) == 32
@@ -48,7 +50,8 @@ def test_roster_matches_spec_and_launch_decision():
     assert "BLOCKED" in pending[0].notes
 
 
-def test_every_active_prompt_is_complete():
+def test_every_active_prompt_is_complete(tmp_path, monkeypatch):
+    monkeypatch.setenv("MARKETMIND_DATA_DIR", str(tmp_path))
     for r in roster.active():
         text = roster.load_prompt(r)
         missing = [s for s in REQUIRED_SECTIONS if s not in text]

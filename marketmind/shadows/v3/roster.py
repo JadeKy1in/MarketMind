@@ -13,8 +13,13 @@ not matter; alerts to the owner still list only instruments the owner can trade.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+import logging
+import os
+from dataclasses import dataclass, field, replace
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
 
@@ -39,10 +44,14 @@ class RosterEntry:
     # Temporary shadows (docs/S7_DESIGN.md): ledger source type and an inline methodology
     source_type: str = "shadow"
     prompt_text: str = ""
+    # Successors of retired shadows (docs/S7_DESIGN.md §一 退役): the methodology lives
+    # in the data dir (prompt_file) and `successor_of` names the retired shadow.
+    prompt_file: str = ""
+    successor_of: str = ""
 
     @property
     def prompt_path(self) -> Path:
-        return PROMPT_DIR / f"{self.name}.md"
+        return Path(self.prompt_file) if self.prompt_file else PROMPT_DIR / f"{self.name}.md"
 
 
 def _e(shadow_id, display_name, group, domain, watchlist, bench, status=ACTIVE,
@@ -186,13 +195,74 @@ ROSTER: tuple[RosterEntry, ...] = (
 )
 
 
-def by_id() -> dict[str, RosterEntry]:
-    return {r.shadow_id: r for r in ROSTER}
+# ── Runtime overrides: retirement and successors (docs/S7_DESIGN.md §一 退役) ──
+# data/promotion/retirements.json is written by marketmind/promotion/retirement.py.
+# Only APPROVED proposals change the roster: the retired shadow stops being called and
+# its successor (a new shadow id, methodology in data/promotion/successors/) joins.
+
+def retirements_path(data_dir: str | Path | None = None) -> Path:
+    root = Path(data_dir) if data_dir is not None else Path(os.getenv("MARKETMIND_DATA_DIR", "data"))
+    return root / "promotion" / "retirements.json"
 
 
-def active() -> list[RosterEntry]:
-    """Live shadows: status active and a prompt file present."""
-    return [r for r in ROSTER if r.status == ACTIVE and r.prompt_path.exists()]
+def _approved(data_dir: str | Path | None = None) -> list[dict]:
+    p = retirements_path(data_dir)
+    if not p.exists():
+        return []
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return [r for r in data.get("proposals", []) if r.get("status") == "approved"]
+    except (OSError, ValueError, AttributeError):
+        logger.warning("retirements file %s unreadable; roster overrides ignored", p)
+        return []
+
+
+def retired_ids(data_dir: str | Path | None = None) -> set[str]:
+    """Shadows retired with the owner's approval (never called again)."""
+    return {r["shadow_id"] for r in _approved(data_dir) if r.get("shadow_id")}
+
+
+def successor_entries(data_dir: str | Path | None = None) -> list[RosterEntry]:
+    """Every approved successor, in approval order: the retired shadow's entry (domain,
+    watchlist, benchmark, keywords, prompt-file stem `name`) under a new shadow id, with
+    its methodology from the data dir. A successor may itself be retired later."""
+    promo = retirements_path(data_dir).parent
+    known = {r.shadow_id: r for r in ROSTER}
+    out = []
+    for p in _approved(data_dir):
+        succ = p.get("successor") or {}
+        parent = known.get(p.get("shadow_id"))
+        if parent is None or not succ.get("shadow_id") or not succ.get("prompt_file"):
+            continue
+        n = succ["shadow_id"].rsplit("@", 1)[-1]
+        e = replace(parent, shadow_id=succ["shadow_id"],
+                    display_name=f"{parent.display_name.split(' #')[0]} #{n}", status=ACTIVE,
+                    prompt_text="", prompt_file=str(promo / succ["prompt_file"]),
+                    successor_of=parent.shadow_id)
+        known[e.shadow_id] = e
+        out.append(e)
+    return out
+
+
+def all_entries(data_dir: str | Path | None = None) -> list[RosterEntry]:
+    """The fixed roster plus approved successors (retired ones included, for history)."""
+    return [*ROSTER, *successor_entries(data_dir)]
+
+
+def by_id(data_dir: str | Path | None = None) -> dict[str, RosterEntry]:
+    return {r.shadow_id: r for r in all_entries(data_dir)}
+
+
+def active(data_dir: str | Path | None = None) -> list[RosterEntry]:
+    """Live shadows: status active, a prompt file present, not retired (successors included)."""
+    retired = retired_ids(data_dir)
+    return [r for r in all_entries(data_dir)
+            if r.status == ACTIVE and r.shadow_id not in retired and r.prompt_path.exists()]
+
+
+def lineage_id(shadow_id: str) -> str:
+    """The original roster id of a successor ("x@3" -> "x")."""
+    return shadow_id.split("@", 1)[0]
 
 
 def load_prompt(entry: RosterEntry) -> str:

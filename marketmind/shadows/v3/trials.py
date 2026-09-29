@@ -13,6 +13,8 @@ new trial per REPROPOSE_GAP_DAYS trading days. Wilcoxon is reported only as a
 robustness statistic. A passing trial only becomes "passed"; the owner must approve
 it before the prompt file changes (SPEC L1).
 
+A running trial stops deciding once its parent is retired (promotion/retirement.py).
+
 CLI: python -m marketmind.shadows.v3.trials {list,propose,approve,reject}
 """
 from __future__ import annotations
@@ -151,6 +153,18 @@ async def _call_llm(system: str, user: str) -> str:
     return result.get("content") or ""
 
 
+async def rewrite(original: str, system: str, user: str, call=_call_llm) -> str:
+    """One LLM rewrite of a methodology, format-checked against `original` (same "## "
+    headings in the same order, 0.5-2x its length). Shared by variant trials and
+    retirement successors (promotion/retirement.py). Raises ValueError when rejected."""
+    variant = (await call(system, user)).strip()
+    variant = re.sub(r"^```(?:markdown|md)?\s*|\s*```$", "", variant)
+    errors = validate_variant(original, variant)
+    if errors:
+        raise ValueError("variant rejected: " + "; ".join(errors))
+    return variant
+
+
 def trial_bars_for(hold: int) -> int:
     """Trial window in trading days: 40, or 8 x the parent's median hold, at most 120."""
     return min(TRIAL_BARS_MAX, max(TRIAL_BARS, WINDOW_PER_HOLD * max(1, int(hold))))
@@ -189,11 +203,7 @@ async def propose(parent_id: str, kind: str, note: str, *, store=None, call=_cal
     original = roster_mod.load_prompt(parent)
     user = (f"## 原方法论\n\n{original}\n\n## 改动说明\n\n{note}\n\n"
             f"## 该影子账本成绩\n\n{_parent_summary(store, parent_id)}")
-    variant = (await call(SYSTEM_PROMPT, user)).strip()
-    variant = re.sub(r"^```(?:markdown|md)?\s*|\s*```$", "", variant)
-    errors = validate_variant(original, variant)
-    if errors:
-        raise ValueError("variant rejected: " + "; ".join(errors))
+    variant = await rewrite(original, SYSTEM_PROMPT, user, call)
     trial = Trial(uuid.uuid4().hex[:8], kind, parent_id, note.strip()[:500], today,
                   add_trading_days(today, trial_bars_for(parent_hold(store, parent_id))))
     pf = prompt_file(trial.trial_id, folder)
@@ -218,12 +228,14 @@ def roster_entries(folder: Path | None = None, today: str | None = None) -> list
     """Variants that still decide today. After `ends` a trial only waits for its
     records to settle; its later decisions would not count, so it stops calling the LLM."""
     by_id = roster_mod.by_id()
+    retired = roster_mod.retired_ids()      # a retired parent's trial stops calling the LLM
     today = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     out = []
     for t in load(folder):
         parent = by_id.get(t.parent_id)
         pf = prompt_file(t.trial_id, folder)
-        if t.status != "running" or t.ends <= today or parent is None or not pf.exists():
+        if (t.status != "running" or t.ends <= today or parent is None or not pf.exists()
+                or t.parent_id in retired):
             continue
         out.append(RosterEntry(
             shadow_id=f"trial:{t.trial_id}", name=f"trial_{parent.name}_{t.trial_id[:4]}",
@@ -406,7 +418,9 @@ def resolve(trial_id: str, approve: bool, *, folder: Path | None = None,
         raise ValueError(f"trial already {t.status}")
     if approve:
         parent = roster_mod.by_id()[t.parent_id]
-        target = (prompt_dir or roster_mod.PROMPT_DIR) / f"{parent.name}.md"
+        # a retirement successor keeps its methodology in the data dir (roster.prompt_file)
+        target = (parent.prompt_path if parent.prompt_file
+                  else (prompt_dir or roster_mod.PROMPT_DIR) / f"{parent.name}.md")
         stamp = datetime.now().strftime("%Y%m%d-%H%M")
         shutil.copy2(target, target.with_name(f"{target.name}.{stamp}.bak"))
         target.write_text(prompt_file(t.trial_id, folder).read_text(encoding="utf-8"),

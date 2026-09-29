@@ -239,6 +239,8 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
     today = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     created_at = created_at or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     entries = entries if entries is not None else roster_mod.active()
+    retired = roster_mod.retired_ids()      # owner-approved retirements: no more LLM calls
+    entries = [e for e in entries if e.shadow_id not in retired]
     report = RunReport(today)
     done = _already_recorded(store, entries, created_at)
     todo = []
