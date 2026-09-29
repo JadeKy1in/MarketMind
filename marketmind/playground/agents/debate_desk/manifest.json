@@ -1,0 +1,51 @@
+{
+  "agent_id": "debate_desk",
+  "display_name": "Bull/Bear Debate Desk",
+  "description": "Multi-agent LLM desk after TradingAgents (Xiao, Sun, Luo & Wang 2024, arXiv:2412.20138), cut to a bounded daily cost: code builds a fact sheet (returns, SMA50/200, ATR20, trend state, defanged headlines) for the 3 candidates with the strongest volatility-scaled 20-day momentum among SPY/QQQ/GLD/TLT/BTC/ETH and the day's 3 strongest sector ETFs; a Bull and a Bear analyst argue, rebut once, and a Risk-manager judge returns strict JSON (enter_long / enter_short / no_trade, confidence, hold 5-30 days). Stops (3 x ATR20) and sizes are code. 15 Flash calls, ~24k tokens a day.",
+  "output_character": "0-3 daily long/short calls on liquid ETFs and BTC/ETH, 5-30 day hold chosen by an LLM judge, ATR disaster stop by code",
+  "public_data_sources": [
+    "public daily price bars via gateway.price_history (complete bars only)",
+    "code-computed trend states data/trend/<date>.json (marketmind.trend, pure code)",
+    "public news titles from the Playground context (untrusted, defanged)"
+  ],
+  "requires_proprietary_data": false,
+  "primary_metric": "net_excess_return_vs_domain_benchmark",
+  "secondary_metrics": [
+    "direction_accuracy",
+    "brier",
+    "sharpe_ratio",
+    "max_drawdown"
+  ],
+  "min_sample_size": 20,
+  "min_observation_days": 60,
+  "target_pipeline_node": "decision_signal_source",
+  "version": "1.0.0",
+  "author": "MarketMind (owner decision 2026-09-29)",
+  "tags": [
+    "llm",
+    "multi-agent",
+    "debate",
+    "cross-asset",
+    "daily"
+  ],
+  "domain_benchmark": "SPY",
+  "domain_universe": [
+    "SPY",
+    "QQQ",
+    "GLD",
+    "TLT",
+    "BTC-USD",
+    "ETH-USD",
+    "XLB",
+    "XLC",
+    "XLE",
+    "XLF",
+    "XLI",
+    "XLK",
+    "XLP",
+    "XLRE",
+    "XLU",
+    "XLV",
+    "XLY"
+  ]
+}
