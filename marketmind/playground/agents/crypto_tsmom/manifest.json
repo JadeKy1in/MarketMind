@@ -1,0 +1,43 @@
+{
+  "agent_id": "crypto_tsmom",
+  "display_name": "Crypto Time-Series Momentum (1-4 weeks)",
+  "description": "Pure-code crypto time-series momentum at 1-4 week horizons (Liu & Tsyvinski 2021, 'Risks and Returns of Cryptocurrency', RFS 34:2689-2727): weekly, long if the mean of the 7/14/21/28-day returns scaled by EWMA volatility is positive, else flat; large caps Robinhood lists; 7-bar hold, 3xATR20 stop. Zero LLM tokens.",
+  "output_character": "weekly long calls on up to 10 large-cap coins with positive vol-scaled 1-4 week momentum, 7-bar hold, ATR disaster stop",
+  "public_data_sources": [
+    "public daily exchange candles via gateway.price_history (complete bars only)"
+  ],
+  "requires_proprietary_data": false,
+  "primary_metric": "net_excess_return_vs_domain_benchmark",
+  "secondary_metrics": [
+    "direction_accuracy",
+    "sharpe_ratio",
+    "max_drawdown",
+    "brier"
+  ],
+  "min_sample_size": 20,
+  "min_observation_days": 60,
+  "target_pipeline_node": "baseline_benchmark",
+  "version": "1.0.0",
+  "author": "MarketMind (pure code, owner decision 2026-09-29)",
+  "tags": [
+    "pure-code",
+    "zero-llm",
+    "baseline",
+    "momentum",
+    "crypto",
+    "weekly"
+  ],
+  "domain_benchmark": "BTC-USD",
+  "domain_universe": [
+    "BTC-USD",
+    "ETH-USD",
+    "SOL-USD",
+    "XRP-USD",
+    "DOGE-USD",
+    "ADA-USD",
+    "LINK-USD",
+    "LTC-USD",
+    "BCH-USD",
+    "AVAX-USD"
+  ]
+}

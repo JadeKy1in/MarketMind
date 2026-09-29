@@ -1,0 +1,37 @@
+{
+  "agent_id": "onchain_valuation",
+  "display_name": "On-chain Valuation (MVRV bands + Fear & Greed)",
+  "description": "Pure-code BTC/ETH long/flat on pre-registered MVRV bands (BTC: MVRV Z < -0.2 entry / >= 6 exit from Grobys, Näsman & Sandretto 2026, RIBAF 89:103486, only ~3 cycles so weak evidence; ETH: 10th/90th own-history percentile house bands) with alternative.me Crypto Fear & Greed extremes as a contrarian filter; at most weekly per coin, 20-60 bar hold, 3xATR20 stop. Zero LLM tokens.",
+  "output_character": "at most weekly long calls on BTC-USD / ETH-USD in deep-value or in-cycle-panic zones, 20-60 bar hold, ATR disaster stop; flat otherwise",
+  "public_data_sources": [
+    "Coin Metrics community API: CapMVRVCur, CapMrktCurUSD (daily, keyless)",
+    "alternative.me Crypto Fear & Greed Index (daily, keyless)",
+    "public daily exchange candles via gateway.price_history (complete bars only)"
+  ],
+  "requires_proprietary_data": false,
+  "primary_metric": "net_excess_return_vs_domain_benchmark",
+  "secondary_metrics": [
+    "direction_accuracy",
+    "sharpe_ratio",
+    "max_drawdown",
+    "brier"
+  ],
+  "min_sample_size": 20,
+  "min_observation_days": 60,
+  "target_pipeline_node": "baseline_benchmark",
+  "version": "1.0.0",
+  "author": "MarketMind (pure code, owner decision 2026-09-29)",
+  "tags": [
+    "pure-code",
+    "zero-llm",
+    "crypto",
+    "on-chain",
+    "valuation",
+    "weekly"
+  ],
+  "domain_benchmark": "BTC-USD",
+  "domain_universe": [
+    "BTC-USD",
+    "ETH-USD"
+  ]
+}
