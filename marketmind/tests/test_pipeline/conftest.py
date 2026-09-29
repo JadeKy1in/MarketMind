@@ -29,10 +29,18 @@ def vcr_news():
         # key were found recorded here on 2026-09-27).
         filter_query_parameters=["apiKey", "apikey", "api_key", "key", "token"],
         filter_headers=["authorization", "x-api-key"],
+        # Request bodies can carry credentials (a Bluesky app password was recorded in
+        # a createSession body); matching never uses the body, so it is not recorded.
+        before_record_request=_drop_request_body,
         match_on=["method", "scheme", "host", "port", "path", "query"],
     )
     with my_vcr.use_cassette("news_daily.yml"):
         yield
+
+
+def _drop_request_body(request):
+    request.body = None
+    return request
 
 
 @pytest.fixture
