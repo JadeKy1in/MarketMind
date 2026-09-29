@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from pathlib import Path
 
@@ -952,6 +953,21 @@ async def daily_report_step(config) -> None:
     print(f"  [report] written ({report['source']}); pushed: {', '.join(ok) or 'none'}")
 
 
+async def trend_step(config, crypto_only: bool = False) -> None:
+    """Trend state machine (docs/TREND_DESIGN.md §9): full + lean states into
+    data/trend/<NY date>.json. States only - no ledger, no push."""
+    from marketmind.trend.daily import run_trend_step, summary_line
+    try:
+        data_dir = Path(getattr(config, "data_dir", None) or os.getenv("MARKETMIND_DATA_DIR", "data"))
+        snap = await run_trend_step(data_dir, mode="weekend" if crypto_only else "daily")
+    except Exception:
+        logger.warning("trend step failed", exc_info=True)
+        print("  [trend] failed (see log)")
+        _step_failed("trend")
+        return
+    print(f"  {summary_line(snap)}")
+
+
 async def alerts_step(config) -> None:
     """S8: big-move alert conditions, after shadows have filed today's decisions."""
     from marketmind.alerts.notify import send
@@ -1015,6 +1031,7 @@ async def run_weekend(config) -> int:
         _step_failed("shadows")
     discovery = await run_discovery_step(news_items, registry=crypto_registry())
     await watchlist_step(config, None, discovery, crypto_only=True)
+    await trend_step(config, crypto_only=True)
     print(f"  [tokens] {usage_tracker.summary_line()}")
     usage_tracker.append_log("weekend")
     return _finish_exit_code(0)
@@ -1102,6 +1119,7 @@ async def _run_daily_with_shadows(config, args) -> int:
     if not args.mock:
         await inspect_holdings_step(config)
         await promotion_step(config)
+        await trend_step(config)
         await alerts_step(config)
         await daily_report_step(config)
     await _finish_shadows()

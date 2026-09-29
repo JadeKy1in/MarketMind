@@ -97,6 +97,19 @@
 
 **是否采用更严过滤的判定（事先定）**：只有同时满足才建议采用——(1) 前后两半的 CAGR 都不低于不加过滤的精简版；(2) 前后两半的最大回撤都不比精简版深超过 2 个百分点；(3) 每年入场次数更接近 4-8 的目标区间（或都在区间内）。否则保留不加过滤的精简版。
 
+**结果**（2026-09-29，见 `docs/TREND_BACKTEST_LEAN_2026-09-29.md`；以上规则未因结果修改）：精简版每年约 12.5 次入场，未达到 4-8 的目标；排名前 3 过滤按事先标准未通过，不采用。
+
+## 9. 每日 / 周末运行（只写状态，不记账本、不推送）
+
+- **位置**：`pipeline/orchestration.py::trend_step`，每日运行在晋升评审之后、大行情警报与日报之前；周末运行在观察名单之后，**只算加密标的**。
+- **做什么**：`trend.daily.run_trend_step` 一次取数（`state.fetch_inputs`：5 年完整日线 + `^IRX` 门槛），算全池 28 个标的的 `compute_states` 与精简版的 `lean.lean_states`（与回测同一个联合模拟器、默认不加排名过滤），写 `<数据目录>/trend/<纽约日期>.json`（`MARKETMIND_DATA_DIR`，默认 `data/`；先写临时文件再 `os.replace`）。
+- **文件内容**：`date`、`mode`（daily / weekend）、`written_at`、`hurdle`、`hurdle_source`、`counts`、`full`（每个标的的 `TrendState`）、`lean`（`strongest_sector`、`groups`、`states`）、`changes`（full / lean 各自的 `entries`、`exits`）。
+- **入场 / 离场的判定**：与每个标的**最近一份更早文件**里的状态比较（周末文件只有加密，周一的股票与周五比较）：现在 TREND 而之前是 CASH/WATCH/EXIT（或同一 TREND 但入场信号日变了）= 入场；之前 TREND 而现在 CASH/WATCH/EXIT = 离场；没有更早记录时只认当天的 ENTRY / EXIT 事件；UNAVAILABLE 两者都不算。
+- **输出一行**：`[trend] n TREND, m CASH, k unavailable; entries: A, B (lean: A); exits: none`（计数是全池；CASH 含 WATCH 与 EXIT；精简版的变化放在括号里）。
+- **失败**：取数或计算出错时记录日志、打印 `[trend] failed (see log)`，加入本次运行的降级步骤列表（退出码 3），不影响其他步骤。
+- **日报**：`reports/daily.py::gather_facts` 增加 `趋势状态` 事实（今天的入场 / 离场、TREND 列表与止损位、不可用列表、精简版视图）。
+- **仪表盘**：白箱"趋势状态"页（`/api/wb/trend`）：每个标的的状态、数据日期、收盘、12 个月超额收益、SMA200、55 日高、止损位；周末文件缺的股票沿用上一份并标注。
+
 ## References（访问日期 2026-09-29）
 
 1. Moskowitz, T. J., Ooi, Y. H., Pedersen, L. H. (2012). *Time Series Momentum*. Journal of Financial Economics 104, 228–250. https://w4.stern.nyu.edu/facdir/lpederse/papers/TimeSeriesMomentum.pdf — 摘要："We find persistence in returns for one to 12 months that partially reverses over longer horizons"；正文："the past 12-month excess return of each instrument is a positive predictor of its future return"。

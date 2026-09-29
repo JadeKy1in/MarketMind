@@ -37,7 +37,8 @@ def _stub_daily(monkeypatch, fail_step=None):
 
     monkeypatch.setattr(orch, "run_daily", fake_run_daily)
     for fn, name in (("inspect_holdings_step", "holdings"), ("promotion_step", "promotion"),
-                     ("alerts_step", "alerts"), ("daily_report_step", "daily report")):
+                     ("alerts_step", "alerts"), ("daily_report_step", "daily report"),
+                     ("trend_step", "trend")):
         monkeypatch.setattr(orch, fn, failing(name) if name == fail_step else ok)
     from marketmind.gateway import usage_tracker
     monkeypatch.setattr(usage_tracker, "append_log", lambda *a, **k: None)
@@ -48,7 +49,7 @@ def test_clean_daily_run_exits_zero(monkeypatch):
     assert asyncio.run(orch._run_daily_with_shadows(object(), _args())) == 0
 
 
-@pytest.mark.parametrize("step", ["holdings", "promotion", "alerts", "daily report"])
+@pytest.mark.parametrize("step", ["holdings", "promotion", "alerts", "daily report", "trend"])
 def test_failed_step_makes_daily_run_degraded(monkeypatch, capsys, step):
     _stub_daily(monkeypatch, fail_step=step)
     assert asyncio.run(orch._run_daily_with_shadows(object(), _args())) == orch.DEGRADED_EXIT == 3
@@ -161,9 +162,15 @@ def test_weekend_run_degraded_on_failed_step(monkeypatch, capsys):
     monkeypatch.setattr(orch, "crypto_registry", lambda: [])
     monkeypatch.setattr(orch, "run_discovery_step", none)
     monkeypatch.setattr(orch, "watchlist_step", watch)
+    trend_calls = []
+
+    async def trend(config, crypto_only=False):
+        trend_calls.append(crypto_only)
+    monkeypatch.setattr(orch, "trend_step", trend)
     monkeypatch.setattr(scout, "fetch_all_sources", news)
     monkeypatch.setattr(runner, "run_shadow_day", shadow_day)
     monkeypatch.setattr(usage_tracker, "append_log", lambda *a, **k: None)
     config = SimpleNamespace(deepseek_api_key="x", deepseek_base_url="x")
     assert asyncio.run(orch.run_weekend(config)) == 3
     assert "[degraded] shadows, watchlist" in capsys.readouterr().out
+    assert trend_calls == [True]                 # weekend: crypto instruments only

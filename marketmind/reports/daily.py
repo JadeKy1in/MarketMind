@@ -116,6 +116,13 @@ def gather_facts(today: str, store=None, brief_dir: Path | None = None) -> dict:
     if hold:
         facts["holdings"] = [{k: i.get(k) for k in ("ticker", "unrealized_return", "verdict_cn", "reason")}
                              for i in hold.get("items", [])]
+    try:
+        from marketmind.trend.daily import report_facts
+        trend = report_facts(d, today)
+        if trend:
+            facts["趋势状态"] = trend
+    except Exception:
+        logger.warning("trend facts unavailable", exc_info=True)
     alerts = _read(d / "alerts" / f"{today}.json")
     if alerts:
         facts["alerts"] = {"mode": alerts.get("mode"),
