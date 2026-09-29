@@ -376,6 +376,18 @@ def test_blocked_roster_shadow_listed():
     assert st["shadows"]["A"]["stage"] == "formal"
 
 
+def test_mean_brier_skips_default_confidence_records():
+    """Forced trades with unstated confidence (confidence_is_default) are not calibration."""
+    rows = _shadow("A", 30, 0.01, 0.01, 1)
+    for e in rows[:10]:
+        e.brier, e.confidence_is_default = 0.9, True
+    s = shadow_stats("A", rows, DAYS[:41], DAYS[40])
+    assert s["mean_brier"] == pytest.approx(0.2)
+    for e in rows:
+        e.confidence_is_default = True
+    assert shadow_stats("A", rows, DAYS[:41], DAYS[40])["mean_brier"] is None
+
+
 # ── Formal -> advisor ───────────────────────────────────────────────────
 
 @pytest.fixture(autouse=True)

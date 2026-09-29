@@ -142,7 +142,8 @@ def shadow_stats(sid: str, entries: list[LedgerEntry], calendar: list[str], toda
              and e.source_id == f"random:{sid}"]
     main = [e for e in entries if e.source_type in MAIN_SOURCES]
     excess_dom = [e.excess_domain for e in settled if e.excess_domain is not None]
-    briers = [e.brier for e in settled if e.brier is not None]
+    # forced trades with unstated confidence (stored 0.5) say nothing about calibration
+    briers = [e.brier for e in settled if e.brier is not None and not e.confidence_is_default]
     return {
         "settled_rows": settled,
         "tickers": sorted({e.ticker for e in settled}),
