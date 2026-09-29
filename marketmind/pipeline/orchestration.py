@@ -253,6 +253,13 @@ def _record_z0_l1(l1_result) -> None:
 # Pipeline execution functions
 # ══════════════════════════════════════════════════════════════════════════════
 
+async def preload_universe() -> None:
+    """Load the tradable universe off the event loop: its first download is a blocking
+    HTTP call that guard / ledger / shadows would otherwise make from inside async code."""
+    from marketmind.universe import get_equity_universe
+    await asyncio.to_thread(get_equity_universe)
+
+
 async def run_daily(config, mock: bool = False, verbose: bool = False,
                      shadow_count: int | None = None) -> int:
     """Execute full daily analysis pipeline.
@@ -268,10 +275,7 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
     global _shadow_task
     from marketmind.gateway import usage_tracker
     usage_tracker.reset()
-    # Load the tradable universe off the event loop: its first download is a blocking
-    # HTTP call that guard / ledger would otherwise make from inside async code.
-    from marketmind.universe import get_equity_universe
-    await asyncio.to_thread(get_equity_universe)
+    await preload_universe()
 
     # Settle whatever in the ledger has come due before making new calls (SPEC_v3 §7)
     if not mock:
@@ -930,6 +934,7 @@ async def run_weekend(config) -> int:
     from marketmind.pipeline.scout import fetch_all_sources
     from marketmind.shadows.v3.runner import default_report_dir, run_shadow_day
     usage_tracker.reset()
+    await preload_universe()
     summary = await settle_ledger(config)
     print(f"  [ledger] {summary}")
     news_items = await fetch_all_sources(config) or []
@@ -957,6 +962,7 @@ async def run_evidence_only(config) -> int:
     from marketmind.gateway import usage_tracker
     from marketmind.pipeline.scout import fetch_all_sources
     usage_tracker.reset()
+    await preload_universe()
     news_items = await fetch_all_sources(config) or []
     print(f"Evidence: {len(news_items)} articles collected")
     report = await run_evidence(config, news_items)
@@ -970,9 +976,8 @@ async def run_shadows_only(config, verbose: bool = False) -> int:
     init_gateway(config.deepseek_api_key, config.deepseek_base_url)
     from marketmind.gateway import usage_tracker
     from marketmind.pipeline.scout import fetch_all_sources
-    from marketmind.universe import get_equity_universe
     usage_tracker.reset()
-    await asyncio.to_thread(get_equity_universe)
+    await preload_universe()
     news_items = await fetch_all_sources(config) or []
     print(f"Shadows: {len(news_items)} articles collected")
     await run_v3_shadows(config, news_items)
