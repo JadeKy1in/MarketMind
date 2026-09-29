@@ -207,10 +207,10 @@ async def test_one_bad_record_does_not_block_the_rest(tmp_path, monkeypatch):
     good = store.add(entry(), created_at=CREATED)
     real = settlement.simulate
 
-    def flaky(e, bars):
+    def flaky(e, bars, **kw):
         if e.ticker == "BAD":
             raise RuntimeError("corrupt record")
-        return real(e, bars)
+        return real(e, bars, **kw)
 
     monkeypatch.setattr(settlement, "simulate", flaky)
     src = StaticPriceSource({"BAD": flat(DAYS[:8]), "AAA": flat(DAYS[:8]), "SPY": flat(DAYS[:8])})
@@ -292,8 +292,8 @@ async def test_missing_benchmark_is_backfilled_later(tmp_path):
 
 
 def test_entry_open_past_target_is_void_but_past_stop_is_a_stop_loss():
-    # next_open fill on 09-02 opens below the stop: stopped at that open, measured
-    # against the stop level (owner decision 2026-09-29, second revision)
+    # next_open fill on 09-02 opens below the stop: stopped at that open; without a
+    # decision price the loss is measured from the stop level
     below = flat(DAYS[:1]) + [bar("2026-09-02", 94, 96, 93, 95)] + flat(DAYS[2:8])
     out = simulate(entry(stop_loss=95.0, target_price=110.0), below)
     assert (out.status, out.exit_reason, out.exit_index) == ("settled", "stop", 0)
@@ -334,7 +334,7 @@ async def test_gap_through_the_stop_is_scored_as_a_loss(tmp_path):
     assert (e.entry_price, e.exit_price) == (95.0, 90.0)
     assert e.gross_return == pytest.approx(90 / 95 - 1, abs=1e-6) and e.net_return < e.gross_return < 0
     assert e.brier == pytest.approx(0.49) and e.falsifier_triggered is True
-    assert e.settle_note == "gapped through the stop at the open"
+    assert e.settle_note == "gapped through the stop at the open; loss from the stop (no snapshot price)"
     s = store.get(short_id)
     assert s.gross_return == pytest.approx(-(110 / 105 - 1), abs=1e-6) and s.net_return < 0
     c = store.get(exact_id)                # open exactly at the stop: costs make it a loss
@@ -364,3 +364,17 @@ def test_one_bar_record_ignores_the_gap_rule():
     out = simulate(entry(hold_bars=1, stop_loss=95.0), bars)
     assert (out.status, out.exit_price) == ("settled", 89)
     assert simulate(entry(hold_bars=1), flat(DAYS[:1])).status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_gap_through_the_stop_is_measured_from_the_decision_price(tmp_path):
+    store = LedgerStore(tmp_path / "l.db")
+    snap = store.save_snapshot({"AAA": (100.0, "2026-09-01", "static")})
+    eid = store.add(entry(stop_loss=95.0, target_price=110.0, snapshot_id=snap), created_at=CREATED)
+    bars = flat(DAYS[:1]) + [bar("2026-09-02", 90, 96, 89, 95)] + flat(DAYS[2:8])
+    await settle_all(store, StaticPriceSource({"AAA": bars, "SPY": flat(DAYS[:8])}),
+                     today="2026-09-30")
+    e = store.get(eid)
+    assert (e.status, e.exit_reason, e.entry_price, e.exit_price) == ("settled", "stop", 100.0, 90.0)
+    assert e.gross_return == pytest.approx(-0.10, abs=1e-6)
+    assert e.settle_note.startswith("gapped through the stop at the open; loss from the decision price")

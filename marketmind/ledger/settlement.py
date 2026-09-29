@@ -197,19 +197,21 @@ def is_crypto(e: LedgerEntry) -> bool:
     return e.asset_type == "crypto" or e.ticker.upper().endswith("-USD")
 
 
-def simulate(e: LedgerEntry, bars: list[Bar]) -> Outcome:
+def simulate(e: LedgerEntry, bars: list[Bar], decision_price: float | None = None) -> Outcome:
+    """`decision_price`: the snapshot price at decision time in the current series; a
+    gap through the stop at the open is measured from it (see _simulate)."""
     after = bars_after_creation(e, bars)
     gap = None
     if is_crypto(e):
         # 24/7 market: bar index == calendar day only without holes (never estimated)
         after, gap = calendar_run(e, after)
-    out = _simulate(e, after)
+    out = _simulate(e, after, decision_price)
     if gap and out.status in UNSETTLED:
         out.note = f"data gap {gap}"
     return out
 
 
-def _simulate(e: LedgerEntry, after: list[Bar]) -> Outcome:
+def _simulate(e: LedgerEntry, after: list[Bar], decision_price: float | None = None) -> Outcome:
     fill = _find_fill(e, after)
     if fill is None:
         return Outcome("pending", "waiting for the first bar after creation"
@@ -228,10 +230,14 @@ def _simulate(e: LedgerEntry, after: list[Bar]) -> Outcome:
     long = e.direction == "long"
     if fill.at_open and (gap := gapped_past(e, fill.price)):
         if gap == "stop":
-            # a real loss the plan would have suffered: the gap beyond the stop
-            return Outcome("settled", "gapped through the stop at the open", fill=fill,
-                           exit_index=fill.index, exit_price=fill.price, exit_reason="stop",
-                           entry_price=e.stop_loss)
+            # The call was already wrong by the open: score the whole adverse move from
+            # the decision-time price to the open (owner decision 2026-09-29). Voiding it
+            # inflated scores; measuring only the part beyond the stop understated it.
+            ref = decision_price if decision_price and decision_price > 0 else e.stop_loss
+            basis = "decision price" if ref == decision_price else "stop (no snapshot price)"
+            return Outcome("settled", f"gapped through the stop at the open; loss from the {basis}",
+                           fill=fill, exit_index=fill.index, exit_price=fill.price,
+                           exit_reason="stop", entry_price=ref)
         return Outcome("void", f"opened at {fill.price:.6g}, already past the {gap} before entry",
                        exit_reason=f"gap_{gap}")
     last = fill.index + e.hold_bars - 1
@@ -632,7 +638,9 @@ async def settle_all(store: LedgerStore, source: PriceSource,
                 continue
             snapshot = store.snapshot(e.snapshot_id) if e.snapshot_id else {}
             factor, adj_note = price_adjustment(e, bars, snapshot, source_of(source, e.ticker))
-            out = simulate(rescaled(e, factor), bars)
+            snap_px = (snapshot.get(e.ticker.upper()) or snapshot.get(e.ticker) or {}).get("price")
+            out = simulate(rescaled(e, factor), bars,
+                           decision_price=snap_px * factor if snap_px else None)
             market_bars = domain_bars = None
             if out.status == "settled":
                 mb = market_benchmark(e)
