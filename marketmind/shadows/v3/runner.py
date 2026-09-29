@@ -177,7 +177,7 @@ async def decide(ctx: ShadowContext, call=_call_llm) -> tuple[ParseResult, list[
         extra = await _price_off_context(text, ctx.closes)
         off_context.update(extra)
         result = parse_decisions(text, {**ctx.closes, **extra}, fixed_hold=fixed,
-                                 no_levels=set(extra))
+                                 no_levels=set(extra), atrs=ctx.atrs)
         if result.ok:
             return result, raws, attempt
         user = (ctx.render() + "\n\n## Your previous reply was rejected\n"

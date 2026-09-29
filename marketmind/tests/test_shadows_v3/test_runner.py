@@ -88,6 +88,26 @@ async def test_retry_with_errors_then_missed(tmp_path, prices):
     assert report.results[0].status == "submitted" and report.results[0].attempts == 2
     assert "previous reply was rejected" in prompts[1] and "^N225" in prompts[1]
 
+    # a stop inside 1x ATR14 is rejected and the error reaches the retry prompt
+    store3 = LedgerStore(tmp_path / "l3.db")
+    ctx_line = []
+
+    async def tight(system, user, stage):
+        ctx_line.append(user)
+        if len(ctx_line) == 1:
+            close = float(user.split("- GLD [")[1].split(" close ")[1].split(" ")[0])
+            return reply(good("GLD", stop=round(close - 0.1, 4)))
+        return reply(good("GLD", stop=1.0))
+
+    report = await runner.run_shadow_day(store3, [], today=TODAY,
+                                         entries=entries("expert:gold:bullion_broker"),
+                                         call=tight, fred_fetch=no_fred)
+    assert report.results[0].status == "submitted" and report.results[0].attempts == 2
+    assert "ATR14" in ctx_line[0].split("- GLD [")[1].splitlines()[0]
+    assert "previous reply was rejected" in ctx_line[1]
+    assert "stop" in ctx_line[1] and "×ATR from the close" in ctx_line[1]
+    assert store3.list(source_type="shadow")[0].stop_loss == 1.0
+
     async def abstain(system, user, stage):
         return "I prefer to stay in cash today."
 
