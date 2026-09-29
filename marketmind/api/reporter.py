@@ -3,7 +3,10 @@
 The model only sees data the code hands it (ledger rows, scoreboard, latest
 brief) and must cite ledger record ids. Code then checks every 16-hex id in the
 answer against the ledger and appends a warning for ids that do not exist.
-Nothing here writes to the ledger or any run file.
+Nothing here writes to the ledger or any run file. When the question names a
+ticker or asset group, the advisors' latest ledger decisions on it are added
+(shadows/v3/elite.py, code-selected, no extra LLM call) and returned as
+`advisor_opinions`, so the page can show them even without the LLM.
 """
 from __future__ import annotations
 
@@ -32,7 +35,8 @@ SYSTEM_PROMPT = """你是 MarketMind 的内置汇报员，只读。
 3. 数据里没有的，直接说"数据不可用"或"账本中没有这方面的记录"，不要猜，不要估算。
 4. 胜率、收益等只能引用 data 里已经算好的数字；没有已结算记录时要说明"尚无已结算记录"。
 5. 你不能下单、不能修改任何记录、不能给出新的交易建议；可以解释系统已有的决策和成绩。
-6. 用中文，简洁。"""
+6. 用中文，简洁。
+7. advisor_opinions 是顾问在账本里已有的决策（代码按问题涉及的资产组选出），只供所有人参考，没有决策权；提到时写记录编号。basis 为 not_yet_advisors 时必须说明它们还不是顾问；basis 为 none 时说明尚无顾问。"""
 
 
 def _row(e: dict) -> dict:
@@ -124,7 +128,31 @@ def build_context(question: str) -> dict[str, Any]:
     if rep.get("available"):
         ctx["daily_report"] = {"date": rep["date"], "markdown": rep["markdown"][:6000]}
     ctx["promotion"] = "晋升评审每天运行；账本满 60 个交易日前所有影子都在见习期"
+    elite = elite_opinions(question)
+    if elite.get("asset_groups"):
+        ctx["advisor_opinions"] = _for_model(elite)
     return ctx
+
+
+def elite_opinions(question: str) -> dict:
+    """Advisors' latest ledger decisions on the asset groups in the question (code-selected,
+    docs/S7_DESIGN.md §五); {} when unavailable. Read-only, no LLM call."""
+    try:
+        from marketmind.shadows.v3 import elite
+        store = whitebox._store()
+        return elite.gather(question, store=store, rows=None if store else [],
+                            data_dir=whitebox.data_dir())
+    except Exception:
+        logger.warning("reporter: advisor opinions unavailable", exc_info=True)
+        return {}
+
+
+def _for_model(elite: dict) -> dict:
+    """Signal ids are not ledger ids; leave them out so every cited id is checkable."""
+    ops = [{**op, "pending_signals": [{k: v for k, v in sg.items() if k != "signal_id"}
+                                      for sg in op.get("pending_signals", [])]}
+           for op in elite.get("opinions", [])]
+    return {**elite, "opinions": ops}
 
 
 def render_context(ctx: dict) -> tuple[str, bool]:
@@ -170,8 +198,11 @@ async def ask(question: str, history: list[dict] | None = None) -> dict[str, Any
     except Exception as e:
         logger.warning("reporter: LLM not available: %s", e)
         return {"answer": "汇报员不可用：未配置 LLM 密钥（DEEPSEEK_API_KEY）。账本和成绩可以直接在页面上查看。",
-                "error": "llm_unavailable", "unknown_ids": []}
-    ctx_text, truncated = render_context(build_context(question))
+                "error": "llm_unavailable", "unknown_ids": [],
+                "advisor_opinions": elite_opinions(question) or None}
+    ctx = build_context(question)
+    elite = ctx.get("advisor_opinions")
+    ctx_text, truncated = render_context(ctx)
     turns = []
     history = [m for m in history if isinstance(m, dict)] if isinstance(history, list) else []
     for m in history[-HISTORY_TURNS:]:
@@ -194,4 +225,5 @@ async def ask(question: str, history: list[dict] | None = None) -> dict[str, Any
     unknown = check_citations(answer)
     if unknown:
         answer += "\n\n⚠ 代码核对：以下编号不在账本中，相关说法不可信：" + "、".join(unknown)
-    return {"answer": answer, "unknown_ids": unknown, "context_truncated": truncated}
+    return {"answer": answer, "unknown_ids": unknown, "context_truncated": truncated,
+            "advisor_opinions": elite}
