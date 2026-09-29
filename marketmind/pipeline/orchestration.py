@@ -27,6 +27,30 @@ _shadow_task: "asyncio.Task | None" = None
 _evidence_task: "asyncio.Task | None" = None
 _playground_task: "asyncio.Task | None" = None
 
+# Steps that failed inside a run which still finished. The daily / weekend runs
+# return DEGRADED_EXIT when any are recorded, so the scheduler does not log "ok".
+DEGRADED_EXIT = 3
+_step_failures: list[str] = []
+
+
+def _reset_step_failures() -> None:
+    _step_failures.clear()
+
+
+def _step_failed(step: str) -> None:
+    if step not in _step_failures:
+        _step_failures.append(step)
+
+
+def _finish_exit_code(ret: int) -> int:
+    """ret unchanged when it already signals failure or nothing degraded; else DEGRADED_EXIT,
+    with a one-line `[degraded] a, b` summary."""
+    if _step_failures:
+        print(f"[degraded] {', '.join(_step_failures)}")
+        if ret == 0:
+            return DEGRADED_EXIT
+    return ret
+
 # Resonance (DSR/PBO) is not evaluated in the daily or the interactive path;
 # both pass the NOT_EVALUATED marker (SPEC_v3 §5 step 7).
 
@@ -275,6 +299,9 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
     global _shadow_task
     from marketmind.gateway import usage_tracker
     usage_tracker.reset()
+    _reset_step_failures()
+    global _shadow_entry_count
+    _shadow_entry_count = None
     await preload_universe()
 
     # Settle whatever in the ledger has come due before making new calls (SPEC_v3 §7)
@@ -391,6 +418,7 @@ async def settle_ledger(config) -> str:
         return report.summary()
     except Exception:
         logger.error("Ledger settlement failed (records stay unsettled)", exc_info=True)
+        _step_failed("ledger settle")
         return "ledger settlement failed"
 
 
@@ -403,6 +431,7 @@ async def _record_to_ledger(config, decision, l3_result, discovery: dict | None 
         print(f"  [ledger] recorded {len(ids)} entr{'y' if len(ids) == 1 else 'ies'}")
     except Exception:
         logger.error("Ledger recording failed — today's calls are NOT in the ledger", exc_info=True)
+        _step_failed("ledger record")
 
 
 def _save_daily_prediction(l1_result, l2_result, l3_result, decision) -> None:
@@ -635,11 +664,13 @@ async def run_v3_shadows(config, news_items: list, limit: int | None = None):
     """S3 daily shadow decisions -> ledger; prints a one-line summary."""
     from marketmind.shadows.v3 import roster
     from marketmind.shadows.v3.runner import default_report_dir, run_shadow_day
+    global _shadow_entry_count
     entries = roster.active()
     if limit:
         entries = entries[:limit]
     else:
         entries = entries + await _temp_shadow_entries(news_items, entries)
+    _shadow_entry_count = len(entries)
     report = await run_shadow_day(_ledger_store(config), news_items, entries=entries,
                                   report_dir=default_report_dir())
     print(f"  [shadows] {report.summary()}")
@@ -681,6 +712,7 @@ def _record_missed_path(config) -> None:
         print(f"  [missed_path] {len(ids)} passed-over candidates recorded")
     except Exception:
         logger.warning("missed_path not recorded", exc_info=True)
+        _step_failed("missed_path")
 
 
 async def promotion_step(config) -> None:
@@ -698,6 +730,7 @@ async def promotion_step(config) -> None:
     except Exception:
         logger.warning("promotion review failed", exc_info=True)
         print("  [promotion] failed (see log)")
+        _step_failed("promotion")
         return
     try:
         for t in trials.evaluate(store):
@@ -715,6 +748,7 @@ async def promotion_step(config) -> None:
                 print(f"  [trials] challenger for {ev['shadow_id']} not started: {e}")
     except Exception:
         logger.warning("trial step failed", exc_info=True)
+        _step_failed("trials")
 
 
 async def run_playground(config, news_items: list):
@@ -729,6 +763,7 @@ async def run_playground(config, news_items: list):
     except Exception:
         logger.warning("playground run failed", exc_info=True)
         print("  [playground] failed (see log)")
+        _step_failed("playground")
         return None
     n = sum(len(v) for v in summary["recorded"].values())
     print(f"  [playground] {result.agents_succeeded}/{result.agents_attempted} agents, "
@@ -761,6 +796,7 @@ async def run_discovery_step(news_items: list, registry=None) -> dict | None:
     except Exception:
         logger.warning("discovery scan failed", exc_info=True)
         print("  [discovery] failed (see log)")
+        _step_failed("discovery")
         return None
     c = report.get("counts") or {}
     print(f"  [discovery] {c.get('ok', 0)}/{c.get('series', 0)} series, "
@@ -778,8 +814,10 @@ async def _await_discovery(task) -> dict | None:
         logger.warning("discovery scan timed out after %ss; the main pipeline goes on without it",
                        DISCOVERY_WAIT_S)
         print(f"  [discovery] timed out after {DISCOVERY_WAIT_S // 60} minutes")
+        _step_failed("discovery timeout")
     except Exception:
         logger.warning("discovery scan failed", exc_info=True)
+        _step_failed("discovery")
     return None
 
 
@@ -854,6 +892,7 @@ async def watchlist_step(config, decision=None, discovery: dict | None = None,
     except Exception:
         logger.warning("watchlist step failed", exc_info=True)
         print("  [watchlist] failed (see log)")
+        _step_failed("watchlist")
         return
     print(f"  [watchlist] added {len(added.get('added', []))}, refreshed "
           f"{len(added.get('refreshed', []))}, rejected {len(added.get('rejected', []))}; "
@@ -869,6 +908,7 @@ async def run_evidence(config, news_items: list):
     except Exception:
         logger.warning("evidence run failed", exc_info=True)
         print("  [evidence] failed (see log)")
+        _step_failed("evidence")
         return None
     print(f"  [evidence] {report.summary()}")
     return report
@@ -883,6 +923,7 @@ async def daily_report_step(config) -> None:
     except Exception:
         logger.warning("daily report failed", exc_info=True)
         print("  [report] failed (see log)")
+        _step_failed("daily report")
         return
     ok = [r["channel"] for r in sent if r.get("ok")]
     print(f"  [report] written ({report['source']}); pushed: {', '.join(ok) or 'none'}")
@@ -897,6 +938,7 @@ async def alerts_step(config) -> None:
     except Exception:
         logger.warning("alerts step failed", exc_info=True)
         print("  [alerts] failed (see log)")
+        _step_failed("alerts")
         return
     mode = "observe" if report["mode"] == OBSERVE else "live"
     fired = ", ".join(f["ticker"] for f in report["fired"]) or "none"
@@ -911,6 +953,7 @@ async def inspect_holdings_step(config) -> None:
     except Exception:
         logger.warning("holdings inspection failed", exc_info=True)
         print("  [holdings] inspection failed (see log)")
+        _step_failed("holdings")
         return
     if not reports:
         print("  [holdings] no holdings recorded")
@@ -934,18 +977,24 @@ async def run_weekend(config) -> int:
     from marketmind.pipeline.scout import fetch_all_sources
     from marketmind.shadows.v3.runner import default_report_dir, run_shadow_day
     usage_tracker.reset()
+    _reset_step_failures()
     await preload_universe()
     summary = await settle_ledger(config)
     print(f"  [ledger] {summary}")
     news_items = await fetch_all_sources(config) or []
-    report = await run_shadow_day(_ledger_store(config), news_items, entries=crypto_shadows(),
-                                  report_dir=default_report_dir())
-    print(f"  [shadows] {report.summary()}")
+    try:
+        report = await run_shadow_day(_ledger_store(config), news_items, entries=crypto_shadows(),
+                                      report_dir=default_report_dir())
+        print(f"  [shadows] {report.summary()}")
+    except Exception:
+        logger.error("weekend shadow run failed", exc_info=True)
+        print("  [shadows] failed (see log)")
+        _step_failed("shadows")
     discovery = await run_discovery_step(news_items, registry=crypto_registry())
     await watchlist_step(config, None, discovery, crypto_only=True)
     print(f"  [tokens] {usage_tracker.summary_line()}")
     usage_tracker.append_log("weekend")
-    return 0 if "failed" not in summary else 1
+    return _finish_exit_code(0)
 
 
 def crypto_registry() -> list:
@@ -1008,45 +1057,110 @@ async def _run_daily_with_shadows(config, args) -> int:
     ret = await run_daily(config, mock=args.mock, verbose=args.verbose,
                            shadow_count=shadow_n)
 
-    # Wait for background shadow task to finish (with 5-minute timeout).
-    # The pipeline has already printed all results; we just keep the event
-    # loop alive long enough for shadows to complete their work.
+    # Wait for the background shadow task. The wait is shielded: a timeout must not
+    # cancel the task, or its run report (written after all shadows finish) is lost and
+    # the unfinished shadows get no "missed" mark. It keeps running while the later
+    # steps run and gets one more bounded wait at the end (_finish_shadows).
     global _shadow_task
-    if _shadow_task and not _shadow_task.done():
-        try:
-            await asyncio.wait_for(_shadow_task, timeout=SHADOW_WAIT_S)
-        except asyncio.TimeoutError:
-            print(f"(Shadows timed out after {SHADOW_WAIT_S // 60} minutes — "
-                  "results may be incomplete)")
-        except asyncio.CancelledError:
-            pass
+    shadow_wait = shadow_wait_s()
+    if await _await_background(_shadow_task, shadow_wait, "shadows"):
         from marketmind.gateway import usage_tracker
         print(f"  [tokens incl. shadows] {usage_tracker.summary_line()}")
+    elif _shadow_task is not None and not _shadow_task.done():
+        print(f"(Shadows still running after {shadow_wait // 60} minutes; they continue "
+              "in the background while the remaining steps run)")
     global _evidence_task, _playground_task
-    if _playground_task and not _playground_task.done():
-        try:
-            await asyncio.wait_for(_playground_task, timeout=EVIDENCE_WAIT_S)
-        except (asyncio.TimeoutError, asyncio.CancelledError):
-            print("(Playground timed out)")
-    if _evidence_task and not _evidence_task.done():
-        try:
-            await asyncio.wait_for(_evidence_task, timeout=EVIDENCE_WAIT_S)
-        except asyncio.TimeoutError:
-            print(f"(Evidence layer timed out after {EVIDENCE_WAIT_S // 60} minutes)")
-        except asyncio.CancelledError:
-            pass
+    if not await _await_background(_playground_task, EVIDENCE_WAIT_S, "playground") \
+            and _playground_task is not None and not _playground_task.done():
+        print("(Playground timed out)")
+    if not await _await_background(_evidence_task, EVIDENCE_WAIT_S, "evidence") \
+            and _evidence_task is not None and not _evidence_task.done():
+        print(f"(Evidence layer timed out after {EVIDENCE_WAIT_S // 60} minutes)")
     if not args.mock:
         await inspect_holdings_step(config)
         await promotion_step(config)
         await alerts_step(config)
         await daily_report_step(config)
+    await _finish_shadows()
+    await _finish_background(_playground_task, "playground timeout")
+    await _finish_background(_evidence_task, "evidence timeout")
+    if not args.mock:
         from marketmind.gateway import usage_tracker
         usage_tracker.append_log("daily")
 
-    return ret
+    return _finish_exit_code(ret)
 
 
-# 23 shadows, 5 at a time, one Flash call each (+1 retry): allow 15 minutes.
+async def _await_background(task, timeout: float, step: str) -> bool:
+    """Wait for a background task without cancelling it on timeout (asyncio.shield).
+    True when it finished (successfully or not); a task that raised is a failed step."""
+    if task is None:
+        return False
+    if not task.done():
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+        except asyncio.TimeoutError:
+            return False
+        except asyncio.CancelledError:
+            if not task.cancelled():
+                raise                      # we were cancelled, not the task
+        except Exception:
+            pass                           # read below via task.exception()
+    if task.cancelled():
+        _step_failed(step + " cancelled")
+    elif task.exception() is not None:
+        logger.error("%s task failed", step, exc_info=task.exception())
+        _step_failed(step)
+    return True
+
+
+async def _finish_shadows() -> None:
+    """Last bounded wait for a shadow task that outlived its first wait; if it still
+    has not finished, the process exits without its report and the run is degraded."""
+    task = _shadow_task
+    if task is None or task.done():
+        return
+    if await _await_background(task, SHADOW_FINAL_GRACE_S, "shadows"):
+        from marketmind.gateway import usage_tracker
+        print(f"  [tokens incl. shadows] {usage_tracker.summary_line()}")
+        return
+    logger.error("shadow run unfinished after %ss + %ss grace; the run report is not written "
+                 "and unfinished shadows have no ledger entry today",
+                 shadow_wait_s(), SHADOW_FINAL_GRACE_S)
+    print("  [shadows] unfinished at exit: run report not written, unfinished shadows "
+          "have no ledger entry today")
+    _step_failed("shadows timeout")
+
+
+async def _finish_background(task, step: str) -> None:
+    """A playground / evidence task that outlived its wait: one short last chance."""
+    if task is None or task.done():
+        return
+    if not await _await_background(task, BACKGROUND_FINAL_GRACE_S, step.replace(" timeout", "")):
+        _step_failed(step)
+
+
+def shadow_wait_s() -> int:
+    """First wait for the shadow task, sized from today's roster: SHADOW_PER_ENTRY_S per
+    entry (temporary shadows included once run_v3_shadows has counted them), at least
+    SHADOW_WAIT_S."""
+    n = _shadow_entry_count
+    if n is None:
+        try:
+            from marketmind.shadows.v3 import roster
+            n = len(roster.active())
+        except Exception:
+            n = 0
+    return max(SHADOW_WAIT_S, SHADOW_PER_ENTRY_S * n)
+
+
+# 23 shadows, 5 at a time, one Flash call each (+1 retry): allow 15 minutes, and
+# 45 s per roster entry once the roster is larger than 20.
 SHADOW_WAIT_S = 900
+SHADOW_PER_ENTRY_S = 45
+# after the remaining steps, one more wait for a still-running shadow task
+SHADOW_FINAL_GRACE_S = 600
+BACKGROUND_FINAL_GRACE_S = 60
+_shadow_entry_count: int | None = None
 # one Flash call plus up to ~15 primary-data checks (SEC requests are spaced)
 EVIDENCE_WAIT_S = 600
