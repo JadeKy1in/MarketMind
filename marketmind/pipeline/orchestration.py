@@ -969,6 +969,22 @@ async def trend_step(config, crypto_only: bool = False) -> None:
     print(f"  {summary_line(snap)}")
 
 
+async def ecosystem_step(config) -> None:
+    """Shadow-ecosystem health monitor (docs/ECOSYSTEM_DESIGN.md): herding, diversity,
+    stagnation, zombies -> data/ecosystem/<NY date>.json. Read-only on the ledger;
+    monitoring only (changes no decision, promotion or alert)."""
+    from marketmind.ecosystem.runner import run_ecosystem
+    try:
+        data_dir = Path(getattr(config, "data_dir", None) or os.getenv("MARKETMIND_DATA_DIR", "data"))
+        doc = await asyncio.to_thread(run_ecosystem, data_dir)
+    except Exception:
+        logger.warning("ecosystem health step failed", exc_info=True)
+        print("  [ecosystem] failed (see log)")
+        _step_failed("ecosystem")
+        return
+    print(f"  {doc['summary']}")
+
+
 async def alerts_step(config, crypto_only: bool = False) -> None:
     """S8 big-move alerts (docs/S8_DESIGN.md): today's trend-state changes, annotated with
     advisor votes and evidence, after the trend step. Pure code; pushes only in live mode
@@ -1127,6 +1143,7 @@ async def _run_daily_with_shadows(config, args) -> int:
         await promotion_step(config)
         await trend_step(config)
         await alerts_step(config)
+        await ecosystem_step(config)
         await daily_report_step(config)
     await _finish_shadows()
     await _finish_background(_playground_task, "playground timeout")
