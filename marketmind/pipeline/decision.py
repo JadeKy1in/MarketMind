@@ -82,6 +82,15 @@ def _detect_signal_conflicts(hypotheses: list) -> list[SignalConflict]:
     return conflicts
 
 
+_TODAY_NOTE = re.compile(r"\n\n\[TODAY: [^\]]*\]")
+
+
+def decision_prompt_version(prompt: str) -> str:
+    """Fingerprint of the decision prompt without its daily date note (docs/S9_DESIGN.md §2)."""
+    from marketmind.gateway.llm_trace import prompt_version
+    return prompt_version(_TODAY_NOTE.sub("", prompt))
+
+
 def _get_decision_prompt() -> str:
     """Get the current decision system prompt, dynamically assembled from active rules."""
     global _rule_registry
@@ -548,9 +557,8 @@ async def generate_decision(
         )
         decision = _parse_decision_response(result["content"])
         decision.raw_response = (result.get("content") or "")[:20000]
-        from marketmind.gateway.llm_trace import prompt_version
         decision.llm = result.get("model") if result.get("content") else None
-        decision.prompt_version = prompt_version(dynamic_prompt)
+        decision.prompt_version = decision_prompt_version(dynamic_prompt)
         decision.watch_cards, dropped = validate_watch_cards(decision.watch_cards, l3)
         if dropped:
             logger.info("Watch cards dropped: %s", "; ".join(dropped))

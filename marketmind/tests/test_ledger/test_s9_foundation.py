@@ -207,3 +207,17 @@ def test_old_ledger_gets_review_column(tmp_path):
     with sqlite3.connect(path) as conn:
         raw = conn.execute("SELECT review FROM ledger").fetchone()[0]
     assert json.loads(raw) == {"mfe": 0.1}
+
+
+def test_decision_prompt_version_ignores_the_daily_date_note(monkeypatch):
+    from marketmind.pipeline import decision
+    base = "rules...\n\n[TODAY: 2026年09月29日. All trading decisions ...]\n\n[LANGUAGE: zh]"
+    other_day = base.replace("09月29日", "09月30日")
+    assert decision.decision_prompt_version(base) == decision.decision_prompt_version(other_day)
+    assert decision.decision_prompt_version(base) != decision.decision_prompt_version(base + "x")
+    real = decision._get_decision_prompt()
+    assert "[TODAY:" in real
+    import re
+    other = re.sub(r"\d{4}年\d{2}月\d{2}日", "1999年01月01日", real)
+    assert other != real
+    assert decision.decision_prompt_version(real) == decision.decision_prompt_version(other)
