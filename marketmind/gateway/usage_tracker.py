@@ -13,6 +13,7 @@ _current_stage: contextvars.ContextVar[str] = contextvars.ContextVar(
     "marketmind_llm_stage", default="other")
 
 _usage: dict[str, dict[str, int]] = {}
+_providers: dict[str, int] = {}          # completed calls per provider (claude / deepseek)
 
 
 def set_stage(stage: str) -> contextvars.Token:
@@ -25,6 +26,14 @@ def reset_stage(token: contextvars.Token) -> None:
 
 def reset() -> None:
     _usage.clear()
+    _providers.clear()
+
+
+def _provider(result: dict) -> str:
+    if result.get("provider"):
+        return str(result["provider"])
+    model = str(result.get("model") or "").lower()
+    return "deepseek" if "deepseek" in model or not model else model
 
 
 def record(result: Any) -> None:
@@ -39,6 +48,8 @@ def record(result: Any) -> None:
                             {"calls": 0, "prompt_tokens": 0,
                              "completion_tokens": 0, "total_tokens": 0})
     row["calls"] += 1
+    prov = _provider(result)
+    _providers[prov] = _providers.get(prov, 0) + 1
     row["prompt_tokens"] += prompt
     row["completion_tokens"] += completion
     row["total_tokens"] += total
@@ -50,7 +61,7 @@ def snapshot() -> dict[str, Any]:
     for row in stages.values():
         for k in total:
             total[k] += row[k]
-    return {"stages": stages, "total": total}
+    return {"stages": stages, "total": total, "providers": dict(_providers)}
 
 
 def summary_line() -> str:
@@ -60,8 +71,10 @@ def summary_line() -> str:
     parts = [f"{k} {v['total_tokens']:,}" for k, v in
              sorted(snap["stages"].items(), key=lambda kv: -kv[1]["total_tokens"])]
     t = snap["total"]
+    # which provider actually answered: a DeepSeek count here means Claude fell back
+    providers = ", ".join(f"{k} {v}" for k, v in sorted(snap["providers"].items()))
     return (f"LLM tokens: {t['total_tokens']:,} total in {t['calls']} calls "
-            f"(prompt {t['prompt_tokens']:,} / completion {t['completion_tokens']:,}) — "
+            f"[{providers}] (prompt {t['prompt_tokens']:,} / completion {t['completion_tokens']:,}) — "
             + ", ".join(parts))
 
 

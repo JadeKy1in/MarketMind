@@ -73,3 +73,15 @@ async def test_monitored_stage_attributes_calls_including_subtasks():
     line = usage_tracker.summary_line()
     assert line.startswith("LLM tokens: 480 total in 4 calls")
     assert "flash_triage 240" in line
+
+
+def test_calls_are_counted_per_provider():
+    from marketmind.gateway import usage_tracker as u
+    u.reset()
+    u.record({"content": "a", "provider": "claude", "model": "claude-sonnet-5-5", "usage": {"total_tokens": 3}})
+    u.record({"content": "b", "model": "deepseek-flash", "usage": {"total_tokens": 2}})
+    u.record({"content": "", "error": "x", "model": "deepseek-flash"})        # failed: not counted
+    assert u.snapshot()["providers"] == {"claude": 1, "deepseek": 1}
+    assert "[claude 1, deepseek 1]" in u.summary_line()
+    u.reset()
+    assert u.snapshot()["providers"] == {}
