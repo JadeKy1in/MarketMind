@@ -135,7 +135,7 @@ def test_timeout_returns_none(_isolate):
 def test_crypto_and_indices_not_sent_to_nasdaq(_isolate, monkeypatch):
     _, calls = _isolate
 
-    async def _no_binance(ticker):
+    async def _no_binance(ticker, years):
         return None
     async def _no_bybit(ticker, years):
         return None

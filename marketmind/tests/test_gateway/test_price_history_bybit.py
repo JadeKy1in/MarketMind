@@ -165,7 +165,7 @@ def test_binance_success_skips_bybit(_isolate, monkeypatch):
     _, calls = _isolate
     bar = ph.Bar("2026-09-25", 1, 1, 1, 1, 1)
 
-    async def _binance_ok(ticker):
+    async def _binance_ok(ticker, years):
         return ph.PriceHistory(ticker, "binance", [bar], [bar])
     monkeypatch.setattr(ph, "_from_binance", _binance_ok)
     hist = asyncio.run(ph.get_price_history("BTC-USD", years=1))
@@ -173,14 +173,14 @@ def test_binance_success_skips_bybit(_isolate, monkeypatch):
     assert calls == []
 
 
-def test_fallback_order_yf_binance_bybit(_isolate, monkeypatch):
+def test_fallback_order_binance_bybit(_isolate, monkeypatch):
     state, _ = _isolate
     state["handler"] = _series_handler(5)
     order: list[str] = []
 
     async def _yf(ticker, years):
         order.append("yfinance")
-    async def _bn(ticker):
+    async def _bn(ticker, years):
         order.append("binance")
     real_bybit = ph._from_bybit
 
@@ -192,7 +192,7 @@ def test_fallback_order_yf_binance_bybit(_isolate, monkeypatch):
     monkeypatch.setattr(ph, "_from_bybit", _bb)
     hist = asyncio.run(ph.get_price_history("BTC-USD", years=1))
     assert hist.source == "bybit"
-    assert order == ["yfinance", "binance", "bybit"]
+    assert order == ["binance", "bybit"]
 
 
 def test_non_crypto_never_sent_to_bybit(_isolate):

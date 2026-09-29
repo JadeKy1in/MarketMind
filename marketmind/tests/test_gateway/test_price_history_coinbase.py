@@ -8,6 +8,7 @@ import pytest
 from marketmind.gateway import price_history as ph
 
 _DAY = 86_400
+_real_binance = ph._from_binance     # the autouse fixture below replaces it
 
 
 def _today_s() -> int:
@@ -133,14 +134,14 @@ def test_timeout_returns_none(_isolate):
     assert asyncio.run(ph.get_price_history("BTC-USD", years=1)) is None
 
 
-def test_order_yf_binance_bybit_coinbase(_isolate, monkeypatch):
+def test_order_binance_bybit_coinbase_yf(_isolate, monkeypatch):
     state, _ = _isolate
     state["handler"] = _series_handler(5)
     order: list[str] = []
 
     async def _yf(ticker, years):
         order.append("yfinance")
-    async def _bn(ticker):
+    async def _bn(ticker, years):
         order.append("binance")
     async def _bb(ticker, years):
         order.append("bybit")
@@ -154,7 +155,7 @@ def test_order_yf_binance_bybit_coinbase(_isolate, monkeypatch):
     monkeypatch.setattr(ph, "_from_bybit", _bb)
     monkeypatch.setattr(ph, "_from_coinbase", _cb)
     assert asyncio.run(ph.get_price_history("BTC-USD", years=1)).source == "coinbase"
-    assert order == ["yfinance", "binance", "bybit", "coinbase"]
+    assert order == ["binance", "bybit", "coinbase"]
 
 
 def test_bybit_success_skips_coinbase(_isolate, monkeypatch):
@@ -185,34 +186,50 @@ def test_missing_utc_day():
     assert ph.missing_utc_day(_bars("2026-09-30", "2026-10-01")) is None
 
 
-def test_gapped_yfinance_crypto_falls_back_to_exchange(_isolate, monkeypatch):
-    async def _yf(ticker, years):
-        return ph.PriceHistory(ticker, "yfinance", _bars("2026-09-27", "2026-09-29"))
-
-    async def _bb(ticker, years):
-        return ph.PriceHistory(ticker, "bybit", _bars("2026-09-27", "2026-09-28", "2026-09-29"))
-    monkeypatch.setattr(ph, "_from_yfinance", _yf)
-    monkeypatch.setattr(ph, "_from_bybit", _bb)
-    assert asyncio.run(ph.get_price_history("BTC-USD", years=1)).source == "bybit"
-
-
-def test_gapped_yfinance_kept_when_exchanges_fail(_isolate, monkeypatch):
+def test_yfinance_only_when_exchanges_fail(_isolate, monkeypatch):
     async def _yf(ticker, years):
         return ph.PriceHistory(ticker, "yfinance", _bars("2026-09-27", "2026-09-29"))
     monkeypatch.setattr(ph, "_from_yfinance", _yf)
     assert asyncio.run(ph.get_price_history("BTC-USD", years=1)).source == "yfinance"
 
 
-def test_contiguous_yfinance_crypto_skips_exchanges(_isolate, monkeypatch):
-    _, calls = _isolate
-
-    async def _yf(ticker, years):
-        return ph.PriceHistory(ticker, "yfinance", _bars("2026-09-27", "2026-09-28"))
+def test_exchange_success_skips_yfinance(_isolate, monkeypatch):
+    async def _bn(ticker, years):
+        return ph.PriceHistory(ticker, "binance", _bars("2026-09-27", "2026-09-28"))
 
     async def _boom(*args):
-        raise AssertionError("exchange source must not be called")
-    monkeypatch.setattr(ph, "_from_yfinance", _yf)
-    monkeypatch.setattr(ph, "_from_binance", _boom)
-    monkeypatch.setattr(ph, "_from_bybit", _boom)
-    assert asyncio.run(ph.get_price_history("BTC-USD", years=1)).source == "yfinance"
-    assert calls == []
+        raise AssertionError("yfinance must not be called")
+    monkeypatch.setattr(ph, "_from_binance", _bn)
+    monkeypatch.setattr(ph, "_from_yfinance", _boom)
+    assert asyncio.run(ph.get_price_history("BTC-USD", years=1)).source == "binance"
+
+
+def _binance_series(n_days: int, calls: list):
+    """Serve n_days of klines ending today; honours startTime and the 1000 limit."""
+    today = _today_s() * 1000
+    all_ms = [today - i * _DAY * 1000 for i in range(n_days)][::-1]   # oldest first
+
+    def handler(req: httpx.Request):
+        calls.append(req)
+        start = int(req.url.params["startTime"])
+        limit = int(req.url.params["limit"])
+        rows = [[ms, "1", "2", "0.5", "1.5", "10"] for ms in all_ms if ms >= start][:limit]
+        return httpx.Response(200, json=rows)
+    return handler
+
+
+def test_binance_pages_forward_to_cover_five_years(monkeypatch):
+    calls: list = []
+    monkeypatch.setattr(ph, "_binance_client", lambda: httpx.AsyncClient(
+        transport=httpx.MockTransport(_binance_series(2000, calls))))
+    hist = asyncio.run(_real_binance("BTC-USD", 5))
+    assert hist.source == "binance"
+    assert 1820 <= len(hist.daily) <= 1828 and len(calls) == 2    # ~5 years: 1000 + rest
+    assert hist.daily[-1].date == datetime.fromtimestamp(_today_s(), timezone.utc).strftime("%Y-%m-%d")
+    assert calls[0].url.params["symbol"] == "BTCUSDT"
+
+
+def test_binance_http_error_returns_none(monkeypatch):
+    monkeypatch.setattr(ph, "_binance_client", lambda: httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda req: httpx.Response(451, text="blocked"))))
+    assert asyncio.run(_real_binance("BTC-USD", 1)) is None

@@ -233,6 +233,16 @@ def _offline_shadow_feeds(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _offline_binance(monkeypatch):
+    """No test reaches Binance (first crypto price source): it answers 503 unless
+    the test installs its own client or replaces _from_binance."""
+    import httpx
+    from marketmind.gateway import price_history as ph
+    monkeypatch.setattr(ph, "_binance_client", lambda: httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda req: httpx.Response(503, text="offline"))))
+
+
+@pytest.fixture(autouse=True)
 def _offline_coinbase(monkeypatch):
     """No test reaches Coinbase Exchange (third crypto price fallback): when a test
     makes Binance and Bybit fail, Coinbase answers 503 unless the test installs

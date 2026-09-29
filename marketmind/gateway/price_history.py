@@ -6,10 +6,10 @@ market_data.py is too short for that.
 
 Sources: Alpaca market data first for US stocks/ETFs when ALPACA_API_KEY_ID and
 ALPACA_API_SECRET_KEY are set (owner decision 2026-09-27); yfinance for stocks,
-ETFs, indices and crypto (e.g. "BTC-USD");
-Binance public klines, then Bybit public spot klines, then Coinbase Exchange
-daily candles, as crypto fallbacks (also used when the yfinance crypto series
-skips a UTC day, as Yahoo did for 2026-09-28); the
+ETFs and indices. Crypto ("BTC-USD") uses exchange candles first — Binance public
+klines, then Bybit public spot klines, then Coinbase Exchange daily candles — and
+yfinance only as the last resort (owner decision 2026-09-29; Yahoo's series skipped
+2026-09-28 entirely); the
 Nasdaq public historical API
 (api.nasdaq.com) as a fallback for US stocks/ETFs. No API keys. Returns None
 when every source fails — callers must report "data unavailable", never guess.
@@ -101,35 +101,35 @@ async def get_price_history(ticker: str, years: int = 5) -> PriceHistory | None:
         return _cache[key]
     from marketmind.markets import US, market_for
     market = market_for(ticker)
-    hist = await _from_alpaca(ticker, years) if market is US else None
-    if hist is None:
-        hist = await _from_yfinance(ticker, years)
-    gapped = None
-    if hist is not None and is_crypto_ticker(ticker) and (gap := missing_utc_day(hist.daily)):
-        # Seen live 2026-09-29 ~00:15 UTC: Yahoo BTC-USD/SOL-USD skipped 09-28 entirely.
-        # Settlement would fill on the wrong day, so prefer an exchange series.
-        logger.warning("yfinance %s has no bar for %s; trying exchange sources", ticker, gap)
-        gapped, hist = hist, None
-    if hist is None and ticker.upper().endswith("-USD"):
-        hist = await _from_binance(ticker)
+    if is_crypto_ticker(ticker):
+        # Exchange candles first (owner decision 2026-09-29): one consistent series for
+        # snapshots, L3 and settlement. Yahoo is the last resort — on 2026-09-29 its
+        # BTC-USD/SOL-USD series skipped 09-28 entirely.
+        hist = await _from_binance(ticker, years)
         if hist is None:
             hist = await _from_bybit(ticker, years)
         if hist is None:
             hist = await _from_coinbase(ticker, years)
-        if hist is None and gapped is not None:
-            logger.warning("Using gapped yfinance series for %s — exchange sources failed", ticker)
-            hist = gapped
-    elif hist is None and market is US:
-        hist = await _from_nasdaq(ticker, years)
-    elif hist is None:
-        # non-US markets, futures, FX, indices (docs/S3_DESIGN.md §7)
-        # Tencent first: it covers HK/CN, and Eastmoney hosts failed with
-        # RemoteProtocolError on 2026-09-28. Eastmoney stays for the futures, FX and
-        # indices only it maps (from_tencent returns None for those).
-        from marketmind.gateway.global_quotes import from_eastmoney, from_tencent
-        hist = await from_tencent(ticker, years)
         if hist is None:
-            hist = await from_eastmoney(ticker, years)
+            hist = await _from_yfinance(ticker, years)
+            if hist is not None and (gap := missing_utc_day(hist.daily)):
+                logger.warning("yfinance %s has no bar for %s (exchange sources failed)",
+                               ticker, gap)
+    else:
+        hist = await _from_alpaca(ticker, years) if market is US else None
+        if hist is None:
+            hist = await _from_yfinance(ticker, years)
+        if hist is None and market is US:
+            hist = await _from_nasdaq(ticker, years)
+        elif hist is None:
+            # non-US markets, futures, FX, indices (docs/S3_DESIGN.md §7)
+            # Tencent first: it covers HK/CN, and Eastmoney hosts failed with
+            # RemoteProtocolError on 2026-09-28. Eastmoney stays for the futures, FX and
+            # indices only it maps (from_tencent returns None for those).
+            from marketmind.gateway.global_quotes import from_eastmoney, from_tencent
+            hist = await from_tencent(ticker, years)
+            if hist is None:
+                hist = await from_eastmoney(ticker, years)
     if hist is None:
         # last resort for every market; it declines what its plan does not cover
         from marketmind.gateway.global_quotes import from_twelvedata
@@ -176,29 +176,54 @@ def _yf_sync(ticker: str, years: int) -> PriceHistory | None:
     return PriceHistory(ticker=ticker, source="yfinance", daily=daily, weekly=to_weekly(daily))
 
 
-# ── Binance (crypto fallback) ──────────────────────────────────────────────
+# ── Binance (first crypto source) ──────────────────────────────────────────────
 
-async def _from_binance(ticker: str) -> PriceHistory | None:
+_BINANCE_PAGE = 1000
+
+
+async def _from_binance(ticker: str, years: int = 5) -> PriceHistory | None:
+    """Binance spot daily klines, paged back `years` (1000 bars per request)."""
+    from datetime import datetime, timedelta, timezone
     symbol = ticker.upper().replace("-USD", "USDT")
+    now = datetime.now(timezone.utc)
+    start_dt = now - timedelta(days=int(365.25 * years))
+    start_ms = int(start_dt.timestamp() * 1000)
+    max_pages = int(365.25 * years) // _BINANCE_PAGE + 2
+    raw: list = []
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(_BINANCE_KLINES,
-                                    params={"symbol": symbol, "interval": "1d", "limit": 1000})
-            resp.raise_for_status()
-            rows = resp.json()
+        async with _binance_client() as client:
+            for _ in range(max_pages):
+                params = {"symbol": symbol, "interval": "1d", "limit": _BINANCE_PAGE,
+                          "startTime": start_ms}
+                resp = await client.get(_BINANCE_KLINES, params=params)
+                resp.raise_for_status()
+                rows = resp.json()
+                if not isinstance(rows, list) or not rows:
+                    break
+                raw.extend(rows)
+                # with startTime, Binance returns the oldest `limit` bars from it: walk forward
+                if len(rows) < _BINANCE_PAGE:
+                    break
+                start_ms = int(rows[-1][0]) + 1
     except Exception as exc:
         logger.warning("Binance klines failed for %s: %s", ticker, exc)
         return None
-    from datetime import datetime, timezone
-    daily = [
-        Bar(date=datetime.fromtimestamp(r[0] / 1000, tz=timezone.utc).strftime("%Y-%m-%d"),
-            open=float(r[1]), high=float(r[2]), low=float(r[3]), close=float(r[4]),
-            volume=float(r[5]))
-        for r in rows
-    ]
+    by_date: dict[str, Bar] = {}
+    for r in raw:
+        try:
+            d = datetime.fromtimestamp(int(r[0]) / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+            by_date[d] = Bar(date=d, open=float(r[1]), high=float(r[2]), low=float(r[3]),
+                             close=float(r[4]), volume=float(r[5]))
+        except (IndexError, TypeError, ValueError, OverflowError, OSError):
+            continue
+    daily = [by_date[d] for d in sorted(by_date)]
     if not daily:
         return None
     return PriceHistory(ticker=ticker, source="binance", daily=daily, weekly=to_weekly(daily))
+
+
+def _binance_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=15)
 
 
 # ── Bybit (second crypto fallback) ─────────────────────────────────────────
