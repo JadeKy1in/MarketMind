@@ -1,0 +1,45 @@
+{
+  "agent_id": "short_term_reversal",
+  "display_name": "Weekly Reversal on Sector ETFs",
+  "description": "Pure-code short-term reversal (Jegadeesh 1990, JF 45:881-898; Lehmann 1990, QJE 105:1-28): each week buy the two sector SPDR ETFs with the lowest 5-bar return relative to the cross-section and hold 5 bars; long-only (loser leg). Industry-level returns may continue instead (Moskowitz & Grinblatt 1999), so this may be a negative baseline. Zero LLM tokens.",
+  "output_character": "weekly long calls on the two biggest relative losers among 11 sector ETFs, 5-bar hold, ATR disaster stop",
+  "public_data_sources": [
+    "public daily price bars via gateway.price_history (complete bars only)",
+    "^IRX 13-week T-bill yield (Yahoo) as the 12-month hurdle"
+  ],
+  "requires_proprietary_data": false,
+  "primary_metric": "net_excess_return_vs_domain_benchmark",
+  "secondary_metrics": [
+    "direction_accuracy",
+    "sharpe_ratio",
+    "max_drawdown",
+    "brier"
+  ],
+  "min_sample_size": 20,
+  "min_observation_days": 60,
+  "target_pipeline_node": "baseline_benchmark",
+  "version": "1.0.0",
+  "author": "MarketMind (pure code, owner decision 2026-09-29)",
+  "tags": [
+    "pure-code",
+    "zero-llm",
+    "baseline",
+    "reversal",
+    "sector-etf",
+    "weekly"
+  ],
+  "domain_benchmark": "SPY",
+  "domain_universe": [
+    "XLB",
+    "XLC",
+    "XLE",
+    "XLF",
+    "XLI",
+    "XLK",
+    "XLP",
+    "XLRE",
+    "XLU",
+    "XLV",
+    "XLY"
+  ]
+}

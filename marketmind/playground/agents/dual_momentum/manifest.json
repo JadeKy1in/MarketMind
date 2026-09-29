@@ -1,0 +1,39 @@
+{
+  "agent_id": "dual_momentum",
+  "display_name": "Dual Momentum (Antonacci)",
+  "description": "Pure-code dual momentum (Antonacci 2012, 'Risk Premia Harvesting Through Dual Momentum', SSRN 2042750): monthly, hold the strongest 12-month performer of SPY / EFA / BTC-USD if it beat T-bills, else intermediate Treasuries (IEF, TLT fallback). One long call per month, none in between. Zero LLM tokens.",
+  "output_character": "one monthly long call on SPY, EFA, BTC-USD or IEF/TLT, one-month hold, ATR disaster stop",
+  "public_data_sources": [
+    "public daily price bars via gateway.price_history (complete bars only)",
+    "^IRX 13-week T-bill yield (Yahoo) as the 12-month hurdle"
+  ],
+  "requires_proprietary_data": false,
+  "primary_metric": "net_excess_return_vs_domain_benchmark",
+  "secondary_metrics": [
+    "direction_accuracy",
+    "sharpe_ratio",
+    "max_drawdown",
+    "brier"
+  ],
+  "min_sample_size": 20,
+  "min_observation_days": 60,
+  "target_pipeline_node": "baseline_benchmark",
+  "version": "1.0.0",
+  "author": "MarketMind (pure code, owner decision 2026-09-29)",
+  "tags": [
+    "pure-code",
+    "zero-llm",
+    "baseline",
+    "momentum",
+    "asset-allocation",
+    "monthly"
+  ],
+  "domain_benchmark": "SPY",
+  "domain_universe": [
+    "SPY",
+    "EFA",
+    "BTC-USD",
+    "IEF",
+    "TLT"
+  ]
+}
