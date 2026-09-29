@@ -203,11 +203,51 @@ def test_decision_prompts_no_longer_ask_the_llm_for_a_size():
     assert "computed by code from the stop distance" in d.DECISION_SYSTEM_PROMPT
 
 
-def test_paper_trade_never_picks_a_directionless_candidate():
-    class L1: sentiment_direction = "bullish"
-    class L2: ticker_candidates = ["NVDA", "AMD"]   # bare strings: no direction
-    l3 = Layer3BatchResult(results=[])
-    assert _pick_paper_trade(L1(), L2(), l3, None, None) is None
+def test_paper_trade_falls_back_to_long_spy_without_l3_candidates():
+    class L1: sentiment_direction = "bearish"       # L1/L2 no longer steer the forced trade
+    class L2: ticker_candidates = ["NVDA", "AMD"]
+    for l3 in (Layer3BatchResult(results=[]), None):
+        p = _pick_paper_trade(L1(), L2(), l3, None, None)
+        assert (p.ticker, p.direction, p.confidence, p.source) == ("SPY", "long", None, "fallback:SPY")
+
+
+def test_paper_trade_picks_best_reward_risk_then_ticker():
+    a, b, c = green("BBB"), green("AAA"), green("CCC")
+    a.reward_risk_ratio, b.reward_risk_ratio, c.reward_risk_ratio = 3.5, 3.5, 2.8
+    yellow = green("ZZZ")
+    yellow.light, yellow.reward_risk_ratio = "yellow", 9.0          # green light required
+    for order in ([a, b, c, yellow], [yellow, c, b, a]):
+        p = _pick_paper_trade(None, None, Layer3BatchResult(results=order), None, None)
+        assert (p.ticker, p.direction, p.confidence, p.source) == ("AAA", "long", None, "L3")
+        assert "3.50" in p.thesis
+
+
+def test_paper_trade_skips_unusable_l3_levels():
+    bad_stop, no_data, cash, nan_rr, ok = (green("A", stop=120.0), green("B"), green("SHV"),
+                                           green("D"), green("E"))
+    no_data.data_available = False
+    for r in (bad_stop, no_data, cash):
+        r.reward_risk_ratio = 50.0                    # would win if it were usable
+    nan_rr.reward_risk_ratio = float("nan")
+    l3 = Layer3BatchResult(results=[bad_stop, no_data, cash, nan_rr, ok])
+    assert _pick_paper_trade(None, None, l3, None, None).ticker == "E"
+    l3 = Layer3BatchResult(results=[bad_stop, no_data, cash, nan_rr])
+    assert _pick_paper_trade(None, None, l3, None, None).source == "fallback:SPY"
+
+
+@pytest.mark.asyncio
+async def test_no_green_day_forces_spy_without_calling_the_llm():
+    from unittest.mock import AsyncMock, patch
+    from marketmind.pipeline.decision import generate_decision
+    from marketmind.pipeline.layer1_narrative import Layer1Result
+    from marketmind.pipeline.layer2_fundamental import Layer2Result
+    from marketmind.pipeline.red_team import RedTeamReport
+    llm = AsyncMock()
+    with patch("marketmind.pipeline.decision.chat_pro", llm):
+        out = await generate_decision(Layer1Result.empty_default(), Layer2Result(),
+                                      Layer3BatchResult(results=[]), RedTeamReport())
+    llm.assert_not_called()
+    assert out.decision_cards == [] and out.paper_trade.ticker == "SPY"
 
 
 def test_guard_uses_tradable_universe_when_loaded():

@@ -17,7 +17,7 @@ from marketmind.gateway.response_parser import strip_markdown_fences
 from marketmind.pipeline.layer1_narrative import Layer1Result
 from marketmind.pipeline.layer2_fundamental import Layer2Result
 from marketmind.pipeline.layer3_technical import Layer3BatchResult
-from marketmind.pipeline.decision_guard import enforce
+from marketmind.pipeline.decision_guard import CASH_EQUIVALENT_ETFS, enforce, levels_stop_pct
 from marketmind.pipeline.red_team import RedTeamReport
 from marketmind.pipeline.resonance import ResonanceResult
 from marketmind.pipeline.defang import defang_text
@@ -173,9 +173,9 @@ class NoTradeCard:
 class PaperTrade:
     ticker: str
     direction: str  # "long" or "short"
-    confidence: float
+    confidence: float | None  # None: unstated (the code-chosen forced trade)
     thesis: str
-    source: str = ""  # e.g. "L2 fundamental", "L3 technical", "L1 narrative"
+    source: str = ""  # "L3" or "fallback:SPY" for the code-chosen forced trade
 
 
 @dataclass
@@ -602,67 +602,42 @@ async def generate_decision(
         )
 
 
-def _pick_paper_trade(l1, l2, l3, red_team, resonance) -> PaperTrade | None:
-    """When no_trade, pick the best-conviction direction for virtual (paper) trading.
+FORCED_FALLBACK_TICKER = "SPY"   # market benchmark when L3 has no usable candidate
 
-    Scans L2 candidates + L3 lights to find the ticker with strongest directional signal.
-    Used for post-hoc review (复盘) without risking real capital.
+
+def _pick_paper_trade(l1, l2, l3, red_team, resonance) -> PaperTrade:
+    """The day's forced paper trade when there is no card (SPEC_v3 L7, §5).
+
+    Chosen by code, never by the LLM (owner decision 2026-09-29): among the L3 green
+    lights with usable levels (data available, positive finite stop distance, finite
+    reward/risk, not a cash-equivalent ETF) take the highest reward/risk, ties broken by
+    ticker. With no usable candidate, fall back to a long SPY trade, so a forced trade
+    always exists. Its confidence is unstated (None); the recorder stores the 0.5
+    default flagged so it is not scored with Brier. l1, l2, red_team and resonance are
+    accepted for call-site compatibility and not used.
     """
-    candidates: list[dict] = []
-
-    # From L2 ticker candidates
-    for t in getattr(l2, 'ticker_candidates', []) or []:
-        candidates.append({
-            "ticker": str(t),
-            "direction": getattr(t, 'direction', 'neutral'),
-            "confidence": getattr(t, 'confidence', 0.0),
-            "thesis": getattr(t, 'thesis', ''),
-            "source": _t("src_l2"),
-        })
-
-    # From L3 green lights (strongest signal). green_lights holds Layer3Result
-    # objects — compare by ticker, not by object membership.
-    for r in getattr(l3, 'green_lights', []) or []:
-        candidates.append({
-            "ticker": str(r.ticker),
-            "direction": "long",  # L3 only validates long setups
-            "confidence": 0.65,
-            "thesis": getattr(r, 'raw_analysis', ''),
-            "source": _t("src_l3"),
-        })
-
-    # L2 candidates are often bare ticker strings with no direction; a forced
-    # trade needs a real direction, so directionless candidates cannot be picked.
-    candidates = [c for c in candidates if c["direction"] in ("long", "short")]
-
-    # From L1 sentiment if available
-    l1_dir = getattr(l1, 'sentiment_direction', 'neutral')
-    if l1_dir in ('bullish', 'bearish') and not candidates:
-        direction = 'long' if l1_dir == 'bullish' else 'short'
-        l1_label = _t("l1_bullish") if l1_dir == 'bullish' else _t("l1_bearish")
-        for r in getattr(l3, 'results', []) or []:
-            candidates.append({
-                "ticker": str(getattr(r, 'ticker', 'SPY')),
-                "direction": direction,
-                "confidence": 0.45,
-                "thesis": f"{_t('src_l1')}: {l1_label}",
-                "source": _t("src_l1"),
-            })
-            break
-
+    candidates = []
+    for r in getattr(l3, "green_lights", []) or []:
+        ticker = str(getattr(r, "ticker", "") or "").strip().upper()
+        rr = _num(getattr(r, "reward_risk_ratio", None), float("nan"))
+        if (not ticker or ticker in CASH_EQUIVALENT_ETFS
+                or not getattr(r, "data_available", False) or not math.isfinite(rr)
+                or levels_stop_pct(r.entry_zone_low, r.entry_zone_high, r.stop_loss) is None):
+            continue
+        candidates.append((-rr, ticker, r))
     if not candidates:
-        return None
-
-    # Sort by confidence descending
-    candidates.sort(key=lambda c: c["confidence"], reverse=True)
-    best = candidates[0]
+        return PaperTrade(
+            ticker=FORCED_FALLBACK_TICKER, direction="long", confidence=None,
+            thesis="No usable L3 candidate today; the forced paper trade defaults to long SPY.",
+            source=f"fallback:{FORCED_FALLBACK_TICKER}")
+    candidates.sort(key=lambda c: (c[0], c[1]))
+    neg_rr, ticker, _ = candidates[0]
     return PaperTrade(
-        ticker=best["ticker"],
-        direction=best["direction"],
-        confidence=best["confidence"],
-        thesis=best["thesis"],
-        source=best["source"],
-    )
+        ticker=ticker, direction="long",    # L3 only validates long setups
+        confidence=None,
+        thesis=(f"Forced paper trade: best L3 green light by reward/risk "
+                f"({-neg_rr:.2f}, {len(candidates)} usable candidate(s))."),
+        source="L3")
 
 
 def _l3_evidence(l3: Layer3BatchResult) -> str:

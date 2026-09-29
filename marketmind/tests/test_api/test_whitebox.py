@@ -73,6 +73,15 @@ def test_score_without_settled_rows_is_none_not_zero():
     assert s.total_pnl_usd is None
 
 
+def test_mean_brier_skips_unstated_confidence():
+    stated = _settled(_e(confidence=0.8), 0.04, 12.0)                     # brier 0.04
+    forced = _settled(_e("main_forced", "main_pipeline", confidence=0.5,
+                         confidence_is_default=True), -0.02, -2.0)         # brier 0.25
+    assert score([stated, forced]).mean_brier == pytest.approx(0.04)
+    s = score([forced])
+    assert s.mean_brier is None and s.settled == 1 and s.win_rate == 0.0   # still counted for P&L
+
+
 def test_scoreboard_groups_by_source():
     board = scoreboard([_e(), _e("benchmark", f"random:{SHADOW}"), _e()])
     assert [(s.source_type, s.records) for s in board] == [("benchmark", 1), ("shadow", 2)]

@@ -118,9 +118,14 @@ def enforce(cards: list, l3, max_single_pct: float = MAX_SINGLE_POSITION_PCT,
 
 def stop_distance_pct(card) -> float | None:
     """(entry_mid - stop) / entry_mid * 100, or None when not positive and finite."""
+    return levels_stop_pct(card.entry_low, card.entry_high, card.stop_loss)
+
+
+def levels_stop_pct(entry_low, entry_high, stop_loss) -> float | None:
+    """Stop distance % from raw levels (a card's or an L3 result's); None if unusable."""
     try:
-        entry_mid = (float(card.entry_low) + float(card.entry_high)) / 2
-        stop = float(card.stop_loss)
+        entry_mid = (float(entry_low) + float(entry_high)) / 2
+        stop = float(stop_loss)
     except (TypeError, ValueError):
         return None
     if not (math.isfinite(entry_mid) and math.isfinite(stop)) or entry_mid <= 0 or stop <= 0:

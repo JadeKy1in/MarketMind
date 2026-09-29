@@ -10,7 +10,8 @@ from marketmind.pipeline.layer3_technical import Layer3BatchResult
 
 CREATED = "2026-09-01T21:00:00Z"
 SRC = StaticPriceSource({"COIN": [Bar("2026-09-01", 1, 1, 1, 195.0, 1)],
-                         "NVDA": [Bar("2026-09-01", 1, 1, 1, 225.0, 1)]})
+                         "NVDA": [Bar("2026-09-01", 1, 1, 1, 225.0, 1)],
+                         "SPY": [Bar("2026-09-01", 1, 1, 1, 650.0, 1)]})
 
 
 def card(**kw):
@@ -62,32 +63,59 @@ async def test_forced_paper_trade_recorded_when_no_cards(tmp_path):
                                      created_at=CREATED)
     e = store.get(ids[0])
     assert (e.source_type, e.entry_rule, e.hold_bars) == ("main_forced", "next_open", 10)
-    assert e.position_usd == 650.0 and e.stop_loss is None and "loses money" in e.falsifier
+    assert e.position_usd == 500.0 and e.stop_loss is None and "loses money" in e.falsifier
+    assert e.meta["source"] == "L3"
 
 
 @pytest.mark.asyncio
-async def test_nothing_to_record(tmp_path):
+async def test_empty_decision_still_records_one_forced_spy_trade(tmp_path):
     store = LedgerStore(tmp_path / "l.db")
-    assert await record_main_decision(DecisionOutput(), None, store, SRC) == []
+    ids = await record_main_decision(DecisionOutput(), None, store, SRC)
+    assert len(ids) == 1
+    e = store.get(ids[0])
+    assert (e.source_type, e.ticker, e.direction) == ("main_forced", "SPY", "long")
+    assert e.meta["source"] == "fallback:SPY"
 
 
 @pytest.mark.asyncio
-async def test_forced_trade_without_direction_is_not_recorded(tmp_path):
+async def test_empty_decision_uses_the_l3_pick(tmp_path):
+    from marketmind.tests.test_pipeline.test_decision_guard import green
+    store = LedgerStore(tmp_path / "l.db")
+    l3 = Layer3BatchResult(results=[green("NVDA", close=225.0, stop=200.0, target=300.0)])
+    ids = await record_main_decision(DecisionOutput(), l3, store, SRC)
+    e = store.get(ids[0])
+    assert (e.ticker, e.stop_loss, e.target_price, e.meta["source"]) == ("NVDA", 200.0, 300.0, "L3")
+
+
+@pytest.mark.asyncio
+async def test_forced_trade_without_direction_falls_back_to_spy(tmp_path):
     store = LedgerStore(tmp_path / "l.db")
     out = DecisionOutput(paper_trade=PaperTrade("NVDA", "neutral", 0.0, "", "L2"))
-    assert await record_main_decision(out, None, store, SRC) == []
+    ids = await record_main_decision(out, None, store, SRC)
+    assert len(ids) == 1 and store.get(ids[0]).ticker == "SPY"
 
 
 @pytest.mark.asyncio
-async def test_forced_trade_zero_or_percent_confidence(tmp_path):
+async def test_forced_trade_confidence_is_always_unstated(tmp_path):
     store = LedgerStore(tmp_path / "l.db")
-    ids = await record_main_decision(DecisionOutput(paper_trade=PaperTrade("NVDA", "long", 0.0, "", "")),
-                                     None, store, SRC)
+    for pt_conf, created in ((None, None), (0.65, CREATED)):         # two sessions
+        ids = await record_main_decision(
+            DecisionOutput(paper_trade=PaperTrade("NVDA", "long", pt_conf, "", "L3")),
+            None, store, SRC, created_at=created)
+        e = store.get(ids[0])
+        assert e.confidence == 0.5 and e.confidence_is_default
+        assert e.meta["confidence_unstated"] is True
+
+
+@pytest.mark.asyncio
+async def test_spy_fallback_ignores_insane_spy_levels(tmp_path):
+    from marketmind.tests.test_pipeline.test_decision_guard import green
+    store = LedgerStore(tmp_path / "l.db")
+    spy = green("SPY", close=650.0, stop=700.0)      # stop above entry: not usable
+    spy.light = "red"
+    ids = await record_main_decision(DecisionOutput(), Layer3BatchResult(results=[spy]), store, SRC)
     e = store.get(ids[0])
-    assert e.confidence == 0.5 and e.confidence_is_default
-    ids = await record_main_decision(DecisionOutput(paper_trade=PaperTrade("NVDA", "long", 65, "", "")),
-                                     None, store, SRC, created_at=CREATED)   # another session
-    assert store.get(ids[0]).confidence == 0.65
+    assert e.ticker == "SPY" and e.stop_loss is None
 
 
 @pytest.mark.asyncio
