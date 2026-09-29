@@ -211,3 +211,53 @@ def test_log_returns_entries(client):
         r = client.get("/api/log")
     assert r.status_code == 200
     assert r.json()["entries"][0]["level"] == "info"
+
+
+# ── Pipeline run shares the scheduler lock ────────────────────────────
+
+def _pipeline_env(tmp_path, monkeypatch):
+    import subprocess
+    from marketmind.scripts import scheduled_run as sr
+    import os
+    monkeypatch.setattr(sr, "ROOT", tmp_path)
+    monkeypatch.setenv("MARKETMIND_DATA_DIR", "data")
+    monkeypatch.setattr(sr, "_pid_alive", lambda pid: pid == os.getpid())   # no tasklist
+    started = []
+
+    class FakeProc:
+        pid = 4321
+
+    def fake_popen(cmd, **kw):
+        started.append(kw)
+        return FakeProc()
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    return tmp_path / "data", started
+
+
+def test_pipeline_run_refused_while_scheduler_lock_held(client, tmp_path, monkeypatch):
+    import json
+    import os
+    import time
+    data, started = _pipeline_env(tmp_path, monkeypatch)
+    (data / "scheduler").mkdir(parents=True)
+    (data / "scheduler" / "run.lock").write_text(json.dumps({"pid": os.getpid(), "t": time.time()}),
+                                                 encoding="utf-8")
+    with patch("marketmind.api.routes.add_log_entry"):
+        r = client.post("/api/pipeline/run", json={"mock": True})
+    assert r.status_code == 409 and r.json()["status"] == "busy" and started == []
+
+
+def test_pipeline_run_logs_to_file_and_takes_the_lock(client, tmp_path, monkeypatch):
+    import json
+    import subprocess
+    from marketmind.scripts import scheduled_run as sr
+    data, started = _pipeline_env(tmp_path, monkeypatch)
+    (data / "scheduler").mkdir(parents=True)
+    (data / "scheduler" / "run.lock").write_text(json.dumps({"pid": 999999, "t": 0}), encoding="utf-8")
+    with patch("marketmind.api.routes.add_log_entry"):
+        r = client.post("/api/pipeline/run", json={"mock": True})
+    assert r.status_code == 200 and r.json()["status"] == "started"
+    kw = started[0]
+    assert kw["stdout"] not in (None, subprocess.DEVNULL) and kw["stderr"] == subprocess.STDOUT
+    assert r.json()["log"].startswith(str(data / "logs" / "dashboard_runs"))
+    assert sr.read_lock(data / "scheduler" / "run.lock")["pid"] == 4321

@@ -490,12 +490,18 @@ async def health():
 
 @app.post("/api/pipeline/run")
 async def pipeline_run(request: dict):
-    """Trigger a daily pipeline run with optional --mock flag. Runs asynchronously."""
+    """Trigger a daily pipeline run with optional --mock flag. Runs asynchronously.
+
+    Shares the scheduler's run lock (marketmind/scripts/scheduled_run.py): refused
+    while a scheduled or dashboard run holds it, and held by the child while it runs
+    so a scheduled trigger does not start a second pipeline alongside it."""
     import asyncio
+    import json
     import subprocess
     import sys
-    from pathlib import Path
-    from marketmind.api.data_providers import add_log_entry
+    import time
+    from datetime import datetime
+    from marketmind.scripts import scheduled_run as sr
 
     mock = request.get("mock", False) if request else False
     lang = request.get("lang", "zh") if request else "zh"
@@ -505,17 +511,27 @@ async def pipeline_run(request: dict):
         cmd.append("--mock")
     cmd.append("-v")
 
-    add_log_entry("info", f"Pipeline started: {' '.join(cmd)}")
+    lock = sr.data_dir() / "scheduler" / "run.lock"
+    if await asyncio.to_thread(sr.lock_held, lock):
+        add_log_entry("warning", "Pipeline run refused: another run holds the scheduler lock")
+        return JSONResponse({"status": "busy", "detail": "another pipeline run is in progress"},
+                            status_code=409)
+    log_dir = sr.data_dir() / "logs" / "dashboard_runs"
+    log_path = log_dir / f"{datetime.now():%Y%m%d-%H%M%S}.log"
+    add_log_entry("info", f"Pipeline started: {' '.join(cmd)} (log: {log_path})")
     try:
-        proc = subprocess.Popen(
-            cmd, cwd=str(project_dir),
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
+        log_dir.mkdir(parents=True, exist_ok=True)
+        with log_path.open("ab") as log:
+            proc = subprocess.Popen(cmd, cwd=str(project_dir), stdout=log, stderr=subprocess.STDOUT)
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text(json.dumps({"pid": proc.pid, "t": time.time(), "by": "dashboard"}),
+                        encoding="utf-8")
         # Non-blocking: fire and forget, pipeline broadcasts progress via WS
         return JSONResponse({
             "status": "started",
             "pid": proc.pid,
             "mock": mock,
+            "log": str(log_path),
         })
     except Exception as e:
         add_log_entry("error", f"Pipeline failed to start: {e}")
