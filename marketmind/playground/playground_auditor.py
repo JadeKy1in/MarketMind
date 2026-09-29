@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from marketmind.runtime_paths import claude_dir
 
 from marketmind.playground.agent_manifest import AgentManifest, discover_agents
 from marketmind.playground.playground_tracker import (
@@ -262,7 +263,7 @@ def _compute_main_pipeline_correlation(
 
     pg_dir = playground_dir or Path(__file__).resolve().parent
     project_root = pg_dir.parent  # up from playground/ to marketmind/
-    cal_dir = project_root / ".claude" / "calibration"
+    cal_dir = claude_dir() / "calibration"
 
     # Strategy 1: per-date aggregation
     agent_date_scores = _load_agent_direction_scores(agent_id, pg_dir)

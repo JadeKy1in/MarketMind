@@ -199,6 +199,17 @@ def _offline_shadow_feeds(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_data_dir(tmp_path_factory, monkeypatch):
+    """Tests never write into the real data/ directory: 2026-09-29, ~2,500 test alerts were
+    found in data/alerts.db. Every test gets its own data dir unless it sets one itself."""
+    monkeypatch.setenv("MARKETMIND_DATA_DIR", str(tmp_path_factory.mktemp("data")))
+    # runtime files under marketmind/.claude (briefs, calibration, metrics, kill-switch state)
+    monkeypatch.setenv("MARKETMIND_CLAUDE_DIR", str(tmp_path_factory.mktemp("claude")))
+    from marketmind.notification import alert_manager
+    monkeypatch.setattr(alert_manager, "_alert_manager", None)
+
+
+@pytest.fixture(autouse=True)
 def _offline_binance(monkeypatch):
     """No test reaches Binance (first crypto price source): it answers 503 unless
     the test installs its own client or replaces _from_binance."""

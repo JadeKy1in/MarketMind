@@ -13,11 +13,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
+from marketmind.runtime_paths import claude_dir
 
 logger = logging.getLogger("marketmind.integrity.kill_switch")
 
 # integrity/kill_switch.py → parent.parent = marketmind/ (package root)
-_STATE_FILE = Path(__file__).resolve().parent.parent / ".claude" / "state" / "kill_switch_state.json"
+def _state_file() -> Path:
+    return claude_dir() / "state" / "kill_switch_state.json"
 
 # FIA 2024 three-tier thresholds
 T1_NO_TRADE_KILL = 60        # paralyzed: no-trade + L3-red both at 60d → SUSPENDED
@@ -174,8 +176,8 @@ class KillSwitchMonitor:
         data = {k: (self.state.value if k == "state" else getattr(self, k)) for k in _PERSIST_KEYS}
         data["last_updated"] = datetime.now(timezone.utc).isoformat()
         try:
-            _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            with open(_STATE_FILE, "w", encoding="utf-8") as f:
+            _state_file().parent.mkdir(parents=True, exist_ok=True)
+            with open(_state_file(), "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             self._dirty = False
         except OSError as e:
@@ -183,11 +185,11 @@ class KillSwitchMonitor:
 
     @classmethod
     def load(cls) -> KillSwitchMonitor:
-        if not _STATE_FILE.exists():
+        if not _state_file().exists():
             logger.info("No existing kill switch state — starting fresh")
             return cls()
         try:
-            with open(_STATE_FILE, "r", encoding="utf-8") as f:
+            with open(_state_file(), "r", encoding="utf-8") as f:
                 data = json.load(f)
             state_raw = data.get("state", "ACTIVE")
             try:
@@ -212,7 +214,7 @@ class KillSwitchMonitor:
                         monitor.consecutive_no_trade_days)
             return monitor
         except (json.JSONDecodeError, KeyError, TypeError) as e:
-            logger.error("Corrupted state file %s — starting fresh: %s", _STATE_FILE, e)
+            logger.error("Corrupted state file %s — starting fresh: %s", _state_file(), e)
             return cls()
 
 

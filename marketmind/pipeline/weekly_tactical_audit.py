@@ -15,6 +15,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from marketmind.runtime_paths import claude_dir
 
 from marketmind.pipeline.pipeline_metrics import load_recent_metrics, record_metrics
 
@@ -249,7 +250,7 @@ def get_suggestion_context(shadow_db=None) -> str:
     """
     from pathlib import Path
 
-    audit_dir = Path(__file__).resolve().parent.parent / ".claude" / "metrics"
+    audit_dir = claude_dir() / "metrics"
     audit_path = audit_dir / "weekly_audit_latest.json"
     if not audit_path.exists():
         return ""
@@ -287,7 +288,7 @@ def save_latest_audit(result: WeeklyAuditResult) -> None:
     """Save the most recent audit result for prompt injection."""
     from pathlib import Path
 
-    audit_dir = Path(__file__).resolve().parent.parent / ".claude" / "metrics"
+    audit_dir = claude_dir() / "metrics"
     audit_dir.mkdir(parents=True, exist_ok=True)
     audit_path = audit_dir / "weekly_audit_latest.json"
 

@@ -1,6 +1,7 @@
 """AlertLog — SQLite persistence with Python logging fallback."""
 from __future__ import annotations
 import logging
+import os
 import sqlite3
 from pathlib import Path
 
@@ -8,8 +9,9 @@ logger = logging.getLogger("marketmind.alert")
 
 
 class AlertLog:
-    def __init__(self, db_path: str = "data/alerts.db"):
-        self.db_path = Path(db_path)
+    def __init__(self, db_path: str | None = None):
+        # the configured data dir (tests point it at a temp dir), not a fixed "data/"
+        self.db_path = Path(db_path) if db_path else             Path(os.getenv("MARKETMIND_DATA_DIR", "data")) / "alerts.db"
         self._conn: sqlite3.Connection | None = None
         self._available = False
         self._init_db()

@@ -15,7 +15,7 @@ def _card(**kw):
 
 
 def test_brief_card_confidence_is_not_position_size(tmp_path, monkeypatch):
-    monkeypatch.setattr(orch, "__file__", str(tmp_path / "pipeline" / "orchestration.py"))
+    monkeypatch.setenv("MARKETMIND_CLAUDE_DIR", str(tmp_path / ".claude"))
     decision = DecisionOutput(decision_cards=[_card(), _card(ticker="SPY", confidence=None)])
     orch._save_decision_brief(None, None, None, None, None, decision)
     files = list((tmp_path / ".claude" / "briefs").glob("*.json"))

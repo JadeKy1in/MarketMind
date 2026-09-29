@@ -15,6 +15,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from marketmind.runtime_paths import claude_dir
 
 logger = logging.getLogger("marketmind.pipeline.calibration")
 
@@ -43,7 +44,7 @@ class DailyPrediction:
 
 
 def _calibration_dir() -> Path:
-    d = Path(__file__).resolve().parent.parent / ".claude" / "calibration"
+    d = claude_dir() / "calibration"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -307,7 +308,7 @@ def _format_context(ctx: CalibrationContext) -> str:
 
 
 def _evolution_log_path() -> Path:
-    return Path(__file__).resolve().parent.parent / ".claude" / "metrics" / "evolutions.jsonl"
+    return claude_dir() / "metrics" / "evolutions.jsonl"
 
 
 def _load_recent_evolutions(days: int = 7) -> list[dict]:

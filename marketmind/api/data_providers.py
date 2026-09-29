@@ -9,6 +9,7 @@ import asyncio
 import logging
 import os
 from datetime import datetime, timezone
+from marketmind.runtime_paths import claude_dir
 
 logger = logging.getLogger("marketmind.api.data_providers")
 
@@ -190,8 +191,8 @@ def get_main_pipeline_decision() -> dict:
     from pathlib import Path
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    calib_path = Path(__file__).resolve().parent.parent / ".claude" / "calibration" / f"{today}.json"
-    brief_path = Path(__file__).resolve().parent.parent / ".claude" / "briefs" / f"{today}.json"
+    calib_path = claude_dir() / "calibration" / f"{today}.json"
+    brief_path = claude_dir() / "briefs" / f"{today}.json"
 
     if not calib_path.exists():
         return {"found": False, "message": "No pipeline run today yet"}
@@ -212,7 +213,7 @@ def get_main_pipeline_decision() -> dict:
             pass
 
     # Also read latest pipeline metrics for stage-level detail
-    metrics_path = Path(__file__).resolve().parent.parent / ".claude" / "metrics" / "pipeline_metrics.jsonl"
+    metrics_path = claude_dir() / "metrics" / "pipeline_metrics.jsonl"
     latest_metrics = {}
     if metrics_path.exists():
         try:

@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from marketmind.runtime_paths import claude_dir
 
 from marketmind.pipeline.methodology_rules import (
     MainAIRule, RuleRegistry, RuleImpactHypothesis,
@@ -399,7 +400,7 @@ def _parse_attribution_response(content: str) -> dict | None:
 
 def _evolution_log_path() -> Path:
     from pathlib import Path as _Path
-    return _Path(__file__).resolve().parent.parent / ".claude" / "metrics" / "evolutions.jsonl"
+    return claude_dir() / "metrics" / "evolutions.jsonl"
 
 
 def record_evolution(rule_id: str, reason: str, action: str = "retired") -> None:

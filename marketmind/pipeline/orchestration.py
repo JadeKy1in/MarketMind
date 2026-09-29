@@ -10,6 +10,7 @@ import logging
 import os
 import time
 from pathlib import Path
+from marketmind.runtime_paths import claude_dir
 
 from marketmind.gateway.async_client import init_gateway
 
@@ -247,7 +248,7 @@ def _record_z0_flash(input_count: int, signal_count: int) -> None:
     import json as _j, os as _o
     from datetime import datetime, timezone
     try:
-        d = _o.path.join(_o.path.dirname(_o.path.abspath(__file__)), "..", ".claude", "metrics")
+        d = str(claude_dir() / "metrics")
         _o.makedirs(d, exist_ok=True)
         r = {"timestamp": datetime.now(timezone.utc).isoformat(), "type": "flash",
              "articles_in": input_count, "signals_out": signal_count}
@@ -262,7 +263,7 @@ def _record_z0_l1(l1_result) -> None:
     import json as _j, os as _o
     from datetime import datetime, timezone
     try:
-        d = _o.path.join(_o.path.dirname(_o.path.abspath(__file__)), "..", ".claude", "metrics")
+        d = str(claude_dir() / "metrics")
         _o.makedirs(d, exist_ok=True)
         r = {"timestamp": datetime.now(timezone.utc).isoformat(), "type": "l1",
              "event_grade": getattr(l1_result, "event_grade", "N/A"),
@@ -480,7 +481,7 @@ def _save_decision_brief(l1_result, l2_result, l3_result, red_team, resonance, d
 
     try:
         today = _dt.now(_tz.utc).strftime("%Y-%m-%d")
-        brief_dir = Path(__file__).resolve().parent.parent / ".claude" / "briefs"
+        brief_dir = claude_dir() / "briefs"
         brief_dir.mkdir(parents=True, exist_ok=True)
 
         # L1
@@ -641,7 +642,7 @@ async def _maybe_run_weekly_audit(data_dir: Path | None = None) -> None:
             logger.warning("weekly audit marker not written; skipping the audit", exc_info=True)
             return
 
-    audit_dir = Path(__file__).resolve().parent.parent / ".claude" / "metrics"
+    audit_dir = claude_dir() / "metrics"
     audit_path = audit_dir / "weekly_audit_latest.json"
 
     if audit_path.exists():
@@ -730,7 +731,7 @@ def _record_missed_path(config) -> None:
     from datetime import datetime as _dt, timezone as _tz
     from marketmind.shadows.v3 import missed_path
     today = _dt.now(_tz.utc).strftime("%Y-%m-%d")
-    path = Path(__file__).resolve().parent.parent / ".claude" / "briefs" / f"{today}.json"
+    path = claude_dir() / "briefs" / f"{today}.json"
     try:
         brief = json.loads(path.read_text(encoding="utf-8"))
         ids = missed_path.record(_ledger_store(config), brief, today=today)

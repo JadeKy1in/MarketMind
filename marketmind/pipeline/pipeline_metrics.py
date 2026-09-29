@@ -10,6 +10,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from marketmind.runtime_paths import claude_dir
 
 logger = logging.getLogger("marketmind.pipeline.metrics")
 
@@ -91,7 +92,7 @@ class PipelineMetrics:
 
 
 def _metrics_dir() -> Path:
-    d = Path(__file__).resolve().parent.parent / ".claude" / "metrics"
+    d = claude_dir() / "metrics"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

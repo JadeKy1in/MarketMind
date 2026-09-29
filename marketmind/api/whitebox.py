@@ -14,6 +14,7 @@ import sqlite3
 from datetime import datetime, timezone
 from dataclasses import asdict
 from pathlib import Path
+from marketmind.runtime_paths import claude_dir
 
 from marketmind.ledger.scoreboard import PROBATION_DAYS, benchmark_id_for, score, scoreboard
 from marketmind.ledger.store import LedgerStore, default_ledger_path
@@ -21,7 +22,7 @@ from marketmind.ledger.store import LedgerStore, default_ledger_path
 logger = logging.getLogger("marketmind.api.whitebox")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
-BRIEF_DIR = Path(__file__).resolve().parent.parent / ".claude" / "briefs"
+BRIEF_DIR = None                     # resolved at call time (claude_dir / MARKETMIND_BRIEF_DIR)
 LEDGER_PAGE_MAX = 500
 
 
@@ -30,7 +31,7 @@ def data_dir() -> Path:
 
 
 def brief_dir() -> Path:
-    return Path(os.getenv("MARKETMIND_BRIEF_DIR", str(BRIEF_DIR)))
+    return Path(os.getenv("MARKETMIND_BRIEF_DIR") or (claude_dir() / "briefs"))
 
 
 def _store() -> LedgerStore | None:

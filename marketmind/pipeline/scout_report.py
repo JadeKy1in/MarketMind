@@ -6,6 +6,7 @@ from __future__ import annotations
 import json as _json
 import os as _os
 from datetime import datetime, timezone
+from marketmind.runtime_paths import claude_dir
 
 from marketmind.config.source_authority import SourceTier, SourceStatus
 
@@ -13,7 +14,7 @@ from marketmind.config.source_authority import SourceTier, SourceStatus
 def record_z0_metrics(sources, counts, issues, rss_count, api_count, rss_health, pre_dedup, post_dedup) -> None:
     """Z0 baseline: append per-run metrics to .claude/metrics/baseline.jsonl (accumulates across days)."""
     try:
-        metrics_root = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".claude", "metrics")
+        metrics_root = str(claude_dir() / "metrics")
         _os.makedirs(metrics_root, exist_ok=True)
         record = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
