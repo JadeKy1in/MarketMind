@@ -84,6 +84,9 @@ class Bar:
     low: float
     close: float
     volume: float
+    # Only the close is known (see mark_close_only): open/high/low are copies of it, so
+    # the bar's true range is unknown and intrabar stop/target checks are meaningless.
+    close_only: bool = False
 
 
 @dataclass
@@ -136,6 +139,13 @@ async def get_price_history(ticker: str, years: int = 5) -> PriceHistory | None:
         hist = await from_twelvedata(ticker, years)
     if hist is None:
         logger.warning("No price history for %s — all sources failed", ticker)
+    else:
+        flagged = mark_close_only(hist.daily)
+        if flagged:
+            shown = ", ".join(flagged[-10:]) + (f" (+{len(flagged) - 10} earlier)"
+                                                if len(flagged) > 10 else "")
+            logger.warning("%s (%s): %d close-only bar(s), range unknown: %s",
+                           ticker, hist.source, len(flagged), shown)
     _cache[key] = hist
     return hist
 
@@ -543,6 +553,23 @@ def to_weekly(daily: list[Bar]) -> list[Bar]:
             wk.close = b.close
             wk.volume += b.volume
     return weeks
+
+
+def is_close_only(b: Bar) -> bool:
+    """Open, high, low and close all equal and no volume (0 or missing): the source
+    only knew a close (Yahoo PL=F 2026-09-23..25). A flat bar WITH volume is a real,
+    genuinely flat session and is not flagged."""
+    return b.open == b.high == b.low == b.close and not (b.volume or 0.0) > 0
+
+
+def mark_close_only(daily: list[Bar]) -> list[str]:
+    """Set `close_only` on every close-only daily bar (in place); returns their dates."""
+    flagged = []
+    for b in daily:
+        b.close_only = is_close_only(b)
+        if b.close_only:
+            flagged.append(b.date)
+    return flagged
 
 
 def is_crypto_ticker(ticker: str) -> bool:
