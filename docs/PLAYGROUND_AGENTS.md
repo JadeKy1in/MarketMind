@@ -41,6 +41,40 @@
 - 持有期受 bridge 上限约束（最长 60 根），`trend_state` 以 60 根作为"持有到趋势离场"的替代。
 - 晋升阶梯要求 ≥20 次结算、≥60 个交易日。`dual_momentum` 每月只有 1 条记录，至少要约 20 个月才能被评估。
 
+## 5. `memory_desk`：带记忆与反思的 LLM agent，及其无记忆对照组
+
+> 2026-09-29 所有人决定。设计约束来自 `docs/S9_DESIGN.md` §3（复盘事实）与 §5（记忆与反思的调研结论）。代码：`marketmind/playground/agents/memory_desk/`（`adapter.py`、`memory.py`、`prompts.py`）与 `agents/memory_desk_control/`。
+
+**做什么**：固定小标的池 SPY、QQQ、GLD、TLT、BTC-USD、ETH-USD，每天一次 LLM 调用，给出 1–3 个多 / 空判断，持有 5 根 K 线。
+- **事实表（代码）**：只用已收盘的完整日线，算 5 / 20 / 60 日收益、相对 MA50 / MA200 的位置、ATR20，以及与结算复盘相同定义的状态标签（`ret20_up/down`、`above/below_ma50`、`above/below_ma200`）；另附最多 8 条公开新闻标题。每天只算一次，缓存在 `<data_dir>/playground/memory_desk/facts/<日期>.json`，两个孪生 agent 读同一份。
+- **止损、确信度、持有期（代码）**：止损 = 信号收盘 ∓ 3×ATR20，写成账本 `falsifier_rule`（与 `_quant` 相同）；LLM 给的确信度截到 0.50–0.70，原值记在 `signal.raw_confidence`；已有未结算记录的标的当天不再开仓；每个（日期，标的）只记一次（`signal_key`）。
+- **信息防火墙**：输入只有公开行情、公开标题和**本 agent 自己**的账本记录；不读主管线、影子或其他 Playground agent 的输出（测试检查）。
+
+**三层记忆**（参照 FinMem 的分层记忆 [7] 与旧版影子记忆的三层 + 90 天情景期限），存于 `<data_dir>/playground/memory_desk/memory.json`（原子写入）：
+| 层 | 内容 | 衰减 |
+|---|---|---|
+| working | 自己最近 5 天的判断及其状态 / 结果 | 每次从账本重建 |
+| episodic | 自己已结算的记录 + 结算代码写入的复盘事实（`error_class`、MFE/MAE、入场状态标签、净收益） | 离场 90 天后过期，过期后不再作为教训证据 |
+| semantic | 教训（见下） | 60 个交易日有效期，只有新的样本外支持证据能续期 |
+
+**教训**（参照 ExpeL 从自身成败经验中提炼规则 [8]，按 S9 §5 限定为只来自代码结算的结果、不来自自我批评）：
+- 结构：条件（方向 × 状态标签，或 标的 × 方向，两种固定模板）+ 主张（净赚比例高于 / 低于基准）+ 证据编号 + 独立样本数 + 净赚比例 + 基准 + 样本外统计 + 创建 / 到期日期 + 状态（candidate / active / retired）+ 创建时的 prompt 版本。所有数字与状态都由 `memory.py` 计算。
+- "净赚" = 复盘 `error_class` 为 `win` 或 `beta_carried`；基准 = 条件之外的自己的独立交易的净赚比例（不足 5 笔时取 0.5）。独立：同一入场日只算一笔；同一标的持有期重叠（入场相隔不到 7 天）只算第一笔。
+- candidate：独立样本 ≥ 3 且 |净赚比例 − 基准| ≥ 0.10。创建时已看到的交易记为样本内证据。
+- active：支持主张的独立交易 ≥ 5，全样本在主张一侧超出基准 ≥ 0.10，且**创建之后才结算**的样本外交易 ≥ 2、其净赚比例也在主张一侧（先验证后使用，不在产生它的样本上验证）。条件不再满足时降回 candidate。
+- retired：全样本净赚比例不再在主张一侧（反证）；或样本外交易 ≥ 3 笔且落在另一侧；或到期未续。
+- LLM 只在教训刚转为 active 时给它写一句措辞（`WORDING_SYSTEM_PROMPT`，最多 120 字，不许加原因、条件和数字）；失败时用代码模板。措辞不影响任何计数与状态。
+- 检索：只取 active、且条件与今天事实表的状态标签相符的教训（标的类教训只要该标的今天有数据即相符），按 |差值| × √n 排序，最多 5 条；放在用户 prompt 的 `<<<MEMORY>>> … <<<END MEMORY>>>` 段落内，一并给出工作记忆与最近 5 笔已结算交易的事实。
+- 防后见之明：教训只由结算代码的事实计算；样本外验证；至少 3 笔才建候选、5 笔才启用；LLM 看到的是带样本数与基准的统计，不是它自己写的复盘故事。
+
+**对照组 `memory_desk_control`**（旧版 AEL 实验的"复制体对照组"要求）：同一份事实表、同一个系统 prompt（`prompt_version` 相同）、同一套代码规则，唯一的区别是用户 prompt 里没有记忆段落，也不维护记忆库（测试检查两者 prompt 去掉记忆段落后逐字相同）。它记为独立来源 `playground:memory_desk_control`。以后在晋升阶梯上按同一交易日做配对比较（Brier 为主，按日聚合的配对差，S9 §5 的方法），用来检验记忆是否真的有帮助；两者各自也要跑赢同域随机基准。
+
+**可追溯性**：每笔判断的 `meta.model` 为 agent 名；`meta.signal` 内记录 `prompt_version`（系统 prompt 指纹）、`llm`（网关实际应答的模型，经 `llm_trace`）、`memory`（是否带记忆）、`lessons_used`（LLM 声称用到且确实被检索到的教训编号）和当天的事实。注意：`ledger_bridge` 目前只把 `signal` 写进 `meta`，所以这两个字段在 `meta.signal` 下，而不是影子那样的顶层 `meta.llm` / `meta.prompt_version`；如需顶层，要在 bridge 里加两行（不在本次范围）。
+
+**Token 成本（估算）**：系统 prompt 约 1.3k 字符，带满记忆段落（10 条工作记忆、5 笔交易、5 条教训）的用户 prompt 约 4.3k 字符，输出约 1k 字符：`memory_desk` 约 2–2.5k token / 天，教训转为 active 的那天多一次约 0.6k 的措辞调用；对照组约 1.3–1.5k token / 天。两者都远低于每天 15k 的上限。走 Claude CLI 时 CLI 自身的系统开销不在此估算内。
+
+**已知局限**：条件模板共 24 个（方向 × 6 个标签、标的 × 方向），存在多重检验；样本外验证是主要防线，门槛 0.10 与 5 / 2 / 3 的计数是先验设定、未在数据上调参 [推断]。交易日按工作日计（不计交易所假日）。每天约 1–3 笔、持有 5 根，最快也要约一个多月才可能出现第一条 active 教训。
+
 ## References（访问日期 2026-09-29）
 
 1. Moskowitz, T. J., Ooi, Y. H., Pedersen, L. H. (2012). *Time Series Momentum*. Journal of Financial Economics 104(2), 228-250. https://w4.stern.nyu.edu/facdir/lpederse/papers/TimeSeriesMomentum.pdf
@@ -49,5 +83,7 @@
 4. Moskowitz, T. J., Grinblatt, M. (1999). *Do Industries Explain Momentum?* Journal of Finance 54(4), 1249-1290.
 5. Antonacci, G. (2012/2017). *Risk Premia Harvesting Through Dual Momentum*. SSRN 2042750; Journal of Management & Entrepreneurship 2(1), 27-55. https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2042750
 6. `docs/TREND_DESIGN.md`（趋势状态机的规则与出处：Moskowitz-Ooi-Pedersen 2012、Faber 2007、海龟交易法则）。
+7. Yu, Y. et al. (2023). *FinMem: A Performance-Enhanced LLM Trading Agent with Layered Memory and Character Design*. https://arxiv.org/html/2311.13743
+8. Zhao, A. et al. (2023). *ExpeL: LLM Agents Are Experiential Learners*. https://arxiv.org/abs/2308.10144
 
-期刊卷期页码为作者凭记忆填写，未在线核对；参考 1、5 的链接与趋势设计文档所引用的一致。
+期刊卷期页码为作者凭记忆填写，未在线核对；参考 1、5 的链接与趋势设计文档所引用的一致；参考 7、8 的链接与 `docs/S9_DESIGN.md` [R1] 相同，标题与作者未在线核对。
