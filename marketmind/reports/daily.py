@@ -22,7 +22,7 @@ PUSH_MAX_CHARS = 4000
 SYSTEM_PROMPT = """你是 MarketMind 的每日汇报员，给所有人写今天的投研汇报。
 规则：
 1. 只使用 <facts> 里的信息；不得补充任何 facts 以外的事实、价格、数字或预测。
-2. 用中文，结构如下（Markdown，每节 2–6 条要点，没有内容的节写"今日无"）：
+2. 用中文，结构如下（Markdown，每节 2–6 条要点，括号里另有规定的从其规定；没有内容的节写"今日无"）：
    ## 今日要闻（从 headlines 里挑最重要的 5–8 条，说明为什么重要）
    ## 冷门数据异常（discovery：新闻很少报道的官方数据异动；写出序列、z 值、新闻覆盖篇数、代理标的是否已被价格反映）
    ## 证据层（叙事与数据是否背离）
@@ -30,6 +30,8 @@ SYSTEM_PROMPT = """你是 MarketMind 的每日汇报员，给所有人写今天�
    ## 观察名单（watchlist：今天新增 / 触发 / 到期 / 失效的项目与等待的确认条件）
    ## 趋势状态（趋势状态：今天进入 / 退出 TREND 的标的，当前 TREND 名单与代码计算的止损位；明确写出这只是信息性的状态记录，不是警报，也不是交易指令）
    ## 影子动向（多空分布、共识集中的标的、新出现的事件影子）
+   ## 生态健康（ecosystem，简短：一行转述 summary；有 herding_flags 时逐条写资产组、方向、连续天数，并注明是"市场驱动"（market_driven，与趋势状态一致）还是"行为性"（behavioural，更值得警惕）；有 duplicate_clusters 时写出成员；都没有就写"无异常"；date 不是今天时注明报告日期）
+   ## Playground 实验（playground，简短，1–3 条：今天各实验 agent 的调用——标的、方向、记录编号；注明这是实验性来源，不是建议；calls 为 0 写"今日无"）
    ## 实盘持仓（巡检结论；没有持仓就写"未录入持仓"）
    ## 大行情警报（触发 / 接近触发；观察模式要注明不推送）
    ## 待批准：影子退役提案（retirement_proposals：影子、理由——未通过的挑战者与评估期相对领域基准的平均超额、拟接任者与方法论来源、批准命令；只是提案，需所有人批准）
@@ -134,7 +136,44 @@ def gather_facts(today: str, store=None, brief_dir: Path | None = None) -> dict:
     if promo:
         facts["promotion"] = dict(Counter(r.get("stage") for r in promo.get("shadows", {}).values()))
     facts["retirement_proposals"] = retirement_facts()
+    eco = ecosystem_facts(today)
+    if eco:
+        facts["ecosystem"] = eco
+    if store is not None:
+        facts["playground"] = playground_facts(today, store)
     return facts
+
+
+def ecosystem_facts(today: str) -> dict | None:
+    """The ecosystem one-liner plus its herding and unexpected duplicate-cluster flags
+    (docs/ECOSYSTEM_DESIGN.md). Today's report, else the latest one (its date says so)."""
+    try:
+        from marketmind.ecosystem import read_report
+        doc = read_report(today, root=data_dir()) or read_report(root=data_dir())
+    except Exception:
+        logger.warning("ecosystem report unavailable", exc_info=True)
+        return None
+    if not doc:
+        return None
+    div = doc.get("diversity") or {}
+    return {
+        "date": doc.get("date"), "summary": doc.get("summary"),
+        "herding_flags": [{k: f.get(k) for k in ("group", "direction", "days", "verdict", "escalate")}
+                          for f in (doc.get("herding") or {}).get("flags") or []],
+        "duplicate_clusters": [{"measure": m, "members": c.get("members")}
+                               for m in ("pnl", "direction")
+                               for c in (div.get(m) or {}).get("clusters") or [] if not c.get("expected")]}
+
+
+def playground_facts(today: str, store, per_agent: int = 5) -> dict:
+    """Playground calls recorded today (ledger source_type "playground", meta.run_date)."""
+    rows = [e for e in store.list(source_type="playground") if (e.meta or {}).get("run_date") == today]
+    by_agent: dict[str, list[dict]] = {}
+    for e in rows:
+        by_agent.setdefault(e.source_id.split(":", 1)[-1], []).append(
+            {"ticker": e.ticker, "direction": e.direction, "confidence": e.confidence,
+             "entry_id": e.entry_id})
+    return {"calls": len(rows), "by_agent": {a: c[:per_agent] for a, c in sorted(by_agent.items())}}
 
 
 def retirement_facts() -> list[dict]:
@@ -185,7 +224,9 @@ def fallback_text(facts: dict) -> str:
              f"触发 {len((facts.get('watchlist') or {}).get('triggered', []))}",
              f"- 证据层背离：{(facts.get('evidence') or {}).get('divergences', 0)}",
              f"- 警报：{(facts.get('alerts') or {}).get('fired') or '无'}",
-             f"- 待批准退役提案：{[r['shadow_id'] for r in facts.get('retirement_proposals') or []] or '无'}"]
+             f"- 待批准退役提案：{[r['shadow_id'] for r in facts.get('retirement_proposals') or []] or '无'}",
+             f"- 生态健康：{(facts.get('ecosystem') or {}).get('summary') or '无报告'}",
+             f"- Playground 调用：{(facts.get('playground') or {}).get('calls', 0)}"]
     lines += [f"- 要闻：{h['title']}（{h['source']}）" for h in facts.get("headlines", [])[:5]]
     return "\n".join(lines)
 

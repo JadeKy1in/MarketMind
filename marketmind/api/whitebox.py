@@ -570,3 +570,172 @@ def get_daily_report() -> dict:
         return {"available": False, "reason": "还没有今日汇报（每个工作日自动运行后生成）"}
     return {"available": True, "date": r.get("date"), "source": r.get("source"),
             "markdown": r.get("markdown", ""), "written_at": r.get("written_at")}
+
+
+# ── shadow-ecosystem health (docs/ECOSYSTEM_DESIGN.md) ─────────────────────
+
+def _tail(rows: list | None, n: int = 12) -> list:
+    return list(rows or [])[-n:]
+
+
+def _diversity_view(d: dict | None) -> dict:
+    d = d or {}
+    clusters = d.get("clusters") or []
+    return {**{k: d.get(k) for k in ("eligible", "actors", "n_eff", "mean_abs_rho", "note")},
+            "pairs_high": d.get("pairs_high") or [], "clusters": clusters,
+            "unexpected_clusters": [c for c in clusters if not c.get("expected")]}
+
+
+def get_ecosystem(date: str | None = None) -> dict:
+    """The latest (or given) data/ecosystem/<date>.json reshaped for the dashboard:
+    herding flags with their market-driven / behavioural verdict, N_eff and duplicate
+    clusters, source / model homogenisation, stagnation, zombies / orphans, degradation
+    trends and the one-line summary. Measures without enough data keep None + `note`."""
+    from marketmind.ecosystem import read_report
+    if date and not _DATE_RE.match(date):
+        return {"available": False, "reason": "date must be YYYY-MM-DD"}
+    doc = read_report(date, root=data_dir())
+    if not doc:
+        return {"available": False, "date": date,
+                "reason": "生态健康尚未运行（每日运行或 python -m marketmind.ecosystem 后生成 data/ecosystem/）"}
+    herd = doc.get("herding") or {}
+    div = doc.get("diversity") or {}
+    hom = doc.get("homogenisation") or {}
+    stag = doc.get("stagnation") or {}
+    integ = doc.get("integrity") or {}
+    deg = doc.get("degradation") or {}
+    ent = [r for r in deg.get("entropy") or [] if r.get("records")]
+    return {
+        "available": True, "date": doc.get("date"), "written_at": doc.get("written_at"),
+        "summary": doc.get("summary"), "population": doc.get("population") or {},
+        "herding": {"flags": herd.get("flags") or [], "today": herd.get("today") or [],
+                    "episodes": len(herd.get("episodes") or []),
+                    "long_share": _tail(herd.get("ecosystem_long_share"))},
+        "diversity": {"pnl": _diversity_view(div.get("pnl")),
+                      "direction": _diversity_view(div.get("direction"))},
+        "homogenisation": {k: hom.get(k) for k in ("window_days", "dominant_group", "dominant_ticker",
+                                                   "llm", "mean_ticker_jaccard", "news_source")},
+        "stagnation": {"flags": stag.get("flags") or [],
+                       "insufficient": len(stag.get("insufficient") or {}), "note": stag.get("note")},
+        "integrity": {"zombies": integ.get("zombies") or [], "orphans": integ.get("orphans") or [],
+                      "retired_submitting": integ.get("retired_submitting") or [],
+                      "active": integ.get("active"), "run_days_checked": integ.get("run_days_checked")},
+        "degradation": {"direction_entropy_trend": deg.get("direction_entropy_trend"),
+                        "spread_trend": deg.get("spread_trend"),
+                        "beat_random_trend": deg.get("beat_random_trend"),
+                        "entropy_latest": ent[-1] if ent else None,
+                        "beat_random": _tail(deg.get("beat_random")), "note": deg.get("note")},
+        "notes": doc.get("notes") or [], "thresholds": doc.get("thresholds") or {},
+    }
+
+
+# ── promotion diagnostics: factor regression + paper-to-live (S7 §三 / §四) ──
+
+def _factor_view(f: dict | None) -> dict:
+    f = f or {}
+    if f.get("status") != "ok":
+        return {"status": f.get("status") or "missing", "reason": f.get("reason"),
+                "obs": f.get("obs"), "window": f.get("window")}
+    betas = f.get("betas") or {}
+    main = sorted(betas.items(), key=lambda kv: -abs(kv[1].get("t") or 0))[:3]
+    drift = f.get("drift") or {}
+    return {"status": "ok", "source": f.get("source"), "window": f.get("window"), "obs": f.get("obs"),
+            "alpha_annual": f.get("alpha_annual"), "alpha_t": f.get("alpha_t"),
+            "alpha_p": f.get("alpha_p"),
+            "main_betas": [{"factor": k, "beta": v.get("beta"), "t": v.get("t")} for k, v in main],
+            "r2": f.get("r2"), "adj_r2": f.get("adj_r2"), "meaningful": f.get("meaningful"),
+            "drift": {"status": drift.get("status"), "reason": drift.get("reason"),
+                      "flags": drift.get("flags") or [], "flags_family": drift.get("flags_family") or []},
+            "notes": f.get("notes") or []}
+
+
+def _paper_live_view(p: dict | None) -> dict:
+    if not p:
+        return {"status": "missing", "live_ready": False}
+    cap = p.get("capacity") or {}
+    mean = p.get("extra_cost_mean")
+    return {"status": p.get("status"), "trades": p.get("trades", 0),
+            "record_days": p.get("record_days"),
+            "extra_cost_median_bps": p.get("extra_cost_median_bps"),
+            "extra_cost_mean_bps": None if mean is None else mean * 1e4,
+            "paper_mean_excess_domain": p.get("paper_mean_excess_domain"),
+            "live_mean_excess_domain": p.get("live_mean_excess_domain"),
+            "capacity_breaches": cap.get("breaches"), "capacity_priced": cap.get("priced"),
+            "capacity_usd_p10": cap.get("capacity_usd_p10"), "unknown_cost": p.get("unknown_cost"),
+            "live_ready": bool(p.get("live_ready")), "checks": p.get("live_ready_checks") or {}}
+
+
+def get_diagnostics() -> dict:
+    """Per-shadow factor alpha / main betas / R² / style drift and the paper-to-live gap,
+    from promotion.runner.read_diagnostics (state.json "diagnostics"). Reporting only."""
+    from marketmind.promotion.runner import read_diagnostics
+    d = read_diagnostics(data_dir())
+    shadows = d.get("shadows") or {}
+    if not shadows:
+        return {"available": False, "updated_at": d.get("updated_at"), "meta": d.get("meta"),
+                "rows": [], "reason": "因子诊断尚未计算（晋升评审时写入 data/promotion/state.json）"}
+    rows = [{"shadow_id": sid, "factors": _factor_view(v.get("factors")),
+             "paper_live": _paper_live_view(v.get("paper_live"))}
+            for sid, v in sorted(shadows.items())]
+    return {"available": True, "updated_at": d.get("updated_at"), "meta": d.get("meta"), "rows": rows}
+
+
+# ── Playground agents (docs/PLAYGROUND_AGENTS.md; S8 "Playground 接回") ──────
+
+PLAYGROUND_DIR = Path(__file__).resolve().parent.parent / "playground"
+CONTROL_SUFFIX = "_control"
+
+
+def get_playground(latest: int = 5) -> dict:
+    """Every Playground agent from its manifest, with its ledger counts by status, latest
+    calls and promotion stage. A `<x>_control` agent is paired with `<x>` and listed next to it."""
+    from marketmind.playground.agent_manifest import discover_agents
+    from marketmind.playground.ledger_bridge import source_id as pg_sid
+    manifests = discover_agents(PLAYGROUND_DIR)
+    store = _store()
+    rows_by_sid: dict[str, list] = {}
+    for e in (store.list(source_type="playground") if store else []):
+        rows_by_sid.setdefault(e.source_id, []).append(e)
+    scores = {s.source_id: s.to_dict()
+              for s in scoreboard([e for v in rows_by_sid.values() for e in v])}
+    state_path = data_dir() / "promotion" / "state.json"
+    try:
+        recs = (json.loads(state_path.read_text(encoding="utf-8")).get("shadows") or {}
+                if state_path.exists() else {})
+    except (OSError, ValueError):
+        recs = {}
+    ids = {m.agent_id for m in manifests}
+    agents = []
+    for m in manifests:
+        sid = pg_sid(m.agent_id)
+        rows = rows_by_sid.get(sid, [])
+        counts: dict[str, int] = {}
+        for e in rows:
+            counts[e.status] = counts.get(e.status, 0) + 1
+        rec = recs.get(sid) or {}
+        stage = rec.get("stage")
+        base = m.agent_id[:-len(CONTROL_SUFFIX)] if m.agent_id.endswith(CONTROL_SUFFIX) else None
+        is_control = base in ids
+        pair = base if is_control else (m.agent_id + CONTROL_SUFFIX
+                                        if m.agent_id + CONTROL_SUFFIX in ids else None)
+        agents.append({
+            "agent_id": m.agent_id, "source_id": sid, "display_name": m.display_name,
+            "description": m.description, "author": m.author, "version": m.version,
+            "domain_benchmark": m.domain_benchmark, "primary_metric": m.primary_metric,
+            "tags": m.tags, "records": len(rows), "status_counts": counts, "score": scores.get(sid),
+            "latest": [{"entry_id": e.entry_id, "created_at": e.created_at, "ticker": e.ticker,
+                        "direction": e.direction, "confidence": e.confidence, "status": e.status,
+                        "net_return": e.net_return}
+                       for e in sorted(rows, key=lambda e: e.created_at, reverse=True)[:latest]],
+            "stage_code": stage, "stage": STAGE_CN.get(stage, stage) if stage else None,
+            "tier": rec.get("tier"), "promotion_score": rec.get("score"),
+            "pair_with": pair, "is_control": is_control})
+    order = {a["agent_id"]: i for i, a in enumerate(agents)}
+    agents.sort(key=lambda a: (order[a["pair_with"]] if a["is_control"] else order[a["agent_id"]],
+                               a["is_control"]))
+    pairs = [[a["pair_with"], a["agent_id"]] for a in agents if a["is_control"]]
+    known = {a["source_id"] for a in agents}
+    unknown = [{"source_id": sid, "records": len(v)} for sid, v in sorted(rows_by_sid.items())
+               if sid not in known]
+    return {"available": bool(manifests), "ledger": store is not None, "agents": agents,
+            "pairs": pairs, "unknown_sources": unknown}
