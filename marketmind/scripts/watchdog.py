@@ -10,6 +10,8 @@ that day's record in data/scheduler/state.json is missing, failed, given up, or
 still marked running although the run is gone, it pushes one notification
 "MarketMind: <date> daily run did not complete: <reason>" and records
 `watchdog_notified` on that day, so each missed day is reported at most once.
+Days before the first day any trigger fired (automation not installed yet) are
+not checked.
 It never starts a run itself: the regular triggers (and their catch-up after a
 missed start) do that. It also retries pushes queued while offline.
 """
@@ -63,6 +65,14 @@ def missed_reason(rec: dict, slot: str, lock: Path, now: datetime) -> str | None
     return f"unexpected status {status!r}"
 
 
+def first_day(runs: dict) -> date | None:
+    """Earliest New York date on which a run was recorded or a trigger fired;
+    records the watchdog itself created do not count."""
+    days = [date.fromisoformat(key[:10]) for key, rec in runs.items()
+            if rec.get("status") or rec.get("skips")]
+    return min(days) if days else None
+
+
 def check(now: datetime, dry_run: bool = False) -> list[dict]:
     """Push one notification per missed day not yet reported; returns what was found."""
     sched = sr.data_dir() / "scheduler"
@@ -71,8 +81,10 @@ def check(now: datetime, dry_run: bool = False) -> list[dict]:
     if not state["runs"]:
         print("no scheduled run recorded yet; nothing to check")
         return []
-    found = []
+    found, first = [], first_day(state["runs"])
     for slot, key, day in due_keys(now):
+        if first is None or day < first:
+            continue                                    # before automation was installed
         rec = state["runs"].get(key, {})
         if rec.get("watchdog_notified"):
             continue

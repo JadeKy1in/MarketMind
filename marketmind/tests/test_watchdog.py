@@ -98,8 +98,20 @@ def test_fresh_install_and_dry_run_push_nothing(env):
     write({"2026-09-28-weekday": {"status": "ok"}})
     before = state_path.read_text("utf-8")
     found = wd.check(utc(2026, 9, 29, 20, 0), dry_run=True)
-    assert [f["key"] for f in found] == ["2026-09-29-weekday", "2026-09-27-weekend"]
+    # the 09-27 weekend predates the first recorded run (09-28): not checked
+    assert [f["key"] for f in found] == ["2026-09-29-weekday"]
     assert pushed == [] and state_path.read_text("utf-8") == before
+
+
+def test_days_before_the_first_recorded_run_are_not_reported(env):
+    state_path, write, pushed, _ = env
+    # only a watchdog note on an earlier day: it does not count as installed
+    write({"2026-09-26-weekend": {"watchdog_notified": {"t": "x", "reason": "r", "sent": []}},
+           "2026-09-29-weekday": {"status": "ok"}})
+    wd.main([], now=utc(2026, 9, 30, 20, 0))
+    assert pushed == ["MarketMind: 2026-09-30 daily run did not complete: no run was started"]
+    runs = sr.load_state(state_path)["runs"]
+    assert "2026-09-27-weekend" not in runs
 
 
 def test_offline_watchdog_push_is_queued_and_not_repeated(env, monkeypatch):

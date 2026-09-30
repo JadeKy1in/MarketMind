@@ -48,7 +48,7 @@ powershell -ExecutionPolicy Bypass -File marketmind\scripts\uninstall_schedule.p
 - **超时**：完整流程 60 分钟、周末 30 分钟，超时强制结束并记为失败。
 - **日志**：`data/logs/scheduled/<纽约日期>-<时段>.log`。
 - **失败通知**：通过已配置的推送渠道（见 `docs/S8_DESIGN.md`）发送，内容已脱敏；没配渠道时只记录。仪表盘"系统健康"页显示最近的自动运行记录。
-- **漏跑检查（Watchdog）**：检查"窗口已过"（该纽约日期 12:30 之后）的最近一个工作日和最近一个周末日。记录缺失、失败、已放弃重试，或仍标记为运行中但进程已不在，就推送一次"MarketMind: <日期> daily run did not complete: <原因>"（周末为 weekend run），并在该日记录里写 `watchdog_notified`，同一天不再重复提醒。正在运行、已完成、降级完成的不提醒；从未有过运行记录（刚安装）时不检查。它不启动运行，补跑由常规触发负责。
+- **漏跑检查（Watchdog）**：检查"窗口已过"（该纽约日期 12:30 之后）的最近一个工作日和最近一个周末日。记录缺失、失败、已放弃重试，或仍标记为运行中但进程已不在，就推送一次"MarketMind: <日期> daily run did not complete: <原因>"（周末为 weekend run），并在该日记录里写 `watchdog_notified`，同一天不再重复提醒。正在运行、已完成、降级完成的不提醒；从未有过运行记录（刚安装）时不检查；早于第一次运行 / 触发记录的日期（安装之前）也不检查。它不启动运行，补跑由常规触发负责。
 - **推送排队**：调度器和 Watchdog 的推送如果所有渠道都失败（断网），存进 `data/scheduler/push_queue.json`（原子写入，最多 20 条，超过 3 天的丢弃），下次 `scheduled_run.py` 或 `watchdog.py` 启动时按先后重发，遇到第一条仍失败就停下等下次；`push_queue.lock` 保证同一时间只有一个进程在重发。没配置任何渠道时不排队。注意 Server酱免费版每天 5 条。
 
 
