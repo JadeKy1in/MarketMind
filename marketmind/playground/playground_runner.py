@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sys
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -151,7 +152,14 @@ async def run_single_agent(
         str(adapter_path),
     )
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # registered before exec: @dataclass under `from __future__ import annotations` looks
+    # its module up in sys.modules (onchain_valuation failed every run without this)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(spec.name, None)
+        raise
 
     if not hasattr(module, "analyze"):
         raise AttributeError(f"adapter.py for {manifest.agent_id} has no 'analyze' function")
