@@ -12,8 +12,12 @@ still marked running although the run is gone, it pushes one notification
 `watchdog_notified` on that day, so each missed day is reported at most once.
 Days before the first day any trigger fired (automation not installed yet) are
 not checked.
-It never starts a run itself: the regular triggers (and their catch-up after a
-missed start) do that. It also retries pushes queued while offline.
+Missed starts are caught up by the regular triggers. A run that was interrupted
+after the day's last trigger (on 2026-09-30 a restart killed it at 12:44 New York and
+no trigger was left) is caught up here: before checking, if today's slot is still
+runnable (scheduled_run.plan) and its record is a dead "running" or a failure with an
+attempt left, the watchdog runs scheduled_run for that slot in this process (its lock,
+attempt limit and network check apply). It also retries pushes queued while offline.
 """
 from __future__ import annotations
 
@@ -105,14 +109,41 @@ def check(now: datetime, dry_run: bool = False) -> list[dict]:
     return found
 
 
+def catch_up_slot(now: datetime) -> str | None:
+    """Today's slot whose run was interrupted or failed and may be retried now."""
+    sched = sr.data_dir() / "scheduler"
+    state = sr.load_state(sched / "state.json")
+    for slot in sr.MODES:
+        run, key, _ = sr.plan(slot, now)
+        if not run:
+            continue
+        rec = state["runs"].get(key, {})
+        if rec.get("status") == "running" and sr.stale_run_reason(
+                rec, sched / "run.lock", now, sr.TIMEOUT_S[slot]):
+            return slot
+        if rec.get("status") == "failed" and rec.get("attempts", 0) < sr.MAX_ATTEMPTS:
+            return slot
+    return None
+
+
 def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--dry-run", action="store_true", help="print the decision only")
     args = p.parse_args(argv)
+    fixed_clock = now is not None
     now = now or datetime.now(timezone.utc)
     if not args.dry_run:
         sr.load_user_push_env()
         sr.flush_push_queue()
+    slot = catch_up_slot(now)
+    if slot:
+        print(f"catch-up: today's {LABELS[slot]} run was interrupted or failed")
+        if args.dry_run:
+            sr.main(["--slot", slot, "--dry-run"], now=now)
+        else:
+            sr.main(["--slot", slot], now=now)
+            if not fixed_clock:                     # the run took a while
+                now = datetime.now(timezone.utc)
     check(now, dry_run=args.dry_run)
     return 0
 

@@ -1,4 +1,5 @@
-"""Missed-run watchdog (docs/AUTOMATION.md): fake clock, fake notifier, never starts a run."""
+"""Missed-run watchdog (docs/AUTOMATION.md): fake clock, fake notifier; it starts a run
+only to catch up today's interrupted or failed one."""
 import json
 import os
 from datetime import date, datetime, timezone
@@ -84,7 +85,7 @@ def test_completed_degraded_and_live_runs_are_not_reported(env):
 
 def test_retryable_failure_and_dead_running_record_are_reported(env):
     state_path, write, pushed, _ = env
-    now = utc(2026, 9, 29, 20, 0)
+    now = utc(2026, 9, 30, 5, 0)        # 01:00 New York next day: too late to catch up 09-29
     write({"2026-09-29-weekday": {"status": "failed", "attempts": 1, "reason": "timed out after 60 minutes"},
            "2026-09-27-weekend": {"status": "running", "started": "2026-09-27T09:00:00+00:00"}})
     wd.main([], now=now)                                        # no run.lock: the run is gone
@@ -143,3 +144,35 @@ def test_run_finishing_after_the_watchdog_keeps_its_note(tmp_path, monkeypatch, 
     assert sr.main(["--slot", "weekday"]) == 0
     rec = sr.load_state(state_path)["runs"][key]
     assert rec["status"] == "ok" and rec["watchdog_notified"]["reason"] == "r"
+
+
+class _Done:
+    returncode = 0
+
+
+def test_interrupted_run_today_is_caught_up_not_reported(env, monkeypatch):
+    """2026-09-30: a restart at 12:44 New York killed the run after the last trigger."""
+    state_path, write, pushed, started = env
+    monkeypatch.setattr(sr.subprocess, "run", lambda *a, **kw: started.append(a) or _Done())
+    write({"2026-09-29-weekday": {"status": "ok"},
+           "2026-09-30-weekday": {"status": "running", "attempts": 1,
+                                  "started": "2026-09-30T16:39:15+00:00"}})   # no run.lock: dead
+    assert wd.main([], now=utc(2026, 9, 30, 17, 0)) == 0      # 13:00 New York, after logon
+    rec = sr.load_state(state_path)["runs"]["2026-09-30-weekday"]
+    assert len(started) == 1 and rec["status"] == "ok" and rec["attempts"] == 2
+    assert "watchdog_notified" not in rec                      # caught up: nothing to report
+    assert not any("did not complete" in p for p in pushed)
+
+
+def test_no_catch_up_when_given_up_finished_too_early_or_dry_run(env, monkeypatch):
+    state_path, write, pushed, started = env
+    monkeypatch.setattr(sr.subprocess, "run", lambda *a, **kw: started.append(a) or _Done())
+    write({"2026-09-29-weekday": {"status": "failed", "attempts": 2, "reason": "x"}})
+    wd.main([], now=utc(2026, 9, 29, 20, 0))                   # gave up: report only
+    write({"2026-09-30-weekday": {"status": "ok"}})
+    wd.main([], now=utc(2026, 9, 30, 20, 0))                   # already done
+    write({"2026-10-01-weekday": {"status": "failed", "attempts": 1, "reason": "x"}})
+    wd.main([], now=utc(2026, 10, 1, 11, 0))                   # 07:00 New York: too early
+    wd.main(["--dry-run"], now=utc(2026, 10, 1, 17, 0))        # dry run never starts
+    assert started == []
+    assert wd.catch_up_slot(utc(2026, 10, 1, 17, 0)) == "weekday"

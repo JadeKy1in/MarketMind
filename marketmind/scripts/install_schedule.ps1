@@ -12,7 +12,8 @@
 #              failed run): settle + crypto shadows.
 #   Watchdog   at logon and on wake from sleep (System log event
 #              Microsoft-Windows-Power-Troubleshooter, Event ID 1), 15 minutes later:
-#              pushes one notice per missed or failed day; never starts a run.
+#              pushes one notice per missed or failed day; catches up today's run
+#              if it was interrupted or failed with an attempt left.
 #   Dashboard  at logon: the white-box dashboard on http://127.0.0.1:8520
 # All run only while this user is logged on (no stored password). Daily and
 # Weekend wake the computer from sleep and catch up after a missed start.
@@ -61,7 +62,8 @@ Register-ScheduledTask -TaskPath $Folder -TaskName "Weekend" -Action $weekend -P
 
 # Missed-run watchdog: at logon and on wake from sleep, after a delay so that a
 # catch-up run started on wake is already marked running.
-$wdSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 10) `
+# 2 hours: it may catch up today's interrupted run in-process (run timeout 60 minutes).
+$wdSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
     -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 $atLogon = New-ScheduledTaskTrigger -AtLogOn -User $User
 $atLogon.Delay = "PT15M"
