@@ -417,6 +417,7 @@ async def chat_pro(
 
 _claude_failures = 0
 CLAUDE_FAILURES_BEFORE_PAUSE = 3
+CLAUDE_INTERRUPT_RETRY_S = 30.0
 # Subscription usage limits ("You've hit your session limit" / "weekly limit",
 # code.claude.com/docs, checked 2026-09-28) do not clear within a run.
 _CLAUDE_LIMIT_MARKERS = ("session limit", "weekly limit", "usage limit", "rate limit")
@@ -432,12 +433,20 @@ async def _try_claude(system_prompt: str, user_prompt: str, tier: str) -> dict[s
     Returns the result, or None to fall through to DeepSeek: provider not
     selected, or the call failed (logged). After 3 failures in a row, or at once
     on a subscription usage limit, the rest of the run goes straight to DeepSeek.
+    An interrupted child (exit 0xC000013A, e.g. standby) is retried once after
+    CLAUDE_INTERRUPT_RETRY_S before it counts as a failure.
     """
     global _claude_failures
     from marketmind.gateway import claude_cli
     if claude_cli.provider() != "claude" or _claude_failures >= CLAUDE_FAILURES_BEFORE_PAUSE:
         return None
     result = await claude_cli.call(system_prompt, user_prompt, tier)
+    if claude_cli.INTERRUPTED in (result.get("error") or ""):
+        # interrupted from outside (standby at run start): wait, retry once; only a
+        # second interruption counts as a failure
+        logger.warning("Claude call interrupted; retrying in %.0fs", CLAUDE_INTERRUPT_RETRY_S)
+        await asyncio.sleep(CLAUDE_INTERRUPT_RETRY_S)
+        result = await claude_cli.call(system_prompt, user_prompt, tier)
     if result.get("error") or not result.get("content"):
         _claude_failures += 1
         if _is_usage_limit(result.get("error")):      # retrying cannot help: switch now

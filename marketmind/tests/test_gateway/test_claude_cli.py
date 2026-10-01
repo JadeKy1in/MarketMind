@@ -179,3 +179,46 @@ def test_prompt_is_passed_as_a_stdin_file(monkeypatch):
     monkeypatch.setattr(claude_cli.asyncio, "create_subprocess_exec", fake_exec)
     r = _asyncio.run(claude_cli.call("sys", "用户提示 ping", "flash"))
     assert r["content"] == "OK" and seen["stdin_text"] == "用户提示 ping" and seen["input"] is None
+
+
+def test_interrupted_exit_is_marked_and_child_has_no_window(monkeypatch):
+    """0xC000013A (interrupted, e.g. standby at run start) is not a Claude refusal."""
+    import asyncio as _asyncio
+    seen = {}
+
+    class _Proc:
+        returncode = 0xC000013A
+
+        async def communicate(self, _input=None):
+            return b"", b""
+
+    async def fake_exec(*args, stdin=None, creationflags=None, **kw):
+        seen["flags"] = creationflags
+        return _Proc()
+    monkeypatch.setattr(claude_cli, "_executable", lambda: "claude")
+    monkeypatch.setattr(claude_cli.asyncio, "create_subprocess_exec", fake_exec)
+    r = _asyncio.run(claude_cli.call("sys", "u", "flash"))
+    assert claude_cli.INTERRUPTED in r["error"] and r["content"] == ""
+    assert seen["flags"] == claude_cli._CREATIONFLAGS
+
+
+@pytest.mark.asyncio
+async def test_interruption_is_retried_and_not_counted(monkeypatch):
+    monkeypatch.setenv("MARKETMIND_LLM", "claude")
+    monkeypatch.setattr(async_client, "_claude_failures", 0)
+    monkeypatch.setattr(async_client, "CLAUDE_INTERRUPT_RETRY_S", 0)
+    replies = [{"content": "", "error": f"claude: {claude_cli.INTERRUPTED} (exit 0xC000013A)"},
+               {"content": "ok", "usage": {"total_tokens": 2}, "provider": "claude"}] * 3
+
+    async def flaky(system, user, tier):
+        return replies.pop(0)
+    monkeypatch.setattr(claude_cli, "call", flaky)
+    for _ in range(3):                       # three interrupted calls in a row: still Claude
+        assert (await async_client._try_claude("s", "u", "flash"))["content"] == "ok"
+    assert async_client._claude_failures == 0 and replies == []
+
+    async def always_interrupted(system, user, tier):
+        return {"content": "", "error": f"claude: {claude_cli.INTERRUPTED} (exit 0xC000013A)"}
+    monkeypatch.setattr(claude_cli, "call", always_interrupted)
+    assert await async_client._try_claude("s", "u", "flash") is None
+    assert async_client._claude_failures == 1     # the retry was interrupted too: one failure

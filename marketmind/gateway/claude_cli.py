@@ -20,12 +20,21 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 
 logger = logging.getLogger("marketmind.gateway.claude_cli")
 
 TIMEOUT_S = float(os.environ.get("MARKETMIND_CLAUDE_TIMEOUT", "600"))
+# 0xC000013A STATUS_CONTROL_C_EXIT: the child was interrupted from outside, not refused by
+# Claude. Seen on 2026-09-30 and 10-01 while the laptop slipped in and out of Modern
+# Standby at run start; the error carries INTERRUPTED so the gateway retries instead of
+# counting it toward the switch to DeepSeek.
+_INTERRUPTED_EXIT = 0xC000013A
+INTERRUPTED = "interrupted"
+# No console window for the `claude.CMD` child of a console-less (pythonw) run.
+_CREATIONFLAGS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 MAX_CONCURRENCY = int(os.environ.get("MARKETMIND_CLAUDE_CONCURRENCY", "4"))
 _sem: asyncio.Semaphore | None = None
 
@@ -107,7 +116,7 @@ async def call(system_prompt: str, user_prompt: str, tier: str) -> dict:
                 proc = await asyncio.create_subprocess_exec(
                     *build_args(exe, model, system_file), cwd=str(_workdir()),
                     stdin=stdin, stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE)
+                    stderr=asyncio.subprocess.PIPE, creationflags=_CREATIONFLAGS)
             try:
                 out, err = await asyncio.wait_for(proc.communicate(), timeout=TIMEOUT_S)
             except asyncio.TimeoutError:
@@ -121,6 +130,8 @@ async def call(system_prompt: str, user_prompt: str, tier: str) -> dict:
                 raise
         text = out.decode("utf-8", errors="replace")
         if proc.returncode != 0 and not text.strip():
+            if (proc.returncode or 0) & 0xFFFFFFFF == _INTERRUPTED_EXIT:
+                return {"content": "", "error": f"claude: {INTERRUPTED} (exit 0xC000013A)"}
             return {"content": "", "error": f"claude: exit {proc.returncode}: "
                                             f"{err.decode('utf-8', errors='replace').strip()[:200]}"}
         return parse_output(text, model)
