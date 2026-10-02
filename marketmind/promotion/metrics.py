@@ -13,7 +13,7 @@ from itertools import combinations
 import numpy as np
 from scipy import stats
 
-from marketmind.ledger.store import LedgerEntry
+from marketmind.ledger.store import LedgerEntry, is_comparison
 from marketmind.promotion import config as C
 
 # ── Ledger -> daily series ──────────────────────────────────────────────
@@ -23,8 +23,10 @@ def _day(ts: str | None) -> str | None:
 
 
 def trading_calendar(entries: list[LedgerEntry], until: str | None = None) -> list[str]:
-    """Trading days = sorted union of exit dates of settled rows across all sources."""
-    days = {_day(e.exit_date) for e in entries if e.status == "settled" and e.exit_date}
+    """Trading days = sorted union of exit dates of settled rows across all sources
+    (comparison-only baseline rows excluded: they must not change any score)."""
+    days = {_day(e.exit_date) for e in entries
+            if e.status == "settled" and e.exit_date and not is_comparison(e)}
     return sorted(d for d in days if d and (until is None or d <= until))
 
 

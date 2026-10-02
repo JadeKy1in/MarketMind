@@ -740,7 +740,7 @@ async def settle_all(store: LedgerStore, source: PriceSource,
             report.pending += 1
 
     # Settled records whose benchmark data was missing: retry the benchmark only.
-    for e in store.list(status="settled"):
+    for e in store.list(status="settled", include_baselines=True):
         if not needs_benchmark(e):
             continue
         try:
@@ -762,7 +762,7 @@ async def settle_all(store: LedgerStore, source: PriceSource,
 
     # Settled records without current post-mortem facts (settled before they existed,
     # or computed by an older REVIEW_VERSION): (re)compute them.
-    for e in store.list(status="settled"):
+    for e in store.list(status="settled", include_baselines=True):
         if (e.review is not None and e.review.get("v") == REVIEW_VERSION
                 and e.review.get("post_exit_complete", True)):
             continue

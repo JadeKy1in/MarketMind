@@ -98,6 +98,28 @@ def _rule_fits(rule: dict | None, direction: str, close: float) -> bool:
     return rule["type"] == "close_above" and rule["price"] > close
 
 
+def _tagger(today: str):
+    """Trend tagger for the run (ledger.trend_tag; annotate only), None if unavailable."""
+    try:
+        from marketmind.ledger.trend_tag import TrendTagger
+        return TrendTagger(today)
+    except Exception:
+        logger.error("trend tagger unavailable; playground calls tagged UNAVAILABLE",
+                     exc_info=True)
+        return None
+
+
+def _trend_tag(tagger, ticker: str, hist) -> dict:
+    from marketmind.ledger.trend_tag import unavailable
+    if tagger is None:
+        return unavailable("trend tagger not available")
+    try:
+        return tagger.tag(ticker, getattr(hist, "daily", None), getattr(hist, "source", None))
+    except Exception as exc:
+        logger.error("trend tag for %s failed", ticker, exc_info=True)
+        return unavailable(f"tag error: {type(exc).__name__}")
+
+
 async def record_run(store: LedgerStore, result, manifests: dict, *, today: str | None = None,
                      tradable=None, histories_fn=None) -> dict:
     """Write each agent's calls for today once; returns {agent_id: [entry ids]} and drops."""
@@ -114,6 +136,7 @@ async def record_run(store: LedgerStore, result, manifests: dict, *, today: str 
             if (e.meta or {}).get("signal_key")}
     out: dict[str, list[str]] = {}
     dropped: list[str] = []
+    tagger = _tagger(today)
     for decision in getattr(result, "decisions", []):
         sid = source_id(decision.agent_id)
         if sid in done or decision.metadata.get("mock_mode"):
@@ -163,6 +186,7 @@ async def record_run(store: LedgerStore, result, manifests: dict, *, today: str 
             if c["signal"]:
                 meta["signal"] = c["signal"]
                 meta.update(_provenance(c["signal"]))
+            meta["trend"] = _trend_tag(tagger, c["ticker"], histories.get(c["ticker"]))
             ids.append(store.add(LedgerEntry(
                 source_type="playground", source_id=sid, ticker=c["ticker"],
                 direction=c["direction"], hold_bars=c["hold"], confidence=c["confidence"],

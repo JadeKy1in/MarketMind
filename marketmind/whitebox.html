@@ -80,7 +80,7 @@ const num=(v,d=2)=>v==null?NA:Number(v).toFixed(d);
 const usd=v=>v==null?NA:`<span class="${v>0?"pos":v<0?"neg":""}">$${Number(v).toFixed(2)}</span>`;
 const idl=id=>`<a class="id" href="#" onclick="openEntry('${esc(id)}');return false">${esc(id)}</a>`;
 const STATUS={pending:"待入场",open:"持有中",settled:"已结算",void:"作废"};
-const SRC={main:"主管线",main_forced:"主管线·被迫",shadow:"影子",temp_shadow:"临时影子",playground:"Playground",benchmark:"基准",owner:"所有人实盘",evidence:"证据层",alert:"大行情警报",watch:"观察名单·触发",watch_counterfactual:"观察名单·立即入场对照"};
+const SRC={main:"主管线",main_forced:"主管线·被迫",shadow:"影子",temp_shadow:"临时影子",playground:"Playground",benchmark:"基准",owner:"所有人实盘",evidence:"证据层",alert:"大行情警报",watch:"观察名单·触发",watch_counterfactual:"观察名单·立即入场对照",baseline:"代码基线（只对照）"};
 async function j(url,opt){const r=await fetch(url,opt);if(r.status===404)return{available:false,reason:"未接入",_404:true};return r.json()}
 const loaded={};
 function show(t){TABS.forEach(([k])=>{$("#s-"+k).classList.toggle("on",k===t)});document.querySelectorAll("#nav button").forEach(b=>b.classList.toggle("on",b.dataset.t===t));try{localStorage.setItem("wb.tab",t)}catch(e){}if(!loaded[t]){loaded[t]=1;LOAD[t]()}}
@@ -181,6 +181,13 @@ async function loadArena(){
    <td class="num">${num(s.mean_brier,3)}</td><td class="num">${s.min_position_share==null?NA:(s.min_position_share*100).toFixed(0)+"%"}</td>
    <td>${r.last_run?`${esc(r.last_run.status)}${r.last_run.errors&&r.last_run.errors.length?` <span class="neg">${r.last_run.errors.length} 错误</span>`:""}`:NA}</td></tr>`}).join("");
   const others=(d.other_sources||[]).map(s=>`<tr><td>${SRC[s.source_type]||s.source_type}</td><td>${esc(s.source_id)}</td><td class="num">${s.records}</td><td class="num">${s.settled}</td><td class="num">${s.win_rate==null?NA:(s.win_rate*100).toFixed(0)+"%"}</td><td class="num">${pct(s.mean_net_return)}</td><td class="num">${num(s.mean_brier,3)}</td></tr>`).join("");
+  const cmp=d.comparison||{};const GRP={shadows:"长期影子",temp_shadows:"临时影子",playground:"Playground",main:"主管线"};
+  const wr=v=>v==null?NA:(v*100).toFixed(0)+"%";
+  const bl=(cmp.baselines||[]).map(r=>`<tr><td>${GRP[r.group]||esc(r.group)}</td><td>${esc(r.baseline)}</td><td class="num">${r.pairs}</td><td class="num">${pct(r.llm_mean_net)}</td><td class="num">${pct(r.baseline_mean_net)}</td><td class="num">${pct(r.mean_diff)}</td><td class="num">${wr(r.llm_win_rate)}</td><td class="num">${wr(r.baseline_win_rate)}</td><td class="num">${wr(r.llm_better_share)}</td></tr>`).join("");
+  const tg=(cmp.trend_tags||[]).map(r=>`<tr><td>${GRP[r.group]||esc(r.group)}</td><td>${r.direction==="long"?"做多":"做空"}</td><td>${esc(r.state)}</td><td class="num">${r.n}</td><td class="num">${pct(r.mean_net_return)}</td><td class="num">${wr(r.win_rate)}</td></tr>`).join("");
+  const cmpHtml=`<div class="card"><h2>LLM 与代码基线对照 <span class="mut">${esc(cmp.note||"")}</span></h2>
+   <h3>配对对照（同标的、同持有期、同交易日、次日开盘入场）</h3>${bl?`<div class="tw"><table><tr><th>来源</th><th>基线</th><th class="num">配对数</th><th class="num">LLM 平均净收益</th><th class="num">基线平均净收益</th><th class="num">平均差（LLM−基线）</th><th class="num">LLM 胜率</th><th class="num">基线胜率</th><th class="num">LLM 更好占比</th></tr>${bl}</table></div>`:'<div class="empty">无</div>'}
+   <h3>按决策时的趋势状态（只标注，不拦截）</h3>${tg?`<div class="tw"><table><tr><th>来源</th><th>方向</th><th>趋势状态</th><th class="num">已结算</th><th class="num">平均净收益</th><th class="num">胜率</th></tr>${tg}</table></div>`:'<div class="empty">还没有带趋势标签的已结算记录</div>'}</div>`;
   const tmp=await j("/api/wb/temp_shadows");
   const sc=s=>s?`${s.records} 笔，已结算 ${s.settled}，胜率 ${s.win_rate==null?"—":(s.win_rate*100).toFixed(0)+"%"}，平均净收益 ${s.mean_net_return==null?"—":(s.mean_net_return*100).toFixed(2)+"%"}`:'<span class="mut">还没有记录</span>';
   const ev=(tmp.events||[]).map(e=>`<tr><td>${e.status==="active"?'<span class="chip green">活跃</span>':'<span class="chip">退役</span>'}</td><td>${esc(e.type)}</td><td><b>${esc(e.title)}</b><div class="mut">${esc(e.summary||"")}</div></td><td>${esc((e.watchlist||[]).join(", "))}</td><td>${esc(e.spawned)} → ${esc(e.expires)}</td><td class="num">${num(e.impact)}</td><td>${sc(e.score)}</td></tr>`).join("");
@@ -193,7 +200,7 @@ async function loadArena(){
    <h3>挑战者 / beta 试验</h3>${tr?`<div class="tw"><table><tr><th>编号</th><th>类型</th><th>原影子</th><th>状态</th><th>期间</th><th>改动</th><th>结果</th></tr>${tr}</table></div>`:'<div class="empty">没有试验。发起 beta：python -m marketmind.shadows.v3.trials propose &lt;影子编号&gt; --note "改动说明"</div>'}</div>`;
   $("#s-arena").innerHTML=`<div class="card"><h2>影子竞技场 <span class="mut">最近运行 ${esc(d.run_date||"无")}；收益类指标只用已结算记录，点击一行查看该影子的全部账本记录</span></h2>
   <div class="tw"><table><tr><th>影子</th><th>组</th><th>名册</th><th class="num">记录</th><th class="num">待/持/结/废</th><th class="num">胜率</th><th class="num">平均净收益</th><th class="num">随机基准</th><th class="num">超额·市场</th><th class="num">超额·领域</th><th class="num">Brier</th><th class="num">最小仓位占比</th><th>最近交卷</th></tr>${body}</table></div></div>
-  ${tempHtml}<div class="card"><h2>其他来源</h2>${others?`<table><tr><th>类型</th><th>来源</th><th class="num">记录</th><th class="num">已结算</th><th class="num">胜率</th><th class="num">平均净收益</th><th class="num">Brier</th></tr>${others}</table>`:'<div class="empty">无</div>'}</div>`;
+  ${cmpHtml}${tempHtml}<div class="card"><h2>其他来源</h2>${others?`<table><tr><th>类型</th><th>来源</th><th class="num">记录</th><th class="num">已结算</th><th class="num">胜率</th><th class="num">平均净收益</th><th class="num">Brier</th></tr>${others}</table>`:'<div class="empty">无</div>'}</div>`;
 }
 
 // ── promotion ──
