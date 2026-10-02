@@ -15,6 +15,7 @@ openpyxl>=3.1.0
 Pillow>=10.0.0
 customtkinter>=5.2.0   # legacy desktop UI (frozen, see docs/SPEC_v3.md)
 akshare==1.18.97      # China market data (owner-approved 2026-09-29); pinned: upstream scrapers change often
+baostock>=0.9.4        # A-share daily bars, no key (owner-approved 2026-10-02; gateway/free_quotes.py)
 
 # Optional (guarded imports, degrade gracefully when absent)
 # sentence-transformers   # pipeline/tfidf_clustering.py embeddings

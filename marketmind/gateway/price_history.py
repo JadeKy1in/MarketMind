@@ -13,6 +13,9 @@ yfinance only as the last resort (owner decision 2026-09-29; Yahoo's series skip
 Nasdaq public historical API
 (api.nasdaq.com) as a fallback for US stocks/ETFs. No API keys. Returns None
 when every source fails — callers must report "data unavailable", never guess.
+Non-US fallbacks live in global_quotes.py and free_quotes.py (Stooq, baostock,
+FinMind, budget-guarded EODHD; 2026-10-02). Recent close-only bars are repaired from
+a second source when the closes agree (repair_close_only).
 
 Nasdaq caveats (verified live 2026-09-27): prices ARE split-adjusted (NVDA
 10:1 split on 2024-06-10 is continuous: 06-07 $120.888 -> 06-10 $121.79) but
@@ -129,17 +132,31 @@ async def get_price_history(ticker: str, years: int = 5) -> PriceHistory | None:
             # Tencent first: it covers HK/CN, and Eastmoney hosts failed with
             # RemoteProtocolError on 2026-09-28. Eastmoney stays for the futures, FX and
             # indices only it maps (from_tencent returns None for those).
+            # baostock (A-shares), Stooq (JP/HK/DE/UK, futures, FX, indices) and FinMind
+            # (Taiwan) added 2026-10-02 (gateway/free_quotes.py); each declines the rest.
+            from marketmind.gateway import free_quotes as fq
             from marketmind.gateway.global_quotes import from_eastmoney, from_tencent
             hist = await from_tencent(ticker, years)
             if hist is None:
+                hist = await fq.from_baostock(ticker, years)
+            if hist is None:
                 hist = await from_eastmoney(ticker, years)
+            if hist is None:
+                hist = await fq.from_stooq(ticker, years)
+            if hist is None:
+                hist = await fq.from_finmind(ticker, years)
     if hist is None:
         # last resort for every market; it declines what its plan does not cover
         from marketmind.gateway.global_quotes import from_twelvedata
         hist = await from_twelvedata(ticker, years)
     if hist is None:
+        # EODHD free plan: 20 calls a day (persisted budget), 1 year of history
+        from marketmind.gateway import free_quotes as fq
+        hist = await fq.from_eodhd(ticker, years)
+    if hist is None:
         logger.warning("No price history for %s — all sources failed", ticker)
     else:
+        await _repair_recent_close_only(hist)
         flagged = mark_close_only(hist.daily)
         if flagged:
             shown = ", ".join(flagged[-10:]) + (f" (+{len(flagged) - 10} earlier)"
@@ -570,6 +587,64 @@ def mark_close_only(daily: list[Bar]) -> list[str]:
         if b.close_only:
             flagged.append(b.date)
     return flagged
+
+
+# ── Close-only repair (2026-10-02) ──────────────────────────────────────────
+
+# A close-only bar is repaired only from a full bar of another source on the SAME date
+# whose close is within this relative distance of ours (|ref - ours| / ours <= 0.5%):
+# that confirms both describe the same session (a one-day shift or a different futures
+# contract after a roll usually differs by more) while allowing small adjustment-basis
+# differences between sources.
+REPAIR_CLOSE_TOLERANCE = 0.005
+# Only the last ~year of bars is repaired (ATR, stops, settlement and the 52-week range
+# use recent bars), so tickers whose close-only bars are all older cost no extra request.
+REPAIR_LOOKBACK_BARS = 260
+
+
+def repair_close_only(daily: list[Bar], reference: list[Bar],
+                      tolerance: float = REPAIR_CLOSE_TOLERANCE) -> list[str]:
+    """Fill open/high/low of close-only bars in `daily` (in place) from `reference`.
+
+    A bar is repaired only when the reference has a consistent, not close-only bar on the
+    same date and the two closes agree within `tolerance`. The reference open/high/low
+    are scaled by our_close / ref_close, so the repaired bar keeps OUR close and our
+    adjustment basis; its volume is the reference volume. Returns the repaired dates."""
+    ref = {b.date: b for b in reference}
+    fixed: list[str] = []
+    for b in daily:
+        if not is_close_only(b) or b.close <= 0:
+            continue
+        r = ref.get(b.date)
+        if r is None or is_close_only(r) or r.close <= 0:
+            continue
+        if not (0 < r.low <= min(r.open, r.close) and r.high >= max(r.open, r.close)):
+            continue
+        if abs(r.close - b.close) / b.close > tolerance:
+            continue
+        k = b.close / r.close
+        b.open, b.high, b.low = r.open * k, max(r.high * k, b.close), min(r.low * k, b.close)
+        b.volume = r.volume or 0.0
+        b.close_only = False
+        fixed.append(b.date)
+    return fixed
+
+
+async def _repair_recent_close_only(hist: PriceHistory) -> None:
+    """Repair hist's recent close-only bars from a second free source (free_quotes)."""
+    recent = hist.daily[-REPAIR_LOOKBACK_BARS:]
+    if not any(is_close_only(b) for b in recent):
+        return
+    from marketmind.gateway import free_quotes
+    ref = await free_quotes.repair_reference(hist.ticker, exclude=hist.source)
+    if ref is None:
+        return
+    fixed = repair_close_only(recent, ref.daily)
+    if fixed:
+        hist.weekly = to_weekly(hist.daily)
+        hist.source = f"{hist.source}+{ref.source}"
+        logger.info("%s: %d close-only bar(s) repaired from %s: %s", hist.ticker, len(fixed),
+                    ref.source, ", ".join(fixed[-10:]))
 
 
 def is_crypto_ticker(ticker: str) -> bool:

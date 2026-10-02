@@ -181,6 +181,18 @@ def _offline_global_quotes(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _offline_free_quotes(monkeypatch):
+    """Stooq / baostock / FinMind / EODHD (gateway/free_quotes.py) never hit the network
+    in tests; tests of those sources call the captured real functions with mocks."""
+    from marketmind.gateway import free_quotes
+
+    async def _none(ticker, years=5):
+        return None
+    for name in ("from_stooq", "from_baostock", "from_finmind", "from_eodhd"):
+        monkeypatch.setattr(free_quotes, name, _none)
+
+
+@pytest.fixture(autouse=True)
 def _no_real_claude(monkeypatch):
     """Tests never reach the owner's Claude subscription, whatever MARKETMIND_LLM
     the machine is set to (docs/LLM_PROVIDER.md); provider tests set it themselves."""
