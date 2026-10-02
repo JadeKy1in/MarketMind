@@ -1,0 +1,16 @@
+cost by asset type (LLM all):
+  etf: n=67 cost=+0.10% R0=+0.23% R1=+0.26% gross_R1=+0.36%
+  crypto: n=12 cost=+2.29% R0=-2.34% R1=-2.34% gross_R1=-0.04%
+  stock: n=57 cost=+0.10% R0=-0.97% R1=-0.98% gross_R1=-0.88%
+  future: n=2 cost=+0.04% R0=-3.94% R1=-1.03% gross_R1=-0.99%
+  unknown: n=6 cost=+0.20% R0=-0.23% R1=-0.50% gross_R1=-0.30%
+ex-crypto n 132 R0 -0.37% R1 -0.33% always_long -0.74% cost +0.10%
+long 98 R0 -0.98% R1 -0.95% settled R0 -1.72% 36
+short 46 R0 +0.41% R1 +0.46% settled R0 +0.78% 7
+R0 exit=stop: n=19 R0=-2.07% same-entry expiry/MTM=-1.79% share where holding beat exit=47%
+R0 exit=falsifier: n=9 R0=-2.05% same-entry expiry/MTM=-2.35% share where holding beat exit=33%
+R0 exit=target: n=5 R0=+1.07% same-entry expiry/MTM=+1.57% share where holding beat exit=60%
+R0 exit=expiry: n=10 R0=-0.40% same-entry expiry/MTM=-0.40% share where holding beat exit=0%
+hold<=1: 5
+settled by source: {'main': 1, 'main_forced': 1, 'shadow': 39, 'watch_counterfactual': 2}
+days held distribution R1 (bars to now): [0. 1. 4.]
