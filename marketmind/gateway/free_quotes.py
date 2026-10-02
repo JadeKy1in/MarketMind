@@ -412,11 +412,14 @@ EODHD_MAX_YEARS = 1               # free plan history depth
 _eodhd_disabled: str | None = None
 _eodhd_exhausted_logged: set[str] = set()
 
-_EODHD_SUFFIX = {"T": "TSE", "HK": "HK", "DE": "XETRA", "F": "F", "L": "LSE", "PA": "PA",
-                 "AS": "AS", "SW": "SW", "MI": "MI", "MC": "MC", "CO": "CO", "SS": "SHG",
-                 "SZ": "SHE", "TW": "TW", "KS": "KO", "KQ": "KQ", "NS": "NSE", "TO": "TO",
+# Only exchanges in EODHD's exchanges-list (checked live 2026-10-02, 70 codes): Tokyo,
+# Hong Kong, Milan, NSE India and the INDX index feed are not offered, so .T / .HK / .MI /
+# .NS tickers and ^indices are not requested (each 404 would still cost a daily call).
+_EODHD_SUFFIX = {"DE": "XETRA", "F": "F", "L": "LSE", "PA": "PA",
+                 "AS": "AS", "SW": "SW", "MC": "MC", "CO": "CO", "SS": "SHG",
+                 "SZ": "SHE", "TW": "TW", "KS": "KO", "KQ": "KQ", "TO": "TO",
                  "AX": "AU", "ST": "ST", "OL": "OL", "SA": "SA", "MX": "MX"}
-_EODHD_INDICES = {"^GSPC", "^N225", "^GDAXI", "^FTSE", "^HSI", "^FCHI"}
+_EODHD_INDICES: set[str] = set()
 
 
 def eodhd_symbol(ticker: str) -> str | None:
@@ -439,8 +442,6 @@ def eodhd_symbol(ticker: str) -> str | None:
         code, suffix = t.rsplit(".", 1)
         exch = _EODHD_SUFFIX.get(suffix)
         if exch is not None:
-            if suffix == "HK" and code.isdigit():
-                code = (code.lstrip("0") or "0").zfill(4)     # 09866 -> 9866, 700 -> 0700
             return f"{code}.{exch}"
     m = market_for(t)
     if m is UNKNOWN or m.code != "US":

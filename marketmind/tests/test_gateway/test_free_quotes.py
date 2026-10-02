@@ -233,11 +233,13 @@ async def test_finmind_works_without_token(monkeypatch):
 def test_eodhd_symbol_mapping():
     assert fq.eodhd_symbol("AAPL") == "AAPL.US" and fq.eodhd_symbol("BRK-B") == "BRK-B.US"
     assert fq.eodhd_symbol("BRK.B") == "BRK-B.US"
-    assert fq.eodhd_symbol("7203.T") == "7203.TSE" and fq.eodhd_symbol("SAP.DE") == "SAP.XETRA"
-    assert fq.eodhd_symbol("0700.HK") == "0700.HK" and fq.eodhd_symbol("09866.HK") == "9866.HK"
+    assert fq.eodhd_symbol("SAP.DE") == "SAP.XETRA"
     assert fq.eodhd_symbol("HSBA.L") == "HSBA.LSE" and fq.eodhd_symbol("600519.SS") == "600519.SHG"
     assert fq.eodhd_symbol("EURUSD=X") == "EURUSD.FOREX" and fq.eodhd_symbol("JPY=X") == "USDJPY.FOREX"
-    assert fq.eodhd_symbol("BTC-USD") == "BTC-USD.CC" and fq.eodhd_symbol("^GSPC") == "GSPC.INDX"
+    assert fq.eodhd_symbol("BTC-USD") == "BTC-USD.CC"
+    # not offered by EODHD (exchanges-list, 2026-10-02): no request, no wasted daily call
+    for t in ("7203.T", "0700.HK", "ENI.MI", "RELIANCE.NS", "^GSPC"):
+        assert fq.eodhd_symbol(t) is None
     for t in ("CL=F", "2222.SR", "^XYZ", ""):
         assert fq.eodhd_symbol(t) is None
 

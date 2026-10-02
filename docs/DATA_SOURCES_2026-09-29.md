@@ -63,6 +63,7 @@ await archive_daily(today: str | None = None, data_dir: Path | None = None, forc
 
 - **Stooq**（`STOOQ_API_KEY`）：密钥只能放在 URL（`apikey=`），所以不记录任何请求 URL；httpx 的 INFO 请求日志加了过滤器，把 `apikey=` / `api_token=` / `token=` 的值换成 `***`。错误都以 HTTP 200 + 文本返回，只解析表头以 `Date,Open,High,Low,Close` 开头的 CSV；验证页、额度用完、密钥无效 → 本次运行停用；"No data" → 只跳过这个标的。请求串行、间隔 1 秒。
 - **EODHD**（`EODHD_API_KEY`）：免费档每天 20 次、历史 1 年。每次请求前在 `altdata/eodhd/budget/` 用 O_EXCL 建一个 `<UTC 日期>.<序号>` 文件占位，最多 20 个，多进程也不会超；目录不可用时不请求（宁可少用）。旧日期的占位文件自动删除。401/402/403/429 → 本次运行停用。价格按 `adjusted_close / close` 缩放（拆股 + 分红调整，与 Yahoo 一致）。只在其他源都失败时用，不用于修补。
+- **EODHD 实测（2026-10-02，所有人已设密钥）**：SAP.DE 取到 253 根完整日线（近 1 年）；7203.T 回 404。交易所列表接口（exchanges-list）共 70 个代码，**没有东京、香港、米兰、印度 NSE 和 INDX 指数**，因此 .T / .HK / .MI / .NS 与 ^指数不再向 EODHD 请求（404 也算一次日额度）。日股、港股的第二来源仍缺（Stooq 拿不到密钥）。
 - **baostock**：同步库、全局 socket，所有调用在唯一工作线程里执行，超时 60 秒；超时后本次运行停用（线程可能卡住）。前复权（adjustflag=2）；停牌日（tradestatus=0）丢弃。
 - **FinMind**（可选 `FINMIND_TOKEN`，放 HTTP 头）：错误信息里的 `token_tail` 不写日志；"upper limit" → 本次运行停用。
 
