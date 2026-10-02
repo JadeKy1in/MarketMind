@@ -7,7 +7,9 @@ the code-chosen trade from the decision, else long SPY (SPEC_v3 L7).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+from datetime import datetime, timezone
 
 from marketmind.ledger.prices import PriceSource, latest_quotes
 from marketmind.ledger.settlement import target_session
@@ -97,6 +99,43 @@ def _forced_entry(pt, l3, snapshot_id: str | None) -> LedgerEntry:
 
 
 DEFAULT_ORIGIN = {"kind": "news"}
+TAG_FETCH_TIMEOUT_S = 120
+
+
+async def _tag_inputs(source: PriceSource, tickers: list[str]) -> dict:
+    """Daily bars for the trend tag / baselines: the same source the snapshot just read
+    (cached per process), bounded by a timeout; a failure leaves the ticker out."""
+    async def one(t):
+        try:
+            return t, await source.daily_bars(t)
+        except Exception:
+            logger.warning("Ledger: bars for the trend tag of %s unavailable", t, exc_info=True)
+            return t, None
+    try:
+        got = await asyncio.wait_for(asyncio.gather(*(one(t) for t in dict.fromkeys(tickers))),
+                                     timeout=TAG_FETCH_TIMEOUT_S)
+    except Exception:
+        logger.warning("Ledger: trend-tag bars timed out", exc_info=True)
+        return {}
+    return dict(got)
+
+
+def _tag_and_baselines(store: LedgerStore, entries: list[LedgerEntry], daily: dict,
+                       quotes: dict, created_at: str | None) -> list[LedgerEntry]:
+    """Trend tag on every record (annotate only) and the paired code baselines
+    (docs/S7_DESIGN.md §六). Never raises: tagging must not fail the submission."""
+    from marketmind.ledger.baselines import MAIN_SOURCES, tag_and_build
+    from marketmind.ledger.trend_tag import TrendTagger
+    today = (created_at or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))[:10]
+    try:
+        tagger = TrendTagger(today)
+    except Exception:
+        logger.error("Ledger: trend tagger unavailable", exc_info=True)
+        tagger = None
+    refs = {t: q[0] for t, q in quotes.items() if q and q[0]}
+    sources = {t: q[2] for t, q in quotes.items() if q and q[2]}
+    return tag_and_build(store, entries, daily, tagger, refs, today, with_baselines=True,
+                         sources=sources, long_share_sources=MAIN_SOURCES)
 
 
 async def record_main_decision(decision, l3, store: LedgerStore, source: PriceSource,
@@ -120,7 +159,8 @@ async def record_main_decision(decision, l3, store: LedgerStore, source: PriceSo
                        picked.ticker, picked.source)
         paper = picked
     tickers = [c.ticker.upper() for c in cards] or [paper.ticker.upper()]
-    snapshot_id = store.save_snapshot(await latest_quotes(source, tickers), taken_at=created_at)
+    quotes = await latest_quotes(source, tickers)
+    snapshot_id = store.save_snapshot(quotes, taken_at=created_at)
     if cards:
         entries = [_card_entry(c, snapshot_id) for c in cards]
     else:
@@ -138,11 +178,16 @@ async def record_main_decision(decision, l3, store: LedgerStore, source: PriceSo
             logger.warning("Ledger: rejected %s %s: %s", e.source_type, e.ticker, exc)
     if not valid:
         return []
-    ids = store.add_submission(valid, target_session, created_at=created_at)
+    baselines = _tag_and_baselines(store, valid, await _tag_inputs(source, tickers), quotes,
+                                   created_at)
+    ids = store.add_submission(valid, target_session, created_at=created_at,
+                               companions=baselines)
     if ids is None:
         logger.warning("Ledger: main pipeline already recorded this session; "
                        "duplicate %s submission (%s) not recorded",
                        valid[0].source_type, ", ".join(tickers))
         return []
-    logger.info("Ledger: recorded %d entries (%s)", len(ids), ", ".join(tickers))
+    ids = ids[:len(valid)]                       # the baselines follow the decisions
+    logger.info("Ledger: recorded %d entries (%s) + %d code baselines", len(ids),
+                ", ".join(tickers), len(baselines))
     return ids

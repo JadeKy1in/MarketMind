@@ -15,7 +15,7 @@ from pathlib import Path
 
 from marketmind.ecosystem import config as C
 from marketmind.ecosystem.health import Facts, evaluate, summary_line
-from marketmind.ledger.store import LedgerEntry, LedgerStore
+from marketmind.ledger.store import LedgerEntry, LedgerStore, is_comparison
 
 log = logging.getLogger(__name__)
 
@@ -35,8 +35,9 @@ def ny_today() -> str:
     return ny_date()
 
 
-def load_entries(ledger_path: Path) -> list[LedgerEntry]:
-    """Every ledger row, opened read-only (the monitor never writes the ledger)."""
+def load_entries(ledger_path: Path, include_baselines: bool = False) -> list[LedgerEntry]:
+    """Every ledger row, opened read-only (the monitor never writes the ledger).
+    Comparison-only baseline rows are left out unless asked for (LedgerStore.list)."""
     if not ledger_path.exists():
         return []
     conn = sqlite3.connect(f"file:{ledger_path.as_posix()}?mode=ro", uri=True, timeout=30)
@@ -45,7 +46,8 @@ def load_entries(ledger_path: Path) -> list[LedgerEntry]:
         rows = conn.execute("SELECT * FROM ledger ORDER BY created_at, entry_id").fetchall()
     finally:
         conn.close()
-    return [LedgerStore._from_row(r) for r in rows]
+    out = [LedgerStore._from_row(r) for r in rows]
+    return out if include_baselines else [e for e in out if not is_comparison(e)]
 
 
 def _trend_states(root: Path, days: set[str]) -> dict[str, dict[str, str]]:

@@ -161,6 +161,48 @@
   - 内置汇报员（`api/reporter.py`）：问题里提到标的或资产组时，数据里加 `advisor_opinions`，汇报员照常引用记录编号（不新增 LLM 调用）；接口返回值也带 `advisor_opinions`，没有 LLM 密钥时同样返回，页面可直接显示。条件信号的编号不给模型，避免被编号核对误判。
 - 测试：`marketmind/tests/test_shadows_v3/test_elite.py`。
 
+## 六、趋势标签与可比代码基线（2026-10-02，只记账）
+
+所有人决定（2026-10-02）：(1) 趋势标签**只标注、不拦截**任何交易；(2) 可比基线**只记账**：永不交易、永不作为建议展示，只出现在对照视图。背景见只读分析 `docs/analysis/2026-10-02_exit_baseline/`（所有人本机，未入库；LLM 方向在该样本里不优于 20 日动量与趋势状态机，样本极小）。代码：`ledger/trend_tag.py`、`ledger/baselines.py`、`ledger/comparison.py`；测试：`tests/test_ledger/test_baselines.py`、`test_baseline_exclusion.py`。
+
+### 趋势标签 `meta.trend`
+
+- **范围**：所有 LLM 决策写入账本的记录——长期影子、临时影子（事件 / 变体）、条件信号触发的记录、Playground（`playground/ledger_bridge.py`）、主管线 `main` 与 `main_forced`（`ledger/recorder.py`）。code 生成的 `missed_path`、观察名单、警报、随机基准不打标签。
+- **口径**：与 `docs/TREND_DESIGN.md` 同一个状态机（`trend.state.compute_states`，完整规则：12 个月动量 > T-bill、收盘 > SMA200、55 日收盘突破、吊灯止损），用决策时最后一根完整日线。字段：`state`（TREND / WATCH / CASH / EXIT / UNAVAILABLE）、`as_of`、`event`（当天 ENTRY / EXIT 时）、`reason`（缺哪条或为何不可用）、`hurdle`、`hurdle_source`、`v`。
+- **数据**：只用本次运行已取到的 5 年日线（影子上下文、主管线快照用的同一价格源，进程内缓存）；不在上下文里的标的走同一缓存，超时 120 秒。历史不足（美股 < 260、加密 < 366 根）或最后一根完整日线超过 7 天 → UNAVAILABLE 并写原因。**T-bill 门槛**取最近一份 `data/trend/<日期>.json`（≤ 10 天）里的值；没有则用 0 并在 `hurdle_source` 注明，不联网取 ^IRX。
+- **不阻断**：任何异常只记日志，标签记为 UNAVAILABLE（`reason` 写错误类型），提交照常。
+
+### 可比基线（`source_type = "baseline"`）
+
+- **配对对象**：每条长期影子决策（含条件信号触发的记录）与每条主管线记录（`main` / `main_forced`）。临时影子、Playground 不配基线（变体与父影子比，Playground 已有随机基准）。原有 `random_same_domain` 随机基准不变。
+- **共同规则**：同标的、同 `hold_bars`、同一次 `add_submission` 事务（同一 `created_at`，所以同一交易日；重复提交时决策、随机基准、基线都不写）、入场一律 `next_open`（主管线交易卡是区间入场，基线仍按次日开盘，比较时注意这一差别）、确信度 0.5 且标 `confidence_is_default`（不进 Brier）、仓位与配对决策相同。`source_id = baseline:<kind>:<配对 source_id>`；`meta = {baseline, pairs_with: 配对 entry_id（插入前预先分配）, pairs_key: [source_id, ticker, run_date], run_date, paired_source_type}`。
+- **四种**：
+  - `always_long`：做多，只到期。
+  - `momentum20`：20 个交易日收益（完整日线 close[-1]/close[-21]−1）为正做多、为负做空，只到期；数据不足、过旧（> 7 天）或恰为 0 时不写。
+  - `trend`：配对决策的趋势标签为 TREND 时做多、只到期。**非 TREND 时持现金**：账本只有 long / short，结算（`settlement._simulate`、`apply_outcome`）按方向符号计收益，没有能结算为 0 的 flat 方向；加 flat 要改结算与所有按方向统计的消费者，所以**不写记录**，对照时把 CASH / WATCH / EXIT 记为收益 0；UNAVAILABLE 或没有标签的决策不参与 trend 对照。
+  - `matched_random`：P(做多) = 该来源最近 60 条记录（今天这批在前，不足再取历史；没有记录时 0.5）的做多占比；随机数种子 `run_date:source_id:ticker`（同一批同一标的出现多次时加序号），可复现。止损 / 目标与配对决策的百分比距离相同（距离参照：区间入场取区间中点，否则取决策时收盘），围绕决策时收盘价按抽到的方向镜像；距离 ≥ 90% 的价位不镜像；不设可证伪条件。
+- **结算**：与所有记录相同（`settle_all` 通过 `unsettled()` 与 `list(..., include_baselines=True)` 包含基线）。
+
+### 排除（基线不改变任何其他输出）
+
+- **主机制**：`LedgerStore.list()` 默认不返回 `COMPARISON_SOURCES`（`baseline`），除非 `include_baselines=True` 或显式 `source_type="baseline"`。所以晋升（`promotion/runner.py`：候选、DSR `trial_ids`、交易日历）、警报投票者（`alerts`）、持仓巡检替代观点（`holdings/inspect.py`）、变体试验日历（`shadows/v3/trials.py`）、白箱账本页 / 健康页 / 来源归因、汇报员上下文、日报影子统计都看不到基线。
+- **按来源类型过滤的消费者**本来就不含基线：fade_master 共识（`_previous_consensus` 只读 `shadow`）、自我反馈（`shadow` / `benchmark`）、顾问对话（`elite.py`）、Playground、证据层。
+- **原始 SQL 读者**：生态监测 `ecosystem/runner.load_entries` 默认剔除基线（自我反馈命令行也用它）。
+- **双保险**：`promotion.metrics.trading_calendar` 与 `ecosystem.health.trading_calendar` 跳过基线行（调用方传入全部行时也不会多出交易日）。
+- 测试 `test_baseline_exclusion.py`：同一账本加 / 不加基线（退出日放在周六、盈亏放大），晋升评审输出与 `state.json`、生态报告、共识、自我反馈对照完全相同。
+
+### 对照视图
+
+- 白箱"影子竞技场"接口 `/api/wb/arena` 新增 `comparison`（基线行不进 `other_sources` 评分表）：
+  - `baselines`：按来源组（长期影子 / 主管线）× 基线种类，已结算配对的配对数、LLM 与基线平均净收益、平均差（LLM − 基线）、双方胜率、LLM 更好的占比；
+  - `trend_tags`：已结算的 LLM 记录按来源组 × 方向 × 决策时趋势状态的笔数、平均净收益、胜率。
+- 日报事实 `ledger_comparison.line`：代码写好的一行，汇报员在"影子动向"末尾原样转述。
+
+### 规模
+
+- 每天约 60 条影子 + 主管线决策 × 每条 3–4 条基线（`trend` 只在 TREND 时写，momentum 偶尔缺）≈ 200 行 / 天（上限 4 × 决策数）。
+- 在实盘账本副本上模拟 1 年（7.2 万行基线，临时目录，未动实盘库）：默认 `list()` 不受影响（0.06 秒）；`unsettled()` 0.11 秒；含基线的全量读取约 4 秒（竞技场接口与结算的两次已结算循环各一次），`comparison.compute` 0.14 秒。一年内可接受；超过后可改为只读需要的列。
+
 ## 运行顺序（每日）
 
 结算 → 新闻 → 长期影子 + 活跃临时影子（后台）+ 证据层（后台）→ 主管线 → missed_path 记录 → 等待影子 → 持仓巡检 → **晋升评审**（含 §三 / §四 诊断，失败不影响评审）→ 警报（读最新顾问名单）。

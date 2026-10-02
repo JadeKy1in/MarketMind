@@ -222,6 +222,16 @@ def _ledger_entry(sig: dict, bar_date: str, detail: str, today: str,
     )
 
 
+def _tag_and_baselines(store: LedgerStore, entry: LedgerEntry, hist, bars: list[Bar], tagger,
+                       today: str) -> list[LedgerEntry]:
+    """Trend tag (annotate only) and, for a long-term shadow, the code baselines."""
+    from marketmind.ledger.baselines import tag_and_build
+    return tag_and_build(store, [entry], {entry.ticker: getattr(hist, "daily", None) or bars},
+                         tagger, {entry.ticker: bars[-1].close}, today,
+                         with_baselines=entry.source_type == "shadow",
+                         sources={entry.ticker: getattr(hist, "source", None) or ""})
+
+
 # ── daily check ──────────────────────────────────────────────────────────
 
 def tickers_to_check(path: Path, shadow_ids: set[str]) -> list[str]:
@@ -233,13 +243,16 @@ def tickers_to_check(path: Path, shadow_ids: set[str]) -> list[str]:
 
 
 def check(path: Path, store: LedgerStore, histories: dict, *, shadow_ids: set[str],
-          retired: set[str] | frozenset = frozenset(), today: str, created_at: str) -> dict:
+          retired: set[str] | frozenset = frozenset(), today: str, created_at: str,
+          tagger=None) -> dict:
     """Evaluate the open signals of `shadow_ids` on their completed bars.
 
     `histories`: ticker -> PriceHistory (None / missing = no data: keeps waiting).
     Signals of retired shadows are cancelled; signals past their unchecked deadline
     expire. Returns {"triggered": [...], "expired": [...], "cancelled": [...],
     "waiting": n, "unavailable": [tickers]}; triggered rows carry entry_id.
+    A triggered record gets the trend tag (`tagger`, ledger.trend_tag) and, for a
+    long-term shadow, its paired code baselines in the same transaction (ledger.baselines).
     """
     report = {"triggered": [], "expired": [], "cancelled": [], "waiting": 0, "unavailable": []}
     if not path.exists():
@@ -278,8 +291,11 @@ def check(path: Path, store: LedgerStore, histories: dict, *, shadow_ids: set[st
             last = bars[-1]
             src = getattr(histories.get(t), "source", None)
             snap = store.save_snapshot({t: (last.close, last.date, src)}, taken_at=created_at)
-            entry_id = store.add(_ledger_entry(sig, bar, detail, today, snap),
-                                 created_at=created_at)
+            entry = _ledger_entry(sig, bar, detail, today, snap)
+            companions = _tag_and_baselines(store, entry, histories.get(t), bars, tagger, today)
+            # no session key: a triggered signal never blocks or satisfies the daily decision
+            entry_id = store.add_submission([entry], lambda e: None, created_at=created_at,
+                                            companions=companions)[0]
             sig["entry_id"] = entry_id
             events.append(_close(sig, TRIGGERED, today, created_at, bar, detail))
             report["triggered"].append(_brief(sig) | {"bar": bar, "entry_id": entry_id,

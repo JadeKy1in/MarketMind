@@ -19,7 +19,16 @@ from typing import Callable
 logger = logging.getLogger("marketmind.ledger.store")
 
 SOURCE_TYPES = ("main", "main_forced", "shadow", "temp_shadow", "playground", "benchmark", "owner",
-                "evidence", "alert", "watch", "watch_counterfactual")
+                "evidence", "alert", "watch", "watch_counterfactual", "baseline")
+# Comparison-only records (docs/S7_DESIGN.md §六, owner decision 2026-10-02): code baselines
+# paired with each LLM decision. Settled like every record, never traded or shown as
+# advice, and left out of every other consumer: `list()` hides them unless asked for.
+COMPARISON_SOURCES = ("baseline",)
+
+
+def is_comparison(e: "LedgerEntry") -> bool:
+    """A comparison-only baseline row (excluded from scores, voters, calendars, ...)."""
+    return e.source_type in COMPARISON_SOURCES
 ENTRY_RULES = ("next_open", "zone")
 # pending: waiting for the entry fill; open: filled, not yet exited;
 # settled: exited and scored; void: never filled within the window.
@@ -288,7 +297,11 @@ class LedgerStore:
         return self._from_row(row) if row else None
 
     def list(self, status: str | tuple[str, ...] | None = None,
-             source_type: str | None = None) -> list[LedgerEntry]:
+             source_type: str | None = None,
+             include_baselines: bool = False) -> list[LedgerEntry]:
+        """Records, oldest first. Comparison-only baseline rows (COMPARISON_SOURCES) are
+        left out unless `include_baselines` or `source_type` names them, so no score,
+        calendar, voter or view picks them up by accident."""
         sql, args = "SELECT * FROM ledger WHERE 1=1", []
         if status:
             statuses = (status,) if isinstance(status, str) else tuple(status)
@@ -297,12 +310,29 @@ class LedgerStore:
         if source_type:
             sql += " AND source_type = ?"
             args.append(source_type)
+        elif not include_baselines:
+            sql += f" AND source_type NOT IN ({', '.join('?' for _ in COMPARISON_SOURCES)})"
+            args.extend(COMPARISON_SOURCES)
         sql += " ORDER BY created_at, entry_id"
         with self._connect() as conn:
             return [self._from_row(r) for r in conn.execute(sql, args).fetchall()]
 
     def unsettled(self) -> list[LedgerEntry]:
-        return self.list(status=UNSETTLED)
+        """Every record still to settle, baselines included (settlement settles all)."""
+        return self.list(status=UNSETTLED, include_baselines=True)
+
+    def recent_directions(self, source_types: tuple[str, ...], source_id: str,
+                          limit: int) -> list[str]:
+        """Directions of the newest `limit` records of one source (newest first)."""
+        if limit <= 0:
+            return []
+        marks = ", ".join("?" for _ in source_types)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT direction FROM ledger WHERE source_type IN ({marks}) AND source_id = ? "
+                "ORDER BY created_at DESC, entry_id DESC LIMIT ?",
+                (*source_types, source_id, int(limit))).fetchall()
+        return [r[0] for r in rows]
 
     def snapshot(self, snapshot_id: str) -> dict[str, dict]:
         with self._connect() as conn:

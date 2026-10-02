@@ -25,8 +25,10 @@ from pathlib import Path
 
 from marketmind.gateway import llm_trace, usage_tracker
 from marketmind.gateway.price_history import get_price_histories
+from marketmind.ledger import baselines as baselines_mod
 from marketmind.ledger.settlement import target_session
 from marketmind.ledger.store import LedgerEntry, LedgerStore
+from marketmind.ledger.trend_tag import TrendTagger
 from marketmind.shadows.v3 import pending_signals
 from marketmind.shadows.v3 import roster as roster_mod
 from marketmind.shadows.v3 import self_feedback
@@ -57,6 +59,7 @@ class ShadowResult:
     status: str                      # submitted | missed | skipped | duplicate
     entry_ids: list[str] = field(default_factory=list)
     benchmark_id: str | None = None
+    baseline_ids: list[str] = field(default_factory=list)   # code baselines (comparison only)
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     attempts: int = 0
@@ -227,14 +230,14 @@ async def decide(ctx: ShadowContext, call=_call_llm) -> tuple[ParseResult, list[
 
 
 async def _check_pending(store: LedgerStore, entries: list, retired: set[str], today: str,
-                         created_at: str, path: Path) -> dict:
+                         created_at: str, path: Path, tagger: TrendTagger | None = None) -> dict:
     """Trigger check of the run's shadows' conditional signals; never fails the run."""
     try:
         ids = {e.shadow_id for e in entries}
         tickers = pending_signals.tickers_to_check(path, ids)
         histories = await get_price_histories(tickers) if tickers else {}
         out = pending_signals.check(path, store, histories, shadow_ids=ids, retired=retired,
-                                    today=today, created_at=created_at)
+                                    today=today, created_at=created_at, tagger=tagger)
     except Exception as exc:
         logger.error("conditional-signal check failed", exc_info=True)
         return {"error": f"{type(exc).__name__}: {exc}"}
@@ -270,6 +273,37 @@ async def _derivatives_lines(todo: list, histories: dict, today: str, fetch=None
     return out
 
 
+TAG_FETCH_TIMEOUT_S = 120
+
+
+async def _trend_inputs(tickers: list[str], histories: dict) -> dict:
+    """Histories for tickers the run did not fetch up front (off-context picks): the
+    gateway cache already holds them, so this is bounded and normally no network.
+    Failure leaves them out (their tag says UNAVAILABLE)."""
+    missing = [t for t in dict.fromkeys(tickers) if t not in histories]
+    if not missing:
+        return histories
+    try:
+        got = await asyncio.wait_for(get_price_histories(missing), timeout=TAG_FETCH_TIMEOUT_S)
+    except Exception:
+        logger.warning("trend tag: histories for %s unavailable", ", ".join(missing),
+                       exc_info=True)
+        return histories
+    return {**histories, **{t: h for t, h in (got or {}).items() if t in missing}}
+
+
+def tag_and_baselines(store: LedgerStore, records: list[LedgerEntry], histories: dict,
+                      tagger: TrendTagger | None, ref_prices: dict, today: str,
+                      with_baselines: bool) -> list[LedgerEntry]:
+    """Trend tag on every record and, for a long-term shadow, its code baselines
+    (ledger.baselines.tag_and_build; never raises)."""
+    daily = {r.ticker: (h.daily if (h := histories.get(r.ticker)) is not None else None)
+             for r in records}
+    sources = {t: h.source for t in daily if (h := histories.get(t)) is not None}
+    return baselines_mod.tag_and_build(store, records, daily, tagger, ref_prices, today,
+                                       with_baselines, sources=sources)
+
+
 def _benchmark_entry(ctx: ShadowContext, holds: list[int], today: str,
                      snapshot_id: str) -> LedgerEntry | None:
     """Random same-domain pick: seeded by date + shadow id so it is reproducible."""
@@ -303,8 +337,13 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
     entries = [e for e in entries if e.shadow_id not in retired]
     report = RunReport(today)
     pending_path = pending_path or pending_signals.default_path()
+    try:
+        tagger = TrendTagger(today)
+    except Exception:
+        logger.error("trend tagger unavailable; records are tagged UNAVAILABLE", exc_info=True)
+        tagger = None
     report.pending = await _check_pending(store, entries, retired, today, created_at,
-                                          pending_path)
+                                          pending_path, tagger)
     done = _already_recorded(store, entries, created_at)
     todo = []
     for e in entries:
@@ -409,9 +448,16 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
         # random benchmarks pair with long-term shadows; trials compare with their parent
         bench = (_benchmark_entry(ctx, [d.hold_days for d in parsed.decisions], today, snapshot_id)
                  if ctx.entry.source_type == "shadow" else None)
-        # one transaction: a duplicate session writes neither the calls nor the benchmark
+        # trend tag on every record; code baselines for long-term shadows (ledger only)
+        tag_hist = await _trend_inputs([r.ticker for r in records], histories)
+        base = tag_and_baselines(store, records, tag_hist, tagger,
+                                 {**ctx.closes, **ctx.off_context}, today,
+                                 with_baselines=ctx.entry.source_type == "shadow")
+        # one transaction: a duplicate session writes neither the calls nor the
+        # benchmark nor the baselines
+        companions = ([bench] if bench is not None else []) + base
         ids = store.add_submission(records, daily_session, created_at=created_at,
-                                   companions=[bench] if bench is not None else [])
+                                   companions=companions)
         if ids is None:
             res.status = "duplicate"
             sessions = sorted({s for r in records if (s := target_session(r))})
@@ -422,6 +468,7 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
             return res
         res.entry_ids = ids[:len(records)]
         res.benchmark_id = ids[len(records)] if bench is not None else None
+        res.baseline_ids = ids[len(records) + (bench is not None):]
         if parsed.conditionals:          # only with a recorded submission
             try:
                 res.pending_ids, warn = pending_signals.register(

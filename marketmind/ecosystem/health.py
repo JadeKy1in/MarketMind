@@ -20,7 +20,7 @@ from scipy import stats
 
 from marketmind.alerts.asset_groups import asset_group
 from marketmind.ecosystem import config as C
-from marketmind.ledger.store import LedgerEntry
+from marketmind.ledger.store import LedgerEntry, is_comparison
 
 NEW_YORK = ZoneInfo("America/New_York")
 SIGN = {"long": 1, "short": -1}
@@ -575,8 +575,10 @@ def check_degradation(entries: list[LedgerEntry], rows: list[LedgerEntry], run_d
 # ── Everything ──────────────────────────────────────────────────────────
 
 def trading_calendar(entries: list[LedgerEntry], rows: list[LedgerEntry], today: str) -> list[str]:
-    """Exit dates of settled rows (any source) plus the actors' decision days, <= today."""
-    days = {e.exit_date[:10] for e in entries if e.status == "settled" and e.exit_date}
+    """Exit dates of settled rows (any source but comparison-only baselines) plus the
+    actors' decision days, <= today."""
+    days = {e.exit_date[:10] for e in entries
+            if e.status == "settled" and e.exit_date and not is_comparison(e)}
     days |= {day_of(e) for e in rows}
     return sorted(d for d in days if d and d <= today)
 

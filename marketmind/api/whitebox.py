@@ -17,7 +17,7 @@ from pathlib import Path
 from marketmind.runtime_paths import claude_dir
 
 from marketmind.ledger.scoreboard import PROBATION_DAYS, benchmark_id_for, score, scoreboard
-from marketmind.ledger.store import LedgerStore, default_ledger_path
+from marketmind.ledger.store import LedgerStore, default_ledger_path, is_comparison
 
 logger = logging.getLogger("marketmind.api.whitebox")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -121,9 +121,17 @@ def _latest_run() -> tuple[str | None, list[dict]]:
 
 def get_arena() -> dict:
     from marketmind.shadows.v3 import roster as roster_mod
+    from marketmind.ledger import comparison
     store = _store()
-    entries = store.list() if store else []
+    ledger_rows = store.list(include_baselines=True) if store else []
+    # code baselines appear only in the comparison block, never as a scored source
+    entries = [e for e in ledger_rows if not is_comparison(e)]
     scores = {(s.source_type, s.source_id): s for s in scoreboard(entries)}
+    try:
+        comp = comparison.compute(ledger_rows)
+    except Exception:
+        logger.error("ledger comparison failed", exc_info=True)
+        comp = None
     run_day, run_results = _latest_run()
     run_by_id = {r.get("shadow_id"): r for r in run_results}
     retired = roster_mod.retired_ids(data_dir())
@@ -147,7 +155,7 @@ def get_arena() -> dict:
         })
     others = [s.to_dict() for k, s in scores.items() if k[0] not in ("shadow", "benchmark")]
     return {"available": store is not None, "run_date": run_day, "shadows": rows,
-            "other_sources": others}
+            "other_sources": others, "comparison": comp}
 
 
 STAGE_CN = {"probation": "见习", "formal": "正式", "advisor": "顾问", "paused": "暂停",
