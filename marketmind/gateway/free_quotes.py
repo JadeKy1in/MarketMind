@@ -31,7 +31,6 @@ import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import redirect_stdout
 from datetime import date, datetime, timedelta, timezone
 
 import httpx
@@ -289,8 +288,9 @@ def parse_baostock(rows) -> list:
 
 def _baostock_sync(code: str, start: str, end: str) -> list:
     import baostock as bs
-    with redirect_stdout(io.StringIO()):          # it prints "login success!"
-        lg = bs.login()
+    # it prints "login success!"; not silenced: redirect_stdout swaps sys.stdout for the
+    # whole process, and this runs in a worker thread while the run prints step lines
+    lg = bs.login()
     if str(lg.error_code) != "0":
         raise RuntimeError(f"login failed: {lg.error_code} {lg.error_msg}")
     try:
@@ -304,8 +304,7 @@ def _baostock_sync(code: str, start: str, end: str) -> list:
             rows.append(rs.get_row_data())
         return rows
     finally:
-        with redirect_stdout(io.StringIO()):
-            bs.logout()
+        bs.logout()
 
 
 async def from_baostock(ticker: str, years: int = 5):
