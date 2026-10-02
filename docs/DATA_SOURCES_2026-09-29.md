@@ -37,6 +37,43 @@ await archive_daily(today: str | None = None, data_dir: Path | None = None, forc
 
 同一天重复调用幂等（当天已完整就跳过）。存档没跑时，影子 feed 会现场抓一次榜单（不写盘），并标注"today's archive has not run yet"。
 
+## 4. 免费行情源（2026-10-02 新增）
+
+> 所有人 2026-10-02 批准接入 Stooq、EODHD、baostock、FinMind（并批准新依赖 baostock）。代码 `gateway/free_quotes.py`，接线在 `gateway/price_history.get_price_history`。缺环境变量的源直接跳过（每次运行一条 debug 日志）；任何失败返回 None，换下一个源，不估算。
+
+### 4.1 本机实测（2026-10-02，利雅得网络）
+
+| 源 | 可达 | 实测结果 |
+|---|---|---|
+| Stooq `stooq.com/q/d/l/` | TCP/TLS 可达 | 不带密钥（以及带无效 `apikey`）一律 HTTP 200 + HTML 浏览器 JS 验证页（SHA-256 工作量证明），不是 CSV。带有效密钥是否放行**未验证**（没有密钥）。代码不破解验证，遇到即本次运行停用 Stooq 并记一条警告。curl 需 `--ssl-no-revoke`（Windows 吊销检查服务器不可达），Python httpx 不受影响。 |
+| EODHD `eodhd.com/api/eod/` | 可达 | 不带 / 无效密钥：HTTP 401，正文 `Unauthenticated`。成功格式（文档）：JSON 数组 `date, open, high, low, close, adjusted_close, volume`。 |
+| baostock 0.9.4（pip 安装） | 可达 | 登录约 1 秒；`sh.600519` 前复权日线正常（2026-09-30 收 1258.62）；不存在的代码返回空结果、error_code 0。 |
+| FinMind `api.finmindtrade.com/api/v4/data` | 可达 | 无 token 可用：`TaiwanStockPrice` 返回 `{"msg":"success","status":200,"data":[{date, open, max, min, close, Trading_Volume, ...}]}`；复权数据集 `TaiwanStockPriceAdj` 回 "Your level is free"（需付费档）；无效 token 回 `{"msg":"Token is illegal.","status":400,"token_tail":"..."}`。 |
+
+### 4.2 接线顺序
+
+- A 股：Yahoo → 腾讯 → **baostock** → 东方财富 → Twelve Data → **EODHD**。
+- 港股：Yahoo → 腾讯 → 东方财富 → **Stooq** → EODHD。
+- 日股（.T）、德国（.DE Xetra）、英国（.L）：Yahoo → **Stooq** → Twelve Data → EODHD。其他欧洲交易所 Stooq 没有，只走 Twelve Data / EODHD。
+- 期货（CL、NG、GC、SI、HG、PL、PA）、外汇、主要指数（^N225、^GDAXI、^FTSE、^HSI、^GSPC、^FCHI）：Yahoo → 东方财富 → **Stooq**。ZF / ZN 等利率期货 Stooq 代码未核实，不映射。
+- 台股（.TW / .TWO）：Yahoo → **FinMind** → EODHD。FinMind 价格**未做除息调整**（与 Nasdaq 备选相同）。
+- 美股不变（Alpaca → Yahoo → Nasdaq → Twelve Data），最后加 **EODHD**。
+
+### 4.3 各源要点
+
+- **Stooq**（`STOOQ_API_KEY`）：密钥只能放在 URL（`apikey=`），所以不记录任何请求 URL；httpx 的 INFO 请求日志加了过滤器，把 `apikey=` / `api_token=` / `token=` 的值换成 `***`。错误都以 HTTP 200 + 文本返回，只解析表头以 `Date,Open,High,Low,Close` 开头的 CSV；验证页、额度用完、密钥无效 → 本次运行停用；"No data" → 只跳过这个标的。请求串行、间隔 1 秒。
+- **EODHD**（`EODHD_API_KEY`）：免费档每天 20 次、历史 1 年。每次请求前在 `altdata/eodhd/budget/` 用 O_EXCL 建一个 `<UTC 日期>.<序号>` 文件占位，最多 20 个，多进程也不会超；目录不可用时不请求（宁可少用）。旧日期的占位文件自动删除。401/402/403/429 → 本次运行停用。价格按 `adjusted_close / close` 缩放（拆股 + 分红调整，与 Yahoo 一致）。只在其他源都失败时用，不用于修补。
+- **baostock**：同步库、全局 socket，所有调用在唯一工作线程里执行，超时 60 秒；超时后本次运行停用（线程可能卡住）。前复权（adjustflag=2）；停牌日（tradestatus=0）丢弃。
+- **FinMind**（可选 `FINMIND_TOKEN`，放 HTTP 头）：错误信息里的 `token_tail` 不写日志；"upper limit" → 本次运行停用。
+
+### 4.4 收盘价修补（close-only bars）
+
+- 触发：最终序列最近 260 根日线（`REPAIR_LOOKBACK_BARS`）里有 close-only bar（O=H=L=C 且无成交量）。更早的不修，不发请求。
+- 参照源：Stooq → baostock（A 股）→ FinMind（台股）→ 腾讯（港股 / A 股），跳过与主序列相同的源；不用 EODHD。
+- 规则（`price_history.repair_close_only`）：同一日期、参照 bar 自身不是 close-only 且 low ≤ min(open, close)、high ≥ max(open, close)，并且两边收盘价相对差 ≤ **0.5%**（`REPAIR_CLOSE_TOLERANCE`）才修。参照的 O/H/L 乘以 本源收盘 / 参照收盘，保留本源收盘价和复权口径；成交量取参照值。
+- 修补后来源记为 `yfinance+stooq` 这类组合（账本 price_source 可见），INFO 日志列出修补日期；没修上的仍按原规则标记、告警。
+- 2026-10-02 抽查：Yahoo 2330.TW 的 close-only bar 2026-07-10 在 FinMind 中不存在（非交易日），不修补 —— 符合规则；港股 2022-01-31 等节前半日同理。
+
 ## References（访问日期 2026-09-29）
 
 - https://www.sec.gov/data-research/sec-markets-data/fails-deliver-data
@@ -44,3 +81,6 @@ await archive_daily(today: str | None = None, data_dir: Path | None = None, forc
 - https://github.com/hiring-lab/job_postings_tracker （README：方法与 CC BY 4.0）
 - https://itunes.apple.com/us/rss/topfreeapplications/limit=100/genre=6015/json ; https://rss.marketingtools.apple.com/
 - https://github.com/akfamily/akshare ; https://akshare.akfamily.xyz/
+- （2026-10-02）Stooq 密钥要求：https://github.com/pydata/pandas-datareader/issues/1012 ；https://stooq.com/q/d/?s=9434.jp&get_apikey
+- （2026-10-02）EODHD 交易所代码：https://eodhd.com/list-of-stock-markets
+- （2026-10-02）baostock：http://baostock.com/ ；FinMind：https://finmind.github.io/

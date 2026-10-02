@@ -35,4 +35,5 @@
   - 实测（2026-09-30）：`bsky.app`、`api.bsky.app`、`public.api.bsky.app` 被重置；`bsky.social` 可达，搜帖接口回 401（需登录）。已删除的旧代码（`7aa8b6b6^:marketmind/pipeline/social_sources.py`）只用 `bsky.social`，所以缺的只是凭据。
   - 恢复时：所有人新建应用密码，自己设用户环境变量 `BLUESKY_USERNAME` / `BLUESKY_APP_PASSWORD`（不贴进对话）；再从 git 历史取旧代码单独试跑（登录、按代码搜帖条数、内容价值），结果给所有人决定是否接回。不得使用泄露的旧密码。
 - [ ] **警报推送开关 `MARKETMIND_ALERTS_LIVE`**：所有人 2026-09-30 决定暂不打开。截至当天账本中 `alert:*` 记录为 0；观察模式跑满 3–4 周且有若干条已结算警报后，在对话里提醒所有人决定。
+- [ ] **免费行情源密钥**（2026-10-02 接入，`docs/DATA_SOURCES_2026-09-29.md` §4）：所有人自己设用户环境变量 `STOOQ_API_KEY`（stooq.com 网页验证码获取）、`EODHD_API_KEY`（免费注册）；可选 `FINMIND_TOKEN`。设好后跑一次 `get_price_history("7203.T")` 看日志：2026-10-02 本机访问 Stooq 返回浏览器 JS 验证页，若带密钥仍如此，Stooq 在本机不可用（代码会自动停用并记一条警告）。
 - [ ] **360 安全卫士信任 MarketMind 计划任务**（2026-10-02）：`\MarketMind\` 下四个任务 10-02 00:40 左右被整体删除，时间与 360 清理模块运行吻合（未找到直接日志）。已重装。所有人需在 360 里把这些任务 / `pythonw.exe` 加入信任或关闭"开机加速"对它们的处理。排查漏跑时先跑 `Get-ScheduledTask -TaskPath '\MarketMind\'`。
