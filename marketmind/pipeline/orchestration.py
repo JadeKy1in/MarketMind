@@ -5,11 +5,13 @@ import directly from gateway, pipeline, and shadows.v3 modules — no dependency
 """
 from __future__ import annotations
 import asyncio
+import inspect
 import json
 import logging
 import os
 import time
 from pathlib import Path
+from marketmind.run_steps import RunSteps
 from marketmind.runtime_paths import claude_dir
 
 from marketmind.gateway.async_client import init_gateway
@@ -287,15 +289,18 @@ async def preload_universe() -> None:
 
 
 async def run_daily(config, mock: bool = False, verbose: bool = False,
-                     shadow_count: int | None = None) -> int:
+                     shadow_count: int | None = None, steps: RunSteps | None = None) -> int:
     """Execute full daily analysis pipeline.
 
     S3 shadows (marketmind.shadows.v3) run as a non-blocking background task
     so the main pipeline completes and displays results without waiting for them.
+    `steps` (scheduled runs only): steps an earlier attempt of the same day finished
+    are skipped (see _resume_skip); news is fetched only if a step still needs it.
     """
     init_gateway(config.deepseek_api_key, config.deepseek_base_url)
     from marketmind.gateway.async_client import set_mock_mode
     set_mock_mode(mock)
+    steps = steps or RunSteps()
 
     tracker = StageTracker(verbose)
     global _shadow_task
@@ -308,32 +313,78 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
 
     # Settle whatever in the ledger has come due before making new calls (SPEC_v3 §7)
     if not mock:
-        await settle_ledger(config)
+        await _step(steps, "settle", settle_ledger, config, labels=("ledger settle",))
 
-    # Steps 1-3: Scout → Flash → L1
-    news_items = await _do_news_collection(config, tracker, mock=mock)
-    if not mock:
-        from marketmind.reports.daily import save_headlines
-        save_headlines(news_items or [])
+    main_rec = _resume_skip(steps, "main")
+    want_shadows = (config.shadow.shadows_enabled and shadow_count != 0 and not mock
+                    and _resume_skip(steps, "shadows") is None)
+    want_playground = not mock and _resume_skip(steps, "playground") is None
+    want_evidence = not mock and _resume_skip(steps, "evidence") is None
+
+    # Step 1: Scout (every step below that still has to run reads today's news)
+    news_items: list = []
+    if main_rec is None or want_shadows or want_playground or want_evidence:
+        news_items = await _do_news_collection(config, tracker, mock=mock)
+        if not mock and main_rec is None:
+            from marketmind.reports.daily import save_headlines
+            save_headlines(news_items or [])
 
     # S10 cold-data discovery: code-only, in the background until L3 needs its tickers.
-    discovery_task = asyncio.create_task(run_discovery_step(news_items)) if not mock else None
+    discovery_task = (asyncio.create_task(run_discovery_step(news_items))
+                      if not mock and main_rec is None else None)
 
     # S3 shadows: forced daily decisions into the ledger, in parallel with the main
     # pipeline; they see only news and prices, never main-pipeline output (§3.5).
-    if config.shadow.shadows_enabled and shadow_count != 0 and not mock:
-        _shadow_task = asyncio.create_task(run_v3_shadows(config, news_items, shadow_count))
+    if want_shadows:
+        _shadow_task = asyncio.create_task(_background_step(
+            steps, "shadows", run_v3_shadows(config, news_items, shadow_count), _shadows_finished))
         print("  [shadows] daily decisions launched in background")
     # S8 Playground candidates: their calls go into the ledger, in the background.
-    if not mock:
+    if want_playground:
         global _playground_task
-        _playground_task = asyncio.create_task(run_playground(config, news_items))
+        _playground_task = asyncio.create_task(_background_step(
+            steps, "playground", run_playground(config, news_items), lambda r: r is not None))
     # S5 evidence layer: news claims checked against primary data, in the background.
-    if not mock:
+    if want_evidence:
         global _evidence_task
-        _evidence_task = asyncio.create_task(run_evidence(config, news_items))
+        _evidence_task = asyncio.create_task(_background_step(
+            steps, "evidence", run_evidence(config, news_items), _evidence_finished))
         print("  [evidence] claim checks launched in background")
 
+    decision = discovery = None
+    if main_rec is None:
+        before = set(_step_failures)
+        decision, discovery = await _main_chain(config, tracker, news_items, discovery_task, mock)
+        watch = _watch_items_or_none(decision, discovery)
+        new = set(_step_failures) - before
+        # Done once today's calls are in the ledger: a rerun would write a different brief
+        # while the ledger keeps the first submission. Discovery failures are carried.
+        if "ledger record" not in new:
+            steps.mark("main", watch_items=watch, failed=sorted(new & set(MAIN_CARRIED_FAILURES)))
+    else:
+        watch = main_rec.get("watch_items")
+
+    if not mock:
+        await _step(steps, "missed_path", _record_missed_path, config)        # reads the brief file
+        await _step(steps, "watchlist", watchlist_step, config, decision, discovery, items=watch)
+
+    # Trigger weekly audit if due (at most once per ISO week, own marker; never from a
+    # mock run, whose marker would block the real run of that week)
+    if not mock:
+        await _maybe_run_weekly_audit(Path(config.data_dir))
+
+    print(f"  [tokens] {usage_tracker.summary_line()}")
+    print("\nMarketMind daily pipeline complete.")
+    _report_stage_progress(9, "Pipeline complete", "done")
+    if _shadow_task and not _shadow_task.done():
+        print("(Shadow ecosystem still running in background)")
+    return 0
+
+
+async def _main_chain(config, tracker: StageTracker, news_items: list, discovery_task, mock: bool):
+    """Flash -> L1 -> L2/L3 -> red team -> fragility -> decision -> archive, brief and
+    ledger record, pipeline metrics. Returns (decision, discovery). One resumable step:
+    every stage hands in-memory results to the next."""
     signals = await _do_flash_preprocessing(news_items, tracker)
     l1_result = await _do_l1_analysis(signals, news_items, tracker)
 
@@ -381,11 +432,8 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
         _save_decision_brief(l1_result, l2_result, l3_result, red_team, resonance,
                              decision, fragility=fragility)
 
-    # Every card / forced paper trade goes into the unified ledger (mock runs never do)
-    if not mock:
+        # Every card / forced paper trade goes into the unified ledger (mock runs never do)
         await _record_to_ledger(config, decision, l3_result, discovery)
-        _record_missed_path(config)
-        await watchlist_step(config, decision, discovery)
 
     # Record pipeline metrics for weekly tactical audit
     _record_pipeline_metrics(
@@ -393,18 +441,79 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
         l3_result=l3_result, red_team_report=red_team, resonance=resonance,
         decision=decision, mock=mock,
     )
+    return decision, discovery
 
-    # Trigger weekly audit if due (at most once per ISO week; never from a mock run,
-    # whose marker would block the real run of that week)
-    if not mock:
-        await _maybe_run_weekly_audit(Path(config.data_dir))
 
-    print(f"  [tokens] {usage_tracker.summary_line()}")
-    print("\nMarketMind daily pipeline complete.")
-    _report_stage_progress(9, "Pipeline complete", "done")
-    if _shadow_task and not _shadow_task.done():
-        print("(Shadow ecosystem still running in background)")
-    return 0
+# ── Resume after an interrupted attempt (docs/AUTOMATION.md "断点续跑", 2026-10-02) ──
+# What a retry of the same day does with a step an earlier attempt finished:
+#   settle       skipped: settlements are in the ledger; tomorrow settles what came due since.
+#   main         skipped once today's calls are recorded (the ledger keeps the first
+#                submission, so a rerun would only spend tokens and overwrite the brief);
+#                its watch items are kept in the marker for the watchlist step.
+#   shadows      skipped when the run finished with no shadow missed; otherwise rerun
+#                (the runner itself skips shadows already recorded today, no LLM call).
+#   playground   skipped when it finished; evidence when ok / skipped / no news.
+#   missed_path  own step: reads today's brief from disk.
+#   watchlist    own step: adds the stored watch items, then checks every item.
+#   holdings, promotion, trend, alerts, ecosystem, app charts, daily report: each
+#                writes to disk / the ledger or pushes; skipped once finished (no second
+#                daily-report push).
+#   news         never marked: in memory only, fetched when any step above still runs.
+#   weekly audit keeps its own per-week marker.
+MAIN_CARRIED_FAILURES = ("discovery", "discovery timeout")
+
+
+def _resume_skip(steps: RunSteps, name: str) -> dict | None:
+    """The marker when an earlier attempt today finished `name` (prints the resume line
+    and carries the failures it recorded into this attempt's [degraded] line), else None."""
+    rec = steps.done(name)
+    if rec is None:
+        return None
+    print(f"[resume] skipped {name} (finished {rec.get('t', '?')})")
+    for failure in rec.get("failed") or []:
+        _step_failed(str(failure))
+    return rec
+
+
+async def _step(steps: RunSteps, name: str, fn, *args, labels: tuple[str, ...] | None = None, **kw):
+    """Run one resumable step unless an earlier attempt today finished it. Marked done
+    only when it returned without recording one of its own failure `labels` (default:
+    its name); an exception propagates unmarked."""
+    if _resume_skip(steps, name) is not None:
+        return None
+    before = set(_step_failures)
+    result = fn(*args, **kw)
+    if inspect.isawaitable(result):
+        result = await result
+    if not (set(_step_failures) - before) & set(labels or (name,)):
+        steps.mark(name)
+    return result
+
+
+async def _background_step(steps: RunSteps, name: str, coro, finished):
+    """Body of a background task: marks `name` done only when the coroutine returned a
+    result `finished` accepts; an exception propagates to _await_background unmarked."""
+    result = await coro
+    if finished(result):
+        steps.mark(name)
+    return result
+
+
+def _shadows_finished(report) -> bool:
+    return report is not None and not any(
+        getattr(r, "status", None) == "missed" for r in getattr(report, "results", []))
+
+
+def _evidence_finished(report) -> bool:
+    return report is not None and getattr(report, "status", None) in ("ok", "skipped", "no_news")
+
+
+def _watch_items_or_none(decision, discovery) -> list | None:
+    try:
+        return watch_items(decision, discovery)
+    except Exception:
+        logger.warning("watch items not built; a resumed run adds none", exc_info=True)
+        return None
 
 
 def _ledger_store(config):
@@ -904,14 +1013,16 @@ def watch_items(decision, discovery: dict | None) -> list[dict]:
 
 
 async def watchlist_step(config, decision=None, discovery: dict | None = None,
-                         crypto_only: bool = False) -> None:
+                         crypto_only: bool = False, items: list | None = None) -> None:
     """S10 §3: add today's watch items, check every item on complete bars, push
-    main-pipeline triggers (owner decision 2026-09-28)."""
+    main-pipeline triggers (owner decision 2026-09-28). `items`: today's watch items
+    already built (a resumed run passes the ones its earlier attempt stored)."""
     from marketmind.ledger.prices import HistoryPriceSource
     from marketmind.watchlist import add_items, check_all, notify_triggers
     try:
         ledger, src = _ledger_store(config), HistoryPriceSource()
-        items = watch_items(decision, discovery)
+        if items is None:
+            items = watch_items(decision, discovery)
         added = await add_items(items, src, ledger=ledger) if items else {}
         rep = await check_all(src, ledger=ledger, crypto_only=crypto_only)
         pushed = await notify_triggers(rep)
@@ -1063,33 +1174,46 @@ def crypto_shadows() -> list:
 async def run_weekend(config) -> int:
     """`--mode weekend`: settle the ledger, then only the crypto shadows decide.
     Every other market is closed; their shadows would decide on Friday's data and
-    fill at Monday's open, which the weekday pre-open run does better."""
+    fill at Monday's open, which the weekday pre-open run does better.
+    A retried scheduled attempt skips the steps an earlier one finished (_resume_skip)."""
     init_gateway(config.deepseek_api_key, config.deepseek_base_url)
     from marketmind.gateway import usage_tracker
     from marketmind.pipeline.scout import fetch_all_sources
     from marketmind.shadows.v3.runner import default_report_dir, run_shadow_day
     usage_tracker.reset()
     _reset_step_failures()
+    steps = RunSteps.from_env()
     await preload_universe()
-    summary = await settle_ledger(config)
-    print(f"  [ledger] {summary}")
-    news_items = await fetch_all_sources(config) or []
-    try:
-        report = await run_shadow_day(_ledger_store(config), news_items, entries=crypto_shadows(),
-                                      report_dir=default_report_dir())
-        print(f"  [shadows] {report.summary()}")
-    except Exception:
-        logger.error("weekend shadow run failed", exc_info=True)
-        print("  [shadows] failed (see log)")
-        _step_failed("shadows")
-    discovery = await run_discovery_step(news_items, registry=crypto_registry())
-    await watchlist_step(config, None, discovery, crypto_only=True)
-    await trend_step(config, crypto_only=True)
-    await alerts_step(config, crypto_only=True)
-    await app_charts_step(config)
+    await _step(steps, "settle", settle_ledger, config, labels=("ledger settle",))
+    want_shadows = _resume_skip(steps, "shadows") is None
+    want_watchlist = _resume_skip(steps, "watchlist") is None
+    news_items = (await fetch_all_sources(config) or []) if want_shadows or want_watchlist else []
+    if want_shadows:
+        try:
+            report = await run_shadow_day(_ledger_store(config), news_items, entries=crypto_shadows(),
+                                          report_dir=default_report_dir())
+            print(f"  [shadows] {report.summary()}")
+            if _shadows_finished(report):
+                steps.mark("shadows")
+        except Exception:
+            logger.error("weekend shadow run failed", exc_info=True)
+            print("  [shadows] failed (see log)")
+            _step_failed("shadows")
+    if want_watchlist:
+        await _step(steps, "watchlist", _weekend_watchlist, config, news_items,
+                    labels=("discovery", "watchlist"))
+    await _step(steps, "trend", trend_step, config, crypto_only=True)
+    await _step(steps, "alerts", alerts_step, config, crypto_only=True)
+    await _step(steps, "app charts", app_charts_step, config)
     print(f"  [tokens] {usage_tracker.summary_line()}")
     usage_tracker.append_log("weekend")
     return _finish_exit_code(0)
+
+
+async def _weekend_watchlist(config, news_items: list) -> None:
+    """Crypto-only discovery, then the watchlist (one resumable weekend step)."""
+    discovery = await run_discovery_step(news_items, registry=crypto_registry())
+    await watchlist_step(config, None, discovery, crypto_only=True)
 
 
 def crypto_registry() -> list:
@@ -1149,8 +1273,10 @@ async def _run_daily_with_shadows(config, args) -> int:
     process doesn't exit before they finish writing to the ledger.
     """
     shadow_n = 0 if args.no_shadows else args.shadows
+    # scheduled runs: resume after an interrupted attempt of the same day (mock runs never)
+    steps = RunSteps() if args.mock else RunSteps.from_env()
     ret = await run_daily(config, mock=args.mock, verbose=args.verbose,
-                           shadow_count=shadow_n)
+                           shadow_count=shadow_n, steps=steps)
 
     # Wait for the background shadow task. The wait is shielded: a timeout must not
     # cancel the task, or its run report (written after all shadows finish) is lost and
@@ -1172,13 +1298,13 @@ async def _run_daily_with_shadows(config, args) -> int:
             and _evidence_task is not None and not _evidence_task.done():
         print(f"(Evidence layer timed out after {EVIDENCE_WAIT_S // 60} minutes)")
     if not args.mock:
-        await inspect_holdings_step(config)
-        await promotion_step(config)
-        await trend_step(config)
-        await alerts_step(config)
-        await ecosystem_step(config)
-        await app_charts_step(config)
-        await daily_report_step(config)
+        await _step(steps, "holdings", inspect_holdings_step, config)
+        await _step(steps, "promotion", promotion_step, config, labels=("promotion", "trials"))
+        await _step(steps, "trend", trend_step, config)
+        await _step(steps, "alerts", alerts_step, config)
+        await _step(steps, "ecosystem", ecosystem_step, config)
+        await _step(steps, "app charts", app_charts_step, config)
+        await _step(steps, "daily report", daily_report_step, config)
     await _finish_shadows()
     await _finish_background(_playground_task, "playground timeout")
     await _finish_background(_evidence_task, "evidence timeout")

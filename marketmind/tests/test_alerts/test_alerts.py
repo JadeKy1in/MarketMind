@@ -301,11 +301,11 @@ async def test_weekend_crypto_only(env):
 def test_orchestration_runs_alerts_after_trend_daily_and_weekend():
     from marketmind.pipeline import orchestration as orch
     daily = inspect.getsource(orch._run_daily_with_shadows)
-    assert daily.index("await trend_step(config)") < daily.index("await alerts_step(config)") \
-        < daily.index("await daily_report_step(config)")
+    assert daily.index("trend_step, config)") < daily.index("alerts_step, config)") \
+        < daily.index("daily_report_step, config)")
     weekend = inspect.getsource(orch.run_weekend)
-    assert weekend.index("await trend_step(config, crypto_only=True)") \
-        < weekend.index("await alerts_step(config, crypto_only=True)")
+    assert weekend.index("trend_step, config, crypto_only=True)") \
+        < weekend.index("alerts_step, config, crypto_only=True)")
 
 
 @pytest.mark.asyncio

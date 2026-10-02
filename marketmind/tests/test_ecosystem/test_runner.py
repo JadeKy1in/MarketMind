@@ -87,5 +87,5 @@ def test_pipeline_step_prints_summary_and_records_failure(tmp_path, monkeypatch,
 def test_daily_run_calls_ecosystem_after_alerts_before_report():
     import inspect
     src = inspect.getsource(orch._run_daily_with_shadows)
-    assert src.index("await alerts_step(config)") < src.index("await ecosystem_step(config)") \
-        < src.index("await daily_report_step(config)")
+    assert src.index("alerts_step, config)") < src.index("ecosystem_step, config)") \
+        < src.index("daily_report_step, config)")

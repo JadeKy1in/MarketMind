@@ -35,7 +35,7 @@ powershell -ExecutionPolicy Bypass -File marketmind\scripts\install_schedule.ps1
 powershell -ExecutionPolicy Bypass -File marketmind\scripts\uninstall_schedule.ps1
 ```
 
-- 任务在任务计划程序的 `\MarketMind\` 文件夹下（Daily、Weekend、Watchdog、Dashboard），只在所有人登录时运行（不保存密码）；Daily 和 Weekend 会把电脑从睡眠中唤醒（需要电源选项里"允许唤醒定时器"为启用），错过的触发会在开机或唤醒后补跑。
+- 任务在任务计划程序的 `\MarketMind\` 文件夹下（Daily、Weekend、Watchdog、Dashboard），另有"启动"文件夹里的任务自检快捷方式（见"运行保障"）；只在所有人登录时运行（不保存密码）；Daily 和 Weekend 会把电脑从睡眠中唤醒（需要电源选项里"允许唤醒定时器"为启用），错过的触发会在开机或唤醒后补跑。
 - Watchdog 的两个触发：登录时（延迟 15 分钟）；系统日志 `Microsoft-Windows-Power-Troubleshooter` 事件 ID 1（从睡眠唤醒，延迟 15 分钟）。事件触发由安装脚本通过 CIM 类 `MSFT_TaskEventTrigger` 定义。延迟是为了让唤醒时补跑的任务先标记为"运行中"，避免误报。
 - 手动检查某次触发会不会运行：`python marketmind/scripts/scheduled_run.py --slot weekday --dry-run`；手动检查漏跑：`python marketmind/scripts/watchdog.py --dry-run`（只打印，不推送、不写状态）。
 - **回滚 / 更新定义**：先运行卸载脚本，再运行安装脚本（安装脚本会覆盖同名任务，但不会删除旧版本没有的任务）。回到旧版本时，先切到旧代码再依次运行这两个脚本。
@@ -49,6 +49,10 @@ powershell -ExecutionPolicy Bypass -File marketmind\scripts\uninstall_schedule.p
 - **日志**：`data/logs/scheduled/<纽约日期>-<时段>.log`。
 - **失败通知**：通过已配置的推送渠道（见 `docs/S8_DESIGN.md`）发送，内容已脱敏；没配渠道时只记录。仪表盘"系统健康"页显示最近的自动运行记录。
 - **漏跑检查（Watchdog）**：检查"窗口已过"（该纽约日期 12:30 之后）的最近一个工作日和最近一个周末日。记录缺失、失败、已放弃重试，或仍标记为运行中但进程已不在，就推送一次"MarketMind: <日期> daily run did not complete: <原因>"（周末为 weekend run），并在该日记录里写 `watchdog_notified`，同一天不再重复提醒。正在运行、已完成、降级完成的不提醒；从未有过运行记录（刚安装）时不检查；早于第一次运行 / 触发记录的日期（安装之前）也不检查。错过的触发由常规触发在开机 / 唤醒后补跑；但如果当天运行在最后一个触发之后被打断（2026-09-30 电脑重启杀掉了运行，当天已无触发），Watchdog 会先补跑：当天这个时段仍可运行（`scheduled_run.plan`），且记录是"运行中但进程已不在"或"失败且还有重试次数"，就在自己的进程里调用 scheduled_run（锁、最多 2 次、联网检查照常生效），然后再做漏跑检查。为此 Watchdog 任务的时限是 2 小时（2026-10-02 起）。
+- **断点续跑**（2026-10-02）：同一天的第 2 次尝试（下一个触发或 Watchdog 补跑）跳过第 1 次已完成的步骤，日志里打印 `[resume] skipped <步骤>`。记录在 `data/scheduler/steps.json`（按"纽约日期-时段"分开，原子写入，保留 14 天），第 1 次尝试开始时清空当天记录；手动运行和 `--mock` 不读不写。步骤只在成功完成后记下：失败、崩溃、被打断的步骤下次照常重跑。可跳过的步骤：结算、主管线（今天的决策已写入账本才算完成；它的观察项存在记录里供 watchlist 用；其中 discovery 的失败会带到第 2 次的 `[degraded]` 行）、影子（无 missed 才算完成；重跑时账本已有记录的影子本来就不再调 LLM）、Playground、证据层、missed_path、watchlist、持仓巡检、晋升评审、趋势、警报、生态监测、App 榜单、日报（不会重复推送）。新闻只在内存里，任何还要跑的步骤需要时重新抓取。已知限制：日报完成后影子才补完的话，日报不含补完的影子。
+- **BLAS 线程**：`scheduled_run.py` 把 `OPENBLAS_NUM_THREADS`、`OMP_NUM_THREADS`、`MKL_NUM_THREADS` 设为 1（用户已设的值不覆盖），传给 `app.py` 子进程，在 numpy 加载前生效。原因：2026-10-02 内存紧张时子进程报 "OpenBLAS error: Memory allocation still failed"；流程里 numpy 只算小数组，时间都花在 LLM / 网络等待上，单线程没有可见代价、占内存最少。
+- **运行中提示**：子进程运行期间，屏幕右下角显示一个置顶小窗"MarketMind 正在运行（HH:MM 开始）请勿重启或关机"，运行结束自动关闭；关闭按钮只会最小化。同时登记关机阻止原因，重启 / 关机时 Windows 会列出 MarketMind 和原因，仍可点"仍要重启"。窗口出错只写进运行日志（`run notice: ...`），不影响运行。设用户环境变量 `MARKETMIND_RUN_NOTICE=0` 关闭；`--dry-run` 和测试里不显示。
+- **任务自检**（2026-10-02，`\MarketMind\` 下任务曾被整体删除，疑为 360）：安装脚本在"启动"文件夹放一个快捷方式"MarketMind task check"（不在任务计划程序里，不会跟任务一起被删），每次登录运行 `ensure_tasks.py`：四个任务都在就什么也不做；缺任何一个就运行 `install_schedule.ps1` 重装（5 分钟超时、检查退出码、重装后再查一次），并推送一条"计划任务已自动恢复"或"自动恢复失败"（断网时排队）。动作记在 `data/logs/ensure_tasks.log`。手动检查：`python marketmind/scripts/ensure_tasks.py --dry-run`（只打印缺失的任务）。360 的"开机启动项"管理也可能禁用这个快捷方式，需在 360 里一并信任。卸载脚本先删快捷方式再删任务。
 - **推送排队**：调度器和 Watchdog 的推送如果所有渠道都失败（断网），存进 `data/scheduler/push_queue.json`（原子写入，最多 20 条，超过 3 天的丢弃），下次 `scheduled_run.py` 或 `watchdog.py` 启动时按先后重发，遇到第一条仍失败就停下等下次；`push_queue.lock` 保证同一时间只有一个进程在重发。没配置任何渠道时不排队。注意 Server酱免费版每天 5 条。
 
 

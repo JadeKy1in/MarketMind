@@ -21,6 +21,10 @@ from app.py means "finished, some steps failed": status "degraded", done for the
 day (no retry), steps taken from the last "[degraded]" log line, one short push.
 Pushes that fail (offline) wait in data/scheduler/push_queue.json for the next
 invocation of this script or of watchdog.py.
+2026-10-02: a retry resumes, skipping the steps the earlier attempt of the day finished
+(data/scheduler/steps.json, marketmind/run_steps.py); BLAS libraries get one thread
+unless the owner set otherwise; while app.py runs a small notice window asks not to
+restart (run_notice.py, MARKETMIND_RUN_NOTICE=0 turns it off).
 """
 from __future__ import annotations
 
@@ -39,6 +43,9 @@ from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
+
+from marketmind.run_steps import ENV_FILE as STEPS_FILE_ENV, ENV_KEY as RUN_KEY_ENV, RunSteps  # noqa: E402
+from marketmind.scripts.run_notice import run_notice  # noqa: E402
 
 NEW_YORK = ZoneInfo("America/New_York")
 WEEKDAY_EARLIEST = dtime(8, 25)
@@ -199,6 +206,21 @@ def online(probes=ONLINE_PROBES, timeout: float = 5.0) -> bool:
         except OSError:
             continue
     return False
+
+
+# OpenBLAS sizes a buffer per thread (one thread per core by default); on 2026-10-02 a
+# child died with "OpenBLAS error: Memory allocation still failed" under memory pressure.
+# The run's numpy work is small vectors (indicators, statistics) and its time goes to
+# LLM / HTTP waits, so one thread costs nothing measurable and needs the least memory.
+# Must be in the environment before numpy is imported: set here and passed to app.py.
+BLAS_THREAD_VARS = ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS")
+
+
+def limit_blas_threads(env) -> None:
+    """One BLAS / OpenMP thread, unless the owner set a value."""
+    for name in BLAS_THREAD_VARS:
+        if not str(env.get(name) or "").strip():
+            env[name] = "1"
 
 
 _ES_CONTINUOUS, _ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
@@ -452,6 +474,7 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
 
     now = now or datetime.now(timezone.utc)
     if not args.dry_run:
+        limit_blas_threads(os.environ)           # this process and the app.py child
         load_user_push_env()                     # failure pushes and the run need the keys
         flush_push_queue()
     run, key, reason = plan(args.slot, now)
@@ -512,7 +535,14 @@ def _run_locked(slot: str, key: str, now: datetime, state_path: Path) -> int:
                mode=MODES[slot], log=str(log_path), attempts=rec.get("attempts", 0) + 1)
     save_state(state_path, state)
 
+    # Step markers (marketmind/run_steps.py): a retry skips what the earlier attempt of
+    # this day finished; the first attempt starts from scratch.
+    steps_path = state_path.with_name("steps.json")
+    if rec["attempts"] == 1:
+        RunSteps(steps_path, key).reset()
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
+    env.update({RUN_KEY_ENV: key, STEPS_FILE_ENV: str(steps_path)})
+    limit_blas_threads(env)
     # --verbose: stage lines with wall-clock and elapsed times in the run log
     cmd = [sys.executable, str(ROOT / "marketmind" / "app.py"), "--mode", MODES[slot], "--verbose"]
     try:
@@ -520,9 +550,14 @@ def _run_locked(slot: str, key: str, now: datetime, state_path: Path) -> int:
             log.write(f"\n===== {now.isoformat(timespec='seconds')} attempt {rec['attempts']}: "
                       f"{' '.join(cmd[1:])}\n")
             log.flush()
-            with keep_awake():
-                proc = subprocess.run(cmd, cwd=ROOT, env=env, stdout=log,
-                                      stderr=subprocess.STDOUT, timeout=TIMEOUT_S[slot])
+            notice = run_notice(now)
+            try:
+                with keep_awake(), notice:
+                    proc = subprocess.run(cmd, cwd=ROOT, env=env, stdout=log,
+                                          stderr=subprocess.STDOUT, timeout=TIMEOUT_S[slot])
+            finally:
+                if notice.error:                 # the run goes on without the notice
+                    log.write(f"run notice: {notice.error}\n")
         code, failure = proc.returncode, (None if proc.returncode == 0 else f"exit code {proc.returncode}")
     except subprocess.TimeoutExpired:
         code, failure = -1, f"timed out after {TIMEOUT_S[slot] // 60} minutes"

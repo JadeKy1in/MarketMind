@@ -35,4 +35,4 @@
   - 实测（2026-09-30）：`bsky.app`、`api.bsky.app`、`public.api.bsky.app` 被重置；`bsky.social` 可达，搜帖接口回 401（需登录）。已删除的旧代码（`7aa8b6b6^:marketmind/pipeline/social_sources.py`）只用 `bsky.social`，所以缺的只是凭据。
   - 恢复时：所有人新建应用密码，自己设用户环境变量 `BLUESKY_USERNAME` / `BLUESKY_APP_PASSWORD`（不贴进对话）；再从 git 历史取旧代码单独试跑（登录、按代码搜帖条数、内容价值），结果给所有人决定是否接回。不得使用泄露的旧密码。
 - [ ] **警报推送开关 `MARKETMIND_ALERTS_LIVE`**：所有人 2026-09-30 决定暂不打开。截至当天账本中 `alert:*` 记录为 0；观察模式跑满 3–4 周且有若干条已结算警报后，在对话里提醒所有人决定。
-- [ ] **360 安全卫士信任 MarketMind 计划任务**（2026-10-02）：`\MarketMind\` 下四个任务 10-02 00:40 左右被整体删除，时间与 360 清理模块运行吻合（未找到直接日志）。已重装。所有人需在 360 里把这些任务 / `pythonw.exe` 加入信任或关闭"开机加速"对它们的处理。排查漏跑时先跑 `Get-ScheduledTask -TaskPath '\MarketMind\'`。
+- [ ] **360 安全卫士信任 MarketMind 计划任务**（2026-10-02）：`\MarketMind\` 下四个任务 10-02 00:40 左右被整体删除，时间与 360 清理模块运行吻合（未找到直接日志）。已重装。所有人需在 360 里把这些任务 / `pythonw.exe` 加入信任或关闭"开机加速"对它们的处理。排查漏跑时先跑 `Get-ScheduledTask -TaskPath '\MarketMind\'`。已加登录时的任务自检（"启动"文件夹快捷方式 → `ensure_tasks.py`，缺任务自动重装并推送，见 `docs/AUTOMATION.md`），这个快捷方式也要在 360 启动项里信任。

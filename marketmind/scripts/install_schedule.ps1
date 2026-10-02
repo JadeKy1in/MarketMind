@@ -15,6 +15,8 @@
 #              pushes one notice per missed or failed day; catches up today's run
 #              if it was interrupted or failed with an attempt left.
 #   Dashboard  at logon: the white-box dashboard on http://127.0.0.1:8520
+# Plus a Startup-folder shortcut "MarketMind task check" (ensure_tasks.py): at logon it
+# re-runs this script if any of the four tasks is missing.
 # All run only while this user is logged on (no stored password). Daily and
 # Weekend wake the computer from sleep and catch up after a missed start.
 $ErrorActionPreference = "Stop"
@@ -87,10 +89,25 @@ Register-ScheduledTask -TaskPath $Folder -TaskName "Dashboard" -Action $dash -Pr
     -Settings $dashSettings -Force -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $User) `
     -Description "MarketMind white-box dashboard on http://127.0.0.1:8520" | Out-Null
 
+# Task self-check at logon from the user's Startup folder, i.e. outside Task Scheduler:
+# on 2026-10-02 every task under \MarketMind\ was deleted at once (360 Total Security
+# suspected). ensure_tasks.py re-runs this script if any of the four is missing and
+# pushes one notice. uninstall_schedule.ps1 removes the shortcut.
+$Ensure = Join-Path $Root "marketmind\scripts\ensure_tasks.py"
+$Shortcut = Join-Path ([Environment]::GetFolderPath("Startup")) "MarketMind task check.lnk"
+$lnk = (New-Object -ComObject WScript.Shell).CreateShortcut($Shortcut)
+$lnk.TargetPath = $PythonW
+$lnk.Arguments = "`"$Ensure`""
+$lnk.WorkingDirectory = $Root
+$lnk.WindowStyle = 7
+$lnk.Description = "MarketMind: re-register the scheduled tasks if they are missing"
+$lnk.Save()
+
 Write-Output "Registered in Task Scheduler folder $Folder for $User"
 Write-Output ("  Daily     {0:HH:mm}, {1:HH:mm} and {2:HH:mm} local (08:45 New York in US daylight / standard time, then a later retry)" -f $daylight, $standard, $lateRetry)
 Write-Output "  Weekend   Sat, Sun 12:00 and 14:00 local"
 Write-Output "  Watchdog  15 minutes after logon and after wake from sleep"
 Write-Output "  Dashboard at logon"
+Write-Output "Task check at logon (Startup folder): $Shortcut"
 Write-Output "Python: $Python"
 

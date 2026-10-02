@@ -172,8 +172,8 @@ def test_trend_step_runs_before_alerts_in_daily_and_in_weekend():
     import inspect
     from marketmind.pipeline import orchestration as orch
     src = inspect.getsource(orch._run_daily_with_shadows)
-    assert src.index("await trend_step(config)") < src.index("await daily_report_step(config)")
-    assert "await trend_step(config, crypto_only=True)" in inspect.getsource(orch.run_weekend)
+    assert src.index("trend_step, config)") < src.index("daily_report_step, config)")
+    assert "trend_step, config, crypto_only=True)" in inspect.getsource(orch.run_weekend)
 
 
 # ── report facts and dashboard ──────────────────────────────────────────────
