@@ -276,7 +276,9 @@ def stale_run_reason(rec: dict, lock: Path, now: datetime, timeout_s: int) -> st
 PUSH_VARS = ("SERVERCHAN_SENDKEY", "PUSHPLUS_TOKEN", "WECOM_WEBHOOK_KEY", "FEISHU_WEBHOOK_TOKEN",
              "FEISHU_WEBHOOK_SECRET",
              # LLM provider switch (docs/LLM_PROVIDER.md)
-             "MARKETMIND_LLM", "MARKETMIND_CLAUDE_PRO_MODEL", "MARKETMIND_CLAUDE_FLASH_MODEL")
+             "MARKETMIND_LLM", "MARKETMIND_CLAUDE_PRO_MODEL", "MARKETMIND_CLAUDE_FLASH_MODEL",
+             # free quote sources added 2026-10-02 (gateway/free_quotes.py)
+             "STOOQ_API_KEY", "EODHD_API_KEY", "FINMIND_TOKEN")
 
 
 def load_user_push_env() -> None:
