@@ -540,3 +540,106 @@ def test_online_probe_uses_tcp(monkeypatch):
     monkeypatch.setattr(socket, "create_connection", fake)
     assert _REAL_ONLINE(probes=(("a", 443), ("b", 443)), timeout=0.1) is True
     assert _REAL_ONLINE(probes=(("a", 443),), timeout=0.1) is False
+
+
+# ── 2026-10-02: resume markers, BLAS threads, run notice ───────────────────────
+
+def _capture_child(tmp_path, monkeypatch, key="2026-10-02-weekday"):
+    monkeypatch.setattr(sr, "ROOT", tmp_path)
+    monkeypatch.setenv("MARKETMIND_DATA_DIR", "data")
+    monkeypatch.setattr(sr, "plan", lambda slot, now: (True, key, "test"))
+    seen = []
+
+    class Failed:
+        returncode = 1
+
+    def fake_run(cmd, **kw):
+        seen.append(kw["env"])
+        return Failed()
+    monkeypatch.setattr(sr.subprocess, "run", fake_run)
+    monkeypatch.setattr(sr, "notify_failure", lambda *a: [])
+    return seen
+
+
+def test_child_gets_the_day_key_and_marker_file(tmp_path, monkeypatch):
+    seen = _capture_child(tmp_path, monkeypatch)
+    sr.main(["--slot", "weekday"])
+    env = seen[0]
+    assert env["MARKETMIND_RUN_KEY"] == "2026-10-02-weekday"
+    assert env["MARKETMIND_STEPS_FILE"] == str(tmp_path / "data" / "scheduler" / "steps.json")
+
+
+def test_first_attempt_clears_the_days_markers_and_the_retry_keeps_them(tmp_path, monkeypatch):
+    from marketmind.run_steps import RunSteps
+    _capture_child(tmp_path, monkeypatch)
+    steps = RunSteps(tmp_path / "data" / "scheduler" / "steps.json", "2026-10-02-weekday")
+    steps.mark("main")                                   # left over, e.g. a deleted run record
+    sr.main(["--slot", "weekday"])                       # attempt 1 (fails)
+    assert steps.done("main") is None
+    steps.mark("main")                                   # what attempt 1 would have finished
+    sr.main(["--slot", "weekday"])                       # attempt 2 resumes
+    assert steps.done("main") is not None
+
+
+def test_blas_threads_limited_for_the_child_unless_already_set(tmp_path, monkeypatch):
+    seen = _capture_child(tmp_path, monkeypatch)
+    monkeypatch.setenv("OPENBLAS_NUM_THREADS", "4")       # the owner's own choice wins
+    monkeypatch.setenv("OMP_NUM_THREADS", "")
+    monkeypatch.delenv("MKL_NUM_THREADS", raising=False)
+    sr.main(["--slot", "weekday"])
+    env = seen[0]
+    assert env["OPENBLAS_NUM_THREADS"] == "4"
+    assert env["OMP_NUM_THREADS"] == "1" and env["MKL_NUM_THREADS"] == "1"
+    assert os.environ["OMP_NUM_THREADS"] == "1"           # this process too (before numpy)
+
+
+def test_run_notice_is_off_in_tests_and_by_env(monkeypatch):
+    from marketmind.scripts import run_notice as rn
+    assert not rn.enabled()                               # conftest sets MARKETMIND_RUN_NOTICE=0
+    monkeypatch.setattr(rn.os, "name", "nt")
+    monkeypatch.setenv("MARKETMIND_RUN_NOTICE", "1")
+    assert rn.enabled()
+    for off in ("0", "false", "off"):
+        monkeypatch.setenv("MARKETMIND_RUN_NOTICE", off)
+        assert not rn.enabled()
+
+
+def test_run_notice_failure_never_breaks_the_run(monkeypatch):
+    from marketmind.scripts import run_notice as rn
+    monkeypatch.setattr(rn, "enabled", lambda: True)
+
+    def broken(self):
+        raise RuntimeError("no display")
+    monkeypatch.setattr(rn.run_notice, "_window", broken)
+    with rn.run_notice(datetime.now(timezone.utc)) as notice:
+        pass
+    assert "RuntimeError: no display" in notice.error and not notice.blocking
+
+
+def test_run_notice_error_goes_to_the_run_log(tmp_path, monkeypatch):
+    _capture_child(tmp_path, monkeypatch)
+
+    class Broken:
+        def __init__(self, started):
+            self.error = "not shown (TclError: no display)"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+    monkeypatch.setattr(sr, "run_notice", Broken)
+    sr.main(["--slot", "weekday"])
+    log = (tmp_path / "data" / "logs" / "scheduled" / "2026-10-02-weekday.log").read_text("utf-8")
+    assert "run notice: not shown (TclError: no display)" in log
+
+
+def test_dry_run_never_opens_the_notice(tmp_path, monkeypatch):
+    monkeypatch.setattr(sr, "ROOT", tmp_path)
+    monkeypatch.setenv("MARKETMIND_DATA_DIR", "data")
+    monkeypatch.setattr(sr, "plan", lambda slot, now: (True, "2026-10-02-weekday", "test"))
+
+    def refuse(*a, **k):
+        raise AssertionError("dry run opened the notice")
+    monkeypatch.setattr(sr, "run_notice", refuse)
+    assert sr.main(["--slot", "weekday", "--dry-run"]) == 0

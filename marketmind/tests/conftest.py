@@ -188,6 +188,19 @@ def _no_real_claude(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_run_notice_or_step_markers(monkeypatch):
+    """Scheduled-run tests never open the "MarketMind is running" window
+    (scripts/run_notice.py), and no test resumes from real step markers."""
+    monkeypatch.setenv("MARKETMIND_RUN_NOTICE", "0")
+    monkeypatch.delenv("MARKETMIND_RUN_KEY", raising=False)
+    monkeypatch.delenv("MARKETMIND_STEPS_FILE", raising=False)
+    # scheduled_run.main sets BLAS thread limits in os.environ; restore them after the test
+    import os
+    for name in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+        monkeypatch.setenv(name, os.environ.get(name, ""))
+
+
+@pytest.fixture(autouse=True)
 def _offline_shadow_feeds(monkeypatch):
     """Shadow runs in tests never fetch marketmind/shadow_feeds over the network;
     feed tests call their fetch functions with mocked HTTP themselves."""
