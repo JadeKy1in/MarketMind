@@ -253,12 +253,17 @@ async def build_report(today: str | None = None, *, store=None, call=_call_llm,
     return report
 
 
-async def push(report: dict) -> list[dict]:
-    from marketmind.alerts.notify import send
+def push_message(report: dict) -> tuple[str, str]:
+    """(title, body) pushed for a report; long reports point to the dashboard."""
     body = report["markdown"]
     if len(body) > PUSH_MAX_CHARS:
         body = body[:PUSH_MAX_CHARS] + "\n\n……（完整版见仪表盘 http://127.0.0.1:8520 ）"
-    return await send(f"MarketMind 今日汇报 {report['date']}", body)
+    return f"MarketMind 今日汇报 {report['date']}", body
+
+
+async def push(report: dict) -> list[dict]:
+    from marketmind.alerts.notify import send
+    return await send(*push_message(report))
 
 
 def latest() -> dict | None:

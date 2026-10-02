@@ -24,9 +24,15 @@ Priority (big-move alerts, owner decision 2026-09-29): `send(..., priority=True)
 2026-09-29). The other channels have no priority field; for them priority changes nothing.
 Feishu's `<at user_id="all">` is not used: it needs the group's @all permission, and
 the doc does not say a group without it accepts the message.
+
+Retries: a network error (timeout, connection reset) or an HTTP 5xx is retried per channel
+after RETRY_DELAYS_S (2026-10-02: one Server酱 ReadTimeout lost the day's report). A read
+timeout may hide a delivered message, so a retry can duplicate it; for these pushes a
+duplicate is cheaper than a loss. HTTP 4xx (bad key, quota, 429) is not retried.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -40,6 +46,7 @@ import httpx
 logger = logging.getLogger("marketmind.alerts.notify")
 
 TIMEOUT_S = 15.0
+RETRY_DELAYS_S = (2.0, 8.0)          # waits before the 2nd and 3rd try
 WECOM_MAX_BYTES = 2048
 
 
@@ -116,19 +123,26 @@ async def send(title: str, body: str, *, env=os.environ,
     client = client or httpx.AsyncClient(timeout=TIMEOUT_S)
     try:
         for channel, r in reqs.items():
-            status, payload = 0, {}
-            try:
-                resp = await client.post(r.url, json=r.json, data=r.data)
-                status = resp.status_code
+            for attempt, delay in enumerate((0.0, *RETRY_DELAYS_S)):
+                if delay:
+                    await asyncio.sleep(delay)
+                status, payload = 0, {}
                 try:
-                    payload = resp.json()
-                except ValueError:
-                    payload = {}
-            except Exception as e:          # the URL may hold the key: log the type only
-                logger.warning("push via %s failed: %s", channel, type(e).__name__)
-            ok = succeeded(channel, status, payload)
-            if not ok and status:
-                logger.warning("push via %s rejected: HTTP %d", channel, status)
+                    resp = await client.post(r.url, json=r.json, data=r.data)
+                    status = resp.status_code
+                    try:
+                        payload = resp.json()
+                    except ValueError:
+                        payload = {}
+                except Exception as e:      # the URL may hold the key: log the type only
+                    logger.warning("push via %s failed (try %d): %s",
+                                   channel, attempt + 1, type(e).__name__)
+                ok = succeeded(channel, status, payload)
+                if not ok and status:
+                    logger.warning("push via %s rejected (try %d): HTTP %d",
+                                   channel, attempt + 1, status)
+                if ok or 0 < status < 500:  # delivered, or a 4xx a retry cannot fix
+                    break
             results.append({"channel": channel, "ok": ok, "status": status})
     finally:
         if own:

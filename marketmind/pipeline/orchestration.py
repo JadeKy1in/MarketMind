@@ -953,6 +953,20 @@ async def daily_report_step(config) -> None:
         return
     ok = [r["channel"] for r in sent if r.get("ok")]
     print(f"  [report] written ({report['source']}); pushed: {', '.join(ok) or 'none'}")
+    if sent and not ok:
+        _queue_report_push(report)
+
+
+def _queue_report_push(report: dict) -> None:
+    """Every channel failed: keep the report in data/scheduler/push_queue.json, which the
+    next scheduled_run / watchdog invocation retries (2026-10-02 the report was lost)."""
+    from marketmind.reports.daily import push_message
+    from marketmind.scripts.scheduled_run import enqueue_push
+    try:
+        enqueue_push(*push_message(report))
+        print("  [report] push queued for retry")
+    except OSError as e:
+        logger.warning("daily report push could not be queued: %s", type(e).__name__)
 
 
 async def trend_step(config, crypto_only: bool = False) -> None:

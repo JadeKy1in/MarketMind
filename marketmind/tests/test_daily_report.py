@@ -217,3 +217,30 @@ async def test_prompt_has_short_ecosystem_and_playground_sections(env):
         < sp.index("## 实盘持仓")
     assert "market_driven" in sp and "behavioural" in sp and "简短" in sp
     assert "[ecosystem] herding: none" in seen["user"] and '"playground"' in seen["user"]
+
+
+@pytest.mark.parametrize("delivered", [False, True])
+def test_report_push_failure_is_queued_for_retry(tmp_path, monkeypatch, delivered):
+    """2026-10-02: Server酱 timed out and the report was never sent; now it waits in
+    the push queue that scheduled_run / watchdog flush."""
+    import asyncio
+    from marketmind.pipeline import orchestration as orch
+    from marketmind.scripts import scheduled_run as sr
+    monkeypatch.setenv("MARKETMIND_DATA_DIR", str(tmp_path))
+    report = {"date": TODAY, "source": "llm", "markdown": "字" * 10000}
+
+    async def build_report(store=None):
+        return report
+
+    async def push(r):
+        return [{"channel": "serverchan", "ok": delivered, "status": 200 if delivered else 0}]
+    monkeypatch.setattr(daily, "build_report", build_report)
+    monkeypatch.setattr(daily, "push", push)
+    monkeypatch.setattr(orch, "_ledger_store", lambda config: None)
+    asyncio.run(orch.daily_report_step(object()))
+    queued = sr.load_queue(sr.queue_path())
+    if delivered:
+        assert queued == []
+    else:
+        assert [(q["title"], q["body"]) for q in queued] == [daily.push_message(report)]
+        assert "仪表盘" in queued[0]["body"]

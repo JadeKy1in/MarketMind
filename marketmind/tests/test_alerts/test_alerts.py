@@ -373,7 +373,8 @@ def test_priority_mentions_all_on_wecom_only():
 
 
 @pytest.mark.asyncio
-async def test_send_success_and_failure_without_leaking_keys(caplog):
+async def test_send_success_and_failure_without_leaking_keys(caplog, monkeypatch):
+    monkeypatch.setattr(notify, "RETRY_DELAYS_S", (0, 0))
     replies = {"sctapi.ftqq.com": (200, {"code": 0}), "www.pushplus.plus": (200, {"code": 905}),
                "qyapi.weixin.qq.com": (200, {"errcode": 0}), "open.feishu.cn": (500, {})}
     bodies = {}
@@ -388,6 +389,31 @@ async def test_send_success_and_failure_without_leaking_keys(caplog):
         "serverchan": True, "pushplus": False, "wecom": True, "feishu": False}
     assert b"@all" in bodies["qyapi.weixin.qq.com"]
     assert "SCTkey" not in caplog.text and "wk" not in caplog.text.replace("wecom", "")
+
+
+@pytest.mark.asyncio
+async def test_send_retries_network_errors_and_5xx_but_not_4xx(monkeypatch):
+    """2026-10-02: one Server酱 ReadTimeout lost the day's report; transient failures retry."""
+    monkeypatch.setattr(notify, "RETRY_DELAYS_S", (0, 0))
+    tries: dict[str, int] = {}
+    script = {"sctapi.ftqq.com": [httpx.ReadTimeout("slow"), (200, {"code": 0})],
+              "www.pushplus.plus": [(400, {}), (200, {"code": 200})],
+              "qyapi.weixin.qq.com": [(502, {}), (503, {}), (504, {}), (200, {"errcode": 0})],
+              "open.feishu.cn": [(200, {"code": 19001}), (200, {"code": 0})]}
+
+    def handler(request):
+        host = request.url.host
+        step = script[host][tries.get(host, 0)]
+        tries[host] = tries.get(host, 0) + 1
+        if isinstance(step, Exception):
+            raise step
+        return httpx.Response(step[0], json=step[1])
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        results = await notify.send("t", "b", env=ENV, client=client)
+    assert {r["channel"]: r["ok"] for r in results} == {
+        "serverchan": True, "pushplus": False, "wecom": False, "feishu": False}
+    assert tries == {"sctapi.ftqq.com": 2, "www.pushplus.plus": 1,
+                     "qyapi.weixin.qq.com": 3, "open.feishu.cn": 1}
 
 
 def test_redaction_covers_path_keys():
