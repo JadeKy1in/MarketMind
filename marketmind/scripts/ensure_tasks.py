@@ -26,7 +26,10 @@ sys.path.insert(0, str(ROOT))
 from marketmind.scripts import scheduled_run as sr  # noqa: E402
 
 FOLDER = "\\MarketMind\\"
-TASKS = ("Daily", "Weekend", "Watchdog", "Dashboard")
+# TaskCheck is the hourly heartbeat that runs this script; it lives in a different folder so
+# a sweep of \MarketMind\ does not take it along (2026-10-09: nothing ran 10-04..10-09).
+TASKS = ("Daily", "Weekend", "Watchdog", "Dashboard", "TaskCheck")
+TASK_FOLDERS = {"TaskCheck": "\\JunyiOps\\"}
 INSTALLER = ROOT / "marketmind" / "scripts" / "install_schedule.ps1"
 QUERY_TIMEOUT_S = 30
 INSTALL_TIMEOUT_S = 300
@@ -41,8 +44,8 @@ class QueryError(RuntimeError):
 def task_exists(name: str, run=subprocess.run) -> bool:
     """schtasks exits 0 when the task exists, 1 when it does not."""
     try:
-        out = run(["schtasks", "/Query", "/TN", FOLDER + name], capture_output=True, text=True,
-                  timeout=QUERY_TIMEOUT_S, creationflags=_NO_WINDOW)
+        out = run(["schtasks", "/Query", "/TN", TASK_FOLDERS.get(name, FOLDER) + name],
+                  capture_output=True, text=True, timeout=QUERY_TIMEOUT_S, creationflags=_NO_WINDOW)
     except (OSError, subprocess.TimeoutExpired) as e:
         raise QueryError(f"schtasks query of {name} failed: {type(e).__name__}") from e
     return out.returncode == 0

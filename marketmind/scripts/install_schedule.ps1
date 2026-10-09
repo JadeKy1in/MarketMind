@@ -89,11 +89,23 @@ Register-ScheduledTask -TaskPath $Folder -TaskName "Dashboard" -Action $dash -Pr
     -Settings $dashSettings -Force -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $User) `
     -Description "MarketMind white-box dashboard on http://127.0.0.1:8520" | Out-Null
 
+# Hourly heartbeat in its own folder (\JunyiOps\), at logon and every hour: runs
+# ensure_tasks.py, which re-registers everything (including this task) if any is missing.
+# 2026-10-09: a sweep of \MarketMind\ left nothing running for six days.
+$Ensure = Join-Path $Root "marketmind\scripts\ensure_tasks.py"
+$hbSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 10) `
+    -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+$hbAction = New-ScheduledTaskAction -Execute $PythonW -Argument "`"$Ensure`"" -WorkingDirectory $Root
+$hbLogon = New-ScheduledTaskTrigger -AtLogOn -User $User
+$hbHourly = New-ScheduledTaskTrigger -Once -At (Get-Date).Date -RepetitionInterval (New-TimeSpan -Hours 1)
+Register-ScheduledTask -TaskPath "\JunyiOps\" -TaskName "TaskCheck" -Action $hbAction -Principal $principal `
+    -Settings $hbSettings -Force -Trigger @($hbLogon, $hbHourly) `
+    -Description "Hourly check that MarketMind's scheduled tasks exist; re-registers them if not." | Out-Null
+
 # Task self-check at logon from the user's Startup folder, i.e. outside Task Scheduler:
 # on 2026-10-02 every task under \MarketMind\ was deleted at once (360 Total Security
 # suspected). ensure_tasks.py re-runs this script if any of the four is missing and
 # pushes one notice. uninstall_schedule.ps1 removes the shortcut.
-$Ensure = Join-Path $Root "marketmind\scripts\ensure_tasks.py"
 $Shortcut = Join-Path ([Environment]::GetFolderPath("Startup")) "MarketMind task check.lnk"
 $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut($Shortcut)
 $lnk.TargetPath = $PythonW
@@ -108,6 +120,7 @@ Write-Output ("  Daily     {0:HH:mm}, {1:HH:mm} and {2:HH:mm} local (08:45 New Y
 Write-Output "  Weekend   Sat, Sun 12:00 and 14:00 local"
 Write-Output "  Watchdog  15 minutes after logon and after wake from sleep"
 Write-Output "  Dashboard at logon"
+Write-Output "  TaskCheck hourly + at logon (\JunyiOps\)"
 Write-Output "Task check at logon (Startup folder): $Shortcut"
 Write-Output "Python: $Python"
 

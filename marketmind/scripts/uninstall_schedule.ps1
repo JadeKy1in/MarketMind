@@ -6,6 +6,8 @@ if (Test-Path -LiteralPath $Shortcut) {
     Remove-Item -LiteralPath $Shortcut
     Write-Output "Removed $Shortcut"
 }
+# the heartbeat goes first too, or it would re-register the tasks within the hour
+Unregister-ScheduledTask -TaskPath "\JunyiOps\" -TaskName "TaskCheck" -Confirm:$false -ErrorAction SilentlyContinue
 $tasks = Get-ScheduledTask -TaskPath "\MarketMind\" -ErrorAction SilentlyContinue
 if (-not $tasks) { Write-Output "No MarketMind tasks registered."; exit 0 }
 foreach ($t in $tasks) {
