@@ -82,8 +82,9 @@ class run_notice:
             root.title("MarketMind")
             root.resizable(False, False)
             root.attributes("-topmost", True)
+            # tk's default font falls back to a non-Simplified-Chinese face; name one
             tk.Label(root, text=notice_text(self.started), justify="left",
-                     padx=14, pady=10).pack()
+                     font=("Microsoft YaHei UI", 11), padx=16, pady=12).pack()
             root.protocol("WM_DELETE_WINDOW", root.iconify)     # the reason stays registered
             root.update_idletasks()
             x = root.winfo_screenwidth() - root.winfo_reqwidth() - 24
