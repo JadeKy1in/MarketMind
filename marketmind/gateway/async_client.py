@@ -37,6 +37,7 @@ PRO_MODEL = os.environ.get("MARKETMIND_PRO_MODEL", "deepseek-v4-pro")
 # the whole budget and `content` came back empty for 3 of 4 news batches
 # (2026-09-27 live run). Floor the output cap; unused tokens are refunded by settle().
 FLASH_MIN_MAX_TOKENS = int(os.environ.get("MARKETMIND_FLASH_MIN_MAX_TOKENS", "16384"))
+TRUNCATION_RETRY_CAP = 32768   # Layer 1 already runs at this cap on Flash
 
 
 def pro_routed_to_flash() -> bool:
@@ -237,13 +238,16 @@ class DeepSeekGateway:
         elif reasoning_content.strip():
             logger.debug("DeepSeek reasoning_content received: %d chars (effort=%s)",
                         len(reasoning_content), reasoning_effort)
-        return {
+        out = {
             "content": raw_content,
             "usage": data.get("usage", {}),
             "latency_ms": elapsed_ms,
             "reasoning_content": reasoning_content,
             "model": data.get("model") or model,
         }
+        if not raw_content.strip() and (data.get("choices") or [{}])[0].get("finish_reason") == "length":
+            out["truncated"] = True      # lets _call_with_retry retry with a bigger cap
+        return out
 
 
 _gateway: DeepSeekGateway | None = None
@@ -438,7 +442,10 @@ async def _try_claude(system_prompt: str, user_prompt: str, tier: str) -> dict[s
     """
     global _claude_failures
     from marketmind.gateway import claude_cli
-    if claude_cli.provider() != "claude" or _claude_failures >= CLAUDE_FAILURES_BEFORE_PAUSE:
+    if claude_cli.provider() != "claude":
+        return None
+    if _claude_failures >= CLAUDE_FAILURES_BEFORE_PAUSE:
+        usage_tracker.note_fallback("")
         return None
     result = await claude_cli.call(system_prompt, user_prompt, tier)
     if claude_cli.INTERRUPTED in (result.get("error") or ""):
@@ -453,6 +460,8 @@ async def _try_claude(system_prompt: str, user_prompt: str, tier: str) -> dict[s
             _claude_failures = max(_claude_failures, CLAUDE_FAILURES_BEFORE_PAUSE)
         logger.warning("Claude call failed (%s); this call falls back to DeepSeek",
                        result.get("error") or "empty reply")
+        usage_tracker.note_fallback("额度用完" if _is_usage_limit(result.get("error"))
+                                    else (result.get("error") or "empty reply"))
         if _claude_failures == CLAUDE_FAILURES_BEFORE_PAUSE:
             logger.warning("Claude failed %d times in a row; DeepSeek for the rest of this run",
                            CLAUDE_FAILURES_BEFORE_PAUSE)
@@ -594,6 +603,16 @@ async def _call_with_retry(
             model, system_prompt, user_prompt,
             temperature, max_tokens, reasoning_effort,
         )
+        # Reasoning ate the whole output cap and content is empty (2026-10-14 temp_event):
+        # one retry with a doubled cap, bounded at TRUNCATION_RETRY_CAP.
+        if result.get("truncated") and max_tokens < TRUNCATION_RETRY_CAP:
+            bigger = min(max_tokens * 2, TRUNCATION_RETRY_CAP)
+            logger.warning("Output truncated at max_tokens=%d with empty content; retrying with %d",
+                           max_tokens, bigger)
+            result = await gw._call(
+                model, system_prompt, user_prompt,
+                temperature, bigger, reasoning_effort,
+            )
         cb.record_success()
         return result
     except RateLimitError as e:

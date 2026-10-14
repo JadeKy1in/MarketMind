@@ -24,9 +24,29 @@ def reset_stage(token: contextvars.Token) -> None:
     _current_stage.reset(token)
 
 
+_fallbacks: dict[str, Any] = {"calls": 0, "reason": ""}   # Claude selected but DeepSeek answered
+
+
+def note_fallback(reason: str) -> None:
+    """Count one call that was meant for Claude but ran on DeepSeek Flash."""
+    _fallbacks["calls"] += 1
+    if reason and not _fallbacks["reason"]:
+        _fallbacks["reason"] = str(reason)[:120]
+
+
+def fallback_notice() -> str:
+    """One-line mark for reports / pushes; empty when every call ran on the chosen provider."""
+    n = _fallbacks["calls"]
+    if not n:
+        return ""
+    why = f"（{_fallbacks['reason']}）" if _fallbacks["reason"] else ""
+    return f"⚠ Claude 不可用{why}，{n} 次调用已改用 DeepSeek Flash 代跑，结论质量可能低于平时。"
+
+
 def reset() -> None:
     _usage.clear()
     _providers.clear()
+    _fallbacks.update(calls=0, reason="")
 
 
 def _provider(result: dict) -> str:
@@ -61,7 +81,8 @@ def snapshot() -> dict[str, Any]:
     for row in stages.values():
         for k in total:
             total[k] += row[k]
-    return {"stages": stages, "total": total, "providers": dict(_providers)}
+    return {"stages": stages, "total": total, "providers": dict(_providers),
+            "fallback": dict(_fallbacks)}
 
 
 def summary_line() -> str:
@@ -73,6 +94,8 @@ def summary_line() -> str:
     t = snap["total"]
     # which provider actually answered: a DeepSeek count here means Claude fell back
     providers = ", ".join(f"{k} {v}" for k, v in sorted(snap["providers"].items()))
+    if snap["fallback"]["calls"]:
+        providers += f"; Claude->DeepSeek fallback {snap['fallback']['calls']}"
     return (f"LLM tokens: {t['total_tokens']:,} total in {t['calls']} calls "
             f"[{providers}] (prompt {t['prompt_tokens']:,} / completion {t['completion_tokens']:,}) — "
             + ", ".join(parts))

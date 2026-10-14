@@ -68,6 +68,21 @@ def test_second_submission_for_the_same_session_is_rejected(tmp_path):
     assert len(nxt) == 2 and len(store.list()) == 5
 
 
+def test_other_markets_share_a_calendar_date_without_clashing(tmp_path):
+    # 2026-10-14 incident: yesterday's evening HK pick (first bar 10-14) blocked today's
+    # pre-open US picks (first bar 10-14 too), dropping a whole day of decisions.
+    store = LedgerStore(tmp_path / "l.db")
+    hk = entry(ticker="0939.HK", created_at="2026-09-29T12:53:00Z")
+    assert target_session(hk) == "2026-09-30"
+    assert store.add_submission([hk], target_session, created_at=hk.created_at)
+    us = entry(ticker="XLF", created_at="2026-09-30T12:49:00Z")
+    assert target_session(us) == "2026-09-30"
+    assert store.add_submission([us], target_session, created_at=us.created_at)
+    # a repeat of the same market and session is still rejected
+    again = entry(ticker="KRE", created_at="2026-09-30T12:50:00Z")
+    assert store.add_submission([again], target_session, created_at=again.created_at) is None
+
+
 def test_concurrent_submissions_only_one_wins(tmp_path):
     path = tmp_path / "l.db"
     LedgerStore(path)

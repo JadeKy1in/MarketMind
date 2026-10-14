@@ -46,6 +46,40 @@ def test_failed_or_missing_results_are_not_counted():
     assert usage_tracker.summary_line() == "LLM tokens: none"
 
 
+def test_fallback_notice_marks_claude_calls_that_ran_on_deepseek():
+    assert usage_tracker.fallback_notice() == ""
+    usage_tracker.note_fallback("额度用完")
+    usage_tracker.note_fallback("")
+    notice = usage_tracker.fallback_notice()
+    assert "额度用完" in notice and "2 次" in notice and "DeepSeek Flash" in notice
+    usage_tracker.record({"content": "x", "usage": {"total_tokens": 1}})
+    assert "fallback 2" in usage_tracker.summary_line()
+    usage_tracker.reset()
+    assert usage_tracker.fallback_notice() == ""
+
+
+@pytest.mark.asyncio
+async def test_empty_truncated_reply_is_retried_once_with_a_bigger_cap():
+    def reply(content, finish):
+        r = MagicMock()
+        r.status_code = 200
+        r.raise_for_status.return_value = None
+        r.headers = {}
+        r.json.return_value = {"choices": [{"message": {"content": content, "reasoning_content": "thinking"},
+                                            "finish_reason": finish}],
+                               "usage": {"total_tokens": 5}}
+        return r
+
+    client = MagicMock()
+    client.post = AsyncMock(side_effect=[reply("", "length"), reply("ok", "stop")])
+    with patch("httpx.AsyncClient", return_value=client):
+        init_gateway("test-key")
+        result = await chat_flash("s", "u")
+    assert result["content"] == "ok"
+    caps = [c.kwargs["json"]["max_tokens"] for c in client.post.call_args_list]
+    assert caps[1] == 2 * caps[0]
+
+
 @pytest.mark.asyncio
 async def test_monitored_stage_attributes_calls_including_subtasks():
     @monitor(source="flash_triage")

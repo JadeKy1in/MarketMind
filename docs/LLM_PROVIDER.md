@@ -18,5 +18,7 @@ powershell -ExecutionPolicy Bypass -File marketmind\scripts\switch_llm.ps1 statu
 - 每次调用一个独立进程：关闭全部工具、不保存会话、不加载用户 / 项目设置和 MCP、在中性目录运行（不读任何 CLAUDE.md）；系统提示经临时文件传入，正文经标准输入传入（Windows 命令行长度限制）。并发上限 4（`MARKETMIND_CLAUDE_CONCURRENCY`）。
 - **与所有人自己使用 Claude 共用额度**（5 小时窗口和每周上限）。每天约 40 次调用、35 万 token。
 - **自动降级**：Claude 调用失败（未登录、额度用完、超时）时这一次改走 DeepSeek；同一次运行连续失败 3 次后，其余调用全部改走 DeepSeek，并发站内警报。子进程被外部中断（退出码 0xC000013A，例如运行开头电脑进出待机，2026-09-30 / 10-01 因此整天退回 DeepSeek）不算 Claude 失败：等 30 秒重试一次，重试仍被中断才计 1 次失败；子进程以 CREATE_NO_WINDOW 启动，不弹控制台窗口。DeepSeek 密钥必须保留。
+- **降级标注**（2026-10-14）：只要有调用本该走 Claude 却改走了 DeepSeek Flash，日报正文开头加一行"⚠ Claude 不可用（原因），N 次调用已改用 DeepSeek Flash 代跑"，日报 JSON 带 `llm_fallback`，推送同样带这行；运行日志的 token 汇总行和 `token_usage.jsonl` 的 `fallback` 字段记次数。
+- DeepSeek 回复被输出上限截断且内容为空时，自动用翻倍的上限（最多 32768）重试一次。
 - 登录过期：长期无人值守时，可运行 `claude setup-token` 生成长期令牌，设为用户环境变量 `CLAUDE_CODE_OAUTH_TOKEN`。
 - 测试一律不调用 Claude（`tests/conftest.py` 把 `MARKETMIND_LLM` 固定为 deepseek）。

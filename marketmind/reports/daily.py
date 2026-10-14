@@ -259,8 +259,12 @@ async def build_report(today: str | None = None, *, store=None, call=_call_llm,
         text, source = "", "fallback"
     if not text:
         text, source = fallback_text(facts), "fallback"
+    from marketmind.gateway import usage_tracker
+    notice = usage_tracker.fallback_notice()
+    if notice:
+        text = notice + "\n\n" + text
     report = {"date": today, "written_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-              "source": source, "markdown": text, "facts": facts}
+              "source": source, "markdown": text, "facts": facts, "llm_fallback": notice}
     folder = reports_dir()
     folder.mkdir(parents=True, exist_ok=True)
     (folder / f"{today}.json").write_text(json.dumps(report, ensure_ascii=False, indent=1, default=str),

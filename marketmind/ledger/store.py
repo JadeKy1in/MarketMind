@@ -223,6 +223,15 @@ class LedgerStore:
         Check and insert run in one BEGIN IMMEDIATE transaction, so two processes
         cannot both pass the check. Returns the ids of `entries`, then `companions`.
         """
+        # A session is one market's trading day: an HK pick made yesterday evening
+        # (first bar 10-14) must not block today's US picks (first bar 10-14 as well).
+        from marketmind.markets import market_for
+        calendar_session = session_of
+
+        def session_of(e: LedgerEntry) -> str | None:
+            s = calendar_session(e)
+            return f"{s} ({market_for(e.ticker).code})" if s else None
+
         batch = list(entries) + list(companions)
         now = _now()
         for e in batch:
