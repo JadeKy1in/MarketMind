@@ -85,3 +85,5 @@ await archive_daily(today: str | None = None, data_dir: Path | None = None, forc
 - （2026-10-02）Stooq 密钥要求：https://github.com/pydata/pandas-datareader/issues/1012 ；https://stooq.com/q/d/?s=9434.jp&get_apikey
 - （2026-10-02）EODHD 交易所代码：https://eodhd.com/list-of-stock-markets
 - （2026-10-02）baostock：http://baostock.com/ ；FinMind：https://finmind.github.io/
+
+> 所有人 2026-10-15 决定放弃 Stooq：没有 STOOQ_API_KEY 时代码自动跳过，不再申请密钥；日股、港股第二来源继续用腾讯 / 东方财富，不再等 Stooq。
