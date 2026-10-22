@@ -30,7 +30,7 @@ SYSTEM_PROMPT = """你是 MarketMind 的每日汇报员，给所有人写今天�
    ## 观察名单（watchlist：今天新增 / 触发 / 到期 / 失效的项目与等待的确认条件）
    ## 趋势状态（趋势状态：今天进入 / 退出 TREND 的标的，当前 TREND 名单与代码计算的止损位；明确写出这只是信息性的状态记录，不是警报，也不是交易指令）
    ## 影子动向（多空分布、共识集中的标的、新出现的事件影子；最后一条原样转述 ledger_comparison.line——代码算好的 LLM 与代码基线对照，基线只记账、不是建议）
-   ## 生态健康（ecosystem，简短：一行转述 summary；有 herding_flags 时逐条写资产组、方向、连续天数，并注明是"市场驱动"（market_driven，与趋势状态一致）还是"行为性"（behavioural，更值得警惕）；有 duplicate_clusters 时写出成员；都没有就写"无异常"；date 不是今天时注明报告日期）
+   ## 生态健康（ecosystem，简短：一行转述 summary——其中 N_eff x/y (null~z) 只统计长期影子，z 是把各影子日盈亏打乱后的随机基线，x 明显低于 z 才说明盈亏比独立情形更同步；llm today 只是今天各模型的记录数，不是异常；有 herding_flags 时逐条写资产组、方向、连续天数，并注明是"市场驱动"（market_driven，与趋势状态一致）还是"行为性"（behavioural，更值得警惕）；有 duplicate_clusters 时写出成员；都没有就写"无异常"；date 不是今天时注明报告日期）
    ## Playground 实验（playground，简短，1–3 条：今天各实验 agent 的调用——标的、方向、记录编号；注明这是实验性来源，不是建议；calls 为 0 写"今日无"）
    ## 实盘持仓（巡检结论；没有持仓就写"未录入持仓"）
    ## 大行情警报（触发 / 接近触发；观察模式要注明不推送）

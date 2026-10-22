@@ -54,7 +54,7 @@ def test_ecosystem_view_of_a_real_report(data):
     pnl = d["diversity"]["pnl"]
     assert pnl["n_eff"] is None and pnl["note"] and pnl["unexpected_clusters"] == []
     assert d["degradation"]["beat_random_trend"]["trend"] == "insufficient"
-    assert d["homogenisation"]["llm"]["flag"] is True
+    assert "llm" not in d["homogenisation"] and d["homogenisation"]["llm_today"]["records"] > 0
     assert d["homogenisation"]["news_source"]["status"] == "not_recorded"
     assert d["integrity"]["zombies"] == [] and d["integrity"]["orphans"] == []
     assert d["stagnation"]["flags"] == [] and d["stagnation"]["insufficient"] > 0

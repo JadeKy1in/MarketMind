@@ -119,11 +119,80 @@ def pnl_ledger(n=25, seed=0):
 def test_pnl_duplicate_cluster_and_n_eff():
     doc = H.evaluate(pnl_ledger(), days(25)[-1], facts(trial_parent={"trial:t1": "s0"}))
     pnl = doc["diversity"]["pnl"]
-    assert pnl["eligible"] == 4
-    assert pnl["clusters"] == [{"members": ["s0", "s1", "trial:t1"], "expected": False}]
+    # headline N_eff: long-term shadows only (s0, s1, s2); the trial variant only under `all`
+    assert pnl["scope"] == "long-term shadows" and pnl["eligible"] == 3
     assert 1.5 < pnl["n_eff"] < 2.5                        # two independent streams
+    assert pnl["all"]["eligible"] == 4 and 1.5 < pnl["all"]["n_eff"] < 2.5
+    # clusters still cover every actor
+    assert pnl["clusters"] == [{"members": ["s0", "s1", "trial:t1"], "expected": False}]
     exp = {(p["a"], p["b"]): p["expected"] for p in pnl["pairs_high"]}
     assert exp[("s0", "trial:t1")] is True and exp[("s0", "s1")] is False
+    assert all(p["nonzero_days"] == 25 for p in pnl["pairs_high"]) and pnl["pairs_sparse"] == 0
+    assert f"N_eff {pnl['n_eff']:.1f}/3 (null~{pnl['n_eff_null']:.1f})" in H.summary_line(doc)
+
+
+def test_corr_matrix_matches_numpy_on_the_overlap():
+    rng = np.random.default_rng(3)
+    a = {d: float(v) for d, v in zip(days(30), rng.normal(size=30))}
+    b = {d: float(v) for d, v in zip(days(30)[5:], rng.normal(size=25))}
+    x, m = H._series_matrix({"a": a, "b": b}, ["a", "b"])
+    rho, cnt = H._corr_matrix(x, m)
+    common = sorted(a.keys() & b.keys())
+    want = np.corrcoef([a[d] for d in common], [b[d] for d in common])[0, 1]
+    assert cnt[0, 1] == 25 and rho[0, 1] == pytest.approx(want)
+    flat = {d: 0.0 for d in days(30)}
+    rho, _ = H._corr_matrix(*H._series_matrix({"a": a, "f": flat}, ["a", "f"]))
+    assert np.isnan(rho[0, 1])                             # no variance on the overlap
+
+
+def test_sparse_pnl_pair_is_not_a_duplicate():
+    """Exit-day P&L is mostly zeros: one shared exit day gives rho ~1 over 25 'common'
+    days. A duplicate needs DUP_MIN_NONZERO_DAYS days with non-zero P&L on both sides."""
+    ds = days(25)
+    rows = []
+    for k, d in enumerate(ds):
+        big = 500.0 if k == 10 else 0.0
+        rows += [rec("s0", d, status="settled", exit_date=d, pnl_usd=big + (3.0 if k == 3 else 0.0),
+                     net_return=0.0),
+                 rec("s1", d, status="settled", exit_date=d, pnl_usd=big + (2.0 if k == 17 else 0.0),
+                     net_return=0.0)]
+    pnl = H.evaluate(rows, ds[-1], facts())["diversity"]["pnl"]
+    assert pnl["pairs_high"] == [] and pnl["clusters"] == [] and pnl["pairs_sparse"] == 1
+    # the same pair with >= DUP_MIN_NONZERO_DAYS shared non-zero days is a duplicate
+    rows = [rec(s, d, status="settled", exit_date=d,
+                pnl_usd=float((k % 5) + 1) * (1.01 if s == "s1" else 1), net_return=0.0)
+            for k, d in enumerate(ds) for s in ("s0", "s1")]
+    pnl = H.evaluate(rows, ds[-1], facts())["diversity"]["pnl"]
+    assert [(p["a"], p["b"]) for p in pnl["pairs_high"]] == [("s0", "s1")]
+    assert pnl["pairs_high"][0]["nonzero_days"] >= C.DUP_MIN_NONZERO_DAYS
+
+
+def test_n_eff_null_is_deterministic_and_below_n_for_sparse_series():
+    rng = np.random.default_rng(7)
+    series = {}
+    for i in range(12):                                    # independent, ~2 exits in 30 days
+        v = np.zeros(30)
+        v[rng.choice(30, 2, replace=False)] = rng.normal(0, 1, 2)
+        series[f"s{i}"] = dict(zip(days(30), v.tolist()))
+    ids = sorted(series)
+    x, m = H._series_matrix(series, ids)
+    null = H.n_eff_null(x, m)
+    assert null == H.n_eff_null(x, m)                      # fixed seed
+    assert null < 0.9 * len(ids)                           # sparsity alone pulls N_eff below N
+    dense = {s: dict(zip(days(60), rng.normal(size=60).tolist())) for s in ids}
+    xd, md = H._series_matrix(dense, ids)
+    assert H.n_eff_null(xd, md) > null                     # dense independent series sit nearer N
+
+
+def test_playground_is_left_out_of_headline_n_eff():
+    rows = [r for r in pnl_ledger() if r.source_id != "trial:t1"]
+    ds = days(25)
+    rng = np.random.default_rng(5)
+    rows += [rec("playground:x", d, stype="playground", status="settled", exit_date=d,
+                 pnl_usd=float(v), net_return=0.0) for d, v in zip(ds, rng.normal(0, 50, 25))]
+    pnl = H.evaluate(rows, ds[-1], facts())["diversity"]["pnl"]
+    assert pnl["eligible"] == 3 and pnl["all"]["eligible"] == 4
+    assert pnl["all"]["n_eff"] > pnl["n_eff"]
 
 
 def test_pnl_needs_twenty_days():
@@ -152,15 +221,32 @@ def test_direction_duplicates():
 
 # ── 3. homogenisation ───────────────────────────────────────────────────
 
-def test_homogenisation_llm_and_group_and_news_not_recorded():
+def test_homogenisation_group_and_news_not_recorded_and_llm_not_flagged():
     rows = []
     for d in days(3):
         rows += [rec("s0", d, "SPY", meta={"llm": "a"}), rec("s1", d, "QQQ", meta={"llm": "a"}),
                  rec("s2", d, "GLD", meta={"llm": "b"})]
-    hom = H.evaluate(rows, days(3)[-1], facts())["homogenisation"]
+    doc = H.evaluate(rows, days(3)[-1], facts())
+    hom = doc["homogenisation"]
     assert hom["dominant_group"]["top"] == "us_equity_index" and hom["dominant_group"]["flag"]
-    assert hom["llm"]["top"] == "a" and hom["llm"]["share"] == pytest.approx(0.667)
     assert hom["news_source"]["status"] == "not_recorded"
+    assert "llm" not in hom                                # no modal-LLM homogenisation flag
+    line = H.summary_line(doc)
+    assert "homogenised: us_equity_index 67%" in line and "homogenised: a" not in line
+
+
+def test_llm_today_counts_todays_voter_records_only():
+    ds = days(3)
+    rows = [rec(s, d, meta={"llm": "deepseek"}) for d in ds[:2] for s in ("s0", "s1", "s2")]
+    rows += [rec("s0", ds[2], meta={"llm": "claude"}), rec("s1", ds[2], meta={"llm": "claude"}),
+             rec("s1", ds[2], "GLD", meta={"llm": "claude"}), rec("s2", ds[2], meta={"llm": "deepseek"}),
+             rec("s3", ds[2]),                                               # no meta.llm: not counted
+             rec("trial:t1", ds[2], stype="temp_shadow", meta={"llm": "claude"})]  # not a voter
+    doc = H.evaluate(rows, ds[2], facts())
+    llm = doc["homogenisation"]["llm_today"]
+    assert llm == {"day": ds[2], "records": 4, "top": "claude", "count": 3, "share": 0.75,
+                   "by_model": {"claude": 3, "deepseek": 1}}
+    assert H.summary_line(doc).endswith("llm today: claude 3/4")
 
 
 # ── 4. stagnation ───────────────────────────────────────────────────────

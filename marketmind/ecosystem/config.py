@@ -30,6 +30,10 @@ HERDING_ESCALATE_DAYS = 10   # legacy "institutional analysis" escalation, repor
 NOTIONAL_USD = 10_000.0      # same daily-return convention as the promotion ladder
 DUP_CORR = 0.80              # near-duplicate: rho >= this ...
 DUP_MIN_DAYS = 20            # ... over at least this many common days
+DUP_MIN_NONZERO_DAYS = 8     # ... of which at least this many with non-zero P&L for BOTH
+                             # (exit-day P&L is mostly zeros: one shared exit day gave rho 0.99)
+N_EFF_NULL_ITER = 50         # day-shuffle permutations for the N_eff null baseline
+N_EFF_NULL_SEED = 0          # fixed seed: the same ledger gives the same baseline
 DIRECTION_DUP_COS = 0.80     # direction vectors: cosine >= this ...
 DIRECTION_DUP_MIN_CELLS = 20  # ... over at least this many (day, group) cells both traded
 DIRECTION_MIN_DAYS = 20      # common full run days for a pair to enter direction N_eff
@@ -37,6 +41,9 @@ DIRECTION_MIN_DAYS = 20      # common full run days for a pair to enter directio
 # ── 3. Source homogenisation ────────────────────────────────────────────
 HOMOGEN_WINDOW_DAYS = 20     # full run days
 HOMOGEN_SHARE = 0.50         # legacy "BlackRock" warning: >= 50% share one dominant input
+                             # (asset group / ticker / news source; not the LLM - the owner rule
+                             # "shadows use Claude whenever available" makes one model expected,
+                             # so today's model share is reported, not flagged)
 
 # ── 4. Stagnation / plateau ─────────────────────────────────────────────
 PLATEAU_DAYS = 20            # an actor's last 20 decision days, split 10 / 10

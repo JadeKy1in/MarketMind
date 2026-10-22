@@ -254,7 +254,7 @@ async function loadEcosystem(){
   const vd=v=>{const x=VERDICT[v]||[v,""];return `<span class="chip ${x[1]}">${esc(x[0])}</span>`};
   const flags=(h.flags||[]).map(f=>`<tr><td><b>${esc(f.group)}</b></td><td>${dir(f.direction)}</td><td class="num">${f.days}</td><td>${esc(f.start)} → ${esc(f.end)}</td><td class="num">${f.min_share==null?"—":(f.min_share*100).toFixed(0)+"%"} / ${f.min_voters??"—"}</td><td class="num">${f.joint_p==null?NA:Number(f.joint_p).toExponential(1)}</td><td>${vd(f.verdict)}${f.escalate?' <span class="chip red">持续 ≥10 天</span>':""}</td></tr>`).join("");
   const today=(h.today||[]).map(r=>`<span class="chip ${r.concentrated?"yellow":""}">${esc(r.group)} ${dir(r.direction)} ${(r.share*100).toFixed(0)}% / ${r.n}</span>`).join(" ");
-  const divRow=(x,label)=>{x=x||{};const cl=x.clusters||[];return `<tr><td>${label}</td><td class="num">${x.n_eff==null?INS(x.note):`${num(x.n_eff,1)} / ${x.eligible}`}</td><td class="num">${x.mean_abs_rho==null?"—":num(x.mean_abs_rho,2)}</td><td>${cl.length?cl.map(c=>`<div><span class="chip ${c.expected?"":"red"}">${c.expected?"同源（预期）":"非预期重复"}</span> ${(c.members||[]).map(esc).join(", ")}</div>`).join(""):'<span class="mut">无</span>'}</td></tr>`};
+  const divRow=(x,label)=>{x=x||{};const cl=x.clusters||[];return `<tr><td>${label}</td><td class="num">${x.n_eff==null?INS(x.note):`${num(x.n_eff,1)} / ${x.eligible}`+(x.n_eff_null==null?"":` <span class="mut">（随机基线 ${num(x.n_eff_null,1)}）</span>`)}</td><td class="num">${x.mean_abs_rho==null?"—":num(x.mean_abs_rho,2)}</td><td>${cl.length?cl.map(c=>`<div><span class="chip ${c.expected?"":"red"}">${c.expected?"同源（预期）":"非预期重复"}</span> ${(c.members||[]).map(esc).join(", ")}</div>`).join(""):'<span class="mut">无</span>'}</td></tr>`};
   const homRow=(x,label)=>{x=x||{};return `<tr><td>${label}</td><td>${x.top==null?'<span class="mut">无记录</span>':esc(x.top)}</td><td class="num">${x.share==null?"—":(x.share*100).toFixed(0)+"%"} <span class="mut">(${x.count??0}/${x.actors??0})</span></td><td>${x.top==null?"":x.flag?'<span class="chip red">同质化</span>':'<span class="chip green">正常</span>'}</td></tr>`};
   const mkRow=(x,label)=>{x=x||{};return `<tr><td>${label}</td><td>${!x.trend||x.trend==="insufficient"?INS(`${x.n??0} 个点`):`<span class="chip ${x.trend==="decreasing"?"red":""}">${esc(MKT[x.trend]||x.trend)}</span>`}</td><td class="num">${x.tau==null?"—":num(x.tau,2)}</td><td class="num">${x.p==null?"—":num(x.p,3)}</td></tr>`};
   const ns=hm.news_source||{},br=dg.beat_random||[],lb=br[br.length-1],el=dg.entropy_latest;
@@ -263,7 +263,7 @@ async function loadEcosystem(){
   <pre>${esc(d.summary||"")}</pre>
   <div class="grid">
    <div class="stat"><div class="k">羊群标记</div><div class="v">${(h.flags||[]).length}</div><div class="k">历史片段 ${h.episodes??0}</div></div>
-   <div class="stat"><div class="k">N_eff（盈亏）</div><div class="v">${dv.pnl&&dv.pnl.n_eff!=null?num(dv.pnl.n_eff,1)+" / "+dv.pnl.eligible:"数据不足"}</div></div>
+   <div class="stat"><div class="k">N_eff（盈亏，长期影子）</div><div class="v">${dv.pnl&&dv.pnl.n_eff!=null?num(dv.pnl.n_eff,1)+" / "+dv.pnl.eligible:"数据不足"}</div>${dv.pnl&&dv.pnl.n_eff_null!=null?`<div class="k">随机基线 ≈ ${num(dv.pnl.n_eff_null,1)}</div>`:""}</div>
    <div class="stat"><div class="k">非预期重复簇</div><div class="v">${((dv.pnl||{}).unexpected_clusters||[]).length+((dv.direction||{}).unexpected_clusters||[]).length}</div></div>
    <div class="stat"><div class="k">僵尸 / 孤儿来源</div><div class="v">${zo.length} / ${or.length}</div></div>
    <div class="stat"><div class="k">完整运行日</div><div class="v">${p.full_run_days??0}</div><div class="k">${esc(p.first_run_day||"—")} → ${esc(p.last_run_day||"—")}，参与者 ${p.actors??0}</div></div>
@@ -272,9 +272,11 @@ async function loadEcosystem(){
   <div class="mut" style="margin-bottom:8px">市场驱动 = 与该组趋势状态一致（多 + TREND，或空 + 空仓）；行为性 = 与趋势状态不一致，更值得警惕。</div>
   ${flags?`<div class="tw"><table><tr><th>资产组</th><th>方向</th><th class="num">连续天数</th><th>期间</th><th class="num">最低占比 / 票数</th><th class="num">联合 p</th><th>判定</th></tr>${flags}</table></div>`:'<div class="empty">今天没有羊群标记</div>'}
   <h3>今日各组投票</h3><div>${today||'<span class="mut">今天不是完整运行日或没有投票</span>'}</div></div>
-  <div class="card"><h2>输出多样性与重复簇</h2><table><tr><th>口径</th><th class="num">N_eff / 合格数</th><th class="num">平均 |ρ|</th><th>重复簇</th></tr>${divRow(dv.pnl,"每日盈亏相关")}${divRow(dv.direction,"方向向量余弦")}</table></div>
-  <div class="card"><h2>来源 / 模型同质化 <span class="mut">最近 ${hm.window_days??0} 个完整运行日</span></h2>
-  <table><tr><th>维度</th><th>最常见</th><th class="num">占比</th><th>判定</th></tr>${homRow(hm.dominant_group,"主要资产组")}${homRow(hm.dominant_ticker,"主要标的")}${homRow(hm.llm,"LLM 模型")}</table>
+  <div class="card"><h2>输出多样性与重复簇</h2><table><tr><th>口径</th><th class="num">N_eff / 合格数</th><th class="num">平均 |ρ|</th><th>重复簇</th></tr>${divRow(dv.pnl,"每日盈亏相关（长期影子）")}${divRow((dv.pnl||{}).all?{...dv.pnl.all,clusters:[]}:null,"每日盈亏相关（含 Playground / 临时影子）")}${divRow(dv.direction,"方向向量余弦")}</table>
+  <div class="mut" style="margin-top:6px">随机基线 = 把每个影子的日盈亏在自己的日期里打乱后算出的 N_eff，盈亏稀疏时完全独立也达不到合格数；重复簇覆盖全部参与者，且要求双方都有非零盈亏的天数 ≥ ${(d.thresholds||{}).DUP_MIN_NONZERO_DAYS??8}${(dv.pnl||{}).pairs_sparse?`（${dv.pnl.pairs_sparse} 对 ρ 高但共同非零天数不足，未计入）`:""}。</div></div>
+  <div class="card"><h2>来源同质化 <span class="mut">最近 ${hm.window_days??0} 个完整运行日</span></h2>
+  <table><tr><th>维度</th><th>最常见</th><th class="num">占比</th><th>判定</th></tr>${homRow(hm.dominant_group,"主要资产组")}${homRow(hm.dominant_ticker,"主要标的")}</table>
+  <div class="mut" style="margin-top:6px">今日 LLM（只展示，影子按规定优先用 Claude）：${hm.llm_today&&hm.llm_today.records?Object.entries(hm.llm_today.by_model||{}).map(([k,v])=>`${esc(k)} ${v}/${hm.llm_today.records}`).join("，"):"无记录"}</div>
   <div class="mut" style="margin-top:6px">标的集合平均 Jaccard：${hm.mean_ticker_jaccard==null?"—":num(hm.mean_ticker_jaccard,2)}；新闻来源：${ns.status==="not_recorded"?'<span class="chip yellow">未记录</span> '+esc(ns.detail||""):esc(ns.status||"—")}</div></div>
   <div class="card"><h2>停滞 <span class="mut">${esc(st.note||"")}${st.insufficient?`；${st.insufficient} 个影子天数不足未判断`:""}</span></h2>
   ${sf.length?`<table><tr><th>影子</th><th>类型</th><th>详情</th></tr>${sf.map(f=>`<tr><td>${esc(f.shadow_id)}</td><td>${f.kind==="repetition"?"重复同一标的方向":"平台期"}</td><td class="mut">${f.kind==="repetition"?`${esc(f.top)} 占 ${(f.share*100).toFixed(0)}%（${f.days} 天）`:`标的 Jaccard ${num(f.ticker_jaccard,2)}，确信度漂移 ${num(f.conf_shift,3)}，标准差 ${num(f.conf_std,3)}`}</td></tr>`).join("")}</table>`:'<div class="empty">没有停滞标记</div>'}</div>

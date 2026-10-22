@@ -32,9 +32,12 @@ def test_run_writes_report_and_read_function_returns_it(tmp_path):
     flag = doc["herding"]["flags"][0]
     assert (flag["group"], flag["verdict"]) == ("us_equity_index", "behavioural")
     assert doc["integrity"]["zombies"] == [] and doc["integrity"]["orphans"] == []
-    assert doc["homogenisation"]["llm"]["flag"] is True
+    n = len(roster.active(tmp_path))
+    assert "llm" not in doc["homogenisation"]
+    assert doc["homogenisation"]["llm_today"]["by_model"] == {"m": n}
     assert doc["summary"].startswith("[ecosystem] herding: us_equity_index long 3d behavioural, "
                                      "N_eff n/a (0 eligible), dup clusters 0, zombies 0")
+    assert doc["summary"].endswith(f"llm today: m {n}/{n}") and "homogenised: m" not in doc["summary"]
     assert read_report("2026-01-07", tmp_path)["summary"] == doc["summary"]
     assert read_report(root=tmp_path)["date"] == "2026-01-07"
     assert read_report("2026-01-08", tmp_path) is None

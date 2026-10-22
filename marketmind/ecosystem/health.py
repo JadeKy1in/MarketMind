@@ -263,42 +263,115 @@ def pnl_series(rows: list[LedgerEntry], calendar: list[str], today: str) -> dict
             for sid, start in first.items()}
 
 
-def _pair_corr(a: dict[str, float], b: dict[str, float]) -> tuple[float | None, int]:
-    common = sorted(a.keys() & b.keys())
-    if len(common) < C.DUP_MIN_DAYS:
-        return None, len(common)
-    x = np.array([a[d] for d in common])
-    y = np.array([b[d] for d in common])
-    if x.std() == 0 or y.std() == 0:
-        return None, len(common)
-    return float(np.corrcoef(x, y)[0, 1]), len(common)
+def _series_matrix(series: dict[str, dict[str, float]], ids: list[str]) -> tuple[np.ndarray, np.ndarray]:
+    """(values, present): one row per id over the union of their days; absent = 0 / False."""
+    cols = sorted({d for s in ids for d in series[s]})
+    pos = {d: k for k, d in enumerate(cols)}
+    x = np.zeros((len(ids), len(cols)))
+    m = np.zeros((len(ids), len(cols)), dtype=bool)
+    for i, s in enumerate(ids):
+        for d, v in series[s].items():
+            x[i, pos[d]] = v
+            m[i, pos[d]] = True
+    return x, m
 
 
-def check_pnl_diversity(series: dict[str, dict[str, float]], facts: Facts) -> dict:
-    ids = sorted(s for s, m in series.items()
-                 if len(m) >= C.DUP_MIN_DAYS and np.std(list(m.values())) > 0)
-    n = len(ids)
-    out = {"eligible": n, "actors": len(series), "n_eff": None, "mean_abs_rho": None,
-           "pairs_high": [], "clusters": []}
-    if n < 2:
-        out["note"] = (f"needs >= 2 actors with >= {C.DUP_MIN_DAYS} days of settled P&L "
-                       "and non-zero variance")
+def _corr_matrix(x: np.ndarray, m: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Pairwise Pearson rho of the rows over their common days (vectorised); NaN where
+    the overlap is < DUP_MIN_DAYS or either side has no variance on it. Also the
+    common-day counts."""
+    mf = m.astype(float)
+    cnt = mf @ mf.T
+    sx = x @ mf.T                    # sum of row i over the days row j is present
+    sxx = (x * x) @ mf.T
+    sxy = x @ x.T
+    with np.errstate(divide="ignore", invalid="ignore"):
+        cov = sxy - sx * sx.T / cnt
+        vi = sxx - sx * sx / cnt
+        vj = vi.T
+        rho = cov / np.sqrt(vi * vj)
+    flat = (vi <= 1e-12 * np.maximum(sxx, 1e-300)) | (vj <= 1e-12 * np.maximum(sxx.T, 1e-300))
+    rho[(cnt < C.DUP_MIN_DAYS) | flat | ~np.isfinite(rho)] = np.nan
+    return np.clip(rho, -1.0, 1.0), cnt
+
+
+def _n_eff(rho: np.ndarray) -> float:
+    mat = np.nan_to_num(rho, nan=0.0)          # too little overlap = treated as independent
+    np.fill_diagonal(mat, 1.0)
+    return participation_ratio(mat)
+
+
+def n_eff_null(x: np.ndarray, m: np.ndarray, iterations: int = C.N_EFF_NULL_ITER,
+               seed: int = C.N_EFF_NULL_SEED) -> float | None:
+    """N_eff expected with no cross-sectional dependence: shuffle each series over its own
+    days (keeps its span, its zeros and its values), recompute, average. Sparse exit-day
+    P&L gives spurious |rho| on short overlaps, so the null sits well below N."""
+    if x.shape[0] < 2 or iterations <= 0:
+        return None
+    rng = np.random.default_rng(seed)
+    rows = [np.flatnonzero(m[i]) for i in range(x.shape[0])]
+    vals = []
+    for _ in range(iterations):
+        y = x.copy()
+        for i, idx in enumerate(rows):
+            y[i, idx] = rng.permutation(x[i, idx])
+        vals.append(_n_eff(_corr_matrix(y, m)[0]))
+    return float(np.mean(vals))
+
+
+def _eligible(series: dict[str, dict[str, float]], within=None) -> list[str]:
+    return sorted(s for s, v in series.items() if (within is None or s in within)
+                  and len(v) >= C.DUP_MIN_DAYS and np.std(list(v.values())) > 0)
+
+
+def _n_eff_block(series: dict[str, dict[str, float]], ids: list[str]) -> dict:
+    out = {"eligible": len(ids), "n_eff": None, "n_eff_null": None, "mean_abs_rho": None}
+    if len(ids) < 2:
         return out
-    mat = np.eye(n)
-    rhos, dup = [], []
-    for i, j in combinations(range(n), 2):
-        rho, days = _pair_corr(series[ids[i]], series[ids[j]])
-        if rho is None:
+    x, m = _series_matrix(series, ids)
+    rho = _corr_matrix(x, m)[0]
+    upper = rho[np.triu_indices(len(ids), 1)]
+    upper = upper[np.isfinite(upper)]
+    null = n_eff_null(x, m)
+    out.update(n_eff=round(_n_eff(rho), 2), n_eff_null=None if null is None else round(null, 2),
+               mean_abs_rho=round(float(np.mean(np.abs(upper))), 3) if upper.size else None)
+    return out
+
+
+def check_pnl_diversity(series: dict[str, dict[str, float]], facts: Facts,
+                        long_term: set[str] | None = None) -> dict:
+    """N_eff (headline) over the long-term shadows only, with its day-shuffle null; the
+    same for every actor (Playground, temporary shadows) under `all`. Duplicate pairs and
+    clusters over every actor, and only with >= DUP_MIN_NONZERO_DAYS days on which both
+    have non-zero P&L."""
+    ids = _eligible(series)
+    lt_ids = _eligible(series, long_term) if long_term is not None else ids
+    out = {"scope": "long-term shadows" if long_term is not None else "all actors",
+           "actors": len(series), **_n_eff_block(series, lt_ids),
+           "all": _n_eff_block(series, ids), "null_iterations": C.N_EFF_NULL_ITER,
+           "pairs_high": [], "pairs_sparse": 0, "clusters": []}
+    if len(lt_ids) < 2:
+        out["note"] = (f"needs >= 2 long-term shadows with >= {C.DUP_MIN_DAYS} days of settled P&L "
+                       "and non-zero variance")
+    if len(ids) < 2:
+        return out
+    x, m = _series_matrix(series, ids)
+    rho, cnt = _corr_matrix(x, m)
+    nz = (m & (x != 0)).astype(float)
+    both = nz @ nz.T
+    dup = []
+    for i, j in combinations(range(len(ids)), 2):
+        r = rho[i, j]
+        if not np.isfinite(r) or r < C.DUP_CORR:
             continue
-        mat[i, j] = mat[j, i] = rho
-        rhos.append(abs(rho))
-        if rho >= C.DUP_CORR:
-            dup.append((ids[i], ids[j]))
-            out["pairs_high"].append({"a": ids[i], "b": ids[j], "rho": round(rho, 3), "days": days,
-                                      "expected": family(ids[i], facts.trial_parent)
-                                      == family(ids[j], facts.trial_parent)})
-    out["n_eff"] = round(participation_ratio(mat), 2)
-    out["mean_abs_rho"] = round(float(np.mean(rhos)), 3) if rhos else None
+        if both[i, j] < C.DUP_MIN_NONZERO_DAYS:
+            out["pairs_sparse"] += 1
+            continue
+        dup.append((ids[i], ids[j]))
+        out["pairs_high"].append({"a": ids[i], "b": ids[j], "rho": round(float(r), 3),
+                                  "days": int(cnt[i, j]), "nonzero_days": int(both[i, j]),
+                                  "expected": family(ids[i], facts.trial_parent)
+                                  == family(ids[j], facts.trial_parent)})
     out["clusters"] = _label_clusters(_clusters(ids, dup), facts)
     return out
 
@@ -378,19 +451,28 @@ def _dominant(counter: Counter) -> str | None:
     return sorted(k for k, v in counter.items() if v == top)[0]
 
 
-def check_homogenisation(rows: list[LedgerEntry], run_days: list[str]) -> dict:
+def llm_today(rows: list[LedgerEntry], today: str) -> dict:
+    """Which model made today's voter decisions (meta.llm; meta.model is the tier "flash",
+    not the LLM). Reported, never flagged: the owner rule "shadows use Claude whenever
+    available" makes one dominant model the expected state, and a modal-model-per-actor
+    share over a window only tracks model-switch history."""
+    by_model = Counter(str((e.meta or {}).get("llm")) for e in rows
+                       if day_of(e) == today and is_voter(e) and (e.meta or {}).get("llm"))
+    n = sum(by_model.values())
+    top, k = max(by_model.items(), key=lambda kv: (kv[1], kv[0])) if by_model else (None, 0)
+    return {"day": today, "records": n, "top": top, "count": k,
+            "share": round(k / n, 3) if n else None, "by_model": dict(by_model.most_common())}
+
+
+def check_homogenisation(rows: list[LedgerEntry], run_days: list[str], today: str | None = None) -> dict:
     window = set(run_days[-C.HOMOGEN_WINDOW_DAYS:])
     by_actor_group: dict[str, Counter] = defaultdict(Counter)
     by_actor_ticker: dict[str, Counter] = defaultdict(Counter)
-    by_actor_llm: dict[str, Counter] = defaultdict(Counter)
     by_actor_news: dict[str, Counter] = defaultdict(Counter)     # meta.news_sources (2026-09-29+)
     for e in rows:
         if day_of(e) in window and is_voter(e):
             by_actor_group[e.source_id][asset_group(e.ticker)] += 1
             by_actor_ticker[e.source_id][e.ticker] += 1
-            llm = (e.meta or {}).get("llm")      # meta.model is the tier ("flash"), not the LLM
-            if llm:
-                by_actor_llm[e.source_id][str(llm)] += 1
             for src in (e.meta or {}).get("news_sources") or []:
                 by_actor_news[e.source_id][str(src)] += 1
 
@@ -415,7 +497,7 @@ def check_homogenisation(rows: list[LedgerEntry], run_days: list[str]) -> dict:
     return {"window_days": len(window),
             "dominant_group": share(by_actor_group, "asset group"),
             "dominant_ticker": share(by_actor_ticker, "ticker"),
-            "llm": share(by_actor_llm, "llm (meta.llm)"),
+            "llm_today": llm_today(rows, today or (run_days[-1] if run_days else "")),
             "mean_ticker_jaccard": round(float(np.mean(jac)), 3) if jac else None,
             "news_source": news}
 
@@ -591,7 +673,8 @@ def evaluate(entries: list[LedgerEntry], today: str, facts: Facts | None = None)
     run_days = full_run_days(rows, n_active)
     calendar = trading_calendar(entries, actor_rows, today)
     herding = check_herding(actor_rows, run_days, facts)
-    pnl = check_pnl_diversity(pnl_series(actor_rows, calendar, today), facts)
+    long_term = {e.source_id for e in actor_rows if e.source_type == "shadow"}
+    pnl = check_pnl_diversity(pnl_series(actor_rows, calendar, today), facts, long_term)
     direction = check_direction_diversity(direction_vectors(actor_rows, run_days), facts)
     return {
         "date": today,
@@ -602,7 +685,7 @@ def evaluate(entries: list[LedgerEntry], today: str, facts: Facts | None = None)
                        "last_run_day": run_days[-1] if run_days else None},
         "herding": herding,
         "diversity": {"pnl": pnl, "direction": direction},
-        "homogenisation": check_homogenisation(actor_rows, run_days),
+        "homogenisation": check_homogenisation(actor_rows, run_days, today),
         "stagnation": check_stagnation(actor_rows),
         "integrity": check_integrity(rows, run_days, facts),
         "degradation": check_degradation(entries, actor_rows, run_days, calendar, today),
@@ -617,8 +700,12 @@ def summary_line(doc: dict) -> str:
     else:
         herd = "none"
     pnl = doc["diversity"]["pnl"]
-    neff = (f"{pnl['n_eff']:.1f}/{pnl['eligible']}" if pnl["n_eff"] is not None
-            else f"n/a ({pnl['eligible']} eligible)")
+    if pnl["n_eff"] is None:
+        neff = f"n/a ({pnl['eligible']} eligible)"
+    else:
+        neff = f"{pnl['n_eff']:.1f}/{pnl['eligible']}"
+        if pnl.get("n_eff_null") is not None:
+            neff += f" (null~{pnl['n_eff_null']:.1f})"
     dup = sum(1 for c in doc["diversity"]["pnl"]["clusters"] + doc["diversity"]["direction"]["clusters"]
               if not c["expected"])
     integ = doc["integrity"]
@@ -628,9 +715,12 @@ def summary_line(doc: dict) -> str:
     if integ["retired_submitting"]:
         extra.append(f"retired submitting {len(integ['retired_submitting'])}")
     hom = doc["homogenisation"]
-    hflags = [f"{h['top']} {h['share']:.0%}" for h in (hom["dominant_group"], hom["llm"]) if h["flag"]]
+    hflags = [f"{h['top']} {h['share']:.0%}" for h in (hom["dominant_group"],) if h["flag"]]
     if hflags:
         extra.append("homogenised: " + ", ".join(hflags))
+    llm = hom.get("llm_today") or {}
+    if llm.get("records"):
+        extra.append(f"llm today: {llm['top']} {llm['count']}/{llm['records']}")
     stag = doc["stagnation"]["flags"]
     if stag:
         extra.append(f"stagnant {len(stag)}")
