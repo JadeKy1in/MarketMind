@@ -590,16 +590,17 @@ def _tail(rows: list | None, n: int = 12) -> list:
 def _diversity_view(d: dict | None) -> dict:
     d = d or {}
     clusters = d.get("clusters") or []
-    return {**{k: d.get(k) for k in ("eligible", "actors", "n_eff", "mean_abs_rho", "note")},
+    return {**{k: d.get(k) for k in ("eligible", "actors", "n_eff", "n_eff_null", "mean_abs_rho",
+                                     "scope", "all", "pairs_sparse", "note")},
             "pairs_high": d.get("pairs_high") or [], "clusters": clusters,
             "unexpected_clusters": [c for c in clusters if not c.get("expected")]}
 
 
 def get_ecosystem(date: str | None = None) -> dict:
     """The latest (or given) data/ecosystem/<date>.json reshaped for the dashboard:
-    herding flags with their market-driven / behavioural verdict, N_eff and duplicate
-    clusters, source / model homogenisation, stagnation, zombies / orphans, degradation
-    trends and the one-line summary. Measures without enough data keep None + `note`."""
+    herding flags with their market-driven / behavioural verdict, N_eff (long-term shadows,
+    with its day-shuffle null) and duplicate clusters, source homogenisation, today's LLM
+    share, stagnation, zombies / orphans, degradation trends and the one-line summary. Measures without enough data keep None + `note`."""
     from marketmind.ecosystem import read_report
     if date and not _DATE_RE.match(date):
         return {"available": False, "reason": "date must be YYYY-MM-DD"}
@@ -623,7 +624,7 @@ def get_ecosystem(date: str | None = None) -> dict:
         "diversity": {"pnl": _diversity_view(div.get("pnl")),
                       "direction": _diversity_view(div.get("direction"))},
         "homogenisation": {k: hom.get(k) for k in ("window_days", "dominant_group", "dominant_ticker",
-                                                   "llm", "mean_ticker_jaccard", "news_source")},
+                                                   "llm_today", "mean_ticker_jaccard", "news_source")},
         "stagnation": {"flags": stag.get("flags") or [],
                        "insufficient": len(stag.get("insufficient") or {}), "note": stag.get("note")},
         "integrity": {"zombies": integ.get("zombies") or [], "orphans": integ.get("orphans") or [],

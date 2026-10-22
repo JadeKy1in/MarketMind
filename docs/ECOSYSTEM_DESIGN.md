@@ -41,8 +41,9 @@
 ### 2. 输出相关 / 多样性（旧 diversity_controller 第 3 层）
 
 - **盈亏相关**：两两 Pearson 相关，按每日盈亏序列在双方存续期重叠的交易日上计算；重叠 < 20 天或任一方无波动的对，相关记 0（视为独立）。
-- **有效独立影子数 N_eff**：基于特征值的参与率 N_eff = (Σλ)² / Σλ² = N² / ‖R‖²_F。完全独立 = N，完全相同 = 1。只统计有 ≥ 20 天盈亏序列且有波动的决策者（报告为 `N_eff x/y`，y = 合格数）。
-- **近似重复簇**：ρ ≥ 0.8 且共同天数 ≥ 20 的对连成簇（并查集）。与晋升 DSR 的试验聚类（`promotion.metrics.effective_trials`，ρ ≥ 0.5 平均连接）是两回事：那边问"算几次试验"，这边问"是不是同一个影子"，所以取更严的 0.8。
+- **有效独立影子数 N_eff**：基于特征值的参与率 N_eff = (Σλ)² / Σλ² = N² / ‖R‖²_F。完全独立 = N，完全相同 = 1。摘要只统计**长期影子**（`shadow` 来源）中有 ≥ 20 天盈亏序列且有波动的（报告为 `N_eff x/y (null~z)`，y = 合格数）；含 Playground、临时影子的全体结果放在 `diversity.pnl.all`，不进摘要（2026-10-22 起：混在一起时 Playground 的代码策略彼此高度同步，会把整体 N_eff 拉低，掩盖长期影子本身的情况）。
+- **随机基线 z（2026-10-22 起）**：盈亏按退出日记账，大多数日子是 0，短重叠上会出现大量偶然的高 |ρ|，即使完全独立，N_eff 也远低于 y（10-22 真实账本：全体 44 个的基线约 15，不是 44）。所以把每个影子的日盈亏在它自己的日期里随机打乱（保留存续期、零的个数和数值，只破坏跨影子的同日对齐），重算 N_eff，取 50 次平均（固定种子，结果可复现）。x 明显低于 z 才说明盈亏比独立情形更同步；x 接近或高于 z 说明与独立无异。
+- **近似重复簇**：ρ ≥ 0.8、共同天数 ≥ 20，**且双方都有非零盈亏的天数 ≥ 8**（2026-10-22 起，`DUP_MIN_NONZERO_DAYS`）的对连成簇（并查集），覆盖全部决策者。只数共同日历天会把 0 也算进去：10-22 真实账本里 32 对 ρ ≥ 0.8（最高 0.99–1.0）的共同非零天数只有 1–5 天，是一两次同日退出造成的，不是重复影子；这类对只计数（`pairs_sparse`），不进簇。与晋升 DSR 的试验聚类（`promotion.metrics.effective_trials`，ρ ≥ 0.5 平均连接）是两回事：那边问"算几次试验"，这边问"是不是同一个影子"，所以取更严的 0.8。
 - **方向向量**：每个决策者每个完整运行日一个向量（资产组 → 净方向 ±1，没做为 0）。两两余弦相似度在共同运行日上计算（需 ≥ 20 天）；领域不重叠的影子余弦为 0，这是真实的"不相关"，所以方向 N_eff 也纳入这些对。方向重复簇要求余弦 ≥ 0.8 **且**双方都下注的格子 ≥ 20 个，避免两个影子只重合几次就被判重复。
 - 同一谱系（变体 `trial:*` 与原影子、接任者 `x@2` 与 `x`）组成的簇标记 `expected: true`，不计入摘要里的重复簇数。
 
@@ -51,7 +52,7 @@
 - **新闻来源（2026-09-29 起已记录）**：影子运行器在决策时写入 `meta.news_sources`（影子上下文里各条标题的来源名，去重排序）。监控对每个影子统计近 N 天最常看到的来源，给出"主导新闻源"份额（≥ 50% 标记）和影子之间来源集合的平均 Jaccard。更早的记录没有这个字段；窗口内全部记录都没有时仍报 `not_recorded`。
 - **现有可算的替代维度**（最近 20 个完整运行日，每个决策者取出现最多的那个值）：
   - 主导资产组、主导标的：同一主导值的决策者占比 ≥ 50% 标记（沿用旧的 50% 阈值）；
-  - LLM（`meta.llm`；`meta.model` 是档位 "flash"，不是模型，不用）：同一模型占比 ≥ 50% 标记——同一个模型的系统性偏差会同时进入所有影子；
+  - LLM 不再做同质化标记（2026-10-22 起）：所有人规定"影子在 Claude 可用时一律用 Claude"，按"每个影子 20 天里最常用的模型"算占比必然超过 50%，而且随切换模型的历史来回翻转（平票时按字母序），没有信息量。改为只展示**今天的实际模型分布**（`homogenisation.llm_today`：今天投票者记录按 `meta.llm` 计数；`meta.model` 是档位 "flash"，不是模型），摘要写 `llm today: <模型> k/n`；
   - 两两标的集合的平均 Jaccard，只展示。
 
 ### 4. 停滞 / 平台期（旧 plateau_detector，改为只看行为）
@@ -90,11 +91,17 @@
 
 摘要行：`[ecosystem] herding: none, N_eff n/a (0 eligible), dup clusters 0, zombies 0, homogenised: deepseek-flash 77%`。
 
+2026-10-22 口径修正后（同一天真实账本，只读试跑）：
+
+- 旧：`[ecosystem] herding: none, N_eff 6.8/44, dup clusters 4, zombies 0, homogenised: claude-sonnet-5-5 59%`
+- 新：`[ecosystem] herding: none, N_eff 8.5/31 (null~14.3), dup clusters 0, zombies 0, llm today: claude-sonnet-5-5 53/54`
+- 解读：4 个"重复簇"全部来自共同非零天数 ≤ 5 的偶然高相关；长期影子 N_eff 8.5 低于随机基线 14.3，说明盈亏确有一定同步，但远没有旧数字 6.8/44 看起来严重；"同质化 59%"是模型切换历史的产物，今天实际 53/54 条记录用 Claude，符合规定。
+
 ## 五、输出与读取接口
 
-- 文件：`data/ecosystem/<纽约日期>.json`（临时文件 + `os.replace` 原子写入，Windows 下被读者占用时重试）。顶层字段：`version`、`date`、`written_at`、`population`、`herding`（`flags`、`episodes`、`today`、`ecosystem_long_share`）、`diversity`（`pnl`、`direction`：`eligible`、`n_eff`、`pairs_high`、`clusters`）、`homogenisation`、`stagnation`、`integrity`（`zombies`、`orphans`、`retired_submitting`）、`degradation`、`thresholds`、`notes`、`summary`。
+- 文件：`data/ecosystem/<纽约日期>.json`（临时文件 + `os.replace` 原子写入，Windows 下被读者占用时重试）。顶层字段：`version`、`date`、`written_at`、`population`、`herding`（`flags`、`episodes`、`today`、`ecosystem_long_share`）、`diversity`（`pnl`、`direction`：`eligible`、`n_eff`、`pairs_high`、`clusters`；`pnl` 另有 `scope`、`n_eff_null`、`all`、`pairs_sparse`，`pairs_high` 每对带 `nonzero_days`）、`homogenisation`（`llm_today` 取代原 `llm`）、`stagnation`、`integrity`（`zombies`、`orphans`、`retired_submitting`）、`degradation`、`thresholds`、`notes`、`summary`。
 - 仪表盘 / 日报读取：`marketmind.ecosystem.read_report(day: str | None = None, root: str | Path | None = None) -> dict | None`——`day` 为空时返回最新一份（跳过损坏文件），没有时返回 None；`root` 默认 `MARKETMIND_DATA_DIR` 或 `data`。一行摘要在 `summary`。
-- 管线打印一行：`[ecosystem] herding: ..., N_eff x/y, dup clusters k, zombies z`（有孤儿、退役仍提交、同质化或停滞时追加在后面）。
+- 管线打印一行：`[ecosystem] herding: ..., N_eff x/y (null~z), dup clusters k, zombies z`（有孤儿、退役仍提交、资产组同质化或停滞时追加在后面，最后是 `llm today: <模型> k/n`）。
 
 ## 六、以后如何接入顾问投票的独立性假设（未实现，需所有人决定）
 
@@ -102,7 +109,7 @@ S8 警报的"顾问支持"要求同向 ≥ 2 票、来自 ≥ 2 个组，隐含�
 
 1. **按簇计票**：同一个近似重复簇（盈亏 ρ ≥ 0.8）里的顾问只算 1 票，"≥ 2 个组"改为"≥ 2 个簇"。
 2. **行为羊群时降级**：某资产组当前有"行为羊群"标记时，该组的顾问支持只显示、不算"支持"。
-3. **生态级提示**：盈亏 N_eff / 合格数 < 0.5（一半以上的影子实际上是重复的）时，在警报附注里提示"顾问意见独立性不足"。
+3. **生态级提示**：长期影子盈亏 N_eff 明显低于随机基线（不是低于合格数的一半：稀疏盈亏下独立影子也达不到）时，在警报附注里提示"顾问意见独立性不足"。
 
 以上三项都会改变警报判定，按 L1 需要所有人批准后再实现；在此之前本模块只输出数据。
 
