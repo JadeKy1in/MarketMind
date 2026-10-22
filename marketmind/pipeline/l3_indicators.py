@@ -34,6 +34,12 @@ Levels (long setups only; L3 gates buys):
   R/R 13 on assets far below old highs; nearest swing high + 3 ATR cap produced
   no R/R >= 2 on any of 30 liquid tickers.
   recommendation  green & R/R >= 2 -> enter; green -> wait; yellow -> wait; red -> avoid
+
+Counterfactual target_v2 (owner decision 2026-10-22, ledger only; never used for the
+light, R/R, recommendation or any card): when the nearest-swing target gives
+R/R < TARGET_V2_MIN_RR, step to the next higher significant swing high, repeating while
+R/R stays below it and levels remain, same TARGET_CAP_ATR cap (shorts mirror: swing
+lows, floor close - cap). Entry and stop unchanged. See alt_target.
 """
 from __future__ import annotations
 
@@ -53,6 +59,7 @@ TARGET_CAP_ATR = 6.0
 TARGET_MIN_ATR = 0.5
 SWING_WINDOW = 10
 SWING_DROP_ATR = 2.0
+TARGET_V2_MIN_RR = 1.5
 
 
 @dataclass
@@ -79,6 +86,10 @@ class TechnicalSnapshot:
     recommendation: str
     as_of: str
     notes: list[str]
+    # counterfactual only (ledger.l3_target_pairs); never read by light / R/R / cards
+    target_price_v2: float | None = None
+    reward_risk_ratio_v2: float | None = None
+    target_v2_levels_skipped: int = 0
 
 
 def sma(values: list[float], n: int) -> float | None:
@@ -103,8 +114,10 @@ def atr(bars: list[Bar], n: int = 14) -> float:
     return sum(window) / len(window) if window else 0.0
 
 
-def nearest_swing_high(daily: list[Bar], close: float, a: float) -> float | None:
-    """Nearest significant swing-high close above close + TARGET_MIN_ATR * ATR."""
+def swing_highs(daily: list[Bar], a: float) -> list[float]:
+    """Significant swing-high closes of the last RESISTANCE_LOOKBACK sessions: the
+    highest close within +/- SWING_WINDOW, followed by a drop >= SWING_DROP_ATR * ATR
+    within the next SWING_WINDOW closes."""
     d = daily[-RESISTANCE_LOOKBACK:]
     n = SWING_WINDOW
     found = []
@@ -114,8 +127,56 @@ def nearest_swing_high(daily: list[Bar], close: float, a: float) -> float | None
             after = min(x.close for x in d[i + 1:i + n + 1])
             if c - after >= SWING_DROP_ATR * a:
                 found.append(c)
-    above = [x for x in found if x > close + TARGET_MIN_ATR * a]
+    return found
+
+
+def swing_lows(daily: list[Bar], a: float) -> list[float]:
+    """Mirror of swing_highs: the lowest close within +/- SWING_WINDOW, followed by a
+    rise >= SWING_DROP_ATR * ATR within the next SWING_WINDOW closes."""
+    d = daily[-RESISTANCE_LOOKBACK:]
+    n = SWING_WINDOW
+    found = []
+    for i in range(n, len(d) - n):
+        c = d[i].close
+        if all(c <= d[j].close for j in range(i - n, i + n + 1)):
+            after = max(x.close for x in d[i + 1:i + n + 1])
+            if after - c >= SWING_DROP_ATR * a:
+                found.append(c)
+    return found
+
+
+def nearest_swing_high(daily: list[Bar], close: float, a: float) -> float | None:
+    """Nearest significant swing-high close above close + TARGET_MIN_ATR * ATR."""
+    above = [x for x in swing_highs(daily, a) if x > close + TARGET_MIN_ATR * a]
     return min(above) if above else None
+
+
+def alt_target(close: float, stop: float, a: float, levels: list[float],
+               direction: str = "long", min_rr: float = TARGET_V2_MIN_RR,
+               cap_atr: float = TARGET_CAP_ATR) -> tuple[float, int]:
+    """Counterfactual target_v2 -> (target, levels skipped past the nearest one).
+
+    Long: candidate levels are swing highs above close + TARGET_MIN_ATR * ATR, nearest
+    first (the first one is the live target). Take the first whose capped target gives
+    (target - close) / (close - stop) >= min_rr; a level at or beyond the cap ends the
+    search at the cap (farther levels are capped too); when every level stays below
+    min_rr, the farthest one. No level: the cap (as the live rule). Short mirrors with
+    swing lows, floor close - cap_atr * ATR and risk stop - close. Non-positive risk:
+    the nearest level (the live target), nothing skipped."""
+    sign = 1.0 if direction == "long" else -1.0
+    cap = close + sign * cap_atr * a
+    risk = sign * (close - stop)
+    cands = sorted({x for x in levels if sign * (x - close) > TARGET_MIN_ATR * a},
+                   key=lambda x: sign * x)
+    if not cands:
+        return cap, 0
+    target = cap
+    for i, lvl in enumerate(cands):
+        beyond = sign * (lvl - cap) >= 0
+        target = cap if beyond else lvl
+        if beyond or risk <= 0 or sign * (target - close) / risk >= min_rr:
+            return target, i
+    return target, len(cands) - 1
 
 
 def _finite_bars(bars: list[Bar]) -> bool:
@@ -176,9 +237,16 @@ def compute_snapshot(hist: PriceHistory) -> TechnicalSnapshot | None:
     entry_high = close * 1.005
     risk = close - stop
     cap = close + TARGET_CAP_ATR * a
-    swing = nearest_swing_high(daily, close, a)
+    highs = swing_highs(daily, a)
+    above = [x for x in highs if x > close + TARGET_MIN_ATR * a]
+    swing = min(above) if above else None             # nearest_swing_high
     target = min(swing, cap) if swing is not None else cap
     rr = (target - close) / risk if risk > 0 else 0.0
+    # counterfactual only (owner 2026-10-22): recorded in the ledger, never decides
+    target_v2, v2_skipped = alt_target(close, stop, a, highs)
+    rr_v2 = (target_v2 - close) / risk if risk > 0 else 0.0
+    if not (math.isfinite(target_v2) and math.isfinite(rr_v2)):
+        target_v2 = rr_v2 = None
 
     levels = (close, a, support_low, support_high, stop, entry_low, entry_high, target, rr)
     if not all(math.isfinite(x) for x in levels) or (wma is not None and not math.isfinite(wma)):
@@ -204,6 +272,9 @@ def compute_snapshot(hist: PriceHistory) -> TechnicalSnapshot | None:
         stop_loss=round(stop, 4), target_price=round(target, 4),
         reward_risk_ratio=round(rr, 2), light=light, recommendation=recommendation,
         as_of=daily[-1].date, notes=notes,
+        target_price_v2=round(target_v2, 4) if target_v2 is not None else None,
+        reward_risk_ratio_v2=round(rr_v2, 2) if rr_v2 is not None else None,
+        target_v2_levels_skipped=v2_skipped if target_v2 is not None else 0,
     )
 
 
