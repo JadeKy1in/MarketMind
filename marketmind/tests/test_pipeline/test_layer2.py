@@ -63,6 +63,26 @@ def test_build_context_includes_l1_fields():
     assert "risk_on" in ctx
 
 
+def test_build_context_includes_l1_narrative():
+    l1 = _sample_l1()
+    l1.narrative_summary = "CPI 3.7% beat; the Fed turns hawkish"
+    l1.tail_risk_flags = ["VIX term structure inverted"]
+    ctx = _build_context(l1, None)
+    assert "Narrative: CPI 3.7% beat; the Fed turns hawkish" in ctx
+    assert "Institutional Surprise: Fed dovish pivot" in ctx
+    assert "Tail Risk Flags: VIX term structure inverted" in ctx
+    assert "Expert Signals: Druckenmiller: long tech" in ctx
+
+
+def test_build_context_omits_empty_l1_narrative():
+    l1 = _sample_l1()
+    l1.institutional_surprise = ""
+    l1.expert_signals = []
+    ctx = _build_context(l1, None)
+    assert "Narrative:" not in ctx and "Institutional Surprise" not in ctx
+    assert "Tail Risk Flags" not in ctx and "Expert Signals" not in ctx
+
+
 def test_build_context_includes_market_data():
     l1 = _sample_l1()
     ctx = _build_context(l1, {"vix": 18.5, "dxy": 104.2})

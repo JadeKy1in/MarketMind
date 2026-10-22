@@ -35,6 +35,7 @@ class Layer1Result:
     key_characters: list[dict]     # [{"name": str, "capability": str, "will": str, "market_trust": str}]
     tail_risk_flags: list[str]     # triggered tail risk indicators
     raw_analysis: str = ""
+    narrative_summary: str = ""    # the LLM's 2-3 sentence synthesis (passed to L2)
 
     @classmethod
     def empty_default(cls) -> "Layer1Result":
@@ -280,4 +281,5 @@ def _parse_layer1_response(content: str) -> Layer1Result:
         key_characters=data.get("key_characters", []),
         tail_risk_flags=data.get("tail_risk_flags", []),
         raw_analysis=content,
+        narrative_summary=str(data.get("narrative_summary") or ""),
     )
