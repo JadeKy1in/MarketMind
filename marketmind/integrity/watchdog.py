@@ -97,7 +97,7 @@ async def verify_claim_m3(claim: NumericClaim) -> NumericClaim:
 async def _verify_price(claim: NumericClaim) -> None:
     try:
         import yfinance as yf
-        ticker_match = re.search(r'\b([A-Z]{1,5})\b', claim.context)
+        ticker_match = re.search(r'(?<![\w/])([A-Z]{1,5})(?![\w/])', claim.context)
         if ticker_match:
             ticker = ticker_match.group(1)
             stock = yf.Ticker(ticker)
@@ -127,7 +127,7 @@ async def _verify_ratio(claim: NumericClaim) -> None:
     """M3 Track A for ratios: verify P/E, P/B, Sharpe via yfinance."""
     try:
         import yfinance as yf
-        ticker_match = re.search(r'\b([A-Z]{1,5})\b', claim.context)
+        ticker_match = re.search(r'(?<![\w/])([A-Z]{1,5})(?![\w/])', claim.context)
         if ticker_match:
             ticker = ticker_match.group(1)
             stock = yf.Ticker(ticker)
@@ -157,7 +157,7 @@ async def _verify_amount(claim: NumericClaim) -> None:
     """M3 Track A for amounts: attempt to verify market cap / revenue via yfinance."""
     try:
         import yfinance as yf
-        ticker_match = re.search(r'\b([A-Z]{1,5})\b', claim.context)
+        ticker_match = re.search(r'(?<![\w/])([A-Z]{1,5})(?![\w/])', claim.context)
         if ticker_match:
             ticker = ticker_match.group(1)
             stock = yf.Ticker(ticker)
