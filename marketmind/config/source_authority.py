@@ -106,7 +106,11 @@ SOURCES: list[Source] = [
     Source("Federal Reserve Calendar", SourceTier.PRIMARY,
            "https://www.federalreserve.gov/json/calendar.json", "fed_calendar", 0.97, 1.0),
     Source("BLS Release Calendar", SourceTier.PRIMARY,
-           "https://www.bls.gov/schedule/news_release/bls.ics", "bls_calendar", 0.97, 1.0),
+           "https://www.bls.gov/schedule/news_release/bls.ics", "bls_calendar", 0.97, 1.0,
+           # quiet weeks have no market-moving release in the 7-day window (10-17..10-22
+           # flagged "URL may be broken" while the .ics was fine); an empty or blocked
+           # .ics raises in fetch_bls_calendar instead
+           zero_is_normal=True),
     # Positioning / inventory / volatility → pipeline/sources_positioning.py
     # Cboe data: 15-min delayed, personal non-commercial use only.
     Source("CFTC Commitments of Traders", SourceTier.PRIMARY, "https://publicreporting.cftc.gov/resource/6dca-aqww.json", "cftc_cot", 0.95, 1.0, zero_is_normal=True),
