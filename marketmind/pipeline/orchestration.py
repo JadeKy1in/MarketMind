@@ -545,6 +545,20 @@ async def _record_to_ledger(config, decision, l3_result, discovery: dict | None 
     except Exception:
         logger.error("Ledger recording failed — today's calls are NOT in the ledger", exc_info=True)
         _step_failed("ledger record")
+    await _record_l3_target_pairs(config, l3_result)
+
+
+async def _record_l3_target_pairs(config, l3_result) -> None:
+    """Ledger-only L3 target v1 / v2 counterfactual (ledger.l3_target_pairs, owner
+    2026-10-22). Independent of the main record; a failure is logged and degrades
+    nothing (it never trades, never reaches a card)."""
+    try:
+        from marketmind.ledger.l3_target_pairs import record_pairs
+        from marketmind.ledger.prices import HistoryPriceSource
+        n = await record_pairs(l3_result, _ledger_store(config), HistoryPriceSource())
+        print(f"  [ledger] L3 target v1/v2 counterfactual: {n} rows (ledger only)")
+    except Exception:
+        logger.error("L3 target counterfactual pairs not recorded", exc_info=True)
 
 
 def _save_daily_prediction(l1_result, l2_result, l3_result, decision) -> None:

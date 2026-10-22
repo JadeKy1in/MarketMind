@@ -43,6 +43,11 @@ class Layer3Result:
     data_available: bool = True
     close: float | None = None
     as_of: str = ""
+    # counterfactual target (l3_indicators.alt_target, owner 2026-10-22): ledger only
+    # (ledger.l3_target_pairs); never shown to the decision LLM, never sets light / R/R
+    target_price_v2: float | None = None
+    reward_risk_ratio_v2: float | None = None
+    target_v2_levels_skipped: int = 0
 
 
 @dataclass
@@ -105,6 +110,8 @@ def from_snapshot(s: TechnicalSnapshot) -> Layer3Result:
         max_hold_days=DEFAULT_MAX_HOLD_DAYS, reward_risk_ratio=s.reward_risk_ratio,
         recommendation=s.recommendation, daily_return_pct=s.daily_return_pct,
         raw_analysis=describe(s), data_available=True, close=s.close, as_of=s.as_of,
+        target_price_v2=s.target_price_v2, reward_risk_ratio_v2=s.reward_risk_ratio_v2,
+        target_v2_levels_skipped=s.target_v2_levels_skipped,
     )
 
 
