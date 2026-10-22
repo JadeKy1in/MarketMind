@@ -494,7 +494,8 @@ async def _step(steps: RunSteps, name: str, fn, *args, labels: tuple[str, ...] |
     result = fn(*args, **kw)
     if inspect.isawaitable(result):
         result = await result
-    if not (set(_step_failures) - before) & set(labels or (name,))             and (finished is None or finished(result)):
+    if (not (set(_step_failures) - before) & set(labels or (name,))
+            and (finished is None or finished(result))):
         steps.mark(name)
     return result
 
