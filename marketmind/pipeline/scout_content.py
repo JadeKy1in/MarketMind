@@ -79,6 +79,20 @@ def compute_salience_multiplier(title: str, summary: str) -> float:
         return 1.0
 
 
+# Feed timezone abbreviations dateutil does not know (it warned "UnknownTimezoneWarning:
+# tzname EDT" daily and returned a naive time, which was then read as UTC: 4 h off).
+# US zones only for the ambiguous ones: CST / IST mean several zones worldwide; the
+# US feeds are the ones that send them.
+_H = 3600
+FEED_TZINFOS = {
+    "EST": -5 * _H, "EDT": -4 * _H, "CST": -6 * _H, "CDT": -5 * _H,
+    "MST": -7 * _H, "MDT": -6 * _H, "PST": -8 * _H, "PDT": -7 * _H,
+    "AKST": -9 * _H, "AKDT": -8 * _H, "HST": -10 * _H,
+    "BST": 1 * _H, "CET": 1 * _H, "CEST": 2 * _H, "HKT": 8 * _H, "SGT": 8 * _H,
+    "JST": 9 * _H, "KST": 9 * _H,
+}
+
+
 def parse_published_at(published_at: str) -> datetime | None:
     """Parse published_at string to timezone-aware datetime.
 
@@ -99,7 +113,7 @@ def parse_published_at(published_at: str) -> datetime | None:
     # Try dateutil if available (handles RFC 822, relative, etc.)
     try:
         from dateutil.parser import parse as dateutil_parse  # type: ignore[import-untyped]
-        dt = dateutil_parse(ts)
+        dt = dateutil_parse(ts, tzinfos=FEED_TZINFOS)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt
