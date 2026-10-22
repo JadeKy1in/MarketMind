@@ -436,4 +436,7 @@ async def fetch_bls_calendar(source: Any, config: Any = None,
         resp.raise_for_status()
         text = resp.content.decode("utf-8-sig", errors="replace")
     events = parse_ics_events(text)
+    if not events:
+        # a bot-block page or a format change, not a quiet week (the source is zero_is_normal)
+        raise ValueError(f"BLS calendar: no VEVENT in the response ({len(text)} chars)")
     return [bls_event_to_newsitem(ev, source) for ev in bls_releases_in_window(events, today)]

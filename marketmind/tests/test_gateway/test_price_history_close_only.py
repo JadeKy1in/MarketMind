@@ -7,6 +7,15 @@ from marketmind.gateway import price_history as ph
 from marketmind.gateway.price_history import Bar, PriceHistory
 
 
+@pytest.fixture(autouse=True)
+def _clean_run_notes():
+    ph._close_only_seen.clear()
+    ph._alpaca_empty_seen.clear()
+    yield
+    ph._close_only_seen.clear()
+    ph._alpaca_empty_seen.clear()
+
+
 def test_close_only_needs_equal_ohlc_and_no_volume():
     assert ph.is_close_only(Bar("2026-09-23", 1745.7, 1745.7, 1745.7, 1745.7, 0.0))
     assert ph.is_close_only(Bar("2026-09-23", 5.0, 5.0, 5.0, 5.0, None))     # volume missing
@@ -46,10 +55,33 @@ async def test_get_price_history_flags_and_warns_with_the_dates(monkeypatch, cap
     monkeypatch.setattr(ph, "_from_yfinance", fake_yf)
     ph.clear_cache()
     try:
-        with caplog.at_level(logging.WARNING, logger="marketmind.gateway.price_history"):
+        with caplog.at_level(logging.DEBUG, logger="marketmind.gateway.price_history"):
             hist = await ph.get_price_history("PL=F")
     finally:
         ph.clear_cache()
     assert [b.close_only for b in hist.daily] == [False, True, True, False]
-    msg = " ".join(r.getMessage() for r in caplog.records)
-    assert "PL=F" in msg and "2026-09-23, 2026-09-24" in msg
+    detail = [r for r in caplog.records if "PL=F" in r.getMessage()]
+    # per-symbol detail is DEBUG (2026-10-22); the run summary carries the WARNING
+    assert detail and all(r.levelno == logging.DEBUG for r in detail)
+    assert "2026-09-23, 2026-09-24" in detail[0].getMessage()
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="marketmind.gateway.price_history"):
+        ph.log_run_summary()
+        ph.log_run_summary()                                   # notes were reset
+    msgs = [r.getMessage() for r in caplog.records]
+    assert msgs == ["price history: 1 symbol(s) with 2 close-only bar(s) in total, range unknown "
+                    "(most: PL=F 2; per-symbol detail at DEBUG)"]
+
+
+def test_run_summary_collapses_many_symbols(caplog):
+    for i in range(12):
+        ph._close_only_seen[f"T{i}"] = i + 1
+        ph._alpaca_empty_seen[f"E{i}"] = None
+    with caplog.at_level(logging.WARNING, logger="marketmind.gateway.price_history"):
+        ph.log_run_summary()
+    close_line, alpaca_line = [r.getMessage() for r in caplog.records]
+    assert "12 symbol(s) with 78 close-only bar(s)" in close_line
+    assert "most: T11 12, T10 11, T9 10, T8 9, T7 8 (+7 more)" in close_line
+    assert alpaca_line.startswith("Alpaca bars empty for 12 symbol(s)")
+    assert alpaca_line.endswith("E9 (+2 more)")
+    assert not ph._close_only_seen and not ph._alpaca_empty_seen

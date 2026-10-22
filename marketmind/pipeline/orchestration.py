@@ -46,6 +46,12 @@ def _step_failed(step: str) -> None:
         _step_failures.append(step)
 
 
+def _log_price_notes() -> None:
+    """End of a daily / weekend run: one summary line for per-symbol price-data notes."""
+    from marketmind.gateway.price_history import log_run_summary
+    log_run_summary()
+
+
 def _finish_exit_code(ret: int) -> int:
     """ret unchanged when it already signals failure or nothing degraded; else DEGRADED_EXIT,
     with a one-line `[degraded] a, b` summary."""
@@ -457,7 +463,8 @@ async def _main_chain(config, tracker: StageTracker, news_items: list, discovery
 #   watchlist    own step: adds the stored watch items, then checks every item.
 #   holdings, promotion, trend, alerts, ecosystem, app charts, daily report: each
 #                writes to disk / the ledger or pushes; skipped once finished (no second
-#                daily-report push).
+#                daily-report push). App charts is auxiliary: its failure does not degrade
+#                the run but leaves the step unmarked, so any later attempt retries it.
 #   news         never marked: in memory only, fetched when any step above still runs.
 #   weekly audit keeps its own per-week marker.
 MAIN_CARRIED_FAILURES = ("discovery", "discovery timeout")
@@ -475,19 +482,25 @@ def _resume_skip(steps: RunSteps, name: str) -> dict | None:
     return rec
 
 
-async def _step(steps: RunSteps, name: str, fn, *args, labels: tuple[str, ...] | None = None, **kw):
+async def _step(steps: RunSteps, name: str, fn, *args, labels: tuple[str, ...] | None = None,
+                finished=None, **kw):
     """Run one resumable step unless an earlier attempt today finished it. Marked done
     only when it returned without recording one of its own failure `labels` (default:
-    its name); an exception propagates unmarked."""
+    its name) and, when given, `finished(result)` is true; an exception propagates unmarked."""
     if _resume_skip(steps, name) is not None:
         return None
     before = set(_step_failures)
     result = fn(*args, **kw)
     if inspect.isawaitable(result):
         result = await result
-    if not (set(_step_failures) - before) & set(labels or (name,)):
+    if not (set(_step_failures) - before) & set(labels or (name,))             and (finished is None or finished(result)):
         steps.mark(name)
     return result
+
+
+def _not_false(result) -> bool:
+    """`finished` for steps that return False on a non-degrading failure."""
+    return result is not False
 
 
 async def _background_step(steps: RunSteps, name: str, coro, finished):
@@ -1111,21 +1124,26 @@ async def ecosystem_step(config) -> None:
     print(f"  {doc['summary']}")
 
 
-async def app_charts_step(config) -> None:
+async def app_charts_step(config) -> bool:
     """Archive today's App Store charts (docs/DATA_SOURCES_2026-09-29.md): the feed has no
-    history, so rank changes exist only for days archived here."""
-    from marketmind.gateway.app_charts import archive_daily
+    history, so rank changes exist only for days archived here.
+
+    Auxiliary data: a failure is a logged warning, not a degraded run (2026-10-22; the
+    feed failed wholesale on 10-11/12/13/21 and marked those runs degraded). Returns False
+    on failure so the step stays unmarked and a later attempt the same day retries it."""
+    from marketmind.gateway.app_charts import archive_daily, describe_error
     try:
         data_dir = Path(getattr(config, "data_dir", None) or os.getenv("MARKETMIND_DATA_DIR", "data"))
         res = await archive_daily(data_dir=data_dir)
-    except Exception:
-        logger.warning("App Store chart archive failed", exc_info=True)
-        print("  [app charts] failed (see log)")
-        _step_failed("app charts")
-        return
+    except Exception as e:
+        logger.warning("App Store chart archive failed (auxiliary; run not degraded): %s",
+                       describe_error(e), exc_info=True)
+        print("  [app charts] failed (see log; not counted as degraded)")
+        return False
     print(f"  [app charts] {res.get('day')}: {res.get('charts_ok')} charts archived"
           + (f", {res.get('charts_failed')} failed" if res.get("charts_failed") else "")
           + (" (already archived)" if res.get("skipped") else ""))
+    return True
 
 
 async def alerts_step(config, crypto_only: bool = False) -> None:
@@ -1204,9 +1222,10 @@ async def run_weekend(config) -> int:
                     labels=("discovery", "watchlist"))
     await _step(steps, "trend", trend_step, config, crypto_only=True)
     await _step(steps, "alerts", alerts_step, config, crypto_only=True)
-    await _step(steps, "app charts", app_charts_step, config)
+    await _step(steps, "app charts", app_charts_step, config, finished=_not_false)
     print(f"  [tokens] {usage_tracker.summary_line()}")
     usage_tracker.append_log("weekend")
+    _log_price_notes()
     return _finish_exit_code(0)
 
 
@@ -1303,7 +1322,7 @@ async def _run_daily_with_shadows(config, args) -> int:
         await _step(steps, "trend", trend_step, config)
         await _step(steps, "alerts", alerts_step, config)
         await _step(steps, "ecosystem", ecosystem_step, config)
-        await _step(steps, "app charts", app_charts_step, config)
+        await _step(steps, "app charts", app_charts_step, config, finished=_not_false)
         await _step(steps, "daily report", daily_report_step, config)
     await _finish_shadows()
     await _finish_background(_playground_task, "playground timeout")
@@ -1312,6 +1331,7 @@ async def _run_daily_with_shadows(config, args) -> int:
         from marketmind.gateway import usage_tracker
         usage_tracker.append_log("daily")
 
+    _log_price_notes()
     return _finish_exit_code(ret)
 
 

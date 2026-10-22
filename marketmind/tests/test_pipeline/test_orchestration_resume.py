@@ -174,6 +174,36 @@ def test_failed_steps_are_not_marked_and_rerun(monkeypatch, tmp_path, capsys):
     assert not {"main", "watchlist", "trend", "daily report", "headlines"} & set(again.calls)
 
 
+def test_failed_app_charts_do_not_degrade_but_rerun_on_a_later_attempt(monkeypatch, tmp_path, capsys):
+    """App charts are auxiliary (2026-10-22): a wholesale feed failure is a warning, not a
+    degraded run, yet the step stays unmarked so a later attempt the same day retries it."""
+    import marketmind.gateway.app_charts as app_charts
+
+    async def all_failed(**kw):
+        raise RuntimeError("App Store charts: every chart failed; nothing archived")
+
+    async def archived(**kw):
+        return {"day": "2026-10-02", "charts_ok": 32, "charts_failed": 0, "skipped": False}
+
+    real = orch.app_charts_step
+    d = Daily(monkeypatch)
+    monkeypatch.setattr(orch, "app_charts_step", real)
+    monkeypatch.setattr(app_charts, "archive_daily", all_failed)
+    monkeypatch.setenv("MARKETMIND_RUN_KEY", KEY)
+    monkeypatch.setenv("MARKETMIND_STEPS_FILE", str(tmp_path / "steps.json"))
+    code = asyncio.run(orch._run_daily_with_shadows(_config(tmp_path), _args()))
+    out = capsys.readouterr().out
+    assert code == 0 and "[degraded]" not in out and "[app charts] failed" in out
+    assert "app charts" not in _marked(tmp_path) and "daily report" in _marked(tmp_path)
+
+    monkeypatch.setattr(app_charts, "archive_daily", archived)
+    orch._reset_step_failures()
+    d.calls.clear()
+    assert asyncio.run(orch._run_daily_with_shadows(_config(tmp_path), _args())) == 0
+    assert "32 charts archived" in capsys.readouterr().out
+    assert "app charts" in _marked(tmp_path) and "daily report" not in d.calls
+
+
 def test_crashed_background_task_is_not_marked(monkeypatch, tmp_path):
     _, code = _attempt(monkeypatch, tmp_path, raise_in={"shadows"})
     assert code == orch.DEGRADED_EXIT and "shadows" not in _marked(tmp_path)

@@ -281,3 +281,17 @@ async def test_fetch_bls_calendar_raises_on_error(mock_http):
     mock_http["handler"] = lambda request: httpx.Response(403)
     with pytest.raises(httpx.HTTPStatusError):
         await sr.fetch_bls_calendar(_src(), None, today=TODAY)
+
+
+@pytest.mark.asyncio
+async def test_fetch_bls_calendar_quiet_week_is_empty_but_blocked_page_raises(mock_http):
+    """2026-10-17..22: no major release in the window -> 0 items, a normal outcome
+    (the source is zero_is_normal); a 200 page without any VEVENT is an error."""
+    from datetime import date
+    mock_http["handler"] = lambda request: httpx.Response(200, content=BLS_ICS.encode("utf-8"))
+    assert await sr.fetch_bls_calendar(_src("BLS"), None, today=date(2027, 6, 1)) == []
+    mock_http["handler"] = lambda request: httpx.Response(200, text="<html>Access Denied</html>")
+    with pytest.raises(ValueError, match="no VEVENT"):
+        await sr.fetch_bls_calendar(_src("BLS"), None, today=TODAY)
+    from marketmind.config.source_authority import SOURCES
+    assert next(s for s in SOURCES if s.name == "BLS Release Calendar").zero_is_normal

@@ -35,6 +35,13 @@ COUNTRIES = ("us", "gb", "jp", "cn")
 LIMIT = 100
 HTTP_TIMEOUT_S = 30.0
 CONCURRENCY = 4
+# Transient failures (connect / read errors, timeouts, HTTP 429 / 5xx) are retried
+# RETRIES times per chart after these sleeps. On 2026-10-11/12/13/21 every chart failed
+# with an empty-message httpx error at 12:45 UTC and the same feeds worked hours later.
+# Once a chart has used up its retries while no chart has succeeded, the remaining
+# charts make a single attempt each (the network is down; retrying would only add minutes).
+RETRIES = 2
+RETRY_BACKOFF_S = (2.0, 5.0)
 SOURCE = "Apple App Store charts (itunes.apple.com legacy RSS JSON)"
 _TRANSPORT: httpx.AsyncBaseTransport | None = None      # tests inject httpx.MockTransport
 
@@ -140,22 +147,59 @@ def _client() -> httpx.AsyncClient:
                              transport=_TRANSPORT)
 
 
+def _transient(e: Exception) -> bool:
+    if isinstance(e, httpx.TransportError):            # connect / read / timeout / protocol
+        return True
+    if isinstance(e, httpx.HTTPStatusError):
+        code = e.response.status_code
+        return code == 429 or code >= 500
+    return False
+
+
+def describe_error(e: BaseException) -> str:
+    """"Type: message", or "Type" plus repr when the message is empty (httpx timeouts
+    and connect errors often have none, which left the 2026-10 log lines blank)."""
+    msg = str(e).strip()
+    return f"{type(e).__name__}: {msg}" if msg else repr(e)
+
+
 async def fetch_snapshot(today: str | None = None, countries=COUNTRIES, genres=tuple(GENRES),
                          kinds=tuple(CHARTS)) -> dict:
     """Every chart now; a chart that fails is recorded as {"error": ...}, never dropped."""
     sem = asyncio.Semaphore(CONCURRENCY)
     keys = [(cc, g, k) for cc in countries for g in genres for k in kinds]
+    state = {"ok": 0, "down": False}
+
+    async def get_one(client, cc, g, k) -> dict:
+        attempt = 0
+        while True:
+            try:
+                r = await client.get(chart_url(cc, g, k))
+                r.raise_for_status()
+                return parse_feed(r.json())
+            except (httpx.HTTPError, ValueError) as e:
+                retries = 0 if state["down"] else RETRIES
+                if attempt >= retries or not _transient(e):
+                    if _transient(e) and state["ok"] == 0 and attempt >= RETRIES:
+                        state["down"] = True
+                    raise
+                delay = RETRY_BACKOFF_S[min(attempt, len(RETRY_BACKOFF_S) - 1)]
+                attempt += 1
+                logger.debug("App Store chart %s attempt %d failed (%s); retry in %.0fs",
+                             chart_key(cc, g, k), attempt, describe_error(e), delay)
+                await asyncio.sleep(delay)
 
     async with _client() as client:
         async def one(cc, g, k):
             async with sem:
                 try:
-                    r = await client.get(chart_url(cc, g, k))
-                    r.raise_for_status()
-                    return parse_feed(r.json())
+                    res = await get_one(client, cc, g, k)
                 except (httpx.HTTPError, ValueError) as e:
-                    logger.warning("App Store chart %s failed: %s", chart_key(cc, g, k), e)
+                    logger.warning("App Store chart %s failed: %s", chart_key(cc, g, k),
+                                   describe_error(e))
                     return {"error": type(e).__name__}
+                state["ok"] += 1
+                return res
         results = await asyncio.gather(*(one(*k) for k in keys))
     return {"date": today or date.today().isoformat(),
             "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),

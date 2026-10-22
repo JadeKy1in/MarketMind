@@ -161,8 +161,9 @@ async def get_price_history(ticker: str, years: int = 5) -> PriceHistory | None:
         if flagged:
             shown = ", ".join(flagged[-10:]) + (f" (+{len(flagged) - 10} earlier)"
                                                 if len(flagged) > 10 else "")
-            logger.warning("%s (%s): %d close-only bar(s), range unknown: %s",
-                           ticker, hist.source, len(flagged), shown)
+            logger.debug("%s (%s): %d close-only bar(s), range unknown: %s",
+                         ticker, hist.source, len(flagged), shown)
+            _close_only_seen[ticker.upper()] = len(flagged)
     _cache[key] = hist
     return hist
 
@@ -174,6 +175,33 @@ async def get_price_histories(tickers: list[str], years: int = 5) -> dict[str, P
 
 def clear_cache() -> None:
     _cache.clear()
+
+
+# Per-run notes, logged once by log_run_summary() at the end of a daily / weekend run
+# (2026-10-22: one WARNING line per symbol filled the scheduled logs; the per-symbol
+# detail is now at DEBUG).
+_close_only_seen: dict[str, int] = {}       # ticker -> close-only bar count
+_alpaca_empty_seen: dict[str, None] = {}    # ordered set of tickers
+
+
+def _names(tickers: list[str], n: int = 10) -> str:
+    return ", ".join(tickers[:n]) + (f" (+{len(tickers) - n} more)" if len(tickers) > n else "")
+
+
+def log_run_summary() -> None:
+    """One WARNING line each for close-only bars and empty Alpaca answers seen this run,
+    then reset the notes."""
+    if _close_only_seen:
+        worst = sorted(_close_only_seen, key=lambda t: -_close_only_seen[t])
+        logger.warning("price history: %d symbol(s) with %d close-only bar(s) in total, range "
+                       "unknown (most: %s; per-symbol detail at DEBUG)",
+                       len(_close_only_seen), sum(_close_only_seen.values()),
+                       _names([f"{t} {_close_only_seen[t]}" for t in worst], 5))
+    if _alpaca_empty_seen:
+        logger.warning("Alpaca bars empty for %d symbol(s), other sources tried: %s",
+                       len(_alpaca_empty_seen), _names(list(_alpaca_empty_seen)))
+    _close_only_seen.clear()
+    _alpaca_empty_seen.clear()
 
 
 # ── yfinance ────────────────────────────────────────────────────────────────
@@ -545,7 +573,8 @@ async def _from_alpaca(ticker: str, years: int) -> PriceHistory | None:
         return None
     daily = sorted({b.date: b for b in _parse_alpaca(rows)}.values(), key=lambda b: b.date)
     if not daily:
-        logger.warning("Alpaca bars empty for %s", ticker)
+        logger.debug("Alpaca bars empty for %s", ticker)
+        _alpaca_empty_seen[ticker.upper()] = None
         return None
     return PriceHistory(ticker=ticker, source="alpaca", daily=daily, weekly=to_weekly(daily))
 

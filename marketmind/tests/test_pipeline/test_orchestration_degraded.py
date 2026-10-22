@@ -49,7 +49,7 @@ def test_clean_daily_run_exits_zero(monkeypatch):
     assert asyncio.run(orch._run_daily_with_shadows(object(), _args())) == 0
 
 
-@pytest.mark.parametrize("step", ["holdings", "promotion", "alerts", "daily report", "trend", "app charts",
+@pytest.mark.parametrize("step", ["holdings", "promotion", "alerts", "daily report", "trend",
                                   "ecosystem"])
 def test_failed_step_makes_daily_run_degraded(monkeypatch, capsys, step):
     _stub_daily(monkeypatch, fail_step=step)
@@ -181,3 +181,12 @@ def test_weekend_run_degraded_on_failed_step(monkeypatch, capsys):
     assert "[degraded] shadows, watchlist" in capsys.readouterr().out
     assert trend_calls == [True]                 # weekend: crypto instruments only
     assert alert_calls == [True]                 # weekend alerts: crypto instruments only
+
+
+def test_daily_run_logs_the_price_note_summary_once(monkeypatch):
+    from marketmind.gateway import price_history
+    calls = []
+    monkeypatch.setattr(price_history, "log_run_summary", lambda: calls.append(1))
+    _stub_daily(monkeypatch)
+    assert asyncio.run(orch._run_daily_with_shadows(object(), _args())) == 0
+    assert calls == [1]
