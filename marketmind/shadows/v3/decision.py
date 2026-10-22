@@ -31,6 +31,10 @@ MAX_DECISIONS = 3
 MIN_HOLD, MAX_HOLD = 1, 60
 MIN_POSITION_USD, MAX_POSITION_USD = 100.0, 1000.0
 MIN_LEVEL_ATR = 1.0              # stop/target at least this many ATR14 from the close
+# Owner decision 2026-10-22: crypto longs lost 7.2% per trade net (4.9% gross + 2.3% cost)
+# over 48 settled trades, so a crypto long needs a target that clears this many times the
+# round-trip cost (BTC/ETH 2 x 100 bp, other coins 2 x 125 bp; ledger/settlement.py).
+CRYPTO_COST_MULTIPLE = 2.0
 MAX_CONDITIONALS = 2             # conditional signals kept per reply
 MAX_EXPIRES_DAYS = 20            # a conditional signal waits at most this many bars
 MAX_PCT_5D = 50.0                # |pct| bound of the 5-day change conditions
@@ -344,6 +348,13 @@ def _parse_one(d: dict, tag: str, closes: dict[str, float], upper: dict[str, str
         res.warnings.append(f"{tag}: target {target} on the wrong side of close {close}, "
                             f"dropped")
         target = None
+    need = crypto_min_move(ticker) if long else None
+    if need is not None and (target is None or (target - close) / close < need - 1e-9):
+        got = "none" if target is None else f"{target:g} ({(target - close) / close:+.1%})"
+        res.errors.append(f"{tag}: a crypto long needs a target at least {need:.1%} above the "
+                          f"close {close:g} ({CRYPTO_COST_MULTIPLE:g}x the round-trip cost); "
+                          f"got {got}")
+        return
     if (stop is not None or target is not None) and int(hold) > 1:
         a = _num(atrs.get(ticker))
         if a is None or a <= 0:
@@ -363,6 +374,16 @@ def _parse_one(d: dict, tag: str, closes: dict[str, float], upper: dict[str, str
         falsifier=falsifier[:500], thesis=thesis[:500], falsifier_rule=rule,
         stop=stop, target=target,
     ))
+
+
+def crypto_min_move(ticker: str) -> float | None:
+    """Smallest target move (fraction of the close) a crypto long must aim for: the
+    round-trip cost times CRYPTO_COST_MULTIPLE. None outside the crypto market."""
+    from marketmind.ledger.settlement import cost_bps
+    from marketmind.markets import market_for
+    if market_for(ticker).code != "CRYPTO":
+        return None
+    return CRYPTO_COST_MULTIPLE * 2 * cost_bps("crypto", ticker) / 1e4
 
 
 def _too_close(name: str, level: float | None, close: float, a: float,

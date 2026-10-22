@@ -60,7 +60,19 @@ class TickerView:
             f"support {s.support_low:.6g}-{s.support_high:.6g} | resistance {res} | "
             f"light {s.light.upper()}, structure {'intact' if s.structure_intact else 'broken'}, "
             f"long-setup R/R {s.reward_risk_ratio:.2f}"
+            + _crypto_note(self.ticker, s.close)
         )
+
+
+def _crypto_note(ticker: str, close: float) -> str:
+    """The crypto-long cost rule, shown next to the prices it applies to (the rule lives
+    in the user prompt, so shadow prompt versions do not change)."""
+    from marketmind.shadows.v3.decision import crypto_min_move
+    need = crypto_min_move(ticker)
+    if need is None:
+        return ""
+    return (f" | a long needs a target >= {close * (1 + need):.6g} (+{need:.1%}, "
+            f"2x round-trip cost) or it is rejected")
 
 
 def _pct(v: float | None) -> str:

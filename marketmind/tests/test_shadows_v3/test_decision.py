@@ -196,3 +196,33 @@ def test_one_bar_decisions_are_exempt():
 
 def test_output_instructions_state_the_atr_rule():
     assert "1x ATR14" in OUTPUT_INSTRUCTIONS and "hold_days 1" in OUTPUT_INSTRUCTIONS
+
+
+# ── crypto cost rule (owner decision 2026-10-22) ──────────────────────────
+def test_crypto_long_target_must_clear_twice_the_round_trip_cost():
+    # BTC: 2 x (2 x 100 bp) = 4% above the 50000 close
+    res = parse_decisions(_text(_d(ticker="BTC-USD", stop=48000, target=51900)), CLOSES, atrs=ATRS)
+    assert not res.ok and "at least 4.0%" in res.errors[0]
+    res = parse_decisions(_text(_d(ticker="BTC-USD", stop=48000, target=52000)), CLOSES, atrs=ATRS)
+    assert res.ok and res.decisions[0].target == 52000
+
+
+def test_crypto_long_without_target_is_rejected_and_short_is_not():
+    res = parse_decisions(_text(_d(ticker="BTC-USD")), CLOSES, atrs=ATRS)
+    assert not res.ok and "got none" in res.errors[0]
+    res = parse_decisions(_text(_d(ticker="BTC-USD", direction="short")), CLOSES, atrs=ATRS)
+    assert res.ok
+
+
+def test_crypto_min_move_by_coin():
+    from marketmind.shadows.v3.decision import crypto_min_move
+    assert crypto_min_move("ETH-USD") == pytest.approx(0.04)
+    assert crypto_min_move("SOL-USD") == pytest.approx(0.05)
+    assert crypto_min_move("SPY") is None
+
+
+def test_crypto_context_note_shows_the_target_floor():
+    from marketmind.shadows.v3.context import _crypto_note
+    assert _crypto_note("BTC-USD", 50000.0) == (
+        " | a long needs a target >= 52000 (+4.0%, 2x round-trip cost) or it is rejected")
+    assert _crypto_note("SPY", 100.0) == ""
