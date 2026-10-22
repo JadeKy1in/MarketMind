@@ -13,6 +13,7 @@ from marketmind.shadow_feeds import macro_alt
 @pytest.fixture(autouse=True)
 def _data_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("MARKETMIND_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(app_charts, "RETRY_BACKOFF_S", (0.0, 0.0))   # retries without sleeping
     return tmp_path
 
 
@@ -186,3 +187,51 @@ async def test_app_feed_one_day_then_changes(monkeypatch):
     assert "up: Cash App [XYZ] #1 (+2)" in text
     assert "XYZ us/all/free #1 (was #3)" in text
     assert "HOOD" not in lines[-1]                            # dropped out of the charts
+
+
+@pytest.mark.asyncio
+async def test_app_chart_transient_errors_are_retried(monkeypatch):
+    """2026-10-11/12/13/21: every chart failed with an empty-message httpx error; a
+    connect error or 5xx is retried RETRIES times, a 404 is not."""
+    seen: dict[str, int] = {}
+
+    def h(req):
+        path = req.url.path
+        seen[path] = seen.get(path, 0) + 1
+        if "/gb/" in path:
+            return httpx.Response(404)
+        if seen[path] == 1:
+            raise httpx.ConnectError("")                      # empty message, like the logs
+        if seen[path] == 2 and "/jp/" in path:
+            return httpx.Response(503)
+        return httpx.Response(200, json=_feed(DAY1))
+
+    _transport(monkeypatch, app_charts, h)
+    snap = await app_charts.fetch_snapshot("2026-10-21")
+    charts = snap["charts"]
+    assert charts["us/all/free"]["apps"][0]["name"] == "Kalshi"
+    assert charts["jp/all/free"]["apps"][0]["name"] == "Kalshi"    # 2 retries were enough
+    assert charts["gb/all/free"] == {"error": "HTTPStatusError"}
+    assert seen["/gb/rss/topfreeapplications/limit=100/json"] == 1  # 404: no retry
+    assert seen["/jp/rss/topfreeapplications/limit=100/json"] == 3
+
+
+@pytest.mark.asyncio
+async def test_app_chart_failure_log_names_the_exception(monkeypatch, caplog):
+    calls = []
+
+    def h(req):
+        calls.append(1)
+        raise httpx.ReadTimeout("")
+
+    _transport(monkeypatch, app_charts, h)
+    with caplog.at_level("WARNING", logger="marketmind.gateway.app_charts"):
+        snap = await app_charts.fetch_snapshot("2026-10-21", countries=("us",))
+    assert all(c == {"error": "ReadTimeout"} for c in snap["charts"].values())
+    lines = [r.getMessage() for r in caplog.records if "failed" in r.getMessage()]
+    assert lines and all("ReadTimeout" in m for m in lines)
+    # the network is down: after the first wave used its retries, the rest try once
+    n = len(snap["charts"])
+    assert len(calls) < n * (app_charts.RETRIES + 1)
+    assert app_charts.describe_error(httpx.ConnectError("")) == "ConnectError('')"
+    assert app_charts.describe_error(ValueError("bad")) == "ValueError: bad"

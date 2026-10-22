@@ -52,7 +52,7 @@ async def _run(feed: Feed, today: str) -> list[str]:
         lines = await asyncio.wait_for(feed.fetch(today), timeout=FEED_TIMEOUT_S)
         return list(lines) or [f"- {feed.title}: no data today"]
     except Exception as e:
-        logger.warning("shadow feed %s failed: %s", feed.name, e)
+        logger.warning("shadow feed %s failed: %s: %s", feed.name, type(e).__name__, e)
         return [f"- {feed.title}: data unavailable today ({type(e).__name__})"]
 
 

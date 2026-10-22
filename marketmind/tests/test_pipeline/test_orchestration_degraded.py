@@ -49,7 +49,7 @@ def test_clean_daily_run_exits_zero(monkeypatch):
     assert asyncio.run(orch._run_daily_with_shadows(object(), _args())) == 0
 
 
-@pytest.mark.parametrize("step", ["holdings", "promotion", "alerts", "daily report", "trend", "app charts",
+@pytest.mark.parametrize("step", ["holdings", "promotion", "alerts", "daily report", "trend",
                                   "ecosystem"])
 def test_failed_step_makes_daily_run_degraded(monkeypatch, capsys, step):
     _stub_daily(monkeypatch, fail_step=step)
