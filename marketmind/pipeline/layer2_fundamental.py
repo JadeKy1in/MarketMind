@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from marketmind.gateway.async_client import chat_pro
 from marketmind.gateway.response_parser import strip_markdown_fences
 from marketmind.pipeline.language_utils import lang_note
+from marketmind.pipeline.defang import defang_text
 from marketmind.pipeline.layer1_narrative import Layer1Result
 
 
@@ -43,7 +44,11 @@ class Layer2Result:
 LAYER2_SYSTEM_PROMPT = """You are a fundamental macro analyst. Perform a 5-tier progressive analysis.
 
 Tiers:
-L2.1 Macro Quadrant: growth(accelerating/decelerating) x inflation(rising/falling) → current cycle position
+L2.1 Macro Quadrant: growth(accelerating/decelerating) x inflation(rising/falling) → current cycle position.
+      Start from the Layer 1 narrative (rates, inflation, policy stance, tail risks). If your quadrant or
+      rate-path premise contradicts Layer 1 (e.g. you assume rate cuts while Layer 1 reports hot inflation
+      or a hawkish Fed), say so in tier_challenges with the evidence; never build L2.2-L2.5 on a premise
+      that silently contradicts Layer 1.
 L2.2 Asset Allocation: based on quadrant, where does capital flow? (equities/bonds/commodities/gold/crypto)
 L2.3 Sector Selection: macro + Layer 1 narrative → 3-5 beneficiary sectors
 L2.4 Factor Scan: for each candidate ticker, score macro sensitivity (rate/oil/dollar/growth beta)
@@ -173,6 +178,19 @@ def _build_context(l1: Layer1Result, market_context: dict | None) -> str:
              f"Sentiment: {l1.sentiment_direction} (intensity={l1.sentiment_intensity})",
              f"Price-in Score: {l1.price_in_score}",
              f"Cascade Hub: {l1.cascade_hub}"]
+    # Owner fix 2026-10-22: L2 used to see only the labels above, guessed the macro
+    # premise on its own (often "slowdown / rate cuts" while L1 reported hot inflation)
+    # and the red team rejected the contradiction almost every day.
+    if l1.narrative_summary:
+        lines.append(f"Narrative: {defang_text(l1.narrative_summary)}")
+    if l1.institutional_surprise:
+        lines.append(f"Institutional Surprise: {defang_text(l1.institutional_surprise)}")
+    if l1.tail_risk_flags:
+        lines.append("Tail Risk Flags: " + "; ".join(defang_text(str(f)) for f in l1.tail_risk_flags[:8]))
+    experts = [e for e in (l1.expert_signals or []) if isinstance(e, dict)][:5]
+    if experts:
+        lines.append("Expert Signals: " + "; ".join(
+            defang_text(f"{e.get('expert', '?')}: {e.get('position', '?')}") for e in experts))
     if market_context:
         lines.append("\n## Market Data")
         for k, v in market_context.items():

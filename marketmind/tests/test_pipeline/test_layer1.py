@@ -42,6 +42,7 @@ def test_parse_layer1_response_clean():
     assert result.matrix_quadrant == "core_opportunity"
     assert result.price_in_score == 0.3
     assert result.cascade_hub is True
+    assert result.narrative_summary == "Fed hawkish pivot"
 
 
 def test_parse_layer1_response_defaults_on_empty():
