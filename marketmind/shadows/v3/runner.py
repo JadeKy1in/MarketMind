@@ -426,6 +426,7 @@ async def run_shadow_day(store: LedgerStore, news_items: list, *, today: str | N
                 "run_date": today, "llm": llm_trace.label(models),
                 "prompt_version": llm_trace.prompt_version(system_prompt(ctx.entry, on)),
                 "self_feedback": "on" if on else "off",
+                "self_feedback_v": self_feedback.FEEDBACK_VERSION,
                 "news_sources": list(ctx.news_sources)}
         if ctx.entry.source_type != "shadow":
             meta["temp"] = ctx.entry.group        # temp_event | trial

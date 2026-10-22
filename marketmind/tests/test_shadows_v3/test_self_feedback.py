@@ -99,6 +99,23 @@ def test_record_block_facts():
     assert "LLM thesis" not in text                 # only code facts feed back
 
 
+def test_record_block_direction_asset_and_confidence():
+    own = [rec(VEGA, "VXX", 0.02, "2026-09-0%d" % i) for i in range(1, 4)]
+    own += [rec(VEGA, "SPY", -0.01, "2026-09-1%d" % i, direction="short") for i in range(3)]
+    for e in own[:3]:
+        e.asset_type, e.confidence = "etf", 0.7
+    own[3].confidence = 0.5
+    own[4].confidence_is_default = True              # unstated: not in the calibration line
+    text = "\n".join(sf.record_lines(own, []))
+    assert "By direction:\n- " in text and "By asset type:\n- " in text
+    assert "- long: n=3, hit rate 100.0%" in text
+    assert "- short: n=3, hit rate 0.0%, mean net -1.00%" in text
+    assert "- etf: n=3" in text and "- stock: n=3" in text
+    assert "Stated confidence vs actual: mean stated 64.0%, actual hit rate 60.0% (n=5)" in text
+    assert "- stated < 0.55: n=1, hit rate 0.0%" in text
+    assert "- stated >= 0.65: n=3, hit rate 100.0%" in text
+
+
 def test_empty_record_and_isolation():
     text = "\n".join(sf.record_lines([], []))
     assert "Settled trades: none yet." in text and "Open positions: none." in text

@@ -126,7 +126,16 @@ for example stop distance, holding period, and the market regimes where your met
 works or fails. Small samples are weak evidence; one trade is noise. Do not chase recent
 winners, do not try to win back recent losses (no revenge trading), and do not repeat a
 trade only because it worked. Check your open positions before adding the same trade again.
+Your confidence is scored with a Brier score. YOUR RECORD shows your stated confidence next
+to your actual hit rate: start from your actual hit rate and move away from it only for
+specific evidence in today's setup. Your record by direction and by asset type shows where
+your method has made or lost money.
 """.strip()
+
+# Version of the block's content, stored as meta.self_feedback_v so the arm comparison
+# can split the experiment where the treatment changed. v2 (owner decision 2026-10-22):
+# by direction, by asset type, stated confidence vs actual hit rate.
+FEEDBACK_VERSION = 2
 
 
 def _settled(rows) -> list:
@@ -161,6 +170,34 @@ def _ma200(e):
 
 def _run_date(e) -> str:
     return (e.meta or {}).get("run_date") or (e.created_at or "")[:10]
+
+
+CONF_BANDS = ((0.0, 0.55, "< 0.55"), (0.55, 0.65, "0.55-0.65"), (0.65, 1.01, ">= 0.65"))
+
+
+def _scored(rows) -> list:
+    """Settled rows with a stated (non-default) confidence."""
+    return [e for e in rows if e.confidence is not None and not e.confidence_is_default]
+
+
+def _calibration_lines(rows) -> list[str]:
+    s = _scored(rows)
+    if not s:
+        return []
+    hit = sum(1 for e in s if e.net_return > 0) / len(s)
+    out = [f"Stated confidence vs actual: mean stated {_pct(mean(e.confidence for e in s))}, "
+           f"actual hit rate {_pct(hit)} (n={len(s)}){_weak(len(s))}"]
+    bands = [(label, [e for e in s if lo <= e.confidence < hi]) for lo, hi, label in CONF_BANDS]
+    if sum(1 for _, b in bands if b) > 1:
+        out += [f"- stated {label}: {_perf(b)}" for label, b in bands if b]
+    return out
+
+
+def _split_lines(title: str, rows, key) -> list[str]:
+    groups: dict[str, list] = {}
+    for e in rows:
+        groups.setdefault(key(e) or "unknown", []).append(e)
+    return [title, *(f"- {k}: {_perf(v)}" for k, v in sorted(groups.items(), key=lambda kv: -len(kv[1])))]
 
 
 def record_facts(own: list, baseline: list) -> dict:
@@ -218,6 +255,9 @@ def record_lines(own: list, baseline: list) -> list[str]:
                   f"- below MA200: {_perf(f['below'])}"]
         if f["unknown"]:
             lines.append(f"- unknown (short history or not reviewed yet): {len(f['unknown'])}")
+        lines += _split_lines("By direction:", f["rows"], lambda e: e.direction)
+        lines += _split_lines("By asset type:", f["rows"], lambda e: e.asset_type)
+        lines += _calibration_lines(f["rows"])
         last = f["rows"][:LAST_N]
         lines += [f"Last {len(last)} settled trades (newest first):", *map(_trade_line, last)]
     opened = f["open"]
