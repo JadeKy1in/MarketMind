@@ -8,7 +8,7 @@
 | 任务 | 时间 | 内容 |
 |---|---|---|
 | Daily | 周一至周五 **纽约 08:45**（美股开盘前 45 分钟，8:30 宏观数据公布之后） | `app.py --mode daily`：结算 → 新闻 → 影子与临时影子 → 证据层 → 主管线 → missed_path → 持仓巡检 → 晋升评审 → 警报 |
-| Weekend | 周六、周日 12:00，失败时 14:00 重试（本地） | `app.py --mode weekend`：结算 + 加密货币影子（chain_oracle、defi_scout） |
+| Weekend | 周六、周日 12:00，失败时 14:00 重试（本地） | `app.py --mode weekend`：结算 + 确信度校准 + 每周一次自动 beta 试验（`docs/S9_DESIGN.md` 第 1 步）+ 加密货币影子（chain_oracle、defi_scout） |
 | Watchdog | 登录后、从睡眠唤醒后各 15 分钟 | `watchdog.py`：先补跑当天被打断或失败（还有重试次数）的运行；再检查最近一次该跑的工作日和周末是否完成，没完成推送一次提醒 |
 | Dashboard | 登录时 | 仪表盘 http://127.0.0.1:8520 |
 

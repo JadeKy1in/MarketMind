@@ -314,6 +314,7 @@ async def run_daily(config, mock: bool = False, verbose: bool = False,
     # Settle whatever in the ledger has come due before making new calls (SPEC_v3 §7)
     if not mock:
         await _step(steps, "settle", settle_ledger, config, labels=("ledger settle",))
+        await _step(steps, "calibration", calibration_step, config)
 
     main_rec = _resume_skip(steps, "main")
     want_shadows = (config.shadow.shadows_enabled and shadow_count != 0 and not mock
@@ -868,8 +869,10 @@ async def promotion_step(config) -> None:
         _step_failed("promotion")
         return
     try:
-        for t in trials.evaluate(store):
+        decided = trials.evaluate(store)
+        for t in decided:
             print(f"  [trials] {t.trial_id} ({t.kind} of {t.parent_id}): {t.status}")
+        await _notify_passed_trials(decided)
         for ev in summary.get("events", []):
             if ev.get("type") != "challenge":
                 continue
@@ -884,6 +887,57 @@ async def promotion_step(config) -> None:
     except Exception:
         logger.warning("trial step failed", exc_info=True)
         _step_failed("trials")
+
+
+async def _notify_passed_trials(decided) -> None:
+    """S9 step 1: a passed trial asks the owner for approval on WeChat (never adopted
+    automatically). evaluate() returns each verdict once, so each pass is pushed once."""
+    from marketmind.shadows.v3 import auto_beta
+    try:
+        ids = await auto_beta.notify_passed(decided)
+    except Exception:
+        logger.warning("trial approval push failed", exc_info=True)
+        return
+    if ids:
+        print(f"  [trials] approval requested: {', '.join(ids)}")
+
+
+def _data_dir(config) -> Path:
+    return Path(getattr(config, "data_dir", None) or os.getenv("MARKETMIND_DATA_DIR", "data"))
+
+
+def calibration_step(config) -> None:
+    """S9 step 1: global confidence calibration -> data/calibration/latest.json, after
+    settlement. Annotation only (no position, sizing, settlement or alert uses it)."""
+    from marketmind.ledger import calibration
+    try:
+        s = calibration.refresh(_ledger_store(config), _data_dir(config) / "calibration")
+    except Exception:
+        logger.warning("calibration refresh failed", exc_info=True)
+        print("  [calibration] failed (see log)")
+        _step_failed("calibration")
+        return
+    print(f"  [calibration] {s['line']}")
+
+
+async def auto_beta_step(config) -> None:
+    """S9 step 1 (weekend run): automatic beta trials for the worst long-term shadows
+    (shadows/v3/auto_beta.py; MARKETMIND_AUTO_BETA=0 turns it off). An LLM failure
+    leaves the step unmarked, so a later attempt retries it."""
+    from marketmind.shadows.v3 import auto_beta
+    try:
+        res = await auto_beta.run(_ledger_store(config),
+                                  folder=_data_dir(config) / "trials")
+    except Exception:
+        logger.warning("auto beta step failed", exc_info=True)
+        print("  [auto beta] failed (see log)")
+        _step_failed("auto beta")
+        return
+    started = ", ".join(f"{p['trial_id']} ({p['parent_id']})" for p in res["proposed"]) or "none"
+    print(f"  [auto beta] {res['status']} {res['week']}: started {started}"
+          + (f"; not started: {len(res['errors'])}" if res["errors"] else ""))
+    if res["status"] == "retry":
+        _step_failed("auto beta")
 
 
 async def run_playground(config, news_items: list):
@@ -1171,6 +1225,19 @@ def crypto_shadows() -> list:
     return [e for e in roster.active() if ":crypto:" in e.shadow_id]
 
 
+def crypto_trial_entries() -> list:
+    """Running trials of crypto shadows also decide on weekends (S9 step 1, 2026-10-22):
+    their parents trade 7 days a week, so a weekday-only variant would be compared with
+    a parent that has weekend trades the variant never had."""
+    from marketmind.shadows.v3 import trials
+    try:
+        ids = {f"trial:{t.trial_id}" for t in trials.load() if ":crypto:" in t.parent_id}
+        return [e for e in trials.roster_entries() if e.shadow_id in ids]
+    except Exception:
+        logger.warning("crypto trial shadows unavailable this weekend", exc_info=True)
+        return []
+
+
 async def run_weekend(config) -> int:
     """`--mode weekend`: settle the ledger, then only the crypto shadows decide.
     Every other market is closed; their shadows would decide on Friday's data and
@@ -1185,12 +1252,14 @@ async def run_weekend(config) -> int:
     steps = RunSteps.from_env()
     await preload_universe()
     await _step(steps, "settle", settle_ledger, config, labels=("ledger settle",))
+    await _step(steps, "calibration", calibration_step, config)
+    await _step(steps, "auto beta", auto_beta_step, config)
     want_shadows = _resume_skip(steps, "shadows") is None
     want_watchlist = _resume_skip(steps, "watchlist") is None
     news_items = (await fetch_all_sources(config) or []) if want_shadows or want_watchlist else []
     if want_shadows:
         try:
-            report = await run_shadow_day(_ledger_store(config), news_items, entries=crypto_shadows(),
+            report = await run_shadow_day(_ledger_store(config), news_items, entries=crypto_shadows() + crypto_trial_entries(),
                                           report_dir=default_report_dir())
             print(f"  [shadows] {report.summary()}")
             if _shadows_finished(report):

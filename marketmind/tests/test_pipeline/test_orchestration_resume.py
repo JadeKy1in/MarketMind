@@ -38,6 +38,7 @@ class Daily:
         m.setattr(orch, "_report_stage_progress", lambda *a, **k: None)
         m.setattr(orch, "_maybe_run_weekly_audit", self._noop("weekly audit"))
         m.setattr(orch, "settle_ledger", self._step("settle", "ledger settle"))
+        m.setattr(orch, "calibration_step", self._sync_step("calibration", "calibration"))
         m.setattr(orch, "_do_news_collection", self._news)
         m.setattr(orch, "run_discovery_step", self._noop("discovery"))
         m.setattr(orch, "_main_chain", self._main)
@@ -140,7 +141,7 @@ def _marked(tmp_path) -> dict:
     return json.loads((tmp_path / "steps.json").read_text(encoding="utf-8")).get(KEY, {})
 
 
-ALL_STEPS = {"settle", "main", "shadows", "playground", "evidence", "missed_path", "watchlist",
+ALL_STEPS = {"settle", "calibration", "main", "shadows", "playground", "evidence", "missed_path", "watchlist",
              "holdings", "promotion", "trend", "alerts", "ecosystem", "app charts", "daily report"}
 
 
@@ -243,6 +244,8 @@ def test_weekend_retry_skips_finished_steps(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(orch, "init_gateway", lambda *a: None)
     monkeypatch.setattr(orch, "preload_universe", lambda: rec("preload"))
     monkeypatch.setattr(orch, "settle_ledger", settled)
+    monkeypatch.setattr(orch, "calibration_step", lambda config: calls.append("calibration"))
+    monkeypatch.setattr(orch, "auto_beta_step", lambda *a, **k: rec("auto beta"))
     monkeypatch.setattr(orch, "_ledger_store", lambda config: None)
     monkeypatch.setattr(orch, "crypto_shadows", lambda: [])
     monkeypatch.setattr(orch, "crypto_registry", lambda: [])
@@ -259,8 +262,8 @@ def test_weekend_retry_skips_finished_steps(monkeypatch, tmp_path, capsys):
     config = SimpleNamespace(deepseek_api_key="x", deepseek_base_url="x")
 
     assert asyncio.run(orch.run_weekend(config)) == 0
-    assert {"settle", "news", "shadows", "discovery", "watchlist", "trend", "alerts",
-            "app charts"} <= set(calls)
+    assert {"settle", "calibration", "auto beta", "news", "shadows", "discovery", "watchlist",
+            "trend", "alerts", "app charts"} <= set(calls)
     calls.clear()
     assert asyncio.run(orch.run_weekend(config)) == 0
     assert calls == ["preload"]

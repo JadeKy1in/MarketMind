@@ -158,6 +158,8 @@ def test_weekend_run_degraded_on_failed_step(monkeypatch, capsys):
     monkeypatch.setattr(orch, "init_gateway", lambda *a: None)
     monkeypatch.setattr(orch, "preload_universe", none)
     monkeypatch.setattr(orch, "settle_ledger", settled)
+    monkeypatch.setattr(orch, "calibration_step", lambda config: None)
+    monkeypatch.setattr(orch, "auto_beta_step", none)
     monkeypatch.setattr(orch, "_ledger_store", lambda config: None)
     monkeypatch.setattr(orch, "crypto_shadows", lambda: [])
     monkeypatch.setattr(orch, "crypto_registry", lambda: [])
