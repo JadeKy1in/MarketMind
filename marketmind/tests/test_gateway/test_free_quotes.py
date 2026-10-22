@@ -396,7 +396,7 @@ async def test_get_price_history_repairs_recent_close_only_bars(monkeypatch, cap
         return PriceHistory(ticker=ticker, source="stooq", daily=ref, weekly=ph.to_weekly(ref))
     monkeypatch.setattr(ph, "_from_yfinance", fake_yf)
     monkeypatch.setattr(fq, "from_stooq", fake_stooq)
-    with caplog.at_level(logging.INFO, logger="marketmind.gateway.price_history"):
+    with caplog.at_level(logging.DEBUG, logger="marketmind.gateway.price_history"):
         hist = await ph.get_price_history("PL=F")
     assert calls == [("PL=F", 2)]
     assert hist.source == "yfinance+stooq"

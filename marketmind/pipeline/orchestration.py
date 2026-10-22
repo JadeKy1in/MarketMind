@@ -46,6 +46,12 @@ def _step_failed(step: str) -> None:
         _step_failures.append(step)
 
 
+def _log_price_notes() -> None:
+    """End of a daily / weekend run: one summary line for per-symbol price-data notes."""
+    from marketmind.gateway.price_history import log_run_summary
+    log_run_summary()
+
+
 def _finish_exit_code(ret: int) -> int:
     """ret unchanged when it already signals failure or nothing degraded; else DEGRADED_EXIT,
     with a one-line `[degraded] a, b` summary."""
@@ -1219,6 +1225,7 @@ async def run_weekend(config) -> int:
     await _step(steps, "app charts", app_charts_step, config, finished=_not_false)
     print(f"  [tokens] {usage_tracker.summary_line()}")
     usage_tracker.append_log("weekend")
+    _log_price_notes()
     return _finish_exit_code(0)
 
 
@@ -1324,6 +1331,7 @@ async def _run_daily_with_shadows(config, args) -> int:
         from marketmind.gateway import usage_tracker
         usage_tracker.append_log("daily")
 
+    _log_price_notes()
     return _finish_exit_code(ret)
 
 
