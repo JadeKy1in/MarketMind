@@ -64,8 +64,9 @@ def main():
         from marketmind.pipeline.scenario_backtest import run_scenario_backtest
         return run_scenario_backtest(args)
     elif args.mode == "settle":
-        from marketmind.pipeline.orchestration import settle_ledger
+        from marketmind.pipeline.orchestration import calibration_step, settle_ledger
         summary = asyncio.run(settle_ledger(config))
+        calibration_step(config)
         return 1 if "failed" in summary else 0
     elif args.mode == "weekend":
         from marketmind.pipeline.orchestration import run_weekend

@@ -37,7 +37,8 @@ SYSTEM_PROMPT = """你是 MarketMind 的每日汇报员，给所有人写今天�
    ## 待批准：影子退役提案（retirement_proposals：影子、理由——未通过的挑战者与评估期相对领域基准的平均超额、拟接任者与方法论来源、批准命令；只是提案，需所有人批准）
    ## 值得关注（从以上事实中归纳 2–3 点，明确标注"观察"而非建议）
 3. 提到账本记录时写出记录编号。
-4. 结尾不写免责声明，不给交易指令；系统不下单。"""
+4. 结尾不写免责声明，不给交易指令；系统不下单。
+5. calibration（确信度校准）由代码另写一节附在最后，你不要单独写这一节。"""
 
 
 def data_dir() -> Path:
@@ -144,7 +145,51 @@ def gather_facts(today: str, store=None, brief_dir: Path | None = None) -> dict:
         comp = comparison_facts(store)
         if comp:
             facts["ledger_comparison"] = comp
+    cal = calibration_facts(today, store)
+    if cal:
+        facts["calibration"] = cal
     return facts
+
+
+def calibration_facts(today: str, store=None) -> dict | None:
+    """S9 step 1: the global calibration line (data/calibration/latest.json) and today's
+    LLM decisions' stated vs calibrated mean confidence. Annotation only."""
+    try:
+        from marketmind.ledger import calibration
+        summary = calibration.read(data_dir() / "calibration" / "latest.json")
+        if not summary:
+            return None
+        out = {"line": summary.get("line"), "map": summary.get("global_map"),
+               "as_of": summary.get("date")}
+        if store is not None:
+            rows = [e for e in store.list() if (e.meta or {}).get("run_date") == today
+                    and e.source_type in calibration.ELIGIBLE_SOURCE_TYPES
+                    and e.source_id not in calibration.CODE_SOURCE_IDS
+                    and not e.confidence_is_default]
+            if rows:
+                raw = [e.confidence for e in rows]
+                cal = [calibration.calibrate(c, summary, e.source_id) for c, e in zip(raw, rows)]
+                out["today"] = {"decisions": len(rows), "stated_mean": sum(raw) / len(raw),
+                                "calibrated_mean": sum(cal) / len(cal)}
+        return out
+    except Exception:
+        logger.warning("calibration facts unavailable", exc_info=True)
+        return None
+
+
+def calibration_section(facts: dict) -> str:
+    """Code-written report section (appended after the LLM text, so it is always exact)."""
+    cal = facts.get("calibration")
+    if not cal or not cal.get("line"):
+        return ""
+    lines = ["## 确信度校准（代码计算，仅注释，不影响仓位）", f"- {cal['line']}"]
+    t = cal.get("today")
+    if t:
+        lines.append(f"- 今日 LLM 决策 {t['decisions']} 笔：自报确信度平均 {t['stated_mean'] * 100:.1f}%，"
+                     f"按全局校准后 {t['calibrated_mean'] * 100:.1f}%。")
+    if cal.get("as_of") and cal["as_of"] != facts.get("date"):
+        lines.append(f"- 校准结果日期：{cal['as_of']}")
+    return "\n".join(lines)
 
 
 def comparison_facts(store) -> dict | None:
@@ -259,6 +304,9 @@ async def build_report(today: str | None = None, *, store=None, call=_call_llm,
         text, source = "", "fallback"
     if not text:
         text, source = fallback_text(facts), "fallback"
+    section = calibration_section(facts)
+    if section:
+        text = text + "\n\n" + section
     from marketmind.gateway import usage_tracker
     notice = usage_tracker.fallback_notice()
     if notice:

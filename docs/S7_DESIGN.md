@@ -92,7 +92,7 @@
 - 被所有人拒绝的大行情警报：警报自己的账本记录照常结算（S8 已实现），仪表盘单列。
 
 ### challenger 与 beta（合并为一套"变体试验"，C19；与事件影子分开计数，最多同时 5 个）
-- **发起**：challenger 由淘汰规则自动发起；beta 由所有人发起（`python -m marketmind.shadows.trials propose <影子> --note "改动说明"`），或名册出现空缺时发起。
+- **发起**：challenger 由淘汰规则自动发起；beta 由所有人发起（`python -m marketmind.shadows.trials propose <影子> --note "改动说明"`），或名册出现空缺时发起；2026-10-22 起周末运行还会为成绩最差的长期影子自动发起 beta（`docs/S9_DESIGN.md` 第 1 步），通过后推送微信，仍由所有人批准。
 - **变体生成**：1 次 Flash 调用，输入原方法论、改动说明、该影子的账本成绩摘要，以及下面的"继承输入"，输出修改后的完整方法论（仍须保持 8 段模板）。代码检查格式后保存在 `data/trials/<编号>/prompt.md`。
 - **继承输入**（所有人决定 2026-09-29，`promotion/review_facts.py`）：全部由代码从已结算记录的 `review` 字段（`docs/S9_DESIGN.md` §3）计算，LLM 只读不算。
   1. 该影子自己的复盘事实：`error_class` 分布（win / beta_carried / cost_flipped / right_but_stopped / thesis_wrong 的笔数与占比）；right_but_stopped 占比（止损后原持有期内又到目标，即止损过紧）；平均 MFE / MAE（ATR 倍数，只计有 ATR 的记录）；ambiguous_bar 占比；按入场前状态拆分的胜率与平均净收益（在 200 日均线之上 / 之下；20 日涨跌 > 0 / ≤ 0）。
