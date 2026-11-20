@@ -524,7 +524,47 @@ def alert_report_view(report: dict | None) -> dict | None:
     }
 
 
+def alert_instruments(history: list[dict]) -> dict:
+    """Trend state per instrument of the alert's trend source (the trunk), from the latest
+    data/trend file (weekend files carry the other instruments, flagged), with each
+    instrument's latest entry alert. Read-only."""
+    from marketmind.alerts import config as C
+    from marketmind.alerts.trend_source import get_source
+    trend = get_trend()
+    if not trend.get("available"):
+        return {"available": False, "reason": trend.get("reason")}
+    try:
+        reading = get_source().read(trend["date"])
+    except Exception as e:                  # a plugged source may fail; the page still loads
+        logger.warning("alert trend source unreadable", exc_info=True)
+        return {"available": False, "reason": f"趋势来源读取失败：{type(e).__name__}"}
+    names = set(reading.states) | (set(C.SIX) if reading.universe == "six" else set())
+    last: dict[str, dict] = {}
+    for h in history:                       # newest first
+        last.setdefault(h["ticker"], h)
+    keys = ("ticker", "state", "event", "as_of", "close", "stop_level", "entry_signal_date",
+            "reason", "carried")
+    rows = [{k: r.get(k) for k in keys} | {"last_alert": last.get(r["ticker"])}
+            for r in trend["rows"] if r["ticker"] in names]
+    return {"available": True, "date": trend["date"], "mode": trend.get("mode"),
+            "source": reading.source, "universe": reading.universe, "rows": rows}
+
+
+def alert_outcomes(history: list[dict]) -> dict:
+    """Settled entry alerts: overall and by the owner's response (rejected = the value of
+    passing, SPEC §6.3 missed_path)."""
+    def agg(rows: list[dict]) -> dict:
+        done = [r for r in rows if r["status"] == "settled" and r["net_return"] is not None]
+        nets = [r["net_return"] for r in done]
+        return {"n": len(rows), "settled": len(done), "wins": sum(n > 0 for n in nets),
+                "avg_net": sum(nets) / len(nets) if nets else None}
+    return {"all": agg(history),
+            "by_response": {k: agg([h for h in history if (h["response"] or "none") == k])
+                            for k in ("accept", "reject", "none")}}
+
+
 def get_big_alerts() -> dict:
+    from marketmind.alerts import quota
     from marketmind.alerts.runner import load_responses
     day, report = _latest_json(data_dir() / "alerts")
     store = _store()
@@ -534,6 +574,8 @@ def get_big_alerts() -> dict:
         r = responses.get(e.entry_id, {})
         history.append({"entry_id": e.entry_id, "created_at": e.created_at, "mode": e.source_id,
                         "ticker": e.ticker, "status": e.status, "net_return": e.net_return,
+                        "exit_reason": e.exit_reason, "exit_date": e.exit_date,
+                        "status_note": (e.meta or {}).get("status"),
                         "response": r.get("decision"), "note": r.get("note", "")})
     history.reverse()
     if report is None and not history:
@@ -541,6 +583,9 @@ def get_big_alerts() -> dict:
                 "reason": "警报尚未运行（每日运行最后一步，或 python -m marketmind.alerts run）"}
     return {"available": True, "date": day, "report": report,
             "view": alert_report_view(report if isinstance(report, dict) else None),
+            "instruments": alert_instruments(history), "outcomes": alert_outcomes(history),
+            "push_budget": {"sent_today": quota.sent_today(), "limit": quota.DAILY_LIMIT,
+                            "day": quota.day_key()},
             "history": history}
 
 

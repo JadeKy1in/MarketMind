@@ -11,6 +11,9 @@ check_all     walks every complete bar since the last check: any invalidation
               expiry_bars complete bars without a trigger -> expired.
 notify_triggers  pushes main-pipeline triggers only (owner decision 2026-09-28);
               anomaly-origin triggers go to the daily report and dashboard.
+              While big-move alerts are live the push is deferred until after
+              the alerts (push_deferred) and held when the day's Server酱
+              budget is down to the daily report's reserve (docs/S8_DESIGN.md).
 
 Stops and targets: L3 levels for longs when L3 has enough history; otherwise
 (and for every short, since L3 levels describe long setups only) the L3 risk
@@ -19,9 +22,12 @@ ledger falls back to expiry. Numbers come from code only (SPEC_v3 L3).
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 from marketmind.gateway.price_history import Bar, PriceHistory, complete_bars, to_weekly
@@ -342,20 +348,36 @@ def format_message(rows: list[dict]) -> tuple[str, str]:
     return title, "\n\n".join(blocks)
 
 
-async def notify_triggers(report: dict, send=None, *, store: WatchlistStore | None = None) -> dict:
+def _pending_path() -> Path:
+    return Path(os.getenv("MARKETMIND_DATA_DIR", "data")) / "scheduler" / "watchlist_push_pending.json"
+
+
+async def notify_triggers(report: dict, send=None, *, store: WatchlistStore | None = None,
+                          defer: bool = False) -> dict:
     """Push main-pipeline triggers only; anomaly triggers stay in the report and dashboard.
 
     `send(title, body) -> [{channel, ok, status}]`, default marketmind.alerts.notify.send.
-    Returns {"pushed": [watch ids], "skipped": [watch ids], "results": [...]}.
+    `defer` (big-move alerts live, docs/S8_DESIGN.md 推送优先级): the message is kept in
+    data/scheduler/watchlist_push_pending.json and sent by push_deferred after the alerts.
+    Returns {"pushed": [watch ids], "skipped": [watch ids], "deferred": [watch ids], "results": [...]}.
     """
     rows = [r for r in report.get("triggered", []) if r.get("source") == "main_pipeline"]
     skipped = [r["watch_id"] for r in report.get("triggered", []) if r.get("source") != "main_pipeline"]
-    out = {"pushed": [], "skipped": skipped, "results": []}
+    out = {"pushed": [], "skipped": skipped, "deferred": [], "results": []}
     if not rows:
+        return out
+    title, body = format_message(rows)
+    if defer:
+        ids = [r["watch_id"] for r in rows]
+        path = _pending_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"day": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                                    "title": title, "body": body, "watch_ids": ids},
+                                   ensure_ascii=False), encoding="utf-8")
+        out["deferred"] = ids
         return out
     if send is None:
         from marketmind.alerts.notify import send
-    title, body = format_message(rows)
     try:
         results = await send(title, body)
     except Exception as exc:
@@ -370,6 +392,44 @@ async def notify_triggers(report: dict, send=None, *, store: WatchlistStore | No
             if item is not None:
                 item.history.append({"at": at, "event": "notified", "results": results})
                 store.update(item)
+    return out
+
+
+async def push_deferred(send=None, *, now: datetime | None = None,
+                        reserve: int | None = None) -> dict:
+    """Send the watchlist message deferred by notify_triggers, after the alerts went out,
+    only while the day's push budget (alerts/quota.py) keeps `reserve` messages (default:
+    one for the daily report). Held or stale messages are dropped: the triggers are in the
+    daily report and on the dashboard anyway. Returns {"pushed", "held", "reason", "results"}."""
+    from marketmind.alerts import quota
+    out = {"pushed": [], "held": [], "reason": None, "results": []}
+    path = _pending_path()
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return out
+    except (OSError, ValueError):
+        logger.warning("deferred watchlist push unreadable; dropped")
+        doc = {}
+    path.unlink(missing_ok=True)
+    ids = list(doc.get("watch_ids") or [])
+    now = now or datetime.now(timezone.utc)
+    reserve = quota.REPORT_RESERVE if reserve is None else reserve
+    if doc.get("day") != now.strftime("%Y-%m-%d"):
+        out.update(held=ids, reason="stale")
+    elif quota.remaining(now) <= reserve:
+        out.update(held=ids, reason="quota")
+    if out["reason"]:
+        logger.info("deferred watchlist push held (%s); triggers stay in the daily report", out["reason"])
+        return out
+    if send is None:
+        from marketmind.alerts.notify import send
+    try:
+        out["results"] = await send(str(doc.get("title", "")), str(doc.get("body", "")))
+    except Exception as exc:
+        logger.warning("Deferred watchlist push failed: %s", type(exc).__name__)
+        out["results"] = [{"channel": "error", "ok": False, "status": 0}]
+    out["pushed"] = ids
     return out
 
 
