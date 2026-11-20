@@ -131,6 +131,16 @@
 - **真实账本**（2026-09-29 只读运行）：账本从 2026-09-27 开始，31 个评审中的影子全部 `insufficient`（28 个还没有成熟的已结算交易，3 个 < 40 个观测），没有取任何因子数据。
 - **与旧版的差别**：旧版是 Carhart 4 因子、普通 OLS 标准误、"连续 3 个月变化 > 2σ"的漂移规则，以及按阈值把影子归类成"动量 / 价值 / 成长"等原型；原型分类没有重建（阈值无依据，且不参与任何决策）。
 
+## 三之二、按 LLM 模型分组的诊断（`promotion/runner.py::llm_breakdown`，仅报告，2026-11-20）
+
+> 所有人决定（2026-11-20）：晋升评审增加按模型分组的诊断，**只报告，不接入任何门槛**：`ladder.evaluate`、阶段、评分（`SCORE_WEIGHTS`）、`advisors.json`（S8 警报投票的来源，`alerts/runner.py`）都不读它。
+
+- **样本**：与阶梯相同的已成熟已结算交易（`ladder.matured`，即 `shadow_stats["settled_rows"]`），按账本 `meta.llm` 归入模型族：`claude`、`deepseek`、`other`（其它具名模型）、`mixed`（复合标签 `a+b` 或列表里含多个族；`gateway/llm_trace.label` 产生复合标签，Playground memory_desk 写的是列表）、`unknown`（缺失或为空）。同族复合标签（如两个 DeepSeek 型号）仍归该族。
+- **输出**：`state.json["diagnostics"][影子]["llm_models"]` = 每族的已结算笔数、决策日数、首末决策日、平均净收益、胜率；`sign_flip`（只在两个具名族——不含 `unknown`——各自 ≥ 10 个决策日且平均净收益符号相反时给出）；`note`（多于一族时的市场环境说明）。`state.json["diagnostics_meta"]["llm_models"]` 是全部受评影子合并的同一结构，外加 `shadows_with_flip`。写在 `diagnostics` 下而不是 `metrics` / `shadow_stats`，因此不进入评分、门槛与日报的评审数字。
+- **混杂（必须读）**：两个模型覆盖的时间段不同——DeepSeek 主要是 9-29、10-01、10-09 至 10-14、10-27 至 11-19；Claude 主要是 10-15 至 10-26 与 11-20 起（另有 9-29、10-02、10-03 少量记录）。组间差异与市场环境完全混在一起，**不是模型优劣的比较**；没有任何影子在单一模型下达到 `PROBATION_DAYS` = 60 天。
+- **真实账本只读运行（2026-11-20，评估日 2026-11-20，44 个受评影子）**：合并后 Claude 425 笔 / 15 个决策日，平均净收益 +0.18%，胜率 52%；DeepSeek 816 笔 / 35 天，+0.17%，45%；无 `meta.llm` 155 笔 / 21 天，−3.35%，26%（主要是早期记录和不调用 LLM 的 Playground 代理）。单个影子的 Claude 决策日最多 15 天（两个加密影子），其余 ≤ 9 天，因此**没有影子触发 `sign_flip`**。
+- 离线测试：`marketmind/tests/test_promotion/test_llm_models.py`（族归一：复合 / 列表 / 缺失 / 其它模型；数值；翻转标记的天数门槛、同号、`unknown` 不参与；晋升运行写入诊断且有无 `meta.llm` 时 `state["shadows"]` 与 `advisors.json` 完全相同）。
+
 ## 四、纸面到实盘差距（`promotion/paper_live.py`，仅报告，2026-09-29）
 
 > 所有人决定（2026-09-29）：用统一账本重建旧版 `shadows/paper_live_gap.py`（从未在真实数据上运行过，已删除）。**只做诊断报告，不接入门槛。**

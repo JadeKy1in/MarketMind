@@ -25,6 +25,13 @@ evaluated shadow, state.json["diagnostics"][shadow] = {"factors": promotion/fact
 "paper_live": promotion/paper_live.py} on the same matured trades the ladder uses, and
 state.json["diagnostics_meta"] says which factor source was used. `read_diagnostics`
 is the dashboard's read function. A failure there never fails the promotion run.
+
+Per-LLM-model diagnostic (owner decision 2026-11-20, docs/S7_DESIGN.md §三之二; report
+only, never read by evaluate / advisors / scores): state.json["diagnostics"][shadow]
+["llm_models"] splits the same matured trades by `meta.llm` model family, and
+state.json["diagnostics_meta"]["llm_models"] is the cohort line over all evaluated
+shadows. The families covered different calendar periods, so any difference is
+confounded with the market regime.
 """
 from __future__ import annotations
 
@@ -34,6 +41,7 @@ import os
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+from statistics import mean
 
 from marketmind.ledger.store import LedgerEntry, LedgerStore
 from marketmind.promotion import config as C
@@ -53,10 +61,61 @@ def trial_count(entries: list[LedgerEntry]) -> int:
     return max(1, len(trial_ids(entries)))
 
 
+# ── per-LLM-model diagnostic (report only) ─────────────────────────────
+
+LLM_FLIP_MIN_DAYS = 10      # sign-flip flag needs both families >= this many decision days
+_LLM_FAMILIES = (("claude", ("claude", "anthropic", "opus", "sonnet", "haiku")),
+                 ("deepseek", ("deepseek",)))
+LLM_REGIME_NOTE = ("model families ran over different calendar periods, so differences "
+                   "are confounded with the market regime; this is not a model comparison "
+                   "and no gate reads it")
+
+
+def llm_family(value) -> str:
+    """Model family of a `meta.llm` value: "claude", "deepseek", "other" (a named model of
+    neither family), "mixed" (several families: compound "a+b" labels from
+    gateway/llm_trace.label, or a list as Playground memory_desk writes) or "unknown"
+    (missing / empty)."""
+    parts = value if isinstance(value, (list, tuple, set)) else [value]
+    names = [p.strip().lower() for v in parts if v is not None
+             for p in str(v).split("+") if p.strip()]
+    if not names:
+        return "unknown"
+    fams = {next((f for f, keys in _LLM_FAMILIES if any(k in n for k in keys)), "other")
+            for n in names}
+    return fams.pop() if len(fams) == 1 else "mixed"
+
+
+def llm_breakdown(rows: list[LedgerEntry]) -> dict:
+    """{"by_family": {family: settled, decision_days, first_day, last_day, mean_net,
+    win_rate}, "sign_flip", "note"} over settled rows (the ladder's matured trades).
+    `sign_flip` is set only when named families (not "unknown") with >= LLM_FLIP_MIN_DAYS
+    decision days have mean net returns of opposite sign."""
+    groups: dict[str, list[LedgerEntry]] = {}
+    for e in rows:
+        if e.net_return is not None:
+            groups.setdefault(llm_family((e.meta or {}).get("llm")), []).append(e)
+    by = {}
+    for fam, rs in sorted(groups.items()):
+        r = [e.net_return for e in rs]
+        days = sorted({e.created_at[:10] for e in rs if e.created_at})
+        by[fam] = {"settled": len(rs), "decision_days": len(days),
+                   "first_day": days[0] if days else None, "last_day": days[-1] if days else None,
+                   "mean_net": mean(r), "win_rate": sum(1 for x in r if x > 0) / len(r)}
+    big = {f: v["mean_net"] for f, v in by.items()
+           if f != "unknown" and v["decision_days"] >= LLM_FLIP_MIN_DAYS}
+    pos = sorted(f for f, m in big.items() if m > 0)
+    neg = sorted(f for f, m in big.items() if m < 0)
+    flip = {"positive": pos, "negative": neg, "min_days": LLM_FLIP_MIN_DAYS} if pos and neg else None
+    return {"by_family": by, "sign_flip": flip,
+            "note": LLM_REGIME_NOTE if len(by) > 1 else None}
+
+
 def compute_diagnostics(entries: list[LedgerEntry], state: dict, today: str,
                         calendar: list[str], bars_for, provider) -> tuple[dict, dict]:
-    """({shadow: {"factors", "paper_live"}}, meta) for every evaluated (not blocked or
-    retired) shadow, on its matured settled trades (ladder.matured)."""
+    """({shadow: {"factors", "paper_live", "llm_models"}}, meta) for every evaluated (not
+    blocked or retired) shadow, on its matured settled trades (ladder.matured, the same
+    rows as ladder.shadow_stats["settled_rows"]); meta["llm_models"] is the cohort line."""
     cal = sorted(d for d in calendar if d and d <= today)
     by_sid: dict[str, list[LedgerEntry]] = {}
     for e in entries:
@@ -73,8 +132,12 @@ def compute_diagnostics(entries: list[LedgerEntry], state: dict, today: str,
     for sid, done in done_by.items():
         record_days = int((state["shadows"][sid].get("metrics") or {}).get("record_days") or 0)
         out[sid] = _clean({"factors": factors_mod.analyze(done, provider),
-                           "paper_live": paper_live_mod.analyze(done, bars, record_days)})
-    meta = _clean({**provider.meta(), "updated_at": today, "min_obs": factors_mod.MIN_OBS})
+                           "paper_live": paper_live_mod.analyze(done, bars, record_days),
+                           "llm_models": llm_breakdown(done)})
+    cohort = llm_breakdown([e for done in done_by.values() for e in done])
+    cohort["shadows_with_flip"] = sorted(s for s, v in out.items() if v["llm_models"]["sign_flip"])
+    meta = _clean({**provider.meta(), "updated_at": today, "min_obs": factors_mod.MIN_OBS,
+                   "llm_models": cohort})
     return out, meta
 
 
