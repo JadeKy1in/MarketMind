@@ -152,9 +152,15 @@ def yahoo_symbol(ticker: str) -> str:
     """Symbol to send to Yahoo/yfinance. HK codes use Yahoo's 4-digit form.
 
     Yahoo 404s on 5-digit HK codes ("09866.HK") but serves "9866.HK"; "0700.HK" stays.
+    US share classes written with a dot ("BRK.B") use Yahoo's dash form ("BRK-B"):
+    Yahoo answers "possibly delisted" for the dot form (2026-11-19 log).
     Only the request symbol changes: ledgers keep the ticker as written.
     """
     t = (ticker or "").strip()
     if t.upper().endswith(".HK") and t[:-3].isdigit():
         return (t[:-3].lstrip("0") or "0").zfill(4) + ".HK"
+    if "." in t and not t.startswith("^"):
+        base, suffix = t.rsplit(".", 1)
+        if suffix.upper() in _US_CLASS_SUFFIXES and suffix.upper() not in _SUFFIX and base.isalpha():
+            return f"{base}-{suffix}"
     return t

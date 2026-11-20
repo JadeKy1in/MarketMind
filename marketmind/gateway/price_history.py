@@ -123,7 +123,7 @@ async def get_price_history(ticker: str, years: int = 5) -> PriceHistory | None:
                                ticker, gap)
     else:
         hist = await _from_alpaca(ticker, years) if market is US else None
-        if hist is None:
+        if hist is None and not yahoo_skipped(ticker):
             hist = await _from_yfinance(ticker, years)
         if hist is None and market is US:
             hist = await _from_nasdaq(ticker, years)
@@ -153,6 +153,7 @@ async def get_price_history(ticker: str, years: int = 5) -> PriceHistory | None:
         # EODHD free plan: 20 calls a day (persisted budget), 1 year of history
         from marketmind.gateway import free_quotes as fq
         hist = await fq.from_eodhd(ticker, years)
+    _note_yahoo_outcome(ticker, hist)
     if hist is None:
         logger.warning("No price history for %s — all sources failed", ticker)
     else:
@@ -174,7 +175,10 @@ async def get_price_histories(tickers: list[str], years: int = 5) -> dict[str, P
 
 
 def clear_cache() -> None:
+    global _yahoo_misses
     _cache.clear()
+    _yf_empty.clear()
+    _yahoo_misses = None            # re-read from the (possibly different) data dir
 
 
 # Per-run notes, logged once by log_run_summary() at the end of a daily / weekend run
@@ -221,6 +225,7 @@ def _yf_sync(ticker: str, years: int) -> PriceHistory | None:
     from marketmind.markets import yahoo_symbol
     df = yf.Ticker(yahoo_symbol(ticker)).history(period=f"{years}y", interval="1d", auto_adjust=True)
     if df is None or df.empty:
+        _yf_empty.add(ticker.upper())       # an answer without data, not a network error
         return None
     daily = _yf_bars(df)
     if not daily:
@@ -248,6 +253,96 @@ def _yf_bars(df) -> list[Bar]:
         bars.append(Bar(date=idx.strftime("%Y-%m-%d"), open=o, high=h, low=lo, close=c,
                         volume=vol if math.isfinite(vol) else 0.0))
     return bars
+
+
+# ── Yahoo "not found" memory ────────────────────────────────────────────────
+# Some tickers are known to another source but not to Yahoo under the ledger's
+# spelling (3529.TW is a TPEx stock, Yahoo "3529.TWO"; FinMind serves it). Every
+# run asked Yahoo again and yfinance logged "possibly delisted" (2026-11-19 log).
+# A non-crypto ticker for which Yahoo answered without data while a later source
+# had bars, on YAHOO_MISS_DAYS run days with no Yahoo success in between, skips
+# yfinance until YAHOO_RETRY_DAYS after the last miss; then Yahoo is tried once
+# again. A Yahoo success clears the record. Network errors never count (only an
+# empty answer does), and the other sources are still asked, so no data is lost.
+# File: <MARKETMIND_DATA_DIR>/price_history/yahoo_not_found.json.
+YAHOO_MISS_DAYS = 3
+YAHOO_RETRY_DAYS = 14
+_yf_empty: set[str] = set()                 # tickers Yahoo answered empty this run
+_yahoo_misses: tuple | None = None          # (file path, records), loaded lazily
+
+
+def _yahoo_misses_path():
+    from pathlib import Path
+    return Path(os.getenv("MARKETMIND_DATA_DIR", "data")) / "price_history" / "yahoo_not_found.json"
+
+
+def _misses() -> dict:
+    global _yahoo_misses
+    path = _yahoo_misses_path()
+    if _yahoo_misses is None or _yahoo_misses[0] != path:
+        import json
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        except (OSError, ValueError) as exc:
+            logger.warning("Yahoo not-found file %s unreadable (%s); starting empty", path, exc)
+            doc = {}
+        _yahoo_misses = (path, doc if isinstance(doc, dict) else {})
+    return _yahoo_misses[1]
+
+
+def _save_misses() -> None:
+    from marketmind.gateway.altdata_store import write_json_atomic
+    try:
+        write_json_atomic(_yahoo_misses_path(), _misses())
+    except OSError as exc:
+        logger.warning("Yahoo not-found file not written: %s", exc)
+
+
+def _utc_today() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+def yahoo_skipped(ticker: str, today: str | None = None) -> bool:
+    """True while Yahoo is known not to have `ticker` (see the block comment above)."""
+    from datetime import date
+    rec = _misses().get(ticker.upper())
+    if not isinstance(rec, dict) or int(rec.get("streak") or 0) < YAHOO_MISS_DAYS:
+        return False
+    try:
+        age = (date.fromisoformat(today or _utc_today())
+               - date.fromisoformat(str(rec.get("last_miss")))).days
+    except ValueError:
+        return False
+    return age < YAHOO_RETRY_DAYS
+
+
+def _note_yahoo_outcome(ticker: str, hist: "PriceHistory | None", today: str | None = None) -> None:
+    """Update the not-found memory after a lookup; never raises into the caller."""
+    key = ticker.upper()
+    empty = key in _yf_empty
+    _yf_empty.discard(key)
+    try:
+        misses = _misses()
+        if hist is not None and hist.source == "yfinance":
+            if misses.pop(key, None) is not None:
+                _save_misses()
+            return
+        if not empty or hist is None:
+            return                          # no Yahoo answer, or nobody has the ticker
+        day = today or _utc_today()
+        rec = misses.get(key) if isinstance(misses.get(key), dict) else {}
+        if rec.get("last_miss") == day:
+            return
+        streak = int(rec.get("streak") or 0) + 1
+        misses[key] = {"streak": streak, "last_miss": day, "served_by": hist.source}
+        _save_misses()
+        if streak == YAHOO_MISS_DAYS:
+            logger.info("Yahoo has no data for %s on %d run days (%s has); yfinance is "
+                        "skipped for it for %d days", ticker, streak, hist.source,
+                        YAHOO_RETRY_DAYS)
+    except Exception:
+        logger.warning("Yahoo not-found memory update failed for %s", ticker, exc_info=True)
 
 
 # ── Binance (first crypto source) ──────────────────────────────────────────────

@@ -97,3 +97,41 @@ async def test_china_timeout_and_total_failure(monkeypatch):
         "sh000300", "sh000001", "sz399006", "sh000688", "HSI", "南向资金", "北向资金", "margin")))
     with pytest.raises(RuntimeError, match="every akshare call failed"):
         await china_market.fetch("2026-09-29")
+
+
+@pytest.mark.asyncio
+async def test_china_calls_capped_by_budget_return_partial_lines(monkeypatch):
+    # 2026-11-19: calls of up to 40 s each overran the 90 s feed timeout and every
+    # line was lost. Each call now gets at most the budget left.
+    import time
+
+    class SlowMargin(FakeAk):
+        def stock_margin_account_info(self):
+            time.sleep(0.8)
+            return []
+    monkeypatch.setattr(china_akshare, "_AK", SlowMargin())
+    monkeypatch.setattr(china_market, "BUDGET_S", 0.4)
+    monkeypatch.setattr(china_market, "MIN_CALL_S", 0.05)
+    started = time.monotonic()
+    lines = await china_market.fetch("2026-11-19")
+    assert time.monotonic() - started < 0.7
+    text = "\n".join(lines)
+    assert "- CSI 300 4,029.00" in text                       # partial result kept
+    assert "A-share margin balances: unavailable (stock_margin_account_info timed out" in text
+    assert "Northbound Stock Connect net buy (HK -> mainland; 亿, Eastmoney): skipped" in text
+    await asyncio.sleep(0.9)                                   # let the worker finish
+
+
+@pytest.mark.asyncio
+async def test_feed_timeout_message_is_informative(monkeypatch, caplog):
+    import marketmind.shadow_feeds as sf
+
+    async def hang(today):
+        await asyncio.sleep(5)
+        return []
+    monkeypatch.setattr(sf, "FEED_TIMEOUT_S", 0.05)
+    feed = sf.Feed("slow_feed", "Slow data", ("x",), hang)
+    with caplog.at_level("WARNING", logger="marketmind.shadow_feeds"):
+        lines = await sf._run(feed, "2026-11-19")
+    assert lines == ["- Slow data: data unavailable today (timed out after 0.05s)"]
+    assert "slow_feed failed: no answer within the 0.05s feed timeout" in caplog.text

@@ -143,23 +143,29 @@ def margin_series(rows: list[dict]) -> list[dict]:
 
 # ── loaders ─────────────────────────────────────────────────────────────────
 
-async def index_closes() -> dict[str, list[tuple[str, float]] | AkshareUnavailable]:
+async def index_closes(timeout_for=None) -> dict[str, list[tuple[str, float]] | AkshareUnavailable]:
+    """`timeout_for()` -> seconds left for the next call (None: CALL_TIMEOUT_S each);
+    an index reached with no time left is labelled skipped, not fetched."""
     out: dict = {}
     for label, (fn, kw) in INDEXES.items():
+        timeout = CALL_TIMEOUT_S if timeout_for is None else timeout_for()
+        if timeout <= 0:
+            out[label] = AkshareUnavailable("skipped (feed time budget spent)")
+            continue
         try:
-            out[label] = close_series(await call(fn, **kw))
+            out[label] = close_series(await call(fn, timeout=timeout, **kw))
         except AkshareUnavailable as e:
             out[label] = e
     return out
 
 
-async def southbound() -> dict:
-    return connect_series(await call("stock_hsgt_hist_em", symbol="南向资金"))
+async def southbound(timeout: float = CALL_TIMEOUT_S) -> dict:
+    return connect_series(await call("stock_hsgt_hist_em", timeout=timeout, symbol="南向资金"))
 
 
-async def northbound() -> dict:
-    return connect_series(await call("stock_hsgt_hist_em", symbol="北向资金"))
+async def northbound(timeout: float = CALL_TIMEOUT_S) -> dict:
+    return connect_series(await call("stock_hsgt_hist_em", timeout=timeout, symbol="北向资金"))
 
 
-async def margin_balance() -> list[dict]:
-    return margin_series(await call("stock_margin_account_info"))
+async def margin_balance(timeout: float = CALL_TIMEOUT_S) -> list[dict]:
+    return margin_series(await call("stock_margin_account_info", timeout=timeout))

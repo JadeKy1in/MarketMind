@@ -16,6 +16,18 @@ def test_yahoo_symbol_uses_four_digit_hk_codes():
     assert yahoo_symbol("AAPL") == "AAPL"
 
 
+def test_yahoo_symbol_uses_dash_for_us_share_classes():
+    # 2026-11-19 log: "$BRK.B: possibly delisted" - Yahoo only knows "BRK-B"
+    assert yahoo_symbol("BRK.B") == "BRK-B"
+    assert yahoo_symbol("BF.A") == "BF-A"
+    assert yahoo_symbol("brk.b") == "brk-b"
+    assert yahoo_symbol("BRK-B") == "BRK-B"
+    # exchange suffixes and indices are untouched
+    assert yahoo_symbol("SAP.DE") == "SAP.DE"
+    assert yahoo_symbol("2330.TW") == "2330.TW"
+    assert yahoo_symbol("^TASI.SR") == "^TASI.SR"
+
+
 def test_yf_history_requests_yahoo_symbol_but_keeps_ledger_ticker():
     from marketmind.gateway import price_history as ph
     df = pd.DataFrame({"Open": [1.0], "High": [1.0], "Low": [1.0], "Close": [1.0], "Volume": [10]},
