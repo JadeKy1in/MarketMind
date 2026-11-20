@@ -1,6 +1,8 @@
-"""L3 target v1 / v2 counterfactual pairs (ledger/l3_target_pairs.py, l3_target_compare.py):
-selection, paired rows, idempotency per session and market, exclusion from every score,
-settlement, and the comparison math."""
+"""L3 target v1 / v2 counterfactual pairs (ledger/l3_target_pairs.py, l3_target_compare.py).
+
+The experiment closed 2026-11-20 (docs/S7_DESIGN.md §六): the daily run writes no new
+pairs. What stays: rows already in the ledger keep settling, stay out of every score, and
+the comparison math still reads them."""
 from __future__ import annotations
 
 import asyncio
@@ -14,46 +16,13 @@ from marketmind.ledger import comparison, l3_target_compare as C, l3_target_pair
 from marketmind.ledger.prices import StaticPriceSource
 from marketmind.ledger.settlement import settle_all
 from marketmind.ledger.store import LedgerEntry, LedgerStore
-from marketmind.pipeline.layer3_technical import Layer3BatchResult, Layer3Result
 from marketmind.tests.test_ledger.test_baseline_exclusion import _saturday_after, _store
 from marketmind.tests.test_promotion.test_promotion import BARS, DAYS, _roster, _world
-
-
-def l3(ticker, light="yellow", close=100.0, stop=96.0, t1=102.0, t2=108.0, rr=0.5,
-       available=True, **kw) -> Layer3Result:
-    return Layer3Result(
-        ticker=ticker, light=light, above_200wma=True, daily_structure_intact=False,
-        near_key_resistance=False, resistance_distance_pct=5.0,
-        support_zone_low=97.0, support_zone_high=98.0, resistance_zone_low=110.0,
-        resistance_zone_high=110.0, entry_zone_low=98.0, entry_zone_high=100.5,
-        stop_loss=stop, target_price=t1, max_hold_days=30, reward_risk_ratio=rr,
-        recommendation="wait" if light != "red" else "avoid", close=close, as_of="2026-10-21",
-        data_available=available, target_price_v2=t2,
-        reward_risk_ratio_v2=None if t2 is None else round((t2 - close) / (close - stop), 2),
-        target_v2_levels_skipped=1, **kw)
 
 
 def run(coro):
     return asyncio.run(coro)
 
-
-# ── selection ───────────────────────────────────────────────────────────
-
-def test_select_green_and_yellow_with_a_different_usable_v2():
-    rs = [l3("Y1"), l3("G1", light="green", rr=0.9), l3("R1", light="red"),
-          l3("SAME", t2=102.0), l3("NOV2", t2=None), l3("NODATA", available=False),
-          l3("BADSTOP", stop=99.0), l3("Y0", rr=0.3)]
-    assert [r.ticker for r in P.select(rs)] == ["G1", "Y0", "Y1"]   # greens first, then R/R
-
-
-def test_select_caps_the_daily_volume():
-    rs = [l3(f"T{i:02d}", rr=1.0 - i / 100) for i in range(20)]
-    got = P.select(rs)
-    assert len(got) == P.MAX_PAIRS_PER_DAY
-    assert got[0].ticker == "T19"                                   # lowest live R/R first
-
-
-# ── recording ───────────────────────────────────────────────────────────
 
 WED_EVENING = "2026-10-21T22:00:00Z"        # US session 10-22
 
@@ -69,74 +38,42 @@ def _bars(ticker, closes, start="2026-10-14"):
     return out
 
 
-def test_pairs_are_written_once_per_session(tmp_path):
+def _historical_pair(ticker="AAA", t1=102.0, t2=108.0, hold=30) -> list[LedgerEntry]:
+    """A v1 / v2 pair shaped like the rows the closed writer put in the ledger."""
+    return [LedgerEntry(
+        source_type=P.SOURCE_TYPE, source_id=P.SOURCE_IDS[v], ticker=ticker,
+        direction="long", hold_bars=hold, confidence=0.5, confidence_is_default=True,
+        position_usd=1000.0, falsifier=f"code counterfactual (L3 target {v})",
+        entry_rule="zone", entry_low=98.0, entry_high=100.5, stop_loss=96.0,
+        target_price=t1 if v == "v1" else t2,
+        meta={"baseline": P.KIND[v], "counterfactual": "l3_target", "version": v,
+              "pair_id": "p1", "run_date": WED_EVENING[:10]}) for v in P.VERSIONS]
+
+
+# ── closed: no writer, historical rows still settle ─────────────────────
+
+def test_writer_and_daily_hook_are_gone(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from marketmind.ledger import recorder
+    from marketmind.pipeline import orchestration as O
+    assert not hasattr(P, "record_pairs")
+    assert not hasattr(O, "_record_l3_target_pairs")
+
+    async def main_ok(*a, **k):
+        return []
+    monkeypatch.setattr(recorder, "record_main_decision", main_ok)
+    monkeypatch.setattr(O, "_step_failures", [])
+    run(O._record_to_ledger(SimpleNamespace(data_dir=str(tmp_path)), None, None))
+    assert O._step_failures == []
+    assert LedgerStore(tmp_path / "ledger.db").list(source_type="baseline") == []
+
+
+def test_open_historical_pairs_still_settle(tmp_path):
     store = LedgerStore(tmp_path / "ledger.db")
-    batch = Layer3BatchResult(results=[l3("AAA"), l3("BBB", light="green"), l3("CCC", light="red")])
-    src = StaticPriceSource({"AAA": _bars("AAA", [100] * 5), "BBB": _bars("BBB", [100] * 5)})
-    assert run(P.record_pairs(batch, store, src, created_at=WED_EVENING)) == 4
-    rows = store.list(source_type="baseline")
-    assert len(rows) == 4
-    by_pair = {}
-    for e in rows:
-        by_pair.setdefault(e.meta["pair_id"], {})[e.meta["version"]] = e
-    assert len(by_pair) == 2
-    for p in by_pair.values():
-        a, b = p["v1"], p["v2"]
-        assert (a.source_id, b.source_id) == ("baseline:l3_target_v1", "baseline:l3_target_v2")
-        assert (a.target_price, b.target_price) == (102.0, 108.0)
-        for f in ("ticker", "entry_rule", "entry_low", "entry_high", "stop_loss", "hold_bars",
-                  "position_usd", "direction", "created_at", "snapshot_id"):
-            assert getattr(a, f) == getattr(b, f), f
-        assert a.entry_rule == "zone" and a.hold_bars == 30 and a.snapshot_id
-        assert a.confidence_is_default and a.meta["run_date"] == "2026-10-21"
-        assert a.meta["l3"]["target_v2"] == 108.0 and a.meta["baseline"] == "l3_target_v1"
-    # a rerun of the same session (same evening, or the next morning before the open)
-    assert run(P.record_pairs(batch, store, src, created_at="2026-10-21T23:30:00Z")) == 0
-    assert run(P.record_pairs(batch, store, src, created_at="2026-10-22T03:00:00Z")) == 0
-    assert len(store.list(source_type="baseline")) == 4
-    # the next session records again
-    assert run(P.record_pairs(batch, store, src, created_at="2026-10-22T22:00:00Z")) == 4
-
-
-def test_add_submission_is_the_atomic_guard(tmp_path, monkeypatch):
-    """Even when the pre-check is bypassed, a repeated session writes nothing."""
-    store = LedgerStore(tmp_path / "ledger.db")
-    batch = Layer3BatchResult(results=[l3("AAA")])
-    assert run(P.record_pairs(batch, store, None, created_at=WED_EVENING)) == 2
-    monkeypatch.setattr(P, "_already_recorded", lambda *a: False)
-    assert run(P.record_pairs(batch, store, None, created_at=WED_EVENING)) == 0
-    assert len(store.list(source_type="baseline")) == 2
-
-
-def test_markets_are_deduplicated_separately(tmp_path):
-    """Friday evening, then Saturday: US is still Monday's session (skipped), crypto is a
-    new UTC day (recorded)."""
-    store = LedgerStore(tmp_path / "ledger.db")
-    batch = Layer3BatchResult(results=[l3("AAA"), l3("BTC-USD", light="green")])
-    assert run(P.record_pairs(batch, store, None, created_at="2026-10-23T22:00:00Z")) == 4
-    assert run(P.record_pairs(batch, store, None, created_at="2026-10-24T22:00:00Z")) == 2
-    rows = store.list(source_type="baseline")
-    assert sorted(e.ticker for e in rows) == ["AAA", "AAA", "BTC-USD", "BTC-USD", "BTC-USD",
-                                              "BTC-USD"]
-
-
-def test_nothing_to_pair_writes_nothing(tmp_path):
-    store = LedgerStore(tmp_path / "ledger.db")
-    assert run(P.record_pairs(Layer3BatchResult(), store, None)) == 0
-    assert run(P.record_pairs(None, store, None)) == 0
-    assert run(P.record_pairs(Layer3BatchResult(results=[l3("X", t2=102.0)]), store, None)) == 0
-    assert store.list(include_baselines=True) == []
-
-
-def test_pairs_settle_like_every_record(tmp_path):
-    store = LedgerStore(tmp_path / "ledger.db")
-    batch = Layer3BatchResult(results=[l3("AAA")])
-    run(P.record_pairs(batch, store, None, created_at=WED_EVENING))
+    for e in _historical_pair(hold=2):
+        store.add(e, created_at=WED_EVENING)
     # 10-22 fills in the zone at the open 100; 10-23 high 104.04 hits v1 (102) only;
-    # the stop 96 is never touched; v2 (108) runs to expiry (hold 2 for the test)
-    for e in store.list(source_type="baseline"):
-        e.hold_bars = 2
-        store.update(e)
+    # the stop 96 is never touched; v2 (108) runs to expiry
     bars = _bars("AAA", [100] * 7 + [103, 100], start="2026-10-14")   # 10-14 .. 10-26
     report = run(settle_all(store, StaticPriceSource({"AAA": bars, "SPY": bars}),
                             today="2026-10-30"))
@@ -144,6 +81,8 @@ def test_pairs_settle_like_every_record(tmp_path):
     got = {e.meta["version"]: e for e in store.list(source_type="baseline")}
     assert got["v1"].status == got["v2"].status == "settled"
     assert got["v1"].exit_reason == "target" and got["v2"].exit_reason == "expiry"
+    c = C.compare(store.list(source_type="baseline"))
+    assert c["pairs_settled"] == 1 and c["v1"]["hit_target_rate"] == 1.0
 
 
 # ── exclusion: no score, calendar, view or voter changes ────────────────
@@ -306,30 +245,3 @@ def test_load_rows_is_read_only(tmp_path, capsys):
     with pytest.raises(sqlite3.OperationalError):
         conn.execute("DELETE FROM ledger")
     conn.close()
-
-
-# ── daily-run hook ──────────────────────────────────────────────────────
-
-def test_hook_runs_after_the_main_record_and_never_raises(tmp_path, monkeypatch):
-    from types import SimpleNamespace
-    from marketmind.ledger import recorder
-    from marketmind.pipeline import orchestration as O
-    config = SimpleNamespace(data_dir=str(tmp_path))
-    batch = Layer3BatchResult(results=[l3("AAA")])
-
-    async def main_fails(*a, **k):
-        raise RuntimeError("main record broke")
-    monkeypatch.setattr(recorder, "record_main_decision", main_fails)
-    from marketmind.ledger import prices
-    monkeypatch.setattr(prices, "HistoryPriceSource",
-                        lambda: StaticPriceSource({"AAA": _bars("AAA", [100] * 5)}))
-    monkeypatch.setattr(O, "_step_failures", [])
-    run(O._record_to_ledger(config, None, batch))
-    assert O._step_failures == ["ledger record"]            # the pairs add no failure
-    rows = LedgerStore(tmp_path / "ledger.db").list(source_type="baseline")
-    assert len(rows) == 2 and rows[0].snapshot_id
-
-    async def pairs_fail(*a, **k):
-        raise RuntimeError("pairs broke")
-    monkeypatch.setattr(P, "record_pairs", pairs_fail)
-    run(O._record_l3_target_pairs(config, batch))            # logged, not raised
