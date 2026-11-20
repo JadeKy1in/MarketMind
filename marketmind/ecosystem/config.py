@@ -49,7 +49,11 @@ HOMOGEN_SHARE = 0.50         # legacy "BlackRock" warning: >= 50% share one domi
 PLATEAU_DAYS = 20            # an actor's last 20 decision days, split 10 / 10
 PLATEAU_JACCARD = 0.80       # ticker sets of the two halves overlap at least this much
 PLATEAU_CONF_SHIFT = 0.02    # |mean confidence(first half) - mean(second half)| <= this
-PLATEAU_CONF_STD = 0.03      # and confidence std over the window <= this
+# (a confidence-std condition was dropped 2026-11-20: the median shadow's confidence sd is
+# ~0.026, so "std <= 0.03" was nearly always true and added nothing; conf_std stays reported)
+PLATEAU_MIN_WATCHLIST = 6    # roster watchlist of fewer tickers: high Jaccard is expected, no plateau
+                             # (also none when the window already covers the whole watchlist);
+                             # actors without a roster watchlist (playground, temp) are unaffected
 REPETITION_SHARE = 0.80      # > this share of decisions are one ticker + direction
 REPETITION_MIN_DAYS = 10     # decision days needed for the repetition check
 

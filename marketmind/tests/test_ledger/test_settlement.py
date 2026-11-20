@@ -116,7 +116,8 @@ async def test_settle_all_scores_returns_costs_benchmarks_brier(tmp_path):
     long_id = store.add(entry(domain_benchmark="XLK"), created_at=CREATED)
     short_id = store.add(entry(direction="short", confidence=0.2), created_at=CREATED)
     crypto_id = store.add(entry(ticker="ETH-USD", asset_type="crypto", hold_bars=3), created_at=CREATED)
-    missing_id = store.add(entry(ticker="NODATA"), created_at=CREATED)
+    # recent enough not to be void as no_data (NO_DATA_VOID_DAYS)
+    missing_id = store.add(entry(ticker="NODATA"), created_at="2026-09-25T21:00:00Z")
 
     report = await settle_all(store, src, today="2026-09-30")
     assert (report.settled, report.unavailable) == (3, ["NODATA"])
@@ -378,3 +379,35 @@ async def test_gap_through_the_stop_is_measured_from_the_decision_price(tmp_path
     assert (e.status, e.exit_reason, e.entry_price, e.exit_price) == ("settled", "stop", 100.0, 90.0)
     assert e.gross_return == pytest.approx(-0.10, abs=1e-6)
     assert e.settle_note.startswith("gapped through the stop at the open; loss from the decision price")
+
+
+@pytest.mark.asyncio
+async def test_pending_without_any_first_bar_is_void_no_data_after_14_days(tmp_path):
+    # first bar date of CREATED is 2026-09-02; NO_DATA_VOID_DAYS = 14 -> void from 2026-09-16
+    store = LedgerStore(tmp_path / "l.db")
+    dead = store.add(entry(ticker="DEAD", hold_bars=1), created_at=CREATED)      # bars stop before creation
+    gone = store.add(entry(ticker="GONE"), created_at=CREATED)                   # source returns nothing
+    slow = store.add(entry(ticker="SLOW", hold_bars=30), created_at=CREATED)     # first bar 10 days late
+    held = store.add(entry(ticker="HELD", hold_bars=10), created_at=CREATED)     # filled, then bars stop
+    coin = store.add(entry(ticker="BTC-USD", asset_type="crypto", hold_bars=3), created_at=CREATED)
+    src = StaticPriceSource({"DEAD": flat(DAYS[:1]), "SLOW": flat(["2026-09-12", "2026-09-13"]),
+                             "HELD": flat(DAYS[:3]),
+                             "BTC-USD": flat([f"2026-09-{d:02d}" for d in range(3, 20)])})  # first day missing
+    report = await settle_all(store, src, today="2026-09-15")
+    assert report.voided == 0
+    assert store.get(dead).status == store.get(gone).status == "pending"
+
+    report = await settle_all(store, src, today="2026-09-16")
+    assert report.voided == 2
+    for eid in (dead, gone):
+        e = store.get(eid)
+        assert (e.status, e.exit_reason) == ("void", "no_data")
+        assert e.settle_note.startswith("no price bar since 2026-09-02 (14 calendar days)")
+        assert e.settled_at and e.entry_price is None and e.net_return is None
+    assert store.get(slow).status == "open"                  # slow source: got its first bar
+    assert store.get(held).status == "open"                  # already filled: never voided here
+    c = store.get(coin)                                      # crypto first-day gap: unchanged rule
+    assert c.status == "pending" and c.settle_note.startswith("data gap 2026-09-02")
+
+    again = await settle_all(store, src, today="2026-09-30")  # void is final, not re-checked
+    assert again.voided == 0 and store.get(dead).status == "void"
