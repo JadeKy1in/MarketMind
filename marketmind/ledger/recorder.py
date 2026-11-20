@@ -167,6 +167,9 @@ async def record_main_decision(decision, l3, store: LedgerStore, source: PriceSo
         entries = [_forced_entry(paper, l3, snapshot_id)]
     provenance = {k: v for k in ("llm", "prompt_version")
                   if (v := getattr(decision, k, None))}      # docs/S9_DESIGN.md §2
+    main_guard = getattr(decision, "main_guard", None)
+    if isinstance(main_guard, dict):          # guard downgrades of the day (owner 2026-11-20)
+        provenance["main_guard"] = main_guard
     valid = []
     for e in entries:
         e.meta = {**(e.meta or {}), **provenance,

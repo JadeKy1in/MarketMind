@@ -207,12 +207,14 @@ async def _do_red_team(l1_result, l2_result, selected_tickers: list, tracker: St
 
 
 async def _do_decision(l1_result, l2_result, l3_result, red_team, resonance,
-                       fragility, tracker: StageTracker, discovery_text: str = ""):
+                       fragility, tracker: StageTracker, discovery_text: str = "",
+                       guard_context=None):
     tracker.advance(8, "Decision: synthesis...")
     from marketmind.pipeline.decision import generate_decision
     decision = await generate_decision(l1=l1_result, l2=l2_result, l3=l3_result,
                                         red_team=red_team, resonance=resonance,
-                                        fragility=fragility, discovery_text=discovery_text)
+                                        fragility=fragility, discovery_text=discovery_text,
+                                        guard_context=guard_context)
     if decision is None:
         # @monitor returns None on timeout/exception. "No trade" must still be explicit.
         from marketmind.pipeline.decision import DecisionOutput, NoTradeCard, _pick_paper_trade
@@ -426,7 +428,8 @@ async def _main_chain(config, tracker: StageTracker, news_items: list, discovery
 
     # Step 8: Decision — always runs (with fragility + per-stage calibration)
     decision = await _do_decision(l1_result, l2_result, l3_result, red_team, resonance,
-                                   fragility, tracker, discovery_text=_discovery_text(discovery))
+                                   fragility, tracker, discovery_text=_discovery_text(discovery),
+                                   guard_context=None if mock else _main_guard_context(config))
     await _do_daily_archive(config, l1_result, l2_result, resonance, tracker)
 
     # Mock runs must not overwrite today's real brief or calibration record
@@ -528,6 +531,18 @@ def _watch_items_or_none(decision, discovery) -> list | None:
         return watch_items(decision, discovery)
     except Exception:
         logger.warning("watch items not built; a resumed run adds none", exc_info=True)
+        return None
+
+
+def _main_guard_context(config):
+    """Stop-cooldown / bear-trend inputs for the main pipeline's decision guard (owner
+    2026-11-20). Fails open: None (rules not run) if even loading breaks."""
+    from marketmind.pipeline.decision_guard import load_main_guard_context
+    try:
+        return load_main_guard_context(_data_dir(config))
+    except Exception:
+        logger.error("Main guard context not loaded; stop cooldown and bear protection "
+                     "skipped today", exc_info=True)
         return None
 
 
@@ -709,8 +724,11 @@ def _save_decision_brief(l1_result, l2_result, l3_result, red_team, resonance, d
             "decision_cards": dec_cards,
             "watch_cards": [{"ticker": w.ticker, "direction": w.direction, "thesis": w.thesis,
                              "conditions": w.conditions, "invalidation": w.invalidation,
-                             "expiry_days": w.expiry_days}
+                             "expiry_days": w.expiry_days,
+                             "guard_reason": getattr(w, "guard_reason", "")}
                             for w in (getattr(decision, "watch_cards", None) or [])],
+            # main-pipeline guard rules (owner 2026-11-20): downgrades, fail-open notes
+            "main_guard": getattr(decision, "main_guard", None) if decision else None,
             "decision_raw": getattr(decision, 'raw_response', '') if decision else '',
             "l3_details": [getattr(r, 'raw_analysis', '') for r in (getattr(l3_result, 'results', []) or [])],
             "l1_analysis": l1_text[:1500],

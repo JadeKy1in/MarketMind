@@ -163,7 +163,7 @@
 
 ## 六、趋势标签与可比代码基线（2026-10-02，只记账）
 
-所有人决定（2026-10-02）：(1) 趋势标签**只标注、不拦截**任何交易；(2) 可比基线**只记账**：永不交易、永不作为建议展示，只出现在对照视图。背景见只读分析 `docs/analysis/2026-10-02_exit_baseline/`（所有人本机，未入库；LLM 方向在该样本里不优于 20 日动量与趋势状态机，样本极小）。代码：`ledger/trend_tag.py`、`ledger/baselines.py`、`ledger/comparison.py`；测试：`tests/test_ledger/test_baselines.py`、`test_baseline_exclusion.py`。
+所有人决定（2026-10-02）：(1) 趋势标签**只标注、不拦截**任何交易；(2) 可比基线**只记账**：永不交易、永不作为建议展示，只出现在对照视图。背景见只读分析 `docs/analysis/2026-10-02_exit_baseline/`（所有人本机，未入库；LLM 方向在该样本里不优于 20 日动量与趋势状态机，样本极小）。2026-11-20 修订：主管线交易卡另加"止损冷却"和"空头趋势保护"两条降级规则（见 `docs/SPEC_v3.md` §5 第 6 步）；本节的 `meta.trend` 标签本身仍只标注。代码：`ledger/trend_tag.py`、`ledger/baselines.py`、`ledger/comparison.py`；测试：`tests/test_ledger/test_baselines.py`、`test_baseline_exclusion.py`。
 
 ### 趋势标签 `meta.trend`
 
