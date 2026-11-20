@@ -71,7 +71,7 @@ class LedgerEntry:
     entry_price: float | None = None
     exit_date: str | None = None
     exit_price: float | None = None
-    exit_reason: str | None = None     # stop | target | falsifier | expiry | unfilled | gap_target (gap_stop: legacy)
+    exit_reason: str | None = None     # stop | target | falsifier | expiry | unfilled | gap_target | no_data (gap_stop: legacy)
     gross_return: float | None = None
     cost_return: float | None = None
     net_return: float | None = None

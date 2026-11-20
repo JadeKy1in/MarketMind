@@ -72,8 +72,10 @@ def load_facts(root: Path, days: set[str]) -> tuple[Facts, list[str]]:
     cannot be read is left unknown (its check is skipped) and named in the notes."""
     from marketmind.shadows.v3 import roster
     notes: list[str] = []
+    entries = roster.all_entries(root)
     facts = Facts(active_ids={r.shadow_id for r in roster.active(root)},
-                  roster_ids={r.shadow_id for r in roster.all_entries(root)})
+                  roster_ids={r.shadow_id for r in entries},
+                  watchlist_size={r.shadow_id: len(r.watchlist) for r in entries if r.watchlist})
     try:
         approved = roster._approved(root)
         facts.retired = {p["shadow_id"]: p.get("decided_at") or "" for p in approved if p.get("shadow_id")}

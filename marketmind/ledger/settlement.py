@@ -42,6 +42,11 @@ Rules (all code, no judgement; see docs/S2_DESIGN.md §4):
           on later runs; only the benchmark fields change. Still missing
           BENCHMARK_GIVE_UP_DAYS after the exit -> "benchmark not comparable", final.
   Missing data leaves the record unsettled with a note; nothing is estimated.
+  No data at all  a pending record with no bar on/after its first bar date (or no
+          bars at all) NO_DATA_VOID_DAYS calendar days after that date is void
+          (exit_reason "no_data"; e.g. a delisted ticker). Slow sources (Tokyo, futures,
+          holidays) deliver their first bar within about a week, so they are untouched;
+          a crypto record whose first day is a data gap keeps its "data gap" note.
   Only complete bars are used (price_history.complete_bars: each market's own
   session close; UTC days for crypto/FX), because a data source returns the
   running session as a partial bar.
@@ -85,6 +90,11 @@ DEFAULT_COST_BPS = 5.0
 # 2026-09-27: do not chase; a missed entry is dropped, not left open for the
 # whole holding period).
 ENTRY_WINDOW_BARS = 5
+
+# A pending record that still has no first bar this many calendar days after its first
+# bar date is void as "no_data" (~10 trading days; the slowest real first fill on the
+# ledger as of 2026-11-20 came 7 days after creation, Shanghai over Golden Week).
+NO_DATA_VOID_DAYS = 14
 
 
 def entry_window(e: LedgerEntry) -> int:
@@ -157,6 +167,21 @@ def first_bar_date(e: LedgerEntry) -> str | None:
     local = ts.astimezone(ZoneInfo(m.tz))
     before_open = local.time() < m.open
     return (local.date() if before_open else local.date() + timedelta(days=1)).isoformat()
+
+
+def no_data_void(e: LedgerEntry, bars: list[Bar] | None, today: str) -> Outcome | None:
+    """Void outcome for a pending record that never got a first bar (see NO_DATA_VOID_DAYS),
+    else None. Only the absence of any bar on/after the first bar date counts."""
+    if e.status != "pending":
+        return None
+    first = first_bar_date(e)
+    if first is None or bars_after_creation(e, bars or []):
+        return None
+    age = (date.fromisoformat(today) - date.fromisoformat(first)).days
+    if age < NO_DATA_VOID_DAYS:
+        return None
+    return Outcome("void", f"no price bar since {first} ({age} calendar days): no data",
+                   exit_reason="no_data")
 
 
 def bars_after_creation(e: LedgerEntry, bars: list[Bar]) -> list[Bar]:
@@ -693,6 +718,12 @@ async def settle_all(store: LedgerStore, source: PriceSource,
             continue
         try:
             bars = await bars_for(e.ticker)
+            if (dead := no_data_void(e, bars, day)) is not None:
+                apply_outcome(e, dead, [], None, None, day)
+                e.price_source = source_of(source, e.ticker)
+                if write(e, UNSETTLED):
+                    report.voided += 1
+                continue
             if not bars:
                 e.settle_note = "price data unavailable (not estimated)"
                 report.unavailable.append(e.ticker)

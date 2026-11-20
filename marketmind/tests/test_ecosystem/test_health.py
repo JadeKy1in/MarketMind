@@ -254,12 +254,31 @@ def test_llm_today_counts_todays_voter_records_only():
 def test_repetition_and_plateau():
     rows = [rec("s0", d, "SPY", "long", conf=0.55) for d in days(20)]
     rows += [rec("s1", d, t, "long", conf=c) for d, t, c in
-             zip(days(20), ["SPY", "GLD", "TLT", "XLE"] * 5, [0.5, 0.6, 0.7, 0.55] * 5)]
+             zip(days(20), ["SPY", "GLD"] * 5 + ["TLT", "XLE"] * 5, [0.5, 0.6, 0.7, 0.55] * 5)]
     rows += [rec("s2", d, "SPY") for d in days(5)]
     st = H.evaluate(rows, days(20)[-1], facts())["stagnation"]
     kinds = {(f["shadow_id"], f["kind"]) for f in st["flags"]}
     assert kinds == {("s0", "repetition"), ("s0", "plateau")}
     assert st["insufficient"]["s2"] == 5
+
+
+def test_plateau_ignores_confidence_std_and_small_watchlists():
+    ds = days(20)
+    wide = [0.40, 0.70] * 10                          # std 0.15: used to block the flag
+    cycle = ["SPY", "GLD", "TLT"] * 7
+    rows = [rec("s0", d, t, "long", conf=c) for d, t, c in zip(ds, cycle, wide)]     # 3-ticker roster list
+    rows += [rec("s1", d, t, "long", conf=c) for d, t, c in zip(ds, cycle, wide)]    # 12-ticker roster list
+    rows += [rec("s2", d, t, "long", conf=c) for d, t, c in zip(ds, cycle, wide)]    # no roster watchlist
+    rows += [rec("s3", d, t, "long", conf=c) for d, t, c in                         # covers its 6 tickers
+             zip(ds, ["SPY", "GLD", "TLT", "XLE", "XLF", "XLK"] * 4, wide)]
+    st = H.check_stagnation(rows, {"s0": 3, "s1": 12, "s3": 6})
+    plateau = {f["shadow_id"] for f in st["flags"] if f["kind"] == "plateau"}
+    assert plateau == {"s1", "s2"}
+    f = next(f for f in st["flags"] if f["shadow_id"] == "s1")
+    assert f["conf_std"] > C.PLATEAU_CONF_SHIFT and set(f) >= {"ticker_jaccard", "conf_shift", "conf_std"}
+    # evaluate() takes the sizes from Facts
+    doc = H.evaluate(rows, ds[-1], facts(watchlist_size={"s0": 3, "s1": 12, "s3": 6}))
+    assert {f["shadow_id"] for f in doc["stagnation"]["flags"] if f["kind"] == "plateau"} == {"s1", "s2"}
 
 
 # ── 5. integrity ────────────────────────────────────────────────────────

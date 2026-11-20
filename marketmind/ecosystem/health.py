@@ -60,6 +60,7 @@ class Facts:
     trial_parent: dict[str, str] | None = None                # "trial:<id>" -> parent id; None = unknown
     playground_ids: set[str] | None = None                   # "playground:<id>"; None = unknown
     trend_by_day: dict[str, dict[str, str]] = field(default_factory=dict)  # day -> ticker -> state
+    watchlist_size: dict[str, int] = field(default_factory=dict)  # roster shadow id -> len(watchlist)
 
 
 def full_run_days(rows: list[LedgerEntry], n_active: int) -> list[str]:
@@ -504,7 +505,17 @@ def check_homogenisation(rows: list[LedgerEntry], run_days: list[str], today: st
 
 # ── 4. Stagnation / plateau ─────────────────────────────────────────────
 
-def check_stagnation(rows: list[LedgerEntry]) -> dict:
+def plateau_expected(sid: str, tickers: set[str], watchlist_size: dict[str, int] | None) -> bool:
+    """True when a high ticker Jaccard says nothing for this actor: its roster watchlist is
+    tiny, or the window already trades every ticker it is allowed (3 tickers -> Jaccard 1).
+    Actors without a roster watchlist (playground, temp) return False."""
+    size = (watchlist_size or {}).get(sid)
+    if not size:
+        return False
+    return size < C.PLATEAU_MIN_WATCHLIST or len(tickers) >= size
+
+
+def check_stagnation(rows: list[LedgerEntry], watchlist_size: dict[str, int] | None = None) -> dict:
     by_actor: dict[str, dict[str, list[LedgerEntry]]] = defaultdict(lambda: defaultdict(list))
     for e in rows:
         if is_voter(e):
@@ -533,7 +544,8 @@ def check_stagnation(rows: list[LedgerEntry]) -> dict:
         jac = len(ta & tb) / len(ta | tb) if ta | tb else 1.0
         shift = abs(np.mean([e.confidence for e in a]) - np.mean([e.confidence for e in b]))
         std = float(np.std([e.confidence for e in recs]))
-        if jac >= C.PLATEAU_JACCARD and shift <= C.PLATEAU_CONF_SHIFT and std <= C.PLATEAU_CONF_STD:
+        if (jac >= C.PLATEAU_JACCARD and shift <= C.PLATEAU_CONF_SHIFT
+                and not plateau_expected(sid, ta | tb, watchlist_size)):
             flags.append({"shadow_id": sid, "kind": "plateau", "days": len(recent),
                           "ticker_jaccard": round(jac, 3), "conf_shift": round(float(shift), 4),
                           "conf_std": round(std, 4)})
@@ -686,7 +698,7 @@ def evaluate(entries: list[LedgerEntry], today: str, facts: Facts | None = None)
         "herding": herding,
         "diversity": {"pnl": pnl, "direction": direction},
         "homogenisation": check_homogenisation(actor_rows, run_days, today),
-        "stagnation": check_stagnation(actor_rows),
+        "stagnation": check_stagnation(actor_rows, facts.watchlist_size),
         "integrity": check_integrity(rows, run_days, facts),
         "degradation": check_degradation(entries, actor_rows, run_days, calendar, today),
     }
