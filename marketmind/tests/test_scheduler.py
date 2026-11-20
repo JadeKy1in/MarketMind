@@ -643,3 +643,59 @@ def test_dry_run_never_opens_the_notice(tmp_path, monkeypatch):
         raise AssertionError("dry run opened the notice")
     monkeypatch.setattr(sr, "run_notice", refuse)
     assert sr.main(["--slot", "weekday", "--dry-run"]) == 0
+
+
+# ── Claude -> DeepSeek fallback alert ──────────────────────────────────
+
+AUTH_ERR = "claude: Failed to authenticate: OAuth session expired and could not be refreshed"
+
+
+def _fallback_env(tmp_path, monkeypatch, attempts):
+    """Each attempt: (exit code, fallback calls, claude calls, reason) logged by the child."""
+    from marketmind.gateway import usage_tracker
+    monkeypatch.setattr(sr, "ROOT", tmp_path)
+    monkeypatch.setenv("MARKETMIND_DATA_DIR", "data")
+    monkeypatch.setattr(sr, "plan", lambda slot, now: (True, "2026-11-19-weekday", "test"))
+    monkeypatch.setattr(sr, "notify_failure", lambda *a: [])
+    pushed, todo = [], list(attempts)
+
+    def fake_run(cmd, **kw):
+        code, fallback, claude, reason = todo.pop(0)
+        usage_tracker.reset()
+        for _ in range(claude):
+            usage_tracker.record({"content": "x", "provider": "claude", "usage": {"total_tokens": 1}})
+        for _ in range(fallback):
+            usage_tracker.note_fallback(reason)
+            usage_tracker.record({"content": "x", "provider": "deepseek", "usage": {"total_tokens": 1}})
+        usage_tracker.append_log("daily", tmp_path / "data" / "token_usage.jsonl")
+        usage_tracker.reset()
+
+        class Done:
+            returncode = code
+        return Done()
+    monkeypatch.setattr(sr.subprocess, "run", fake_run)
+    monkeypatch.setattr(sr, "push", lambda title, body: pushed.append((title, body)) or [])
+    return tmp_path / "data" / "scheduler" / "state.json", pushed
+
+
+def test_claude_auth_fallback_pushes_once_per_day(tmp_path, monkeypatch):
+    # attempt 1 crashes after the calls were logged, the retry the same day falls back again
+    state_path, pushed = _fallback_env(tmp_path, monkeypatch,
+                                       [(1, 72, 0, AUTH_ERR), (0, 72, 0, AUTH_ERR)])
+    sr.main(["--slot", "weekday"])
+    sr.main(["--slot", "weekday"])
+    state = sr.load_state(state_path)
+    assert state["runs"]["2026-11-19-weekday"]["attempts"] == 2
+    assert len(pushed) == 1                                   # deduped on the second run
+    title, body = pushed[0]
+    assert "登录" in title and "claude /login" in body and "72" in body
+    assert state["llm_fallback_alerts"] == {"auth": "2026-11-19"}
+
+
+def test_no_fallback_means_no_alert(tmp_path, monkeypatch):
+    state_path, pushed = _fallback_env(tmp_path, monkeypatch, [(0, 0, 30, "")])
+    sr.main(["--slot", "weekday"])
+    assert pushed == []
+    state = sr.load_state(state_path)
+    assert state["runs"]["2026-11-19-weekday"]["status"] == "ok"
+    assert "llm_fallback_alerts" not in state

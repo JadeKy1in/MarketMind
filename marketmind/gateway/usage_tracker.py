@@ -27,10 +27,23 @@ def reset_stage(token: contextvars.Token) -> None:
 _fallbacks: dict[str, Any] = {"calls": 0, "reason": ""}   # Claude selected but DeepSeek answered
 
 
+# Claude CLI errors meaning the login is gone (2026-10-27..11-19: "Failed to authenticate:
+# OAuth session expired and could not be refreshed"); only `claude /login` fixes them.
+_AUTH_MARKERS = ("failed to authenticate", "oauth", "not logged in", "/login",
+                 "invalid api key", "authentication")
+LOGIN_HINT = "请在终端运行 `claude /login`（或在 Claude Code 里输入 /login）重新登录"
+
+
+def is_auth_error(reason: str | None) -> bool:
+    return bool(reason) and any(m in str(reason).lower() for m in _AUTH_MARKERS)
+
+
 def note_fallback(reason: str) -> None:
-    """Count one call that was meant for Claude but ran on DeepSeek Flash."""
+    """Count one call that was meant for Claude but ran on DeepSeek Flash.
+    Keeps the first reason, except that a login failure replaces an earlier other one."""
     _fallbacks["calls"] += 1
-    if reason and not _fallbacks["reason"]:
+    if reason and (not _fallbacks["reason"]
+                   or (is_auth_error(reason) and not is_auth_error(_fallbacks["reason"]))):
         _fallbacks["reason"] = str(reason)[:120]
 
 
@@ -40,7 +53,31 @@ def fallback_notice() -> str:
     if not n:
         return ""
     why = f"（{_fallbacks['reason']}）" if _fallbacks["reason"] else ""
-    return f"⚠ Claude 不可用{why}，{n} 次调用已改用 DeepSeek Flash 代跑，结论质量可能低于平时。"
+    fix = f"{LOGIN_HINT}。" if is_auth_error(_fallbacks["reason"]) else ""
+    return f"⚠ Claude 不可用{why}，{n} 次调用已改用 DeepSeek Flash 代跑，结论质量可能低于平时。{fix}"
+
+
+def fallback_alert(snap: dict) -> tuple[str, str, str] | None:
+    """(kind, title, body) of the owner push for one run's snapshot(), or None.
+
+    "auth": any call fell back because Claude is logged out (retrying cannot help).
+    "transient": other errors, alerted only when most Claude calls of the run fell back.
+    """
+    fb = (snap or {}).get("fallback") or {}
+    n = int(fb.get("calls") or 0)
+    if not n:
+        return None
+    reason = str(fb.get("reason") or "")
+    ok = int(((snap.get("providers") or {}).get("claude")) or 0)
+    if is_auth_error(reason):
+        return ("auth", "MarketMind：Claude 登录已失效",
+                f"本次运行 {n} 次 Claude 调用因登录失效改用 DeepSeek 代跑（{reason}）。"
+                f"{LOGIN_HINT}，否则之后每次运行都会降级。")
+    if n > ok:
+        return ("transient", "MarketMind：Claude 调用大面积失败",
+                f"本次运行 {n + ok} 次 Claude 调用中 {n} 次失败、改用 DeepSeek 代跑"
+                f"（{reason or '原因未记录'}）。若明天仍出现，请检查 Claude 额度或网络。")
+    return None
 
 
 def reset() -> None:

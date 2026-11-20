@@ -119,3 +119,20 @@ def test_calls_are_counted_per_provider():
     assert "[claude 1, deepseek 1]" in u.summary_line()
     u.reset()
     assert u.snapshot()["providers"] == {}
+
+
+def test_fallback_alert_kinds():
+    auth = "claude: Failed to authenticate: OAuth session expired and could not be refreshed"
+    assert usage_tracker.fallback_alert(usage_tracker.snapshot()) is None
+    usage_tracker.note_fallback("claude: timed out after 600s")
+    usage_tracker.record({"content": "x", "provider": "claude", "usage": {"total_tokens": 1}})
+    usage_tracker.record({"content": "x", "provider": "claude", "usage": {"total_tokens": 1}})
+    assert usage_tracker.fallback_alert(usage_tracker.snapshot()) is None     # 1 of 3: no alert
+    usage_tracker.note_fallback("claude: timed out after 600s")
+    usage_tracker.note_fallback("")
+    kind, _, body = usage_tracker.fallback_alert(usage_tracker.snapshot())
+    assert kind == "transient" and "5 次 Claude 调用中 3 次" in body
+    usage_tracker.note_fallback(auth)                  # a login failure wins over the first reason
+    kind, title, body = usage_tracker.fallback_alert(usage_tracker.snapshot())
+    assert kind == "auth" and "claude /login" in body
+    assert "claude /login" in usage_tracker.fallback_notice()

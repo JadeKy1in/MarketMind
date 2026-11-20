@@ -454,6 +454,43 @@ def notify_degraded(slot: str, key: str, log_path: Path, detail: str) -> list[di
     return push("MarketMind 自动运行部分失败", body[:600])
 
 
+def run_token_usage(mode: str, since: datetime) -> dict | None:
+    """The token snapshot app.py logged for this attempt (data/token_usage.jsonl,
+    usage_tracker.append_log), or None when the attempt did not get that far."""
+    try:
+        lines = (data_dir() / "token_usage.jsonl").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    since = since.replace(microsecond=0)        # rows carry whole seconds
+    for line in reversed(lines):
+        try:
+            row = json.loads(line)
+            if row.get("mode") == mode and datetime.fromisoformat(row["at"]) >= since:
+                return row
+        except (ValueError, KeyError, TypeError, AttributeError):
+            continue
+    return None
+
+
+def notify_llm_fallback(state: dict, key: str, mode: str, since: datetime) -> str | None:
+    """Push once per New York day and kind when this run's Claude calls fell back to
+    DeepSeek (unnoticed for 3.5 weeks from 2026-10-27: the Claude login had expired).
+    The day each kind was last pushed is kept in state["llm_fallback_alerts"].
+    Returns the kind pushed, or None."""
+    from marketmind.gateway.usage_tracker import fallback_alert
+    alert = fallback_alert(run_token_usage(mode, since) or {})
+    if alert is None:
+        return None
+    kind, title, body = alert
+    day = key[:10]
+    sent = state.setdefault("llm_fallback_alerts", {})
+    if sent.get(kind) == day:
+        return None
+    push(title, body)                            # undelivered pushes wait in the queue
+    sent[kind] = day
+    return kind
+
+
 def recover_stale_run(slot: str, key: str, state_path: Path, reason: str) -> dict:
     """Close a "running" record left by a crashed attempt as failed and report it,
     so a later trigger may retry (still bounded by MAX_ATTEMPTS)."""
@@ -585,6 +622,11 @@ def _run_locked(slot: str, key: str, now: datetime, state_path: Path) -> int:
             rec[field] = latest[field]
     state["runs"][key] = rec
     state["runs"] = dict(sorted(state["runs"].items())[-60:])     # keep about two months
+    try:
+        if notify_llm_fallback(state, key, MODES[slot], now):
+            rec["llm_fallback_notified"] = True
+    except Exception as e:                       # never lose the run record over this push
+        print(f"LLM fallback alert not checked: {type(e).__name__}: {e}")
     save_state(state_path, state)
     print(f"{key}: {rec['status']}" + (f" ({rec['reason']})" if rec.get("reason") else ""))
     return 0 if failure is None else 1
