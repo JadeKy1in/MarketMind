@@ -26,7 +26,7 @@ SYSTEM_PROMPT = """你是 MarketMind 的每日汇报员，给所有人写今天�
    ## 今日要闻（从 headlines 里挑最重要的 5–8 条，说明为什么重要）
    ## 冷门数据异常（discovery：新闻很少报道的官方数据异动；写出序列、z 值、新闻覆盖篇数、代理标的是否已被价格反映）
    ## 证据层（叙事与数据是否背离）
-   ## 主管线决策（交易卡或不交易的理由、被迫纸面交易、红队最重要的质疑）
+   ## 主管线决策（第一条原样转述 main_pipeline.track_record——代码算好的主管线战绩与同日同标的随机对照；每张交易卡前标注【未验证】；然后写交易卡或不交易的理由、被迫纸面交易、红队最重要的质疑）
    ## 观察名单（watchlist：今天新增 / 触发 / 到期 / 失效的项目与等待的确认条件）
    ## 趋势状态（趋势状态：今天进入 / 退出 TREND 的标的，当前 TREND 名单与代码计算的止损位；明确写出这只是信息性的状态记录，不是警报，也不是交易指令）
    ## 影子动向（多空分布、共识集中的标的、新出现的事件影子；最后一条原样转述 ledger_comparison.line——代码算好的 LLM 与代码基线对照，基线只记账、不是建议）
@@ -145,6 +145,9 @@ def gather_facts(today: str, store=None, brief_dir: Path | None = None) -> dict:
         comp = comparison_facts(store)
         if comp:
             facts["ledger_comparison"] = comp
+        track = main_track_facts(store)
+        if track:
+            facts.setdefault("main_pipeline", {})["track_record"] = track
     cal = calibration_facts(today, store)
     if cal:
         facts["calibration"] = cal
@@ -202,6 +205,32 @@ def comparison_facts(store) -> dict | None:
         logger.warning("ledger comparison unavailable", exc_info=True)
         return None
     return {"line": comparison.summary_line(comp)}
+
+
+def main_track_facts(store) -> str | None:
+    """Owner decision 2026-11-20: main-pipeline cards are unverified. One code-computed
+    line (source_type "main" only, vs same-day same-ticker matched_random pairs)."""
+    try:
+        from marketmind.ledger import comparison
+        return comparison.main_track_line(
+            comparison.main_track_record(store.list(include_baselines=True)))
+    except Exception:
+        logger.warning("main-pipeline track record unavailable", exc_info=True)
+        return None
+
+
+def ensure_main_track(text: str, line: str | None) -> str:
+    """Keep the track-record line verbatim in the report: after the main-pipeline
+    heading when the LLM left it out, else at the top."""
+    if not line or line in text:
+        return text
+    head = "## 主管线决策"
+    i = text.find(head)
+    if i >= 0:
+        end = text.find("\n", i)
+        end = len(text) if end < 0 else end
+        return text[:end] + "\n- " + line + text[end:]
+    return line + "\n\n" + text
 
 
 def ecosystem_facts(today: str) -> dict | None:
@@ -277,7 +306,10 @@ def fallback_text(facts: dict) -> str:
     mp = facts.get("main_pipeline") or {}
     sh = facts.get("shadows") or {}
     lines = [f"## 今日汇报（{facts['date']}，LLM 不可用，以下为原始事实）",
-             f"- 主管线：{mp.get('decision_summary') or '无简报'}",
+             f"- 主管线：{mp.get('decision_summary') or '无简报'}"]
+    if mp.get("track_record"):
+        lines.append(f"- {mp['track_record']}")
+    lines += [
              f"- 影子：{sh.get('decisions', 0)} 笔（多 {sh.get('long', 0)} / 空 {sh.get('short', 0)}）",
              f"- 冷门数据异常：{((facts.get('discovery') or {}).get('counts') or {}).get('anomalies', 0)}",
              f"- 观察名单：新增 {len((facts.get('watchlist') or {}).get('new', []))}，"
@@ -304,6 +336,8 @@ async def build_report(today: str | None = None, *, store=None, call=_call_llm,
         text, source = "", "fallback"
     if not text:
         text, source = fallback_text(facts), "fallback"
+    track = (facts.get("main_pipeline") or {}).get("track_record")
+    text = ensure_main_track(text, track)
     section = calibration_section(facts)
     if section:
         text = text + "\n\n" + section
@@ -312,7 +346,8 @@ async def build_report(today: str | None = None, *, store=None, call=_call_llm,
     if notice:
         text = notice + "\n\n" + text
     report = {"date": today, "written_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-              "source": source, "markdown": text, "facts": facts, "llm_fallback": notice}
+              "source": source, "markdown": text, "facts": facts, "llm_fallback": notice,
+              "main_track_record": track}
     folder = reports_dir()
     folder.mkdir(parents=True, exist_ok=True)
     (folder / f"{today}.json").write_text(json.dumps(report, ensure_ascii=False, indent=1, default=str),
@@ -325,6 +360,9 @@ def push_message(report: dict) -> tuple[str, str]:
     body = report["markdown"]
     if len(body) > PUSH_MAX_CHARS:
         body = body[:PUSH_MAX_CHARS] + "\n\n……（完整版见仪表盘 http://127.0.0.1:8520 ）"
+    track = report.get("main_track_record")
+    if track and track not in body:   # cut off by the truncation: keep it on top
+        body = track + "\n\n" + body
     return f"MarketMind 今日汇报 {report['date']}", body
 
 

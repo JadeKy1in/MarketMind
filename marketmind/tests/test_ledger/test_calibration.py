@@ -185,7 +185,7 @@ async def test_daily_report_shows_raw_vs_calibrated(tmp_path, monkeypatch):
         return "## 今日要闻\n- x"
     r = await daily.build_report(today, store=store, call=call, brief_dir=tmp_path)
     md = r["markdown"]
-    assert md.startswith("## 今日要闻")
+    assert md.startswith("主管线未验证：") and "\n\n## 今日要闻" in md  # unverified-main line on top (2026-11-20)
     assert "## 确信度校准（代码计算，仅注释，不影响仓位）" in md and summary["line"] in md
     want = cal.calibrate(0.6, summary) * 100
     assert f"今日 LLM 决策 1 笔：自报确信度平均 60.0%，按全局校准后 {want:.1f}%" in md
