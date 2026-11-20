@@ -52,6 +52,11 @@ async def _run(feed: Feed, today: str) -> list[str]:
         lines = await asyncio.wait_for(feed.fetch(today), timeout=FEED_TIMEOUT_S)
         return list(lines) or [f"- {feed.title}: no data today"]
     except Exception as e:
+        if isinstance(e, TimeoutError) and not str(e):
+            # wait_for's timeout has an empty message (2026-11-19 log: "TimeoutError: ")
+            logger.warning("shadow feed %s failed: no answer within the %ss feed timeout",
+                           feed.name, FEED_TIMEOUT_S)
+            return [f"- {feed.title}: data unavailable today (timed out after {FEED_TIMEOUT_S}s)"]
         logger.warning("shadow feed %s failed: %s: %s", feed.name, type(e).__name__, e)
         return [f"- {feed.title}: data unavailable today ({type(e).__name__})"]
 

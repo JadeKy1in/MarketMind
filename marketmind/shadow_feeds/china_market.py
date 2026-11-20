@@ -3,7 +3,12 @@
 Sections: index closes (Sina), Stock Connect net buying (Eastmoney), whole-market
 margin balances (Eastmoney). Calls run one at a time in the akshare worker thread;
 the feed stops starting new calls when its time budget is spent and labels the
-skipped parts. Every number is a published value or a difference computed here.
+skipped parts. Each call's timeout is capped at the budget left, so the feed returns
+its partial lines before the runner's FEED_TIMEOUT_S: measured from Riyadh on
+2026-11-20, the indices took ~7 s, southbound ~14 s, margin ~20 s and northbound up to
+56 s (then failed), so the old uncapped 40 s per call overran the 90 s feed timeout
+and every line was lost ("shadow feed china_akshare failed: TimeoutError").
+Every number is a published value or a difference computed here.
 """
 from __future__ import annotations
 
@@ -14,6 +19,7 @@ from marketmind.shadow_feeds import FEED_TIMEOUT_S, Feed
 
 SHADOWS = ("dragon_watch",)
 BUDGET_S = FEED_TIMEOUT_S - 15
+MIN_CALL_S = 3.0      # less budget than this left: skip the call instead of starting it
 
 
 def _pct(now: float, then: float) -> str:
@@ -72,10 +78,13 @@ async def fetch(today: str) -> list[str]:
     start = time.monotonic()
     lines: list[str] = []
 
-    def spent() -> bool:
-        return time.monotonic() - start > BUDGET_S
+    def left() -> float:
+        return min(ak.CALL_TIMEOUT_S, BUDGET_S - (time.monotonic() - start))
 
-    indexes = await ak.index_closes()
+    def spent() -> bool:
+        return left() < MIN_CALL_S
+
+    indexes = await ak.index_closes(lambda: 0.0 if spent() else left())
     lines += [index_line(k, v) for k, v in indexes.items()]
     steps = (("Southbound Stock Connect net buy (mainland -> HK; 亿, Eastmoney 当日成交净买额)", ak.southbound, connect_line),
              ("A-share margin balances", ak.margin_balance, None),
@@ -86,7 +95,7 @@ async def fetch(today: str) -> list[str]:
             lines.append(f"- {label}: skipped (feed time budget spent)")
             continue
         try:
-            doc = await loader()
+            doc = await loader(timeout=left())
             results.append(doc)
         except ak.AkshareUnavailable as e:
             doc = e

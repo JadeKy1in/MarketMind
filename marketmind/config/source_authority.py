@@ -171,11 +171,11 @@ SOURCES: list[Source] = [
     Source("FT World News", SourceTier.PRIMARY, "https://www.ft.com/world?format=rss", "rss", 0.90, 2.0),
     Source("ECB Press", SourceTier.PRIMARY, "https://www.ecb.europa.eu/rss/press.html", "rss", 0.95, 2.0),
     Source("DW Business", SourceTier.RELIABLE, "http://rss.dw.de/rdf/rss-en-bus", "rss", 0.80, 2.0),
-    # DEGRADED 2026-09-27: Fastly edge returns 406 in some windows; on 2026-09-28 it alternated
-    # 200/406 by User-Agent. Scout retries a 406 once with browser-style headers; the failure
-    # counter handles windows where both header sets are refused.
-    Source("Euronews Economy", SourceTier.RELIABLE, "https://www.euronews.com/rss?format=mrss&level=theme&name=business", "rss", 0.75, 1.0,
-           status=SourceStatus.DEGRADED),
+    # 2026-11-20: www.euronews.com/rss (every variant tried: ?format=mrss&level=theme,
+    # ?level=vertical, /business/rss, bare /rss) answers 406 to both header sets on most
+    # runs since 2026-10 (DEGRADED in the daily log). Euronews' own FeedBurner feed for
+    # the business section returned 200 with 50 current items to both header sets.
+    Source("Euronews Economy", SourceTier.RELIABLE, "https://feeds.feedburner.com/euronews/en/business/", "rss", 0.75, 1.0),
 
     # ── Middle East / Energy ───────────────────────────────────────
     Source("Al Jazeera Economy", SourceTier.RELIABLE, "https://www.aljazeera.com/xml/rss/all.xml", "rss", 0.72, 1.0),
@@ -219,9 +219,14 @@ SOURCES: list[Source] = [
     #   third-party RSS aggregator (trumpstruth.org by Defending Democracy Together).
     #   BUT: when it fires on investment-relevant content, it is a LEADING indicator of
     #   market-moving policy — a unique capability no other source provides.
-    # Reddit WSB: Reddit's own RSS feed — free, no auth, returns 200
-    Source("Reddit WSB", SourceTier.BEST_EFFORT,
-           "https://www.reddit.com/r/wallstreetbets/.rss", "rss", 0.15, 1.0),
+    # Reddit WSB: DISABLED 2026-11-20. www.reddit.com/r/wallstreetbets/.rss returned 404
+    # (an Atom "Not Found" body from rss.reddit.com) on 2026-11-18/19/20 with
+    # x-ratelimit-remaining 0; www.reddit.com/.../.rss?limit=, /new/.rss and
+    # /r/wallstreetbets.rss answered 429, old.reddit.com and the .json API 403 (network
+    # security page). Before 11-18 it failed only on 2 of ~40 runs. Re-enable by restoring
+    # the entry below once the feed answers 200 again from this network:
+    # Source("Reddit WSB", SourceTier.BEST_EFFORT,
+    #        "https://www.reddit.com/r/wallstreetbets/.rss", "rss", 0.15, 1.0),
     Source("Truth Social (Trump)", SourceTier.BEST_EFFORT,
            "https://trumpstruth.org/feed", "rss", 0.15, 1.0),
     # Google daily trending searches (US, 10 items): mass-attention signal, not a news source.

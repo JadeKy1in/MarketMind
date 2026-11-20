@@ -81,8 +81,11 @@ def test_status_corrections():
     # Congress: capitoltrades scraper replaced by House Clerk PTR filings (verified 2026-09-27).
     assert by["Congress Trades"].status == SourceStatus.WORKING
     assert "disclosures-clerk.house.gov" in by["Congress Trades"].url
-    assert by["Euronews Economy"].status == SourceStatus.DEGRADED
-    assert by["Euronews Economy"].is_available
+    # Euronews: www.euronews.com/rss 406s; its FeedBurner feed is used (2026-11-20).
+    assert "feeds.feedburner.com/euronews" in by["Euronews Economy"].url
+    assert by["Euronews Economy"].status == SourceStatus.UNTESTED
+    # Reddit WSB: RSS 404 / 429 / 403 from this network, disabled 2026-11-20.
+    assert "Reddit WSB" not in by
     # Xinhua feed frozen since 2018: entry deleted 2026-09-28.
     assert "Xinhua Finance" not in by
 
