@@ -14,7 +14,10 @@ baselines, the forced paper trade and the interactive path never do):
                   of a trade card;
   bear protection a long card whose asset group the trend state machine has in CASH
                   (every member CASH / EXIT) becomes a watch item. Missing or stale
-                  trend data never blocks: the card is kept and annotated (fail open).
+                  trend data never blocks: the card is kept and annotated (fail open);
+  no stacking     a long card on a ticker that already has a pending / open 'main'
+                  ledger record becomes a watch item (unreadable ledger: fail open).
+The forced paper trade never picks a ticker these rules downgraded that day.
 """
 from __future__ import annotations
 
@@ -106,10 +109,12 @@ class MainGuardContext:
     """Inputs of the main-pipeline rules, loaded by load_main_guard_context.
 
     stops: ticker -> latest stop exit date (YYYY-MM-DD) of its 'main' ledger records.
+    open_counts: ticker -> number of its pending / open 'main' ledger records.
     trend: ticker -> trend state; None when no usable trend file (fail open).
     """
     today: date
     stops: dict[str, str] = field(default_factory=dict)
+    open_counts: dict[str, int] = field(default_factory=dict)
     trend: dict[str, str] | None = None
     trend_file: str | None = None
     ledger_note: str = ""
@@ -196,6 +201,12 @@ def _main_rules(card, ctx: MainGuardContext, report: GuardReport) -> dict | None
                        f"不再出卡（至 {until.isoformat()[5:]}）")
         conditions += [{"type": "after_date", "value": until.isoformat()},
                        {"type": "close_above_ma", "value": COOLDOWN_RECOVERY_MA}]
+    n_open = ctx.open_counts.get(t, 0)
+    if n_open:
+        rules.append("no_stacking")
+        reasons.append(f"不叠仓：{t} 已有 {n_open} 笔主管线持仓未平")
+        # watch triggers are 'watch' ledger rows, never 'main': no stacking of the main book
+        conditions.append({"type": "close_above_ma", "value": COOLDOWN_RECOVERY_MA})
     if ctx.trend is None:
         note = f"趋势数据不可用（{ctx.trend_note or '无趋势文件'}），空头趋势保护未生效，不拦截"
         report.annotations.append({"ticker": t, "rule": "bear_trend", "note": note})
@@ -287,6 +298,27 @@ def load_stop_exits(ledger_path: str | Path) -> tuple[dict[str, str], str]:
     return {t: d for t, d in rows if t and d}, ""
 
 
+def load_open_counts(ledger_path: str | Path) -> tuple[dict[str, int], str]:
+    """ticker -> number of pending / open 'main' ledger records (read-only)."""
+    import sqlite3
+    path = Path(ledger_path)
+    if not path.exists():
+        return {}, "账本不存在，不叠仓未生效"
+    try:
+        conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+        try:
+            rows = conn.execute(
+                "SELECT upper(ticker), count(*) FROM ledger WHERE source_type = 'main' "
+                "AND status IN ('pending', 'open') GROUP BY upper(ticker)").fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        logger.error("Main guard: ledger %s unreadable; no-stacking rule not applied", path,
+                     exc_info=True)
+        return {}, "账本读取失败，不叠仓未生效"
+    return {t: int(n) for t, n in rows if t and n}, ""
+
+
 def load_main_guard_context(data_dir: str | Path, today: date | None = None) -> MainGuardContext:
     """Ledger stop exits and trend states for the main-pipeline rules. Never raises:
     an unreadable source leaves its rule inactive and says so in its note."""
@@ -294,11 +326,13 @@ def load_main_guard_context(data_dir: str | Path, today: date | None = None) -> 
         from marketmind.trend.daily import ny_date
         today = date.fromisoformat(ny_date())
     stops, ledger_note = load_stop_exits(Path(data_dir) / "ledger.db")
+    open_counts, open_note = load_open_counts(Path(data_dir) / "ledger.db")
+    ledger_note = "；".join(n for n in dict.fromkeys((ledger_note, open_note)) if n)
     trend, trend_file, trend_note = load_trend_states(data_dir, today)
     if trend is None:
         logger.warning("Main guard: trend states unavailable (%s); bear protection fails open",
                        trend_note)
-    return MainGuardContext(today=today, stops=stops, trend=trend, trend_file=trend_file,
+    return MainGuardContext(today=today, stops=stops, open_counts=open_counts, trend=trend, trend_file=trend_file,
                             ledger_note=ledger_note, trend_note=trend_note)
 
 

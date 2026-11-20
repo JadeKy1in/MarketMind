@@ -592,7 +592,9 @@ async def generate_decision(
                     no_trade_score=100.0,
                 )
             if decision.paper_trade is None:
-                decision.paper_trade = _pick_paper_trade(l1, l2, l3, red_team, resonance)
+                decision.paper_trade = _pick_paper_trade(
+                    l1, l2, l3, red_team, resonance,
+                    exclude={d["ticker"] for d in guard.downgraded})
         decision.contrarian_challenges = await generate_contrarian_challenges(decision)
         return decision
     except Exception as e:
@@ -631,7 +633,7 @@ def _add_downgraded_watch_cards(decision: DecisionOutput, downgraded: list[dict]
 FORCED_FALLBACK_TICKER = "SPY"   # market benchmark when L3 has no usable candidate
 
 
-def _pick_paper_trade(l1, l2, l3, red_team, resonance) -> PaperTrade:
+def _pick_paper_trade(l1, l2, l3, red_team, resonance, exclude=()) -> PaperTrade:
     """The day's forced paper trade when there is no card (SPEC_v3 L7, §5).
 
     Chosen by code, never by the LLM (owner decision 2026-09-29): among the L3 green
@@ -640,13 +642,15 @@ def _pick_paper_trade(l1, l2, l3, red_team, resonance) -> PaperTrade:
     ticker. With no usable candidate, fall back to a long SPY trade, so a forced trade
     always exists. Its confidence is unstated (None); the recorder stores the 0.5
     default flagged so it is not scored with Brier. l1, l2, red_team and resonance are
-    accepted for call-site compatibility and not used.
+    accepted for call-site compatibility and not used. `exclude`: tickers the main guard
+    rules downgraded today (owner 2026-11-20); with none left, the SPY fallback applies.
     """
+    excluded = {str(t).strip().upper() for t in exclude or ()}
     candidates = []
     for r in getattr(l3, "green_lights", []) or []:
         ticker = str(getattr(r, "ticker", "") or "").strip().upper()
         rr = _num(getattr(r, "reward_risk_ratio", None), float("nan"))
-        if (not ticker or ticker in CASH_EQUIVALENT_ETFS
+        if (not ticker or ticker in CASH_EQUIVALENT_ETFS or ticker in excluded
                 or not getattr(r, "data_available", False) or not math.isfinite(rr)
                 or levels_stop_pct(r.entry_zone_low, r.entry_zone_high, r.stop_loss) is None):
             continue

@@ -7,8 +7,8 @@ import pytest
 
 from marketmind.pipeline.decision import DecisionCard
 from marketmind.pipeline.decision_guard import (
-    MainGuardContext, enforce, load_main_guard_context, load_stop_exits, load_trend_states,
-    trading_days_after,
+    MainGuardContext, enforce, load_main_guard_context, load_open_counts, load_stop_exits,
+    load_trend_states, trading_days_after,
 )
 from marketmind.pipeline.layer3_technical import Layer3BatchResult, unavailable_result
 
@@ -32,8 +32,9 @@ def card(ticker):
 BULL = {"SPY": "TREND", "QQQ": "WATCH", "GLD": "TREND", "BTC-USD": "TREND"}
 
 
-def ctx(today="2026-11-05", stops=None, trend=BULL):
+def ctx(today="2026-11-05", stops=None, trend=BULL, open_counts=None):
     return MainGuardContext(today=date.fromisoformat(today), stops=stops or {}, trend=trend,
+                            open_counts=open_counts or {},
                             trend_file="2026-11-04" if trend is not None else None)
 
 
@@ -96,6 +97,52 @@ def test_both_rules_combine_into_one_watch_item():
     (d,) = rep.downgraded
     assert d["rules"] == ["stop_cooldown", "bear_trend"]
     assert d["reason"].endswith("降为观察")
+
+
+# ── no stacking ────────────────────────────────────────────────────────────
+
+def test_open_main_position_downgrades_new_card_for_same_ticker():
+    l3 = Layer3BatchResult(results=[green("XLV"), green("XLP")])
+    rep = enforce([card("XLV"), card("XLP")], l3, main=ctx(open_counts={"XLV": 2}))
+    (d,) = rep.downgraded
+    assert d["ticker"] == "XLV" and d["rules"] == ["no_stacking"]
+    assert "不叠仓：XLV 已有 2 笔主管线持仓未平" in d["reason"]
+    assert [c.ticker for c in rep.kept] == ["XLP"]
+
+
+def test_open_counts_read_pending_and_open_main_records_only(tmp_path):
+    from marketmind.ledger.store import LedgerStore
+    store = LedgerStore(tmp_path / "ledger.db")
+    for e, status in ((_entry("main", "XLV", None, None), "open"),
+                      (_entry("main", "xlv", None, None), "pending"),
+                      (_entry("main", "XOM", "stop", "2026-11-04"), "settled"),
+                      (_entry("shadow", "XLP", None, None), "open"),
+                      (_entry("main_forced", "SPY", None, None), "open")):
+        e.status = status
+        store.add(e)
+    assert load_open_counts(tmp_path / "ledger.db") == ({"XLV": 2}, "")
+    assert load_open_counts(tmp_path / "missing.db")[0] == {}        # fail open
+
+
+def test_unreadable_ledger_fails_open(tmp_path):
+    bad = tmp_path / "ledger.db"
+    bad.write_text("not a database", encoding="utf-8")
+    assert load_open_counts(bad)[0] == {} and load_stop_exits(bad)[0] == {}
+    ctx_ = load_main_guard_context(tmp_path, today=date(2026, 11, 20))
+    assert "账本读取失败" in ctx_.ledger_note
+    assert len(enforce([card("XOM")], Layer3BatchResult(results=[green("XOM")]), main=ctx_).kept) == 1
+
+
+# ── forced paper trade skips downgraded tickers ────────────────────────────
+
+def test_forced_pick_excludes_downgraded_and_falls_back_when_none_left():
+    from marketmind.pipeline.decision import _pick_paper_trade
+    l3 = Layer3BatchResult(results=[green("XOM"), green("CVX")])
+    l3.results[0].reward_risk_ratio = 5.0
+    assert _pick_paper_trade(None, None, l3, None, None).ticker == "XOM"
+    assert _pick_paper_trade(None, None, l3, None, None, exclude={"xom"}).ticker == "CVX"
+    pt = _pick_paper_trade(None, None, l3, None, None, exclude={"XOM", "CVX"})
+    assert pt.source == "fallback:SPY"                       # existing no-pick behaviour
 
 
 # ── fail open ──────────────────────────────────────────────────────────────
@@ -186,6 +233,7 @@ async def test_downgraded_card_becomes_watch_card_and_forced_trade_is_untouched(
     (w,) = out.watch_cards
     assert w.ticker == "XOM" and w.guard_reason.startswith("止损冷却") and w.expiry_days == 30
     assert out.no_trade_card is not None and out.paper_trade is not None
+    assert out.paper_trade.ticker == "SPY"         # XOM was downgraded: not the forced pick
     assert out.main_guard["downgrades"][0]["rules"] == ["stop_cooldown"]
     assert "[guard]" in out.summary and "止损冷却" in out.summary
     # no context (interactive path, tests, mock runs): unchanged behaviour
