@@ -56,7 +56,7 @@ async def test_build_report_uses_llm_and_saves(env):
         return "## 今日要闻\n- Fed hikes"
     r = await daily.build_report(TODAY, store=store, call=call, brief_dir=briefs)
     assert r["source"] == "llm" and "<facts>" in seen["user"] and "GDX" in seen["user"]
-    assert json.loads((tmp / "reports" / f"{TODAY}.json").read_text("utf-8"))["markdown"].startswith("## 今日要闻")
+    assert json.loads((tmp / "reports" / f"{TODAY}.json").read_text("utf-8"))["markdown"].startswith("主管线未验证：")
     from marketmind.api import whitebox
     assert whitebox.get_daily_report()["date"] == TODAY
 
@@ -244,3 +244,66 @@ def test_report_push_failure_is_queued_for_retry(tmp_path, monkeypatch, delivere
     else:
         assert [(q["title"], q["body"]) for q in queued] == [daily.push_message(report)]
         assert "仪表盘" in queued[0]["body"]
+
+
+def _settled_main(store, net, rand_net):
+    eid = store.add(LedgerEntry("main", "main:l3", "SPY", "long", 5, 0.6, 100, "x",
+                                status="settled", net_return=net, meta={"run_date": TODAY}))
+    store.add(LedgerEntry("baseline", "baseline:matched_random:main:l3", "SPY", "short", 5, 0.5, 100,
+                          "b", status="settled", net_return=rand_net,
+                          meta={"baseline": "matched_random", "pairs_with": eid,
+                                "pairs_key": ["main:l3", "SPY", TODAY], "run_date": TODAY,
+                                "paired_source_type": "main"}))
+
+
+TRACK = ("主管线未验证：已结算 1 笔，0 胜，平均 -4.00%；对同日同标的随机对照 1 对，胜 0 对，"
+         "平均落后 1.00 个百分点。仅供研究，勿照做。")
+
+
+@pytest.mark.asyncio
+async def test_main_track_record_enforced_after_heading_when_llm_omits_it(env):
+    store, briefs, _ = env
+    _settled_main(store, -0.04, -0.03)
+    seen = {}
+
+    async def call(system, user):
+        seen["user"] = user
+        return "## 今日要闻\n- a\n\n## 主管线决策\n- XLU 多\n\n## 观察名单\n- 今日无"
+    r = await daily.build_report(TODAY, store=store, call=call, brief_dir=briefs)
+    assert TRACK in seen["user"] and "【未验证】" in daily.SYSTEM_PROMPT
+    assert r["facts"]["main_pipeline"]["track_record"] == TRACK
+    assert f"## 主管线决策\n- {TRACK}\n- XLU 多" in r["markdown"]
+    assert r["markdown"].count(TRACK) == 1
+
+
+@pytest.mark.asyncio
+async def test_main_track_record_kept_once_when_llm_quotes_it(env):
+    store, briefs, _ = env
+    _settled_main(store, -0.04, -0.03)
+
+    async def call(system, user):
+        return f"## 主管线决策\n- {TRACK}\n- 【未验证】XLU 多"
+    r = await daily.build_report(TODAY, store=store, call=call, brief_dir=briefs)
+    assert r["markdown"].count(TRACK) == 1
+
+
+@pytest.mark.asyncio
+async def test_main_track_record_in_fallback_and_zero_sample(env):
+    store, briefs, _ = env
+
+    async def boom(system, user):
+        raise RuntimeError("limit")
+    r = await daily.build_report(TODAY, store=store, call=boom, brief_dir=briefs)
+    assert r["source"] == "fallback"
+    assert "- 主管线未验证：已结算 0 笔，样本不足；对同日同标的随机对照 0 对，样本不足。" in r["markdown"]
+
+    async def no_heading(system, user):
+        return "## 今日要闻\n- a"
+    r = await daily.build_report(TODAY, store=store, call=no_heading, brief_dir=briefs)
+    assert r["markdown"].startswith("主管线未验证：")
+
+
+def test_push_keeps_track_record_when_truncated():
+    title, body = daily.push_message({"date": TODAY, "markdown": "字" * 10000 + TRACK,
+                                      "main_track_record": TRACK})
+    assert body.startswith(TRACK) and "仪表盘" in body

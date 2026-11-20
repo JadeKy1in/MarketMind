@@ -113,3 +113,49 @@ def summary_line(comp: dict) -> str:
     base = "；".join(parts) if parts else "尚无已结算的基线配对"
     tag = "；".join(tags) if tags else "尚无带趋势标签的已结算记录"
     return f"LLM 与代码基线（已结算配对）：{base}。按趋势标签：{tag}。"
+
+
+MAIN_UNVERIFIED_TAG = "主管线未验证"
+
+
+def main_track_record(entries: list[LedgerEntry]) -> dict:
+    """Settled track record of source_type "main" only (main_forced paper trades are
+    excluded), and its settled pairs with the same-day same-ticker matched_random
+    baseline (meta pairs_with, else pairs_key [source_id, ticker, run_date])."""
+    by_id: dict[str, LedgerEntry] = {}
+    by_key: dict[tuple, LedgerEntry] = {}
+    for e in entries:
+        m = e.meta or {}
+        if e.source_type != SOURCE_TYPE or m.get("baseline") != "matched_random" or not _settled(e):
+            continue
+        if m.get("pairs_with"):
+            by_id[m["pairs_with"]] = e
+        elif m.get("paired_source_type") == "main" and isinstance(m.get("pairs_key"), list):
+            by_key[tuple(m["pairs_key"])] = e
+    main = [e for e in entries if e.source_type == "main" and _settled(e)]
+    pairs = []
+    for e in main:
+        b = by_id.get(e.entry_id) or by_key.get(
+            (e.source_id, e.ticker, (e.meta or {}).get("run_date")))
+        if b is not None:
+            pairs.append((e.net_return, b.net_return))
+    nets = [e.net_return for e in main]
+    return {"settled": len(nets), "wins": sum(v > 0 for v in nets),
+            "mean_net": round(mean(nets), 6) if nets else None,
+            "pairs": len(pairs), "pair_wins": sum(a > b for a, b in pairs),
+            "mean_diff": round(mean(a - b for a, b in pairs), 6) if pairs else None}
+
+
+def main_track_line(rec: dict) -> str:
+    """The owner-facing one-liner that labels main-pipeline cards as unverified."""
+    if rec["settled"]:
+        head = f"已结算 {rec['settled']} 笔，{rec['wins']} 胜，平均 {rec['mean_net'] * 100:+.2f}%"
+    else:
+        head = "已结算 0 笔，样本不足"
+    if rec["pairs"]:
+        d = rec["mean_diff"] * 100
+        lead = f"平均落后 {-d:.2f} 个百分点" if d < 0 else f"平均领先 {d:.2f} 个百分点"
+        tail = f"对同日同标的随机对照 {rec['pairs']} 对，胜 {rec['pair_wins']} 对，{lead}"
+    else:
+        tail = "对同日同标的随机对照 0 对，样本不足"
+    return f"{MAIN_UNVERIFIED_TAG}：{head}；{tail}。仅供研究，勿照做。"
