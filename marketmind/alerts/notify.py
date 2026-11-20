@@ -29,6 +29,9 @@ Retries: a network error (timeout, connection reset) or an HTTP 5xx is retried p
 after RETRY_DELAYS_S (2026-10-02: one Server酱 ReadTimeout lost the day's report). A read
 timeout may hide a delivered message, so a retry can duplicate it; for these pushes a
 duplicate is cheaper than a loss. HTTP 4xx (bad key, quota, 429) is not retried.
+
+Every message Server酱 accepted is counted per day (alerts/quota.py), so a lower-priority
+push (watchlist triggers while alerts are live) can leave the budget to alerts and the report.
 """
 from __future__ import annotations
 
@@ -147,4 +150,7 @@ async def send(title: str, body: str, *, env=os.environ,
     finally:
         if own:
             await client.aclose()
+    if any(r["ok"] for r in results if r["channel"] == "serverchan"):
+        from marketmind.alerts import quota
+        quota.record()                       # daily budget (alerts/quota.py)
     return results

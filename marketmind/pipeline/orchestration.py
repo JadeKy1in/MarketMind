@@ -1111,7 +1111,8 @@ async def watchlist_step(config, decision=None, discovery: dict | None = None,
             items = watch_items(decision, discovery)
         added = await add_items(items, src, ledger=ledger) if items else {}
         rep = await check_all(src, ledger=ledger, crypto_only=crypto_only)
-        pushed = await notify_triggers(rep)
+        from marketmind.alerts.config import live_enabled     # live alerts push first (S8)
+        pushed = await notify_triggers(rep, defer=live_enabled())
     except Exception:
         logger.warning("watchlist step failed", exc_info=True)
         print("  [watchlist] failed (see log)")
@@ -1120,7 +1121,8 @@ async def watchlist_step(config, decision=None, discovery: dict | None = None,
     print(f"  [watchlist] added {len(added.get('added', []))}, refreshed "
           f"{len(added.get('refreshed', []))}, rejected {len(added.get('rejected', []))}; "
           f"triggered {len(rep.get('triggered', []))}, expired {len(rep.get('expired', []))}, "
-          f"invalidated {len(rep.get('invalidated', []))}; pushed {len(pushed.get('pushed', []))}")
+          f"invalidated {len(rep.get('invalidated', []))}; pushed {len(pushed.get('pushed', []))}"
+          + (f", deferred {len(pushed['deferred'])} until after alerts" if pushed.get("deferred") else ""))
 
 
 async def run_evidence(config, news_items: list):
@@ -1231,12 +1233,29 @@ async def alerts_step(config, crypto_only: bool = False) -> None:
         logger.warning("alerts step failed", exc_info=True)
         print("  [alerts] failed (see log)")
         _step_failed("alerts")
+        await _push_deferred_watchlist()
         return
     mode = "observe" if report["mode"] == OBSERVE else "live"
     fired = ", ".join(f"{f['ticker']} {f['kind']} ({f['status']})" for f in report["fired"]) or "none"
     src = report["trend_source"]
     note = "" if src["available"] else f"; trend source unavailable: {src.get('reason')}"
     print(f"  [alerts] {mode}: fired {fired}; watch {len(report['near_misses'])}{note}")
+    await _push_deferred_watchlist()
+
+
+async def _push_deferred_watchlist() -> None:
+    """Watchlist triggers deferred while alerts are live go out after the alerts, unless
+    the day's push budget is down to the daily report's reserve (docs/S8_DESIGN.md)."""
+    from marketmind.watchlist import push_deferred
+    try:
+        out = await push_deferred()
+    except Exception:
+        logger.warning("deferred watchlist push failed", exc_info=True)
+        return
+    if out["pushed"]:
+        print(f"  [watchlist] deferred push sent ({len(out['pushed'])} triggers)")
+    elif out["held"]:
+        print(f"  [watchlist] deferred push held ({out['reason']}); triggers are in the daily report")
 
 
 async def inspect_holdings_step(config) -> None:
